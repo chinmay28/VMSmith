@@ -2,8 +2,9 @@ const BASE = '/api/v1';
 
 async function request(path, options = {}) {
   const url = `${BASE}${path}`;
+  const isFormData = options.body instanceof FormData;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: isFormData ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
     ...options,
   });
 
@@ -36,6 +37,12 @@ export const snapshots = {
 export const images = {
   list:     ()            => request('/images'),
   create:   (vmId, name)  => request('/images', { method: 'POST', body: JSON.stringify({ vm_id: vmId, name }) }),
+  upload:   (file, name)  => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (name) fd.append('name', name);
+    return request('/images/upload', { method: 'POST', body: fd });
+  },
   delete:   (id)          => request(`/images/${id}`, { method: 'DELETE' }),
   downloadUrl: (id)       => `${BASE}/images/${id}/download`,
 };

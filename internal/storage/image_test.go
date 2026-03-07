@@ -141,3 +141,54 @@ func TestStorageManager_ImagePath(t *testing.T) {
 		t.Errorf("ImagePath = %q, want %q", got, want)
 	}
 }
+
+func TestStorageManager_ImportImage_Success(t *testing.T) {
+	mgr, _, imagesDir := newTestManager(t)
+
+	content := []byte("fake qcow2 data")
+	img, err := mgr.ImportImage("uploaded-image", content)
+	if err != nil {
+		t.Fatalf("ImportImage: %v", err)
+	}
+
+	if img.Name != "uploaded-image" {
+		t.Errorf("Name = %q, want uploaded-image", img.Name)
+	}
+	if img.ID == "" {
+		t.Error("ID should not be empty")
+	}
+	expectedPath := filepath.Join(imagesDir, "uploaded-image.qcow2")
+	if img.Path != expectedPath {
+		t.Errorf("Path = %q, want %q", img.Path, expectedPath)
+	}
+	if img.SizeBytes != int64(len(content)) {
+		t.Errorf("SizeBytes = %d, want %d", img.SizeBytes, len(content))
+	}
+	if img.Format != "qcow2" {
+		t.Errorf("Format = %q, want qcow2", img.Format)
+	}
+
+	// File should exist on disk.
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Errorf("file not on disk: %v", err)
+	}
+}
+
+func TestStorageManager_ImportImage_Persisted(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	if _, err := mgr.ImportImage("persist-test", []byte("data")); err != nil {
+		t.Fatalf("ImportImage: %v", err)
+	}
+
+	imgs, err := mgr.ListImages()
+	if err != nil {
+		t.Fatalf("ListImages: %v", err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image in store, got %d", len(imgs))
+	}
+	if imgs[0].Name != "persist-test" {
+		t.Errorf("Name = %q, want persist-test", imgs[0].Name)
+	}
+}

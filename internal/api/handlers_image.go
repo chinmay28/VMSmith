@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,6 +56,49 @@ func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UploadImage handles POST /api/v1/images/upload (multipart form: file + name)
+func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
+	// Limit upload to 50 GB
+	if err := r.ParseMultipartForm(50 << 30); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to parse form: "+err.Error())
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file field")
+		return
+	}
+	defer file.Close()
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		// Derive name from filename, strip extension
+		name = header.Filename
+		if i := strings.LastIndex(name, "."); i > 0 {
+			name = name[:i]
+		}
+	}
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "image name is required")
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reading upload: "+err.Error())
+		return
+	}
+
+	img, err := s.storageMgr.ImportImage(name, data)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, img)
 }
 
 // DownloadImage handles GET /api/v1/images/{imageID}/download

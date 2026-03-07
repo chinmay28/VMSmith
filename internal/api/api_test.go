@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -856,6 +857,90 @@ func TestRemovePort_NotFound(t *testing.T) {
 		t.Errorf("status = %d, want 500 (port not found)", resp.StatusCode)
 	}
 }
+
+// ============================================================
+// Upload image handler tests
+// ============================================================
+
+func TestUploadImage_MissingFile(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// multipart with no "file" field
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("name", "myimage")
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUploadImage_Success(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ubuntu-22.04.qcow2")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	fw.Write([]byte("fake qcow2 content"))
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var img types.Image
+	decodeJSON(t, resp, &img)
+	if img.Name != "ubuntu-22.04" {
+		t.Errorf("Name = %q, want %q", img.Name, "ubuntu-22.04")
+	}
+	if img.ID == "" {
+		t.Error("ID should not be empty")
+	}
+}
+
+func TestUploadImage_CustomName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "some-file.qcow2")
+	fw.Write([]byte("data"))
+	mw.WriteField("name", "custom-name")
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", resp.StatusCode)
+	}
+	var img types.Image
+	decodeJSON(t, resp, &img)
+	if img.Name != "custom-name" {
+		t.Errorf("Name = %q, want %q", img.Name, "custom-name")
+	}
+}
+
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)

@@ -201,7 +201,7 @@ var vmInfoCmd = &cobra.Command{
 }
 
 func init() {
-	vmCreateCmd.Flags().String("image", "", "base image name (required)")
+	vmCreateCmd.Flags().String("image", "", "base image name or absolute path to a .qcow2 file (required)")
 	vmCreateCmd.Flags().Int("cpus", 0, "number of vCPUs (default from config)")
 	vmCreateCmd.Flags().Int("ram", 0, "RAM in MB (default from config)")
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")

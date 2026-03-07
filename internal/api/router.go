@@ -75,6 +75,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 		r.Route("/images", func(r chi.Router) {
 			r.Get("/", s.ListImages)
 			r.Post("/", s.CreateImage)
+			r.Post("/upload", s.UploadImage)
 			r.Delete("/{imageID}", s.DeleteImage)
 			r.Get("/{imageID}/download", s.DownloadImage)
 		})
