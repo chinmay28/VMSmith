@@ -1,0 +1,25 @@
+# vmSmith configuration
+# Copy to ~/.vmsmith/config.yaml or /etc/vmsmith/config.yaml
+
+daemon:
+  listen: "0.0.0.0:8080"
+  pid_file: "/var/run/vmsmith.pid"
+
+libvirt:
+  uri: "qemu:///system"       # Use qemu:///session for rootless operation
+
+storage:
+  images_dir: "/var/lib/vmsmith/images"
+  base_dir: "/var/lib/vmsmith/vms"
+  db_path: "/var/lib/vmsmith/vmsmith.db"
+
+network:
+  name: "vmsmith-net"
+  subnet: "192.168.100.0/24"
+  dhcp_start: "192.168.100.10"
+  dhcp_end: "192.168.100.254"
+
+defaults:
+  cpus: 2
+  ram_mb: 2048
+  disk_gb: 20

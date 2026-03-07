@@ -1,0 +1,25 @@
+# Build output
+/bin/
+
+# Frontend build artifacts
+/internal/web/dist/
+/web/node_modules/
+
+# Root-level node_modules (Playwright E2E deps)
+/node_modules/
+/package-lock.json
+
+# Go
+*.test
+*.out
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Runtime
+*.pid
+/vmsmith.db

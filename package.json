@@ -1,0 +1,12 @@
+{
+  "name": "vmsmith",
+  "version": "1.0.0",
+  "description": "E2E test dependencies for vmSmith web GUI",
+  "private": true,
+  "scripts": {
+    "test": "node tests/web/run-gui-tests.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}
