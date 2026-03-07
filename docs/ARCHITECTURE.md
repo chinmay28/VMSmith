@@ -1,8 +1,8 @@
-# vmSmith — Architecture Document
+# VM Smith — Architecture Document
 
 ## Overview
 
-vmSmith is a CLI tool and daemon for provisioning and managing QEMU/KVM virtual machines on Linux hosts. It provides a unified interface for VM lifecycle management, networking, snapshotting, and image distribution across hosts.
+VM Smith is a CLI tool and daemon for provisioning and managing QEMU/KVM virtual machines on Linux hosts. It provides a unified interface for VM lifecycle management, networking, snapshotting, and image distribution across hosts.
 
 **Design principles:**
 - Single static binary, minimal runtime dependencies (libvirt, qemu-kvm)
@@ -120,7 +120,7 @@ vmsmith/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        vmSmith                              │
+│                        VM Smith                              │
 │                                                             │
 │  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │  CLI      │    │  REST API    │    │  Web GUI         │   │
@@ -182,7 +182,7 @@ The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVi
 
 **Creating a VM:**
 1. User provides: name, base image, CPU count, RAM, disk size, optional cloud-init data
-2. vmSmith creates a qcow2 overlay disk backed by the base image (copy-on-write)
+2. VM Smith creates a qcow2 overlay disk backed by the base image (copy-on-write)
 3. Generates libvirt domain XML with the VM's specs
 4. Attaches the VM to the vmsmith NAT network
 5. Defines + starts the domain via libvirt
@@ -191,12 +191,12 @@ The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVi
 
 **VM states:** `creating → running → stopped → deleted`
 
-**Cloud-init support:** vmSmith generates a cloud-init ISO (NoCloud datasource) with user-provided SSH keys, hostname, and user-data. This is attached as a CD-ROM device to the VM.
+**Cloud-init support:** VM Smith generates a cloud-init ISO (NoCloud datasource) with user-provided SSH keys, hostname, and user-data. This is attached as a CD-ROM device to the VM.
 
 ### 2. Networking
 
 **Default NAT Network:**
-- vmSmith creates a dedicated libvirt NAT network (e.g., `vmsmith-net`, `192.168.100.0/24`)
+- VM Smith creates a dedicated libvirt NAT network (e.g., `vmsmith-net`, `192.168.100.0/24`)
 - This is always the first interface (eth0) on every VM
 - VMs get DHCP addresses on this subnet
 - Host can always reach VMs directly on the NAT subnet
@@ -209,7 +209,7 @@ The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVi
 - Example: `vmsmith port add myvm --host 2222 --guest 22` maps host:2222 → vm:22
 
 ```
-External Host                   vmSmith Host                    VM
+External Host                   VM Smith Host                    VM
 ─────────────                   ────────────                    ──
 ssh -p 2222 host_ip  ──────►  iptables DNAT ──────►  192.168.100.x:22
                                host:2222 → vm:22
@@ -247,7 +247,7 @@ eth2 → second --network attachment
 ...
 ```
 
-**Static IP support:** When `ip=` is specified on a network attachment, vmSmith generates a cloud-init network-config v2 file that configures the interface with the given static IP. If no IP is specified, the interface uses DHCP.
+**Static IP support:** When `ip=` is specified on a network attachment, VM Smith generates a cloud-init network-config v2 file that configures the interface with the given static IP. If no IP is specified, the interface uses DHCP.
 
 **CLI usage:**
 ```bash
@@ -287,7 +287,7 @@ POST /api/v1/vms
 
 **Network diagram with multi-attach:**
 ```
-                       vmSmith Host
+                       VM Smith Host
  ┌───────────────────────────────────────────────┐
  │                                               │
  │  eth0 (10.21.100.101) ──── management         │
@@ -330,7 +330,7 @@ POST /api/v1/vms
 
 ### 4. Daemon Mode
 
-When started as a daemon (`vmsmith daemon start`), vmSmith:
+When started as a daemon (`vmsmith daemon start`), VM Smith:
 1. Opens a libvirt connection and maintains it
 2. Starts the Chi HTTP server on a configurable port (default: `8080`)
 3. Restores iptables port-forwarding rules from bbolt
@@ -446,7 +446,7 @@ bbolt buckets:
 
 ## Dependency Installation
 
-vmSmith requires these host packages:
+VM Smith requires these host packages:
 
 **Ubuntu:**
 ```bash
@@ -529,7 +529,7 @@ internal/web/
 - **KubeVirt backend:** Implement `KubeVirtVMManager` behind the same interface
 - **Cloud-init templates:** Predefined profiles for common setups
 - **VM templates:** Named specs (e.g., "small", "medium", "large")
-- **Cluster mode:** Multiple vmSmith hosts with shared image catalog
+- **Cluster mode:** Multiple VM Smith hosts with shared image catalog
 - **OCI image support:** Pull VM images from container registries
 - **VNC/SPICE proxy:** Browser-accessible console via the web GUI
 
@@ -537,7 +537,7 @@ internal/web/
 
 ## Testing Strategy
 
-vmSmith uses a three-tier testing approach: unit tests, integration tests, and end-to-end tests with a headless browser for the web GUI.
+VM Smith uses a three-tier testing approach: unit tests, integration tests, and end-to-end tests with a headless browser for the web GUI.
 
 ### Test Structure
 
