@@ -1,8 +1,10 @@
-# vmSmith
+# VM Smith
 
-Lightweight CLI tool and daemon for provisioning and managing QEMU/KVM virtual machines on Linux.
+<img align="right" width="42%" src="https://github.com/user-attachments/assets/71c510a1-6f43-48a3-a044-e320e5285c53" alt="vmsmith">
 
-## Features
+CLI tool, a HTTP REST server, and a handy GUI for provisioning and managing QEMU/KVM virtual machines on Linux.
+
+Features
 
 - **VM lifecycle management** — create, start, stop, delete VMs with a single command
 - **Cloud-init support** — inject SSH keys and configuration at boot
@@ -170,4 +172,4 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design documentati
 
 ## License
 
-TBD
+MIT License
