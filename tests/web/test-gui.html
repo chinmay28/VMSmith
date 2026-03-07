@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vmSmith - Test GUI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #14161d; color: #d4d9e3; padding: 20px; }
+    h1 { font-size: 24px; margin-bottom: 16px; color: #eceef2; }
+    h2 { font-size: 18px; margin: 20px 0 10px; color: #afb8ca; }
+    .card { background: rgba(51,58,71,0.6); border: 1px solid rgba(57,66,84,0.6); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #657593; padding: 8px; }
+    td { padding: 8px; border-top: 1px solid rgba(57,66,84,0.4); font-size: 14px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+    .badge-running { background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
+    .badge-stopped { background: rgba(51,58,71,0.6); color: #8492ac; border: 1px solid rgba(57,66,84,0.4); }
+    button { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; }
+    .btn-primary { background: #cd5f09; color: white; }
+    .btn-primary:hover { background: #e8820e; }
+    .btn-secondary { background: #394254; color: #d4d9e3; border: 1px solid rgba(66,77,99,0.5); }
+    .btn-danger { background: rgba(127,29,29,0.6); color: #fca5a5; border: 1px solid rgba(127,29,29,0.5); }
+    input, select { padding: 8px; border-radius: 6px; border: 1px solid rgba(66,77,99,0.5); background: rgba(20,22,29,0.8); color: #eceef2; font-size: 14px; width: 100%; margin-bottom: 8px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #333a47; border: 1px solid rgba(66,77,99,0.6); border-radius: 8px; padding: 20px; width: 400px; max-width: 90vw; }
+    .modal h3 { font-size: 16px; margin-bottom: 16px; color: #eceef2; }
+    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { text-align: center; }
+    .stat-card .value { font-size: 28px; font-weight: bold; color: #eceef2; }
+    .stat-card .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #657593; margin-top: 4px; }
+    .error { color: #f87171; font-size: 13px; margin-top: 8px; }
+    .loading { color: #657593; text-align: center; padding: 40px; }
+    .empty { color: #657593; text-align: center; padding: 40px; }
+    .clickable { cursor: pointer; }
+    .clickable:hover { background: rgba(51,58,71,0.3); }
+    .actions { display: flex; gap: 4px; }
+    a { color: #60a5fa; text-decoration: none; }
+    #nav { display: flex; gap: 12px; margin-bottom: 20px; border-bottom: 1px solid rgba(57,66,84,0.4); padding-bottom: 12px; }
+    #nav a { padding: 6px 12px; border-radius: 4px; color: #8492ac; font-weight: 500; }
+    #nav a.active { background: rgba(51,58,71,0.7); color: #f2a024; }
+  </style>
+</head>
+<body>
+  <h1>vm<span style="color:#f2a024">Smith</span></h1>
+
+  <nav id="nav">
+    <a href="#" data-page="dashboard" class="active" data-testid="nav-dashboard">Dashboard</a>
+    <a href="#" data-page="vms" data-testid="nav-vms">Machines</a>
+    <a href="#" data-page="images" data-testid="nav-images">Images</a>
+  </nav>
+
+  <div id="app"></div>
+
+  <!-- Create VM Modal -->
+  <div class="modal-overlay" id="create-modal">
+    <div class="modal">
+      <h3>Create Machine</h3>
+      <input id="vm-name" placeholder="Name" data-testid="input-vm-name" />
+      <input id="vm-image" placeholder="Base Image (e.g. ubuntu-22.04)" data-testid="input-vm-image" />
+      <div class="row">
+        <input id="vm-cpus" type="number" placeholder="vCPUs" value="2" style="width:33%" data-testid="input-vm-cpus" />
+        <input id="vm-ram" type="number" placeholder="RAM (MB)" value="2048" style="width:33%" data-testid="input-vm-ram" />
+        <input id="vm-disk" type="number" placeholder="Disk (GB)" value="20" style="width:33%" data-testid="input-vm-disk" />
+      </div>
+      <div id="create-error" class="error"></div>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <button class="btn-secondary" onclick="closeCreateModal()" data-testid="btn-cancel-create">Cancel</button>
+        <button class="btn-primary" onclick="submitCreateVM()" data-testid="btn-submit-create">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Snapshot Modal -->
+  <div class="modal-overlay" id="snapshot-modal">
+    <div class="modal">
+      <h3>Create Snapshot</h3>
+      <input id="snap-name" placeholder="Snapshot name" data-testid="input-snap-name" />
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <button class="btn-secondary" onclick="closeSnapshotModal()">Cancel</button>
+        <button class="btn-primary" onclick="submitCreateSnapshot()" data-testid="btn-submit-snapshot">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // API Client (mirrors web/src/api/client.js)
+    // ============================================================
+    const BASE = '/api/v1';
+
+    async function request(path, options = {}) {
+      const res = await fetch(`${BASE}${path}`, {
+        headers: { 'Content-Type': 'application/json', ...options.headers },
+        ...options,
+      });
+      if (res.status === 204) return null;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+      return data;
+    }
+
+    const api = {
+      vms: {
+        list: () => request('/vms'),
+        get: (id) => request(`/vms/${id}`),
+        create: (spec) => request('/vms', { method: 'POST', body: JSON.stringify(spec) }),
+        start: (id) => request(`/vms/${id}/start`, { method: 'POST' }),
+        stop: (id) => request(`/vms/${id}/stop`, { method: 'POST' }),
+        delete: (id) => request(`/vms/${id}`, { method: 'DELETE' }),
+      },
+      snapshots: {
+        list: (vmId) => request(`/vms/${vmId}/snapshots`),
+        create: (vmId, name) => request(`/vms/${vmId}/snapshots`, { method: 'POST', body: JSON.stringify({ name }) }),
+        restore: (vmId, name) => request(`/vms/${vmId}/snapshots/${name}/restore`, { method: 'POST' }),
+        delete: (vmId, name) => request(`/vms/${vmId}/snapshots/${name}`, { method: 'DELETE' }),
+      },
+      images: {
+        list: () => request('/images'),
+        delete: (id) => request(`/images/${id}`, { method: 'DELETE' }),
+      },
+      ports: {
+        list: (vmId) => request(`/vms/${vmId}/ports`),
+        add: (vmId, hp, gp, proto) => request(`/vms/${vmId}/ports`, {
+          method: 'POST', body: JSON.stringify({ host_port: hp, guest_port: gp, protocol: proto || 'tcp' }),
+        }),
+      },
+    };
+
+    // ============================================================
+    // State
+    // ============================================================
+    let currentPage = 'dashboard';
+    let currentVMId = null;
+
+    // ============================================================
+    // Navigation
+    // ============================================================
+    document.querySelectorAll('#nav a').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo(a.dataset.page);
+      });
+    });
+
+    function navigateTo(page, vmId) {
+      currentPage = page;
+      currentVMId = vmId || null;
+      document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === page));
+      renderPage();
+    }
+
+    // ============================================================
+    // Rendering
+    // ============================================================
+    async function renderPage() {
+      const app = document.getElementById('app');
+      app.innerHTML = '<div class="loading">Loading...</div>';
+
+      try {
+        switch (currentPage) {
+          case 'dashboard': await renderDashboard(app); break;
+          case 'vms': await renderVMList(app); break;
+          case 'vm-detail': await renderVMDetail(app); break;
+          case 'images': await renderImages(app); break;
+        }
+      } catch (err) {
+        app.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function renderDashboard(app) {
+      const [vmList, imageList] = await Promise.all([api.vms.list(), api.images.list()]);
+      const running = vmList.filter(v => v.state === 'running').length;
+
+      app.innerHTML = `
+        <div class="stats">
+          <div class="card stat-card"><div class="value" data-testid="stat-total">${vmList.length}</div><div class="label">Total Machines</div></div>
+          <div class="card stat-card"><div class="value" data-testid="stat-running">${running}</div><div class="label">Running</div></div>
+          <div class="card stat-card"><div class="value" data-testid="stat-images">${imageList.length}</div><div class="label">Images</div></div>
+        </div>
+        <div class="card">
+          <h2>Machines</h2>
+          <table data-testid="dashboard-vm-table">
+            <thead><tr><th>Name</th><th>Status</th><th>IP</th><th>Resources</th></tr></thead>
+            <tbody>
+              ${vmList.map(vm => `
+                <tr class="clickable" data-testid="vm-row-${vm.name}" onclick="navigateTo('vm-detail','${vm.id}')">
+                  <td>${vm.name}</td>
+                  <td><span class="badge badge-${vm.state}">${vm.state}</span></td>
+                  <td style="font-family:monospace">${vm.ip || '—'}</td>
+                  <td>${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function renderVMList(app) {
+      const vmList = await api.vms.list();
+
+      app.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h2>Machines (${vmList.length})</h2>
+          <button class="btn-primary" onclick="openCreateModal()" data-testid="btn-new-vm">+ New Machine</button>
+        </div>
+        ${vmList.length === 0 ? '<div class="card empty" data-testid="empty-state">No machines yet. Create your first VM.</div>' : ''}
+        <div data-testid="vm-list">
+        ${vmList.map(vm => `
+          <div class="card clickable" data-testid="vm-card-${vm.name}" onclick="navigateTo('vm-detail','${vm.id}')">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <strong style="font-family:monospace">${vm.name}</strong>
+                <span class="badge badge-${vm.state}" style="margin-left:8px">${vm.state}</span>
+              </div>
+              <div style="font-family:monospace;font-size:12px;color:#657593">
+                ${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB ${vm.ip ? '· ' + vm.ip : ''}
+              </div>
+            </div>
+          </div>
+        `).join('')}
+        </div>
+      `;
+    }
+
+    async function renderVMDetail(app) {
+      const [vm, snaps, ports] = await Promise.all([
+        api.vms.get(currentVMId),
+        api.snapshots.list(currentVMId),
+        api.ports.list(currentVMId),
+      ]);
+
+      app.innerHTML = `
+        <div style="margin-bottom:16px">
+          <a href="#" onclick="navigateTo('vms');return false" data-testid="back-link">← Back</a>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px">
+          <div>
+            <h2 style="display:inline" data-testid="vm-detail-name">${vm.name}</h2>
+            <span class="badge badge-${vm.state}" data-testid="vm-detail-state" style="margin-left:8px">${vm.state}</span>
+            <div style="font-family:monospace;font-size:12px;color:#657593;margin-top:4px" data-testid="vm-detail-id">${vm.id}</div>
+          </div>
+          <div class="actions">
+            ${vm.state === 'stopped' ? `<button class="btn-primary" onclick="startVM('${vm.id}')" data-testid="btn-start">Start</button>` : ''}
+            ${vm.state === 'running' ? `<button class="btn-secondary" onclick="stopVM('${vm.id}')" data-testid="btn-stop">Stop</button>` : ''}
+            <button class="btn-danger" onclick="deleteVM('${vm.id}','${vm.name}')" data-testid="btn-delete">Delete</button>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div class="card"><div style="font-size:10px;text-transform:uppercase;color:#657593">IP Address</div><div style="font-family:monospace" data-testid="vm-detail-ip">${vm.ip || 'Not assigned'}</div></div>
+          <div class="card"><div style="font-size:10px;text-transform:uppercase;color:#657593">Image</div><div style="font-family:monospace" data-testid="vm-detail-image">${vm.spec.image}</div></div>
+          <div class="card"><div style="font-size:10px;text-transform:uppercase;color:#657593">Resources</div><div data-testid="vm-detail-resources">${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB RAM · ${vm.spec.disk_gb} GB</div></div>
+          <div class="card"><div style="font-size:10px;text-transform:uppercase;color:#657593">Created</div><div>${new Date(vm.created_at).toLocaleString()}</div></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <h2>Snapshots</h2>
+              <button class="btn-secondary" onclick="openSnapshotModal()" data-testid="btn-new-snapshot">+ New</button>
+            </div>
+            <div data-testid="snapshot-list">
+              ${snaps.length === 0 ? '<div class="empty">No snapshots</div>' : snaps.map(s => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(57,66,84,0.4)">
+                  <span style="font-family:monospace;font-size:13px" data-testid="snap-${s.name}">${s.name}</span>
+                  <div class="actions">
+                    <button class="btn-secondary" style="font-size:12px;padding:4px 8px" onclick="restoreSnap('${vm.id}','${s.name}')" data-testid="btn-restore-${s.name}">Restore</button>
+                    <button class="btn-danger" style="font-size:12px;padding:4px 8px" onclick="deleteSnap('${vm.id}','${s.name}')" data-testid="btn-delete-snap-${s.name}">Delete</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Port Forwards</h2>
+            <div data-testid="port-list">
+              ${ports.length === 0 ? '<div class="empty">No port forwards</div>' : ports.map(p => `
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid rgba(57,66,84,0.4)">
+                  <span style="font-family:monospace;font-size:13px">:${p.host_port} → ${p.guest_ip}:${p.guest_port} (${p.protocol})</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderImages(app) {
+      const imageList = await api.images.list();
+      const humanSize = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+' GB' : b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b+' B';
+
+      app.innerHTML = `
+        <h2>Images</h2>
+        ${imageList.length === 0 ? '<div class="card empty" data-testid="empty-images">No images</div>' : `
+          <div class="card">
+            <table data-testid="image-table">
+              <thead><tr><th>Name</th><th>Format</th><th>Size</th><th>Created</th></tr></thead>
+              <tbody>
+                ${imageList.map(img => `
+                  <tr data-testid="image-row-${img.name}">
+                    <td style="font-family:monospace">${img.name}</td>
+                    <td><span class="badge">${img.format}</span></td>
+                    <td>${humanSize(img.size_bytes)}</td>
+                    <td>${new Date(img.created_at).toLocaleDateString()}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      `;
+    }
+
+    // ============================================================
+    // Actions
+    // ============================================================
+    function openCreateModal() { document.getElementById('create-modal').classList.add('open'); }
+    function closeCreateModal() { document.getElementById('create-modal').classList.remove('open'); document.getElementById('create-error').textContent = ''; }
+    function openSnapshotModal() { document.getElementById('snapshot-modal').classList.add('open'); }
+    function closeSnapshotModal() { document.getElementById('snapshot-modal').classList.remove('open'); }
+
+    async function submitCreateVM() {
+      const spec = {
+        name: document.getElementById('vm-name').value,
+        image: document.getElementById('vm-image').value,
+        cpus: parseInt(document.getElementById('vm-cpus').value) || 2,
+        ram_mb: parseInt(document.getElementById('vm-ram').value) || 2048,
+        disk_gb: parseInt(document.getElementById('vm-disk').value) || 20,
+      };
+      try {
+        await api.vms.create(spec);
+        closeCreateModal();
+        document.getElementById('vm-name').value = '';
+        document.getElementById('vm-image').value = '';
+        renderPage();
+      } catch (err) {
+        document.getElementById('create-error').textContent = err.message;
+      }
+    }
+
+    async function submitCreateSnapshot() {
+      const name = document.getElementById('snap-name').value;
+      await api.snapshots.create(currentVMId, name);
+      closeSnapshotModal();
+      document.getElementById('snap-name').value = '';
+      renderPage();
+    }
+
+    async function startVM(id) { await api.vms.start(id); renderPage(); }
+    async function stopVM(id) { await api.vms.stop(id); renderPage(); }
+    async function deleteVM(id, name) { if (confirm(`Delete ${name}?`)) { await api.vms.delete(id); navigateTo('vms'); } }
+    async function restoreSnap(vmId, name) { await api.snapshots.restore(vmId, name); renderPage(); }
+    async function deleteSnap(vmId, name) { await api.snapshots.delete(vmId, name); renderPage(); }
+
+    // Initial render
+    renderPage();
+  </script>
+</body>
+</html>
