@@ -100,6 +100,17 @@ open http://localhost:8080
 # Use the API
 curl http://localhost:8080/api/v1/vms
 ```
+GUI: VM Dashboard
+
+<img width="1641" height="922" alt="Screenshot from 2026-03-07 00-05-00" src="https://github.com/user-attachments/assets/76ca8e97-0b90-4a2f-aebf-25677310f4af" />
+
+GUI: Machine Management
+
+<img width="1641" height="922" alt="Screenshot from 2026-03-07 00-02-23" src="https://github.com/user-attachments/assets/56357819-f9bb-4a1b-b24b-d4ecb1a40d5d" />
+
+GUI: VM Image Management
+
+<img width="1641" height="922" alt="Screenshot from 2026-03-07 00-05-22" src="https://github.com/user-attachments/assets/12b5b86e-85dc-4839-95ab-35402284431c" />
 
 ### Development (frontend)
 
