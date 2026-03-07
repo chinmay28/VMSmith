@@ -41,9 +41,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	// Middleware
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.SetHeader("Content-Type", "application/json"))
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(middleware.SetHeader("Content-Type", "application/json"))
 		// VM endpoints
 		r.Route("/vms", func(r chi.Router) {
 			r.Post("/", s.CreateVM)
