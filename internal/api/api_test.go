@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -523,6 +524,118 @@ func TestCreateVM_WithNetworks(t *testing.T) {
 
 	if len(created.Spec.Networks) != 2 {
 		t.Errorf("expected 2 networks, got %d", len(created.Spec.Networks))
+	}
+}
+
+// ============================================================
+// Content-Type regression tests (web handler vs API routes)
+// ============================================================
+
+// testServerWithWeb sets up a test server that includes a stub web handler,
+// simulating the production setup where the SPA is embedded.
+func testServerWithWeb(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+
+	// Stub web handler that mimics a real SPA: serves text/html.
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<!doctype html><html><body><div id=\"root\"></div></body></html>"))
+	})
+
+	apiServer := NewServerWithWeb(mockMgr, storageMgr, portFwd, webHandler)
+	ts := httptest.NewServer(apiServer)
+
+	cleanup := func() {
+		ts.Close()
+		s.Close()
+	}
+
+	return ts, cleanup
+}
+
+// TestWebHandler_ContentType_HTML verifies that the web handler serves HTML
+// with text/html content type — not application/json (regression for the bug
+// where the global JSON middleware overwrote the content type for all routes).
+func TestWebHandler_ContentType_HTML(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "application/json" {
+		t.Errorf("Content-Type = %q: web handler must not receive application/json middleware", ct)
+	}
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+// TestWebHandler_SubPath_ContentType_HTML verifies sub-paths (client-side routes)
+// also get text/html, not application/json.
+func TestWebHandler_SubPath_ContentType_HTML(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	for _, path := range []string{"/vms", "/images", "/dashboard"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+
+		ct := resp.Header.Get("Content-Type")
+		if ct == "application/json" {
+			t.Errorf("path %s: Content-Type = %q: must not be application/json", path, ct)
+		}
+		if !strings.Contains(ct, "text/html") {
+			t.Errorf("path %s: Content-Type = %q, want text/html", path, ct)
+		}
+	}
+}
+
+// TestAPIRoutes_ContentType_JSON verifies that API endpoints still return
+// application/json when a web handler is also registered.
+func TestAPIRoutes_ContentType_JSON(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json for API routes", ct)
 	}
 }
 
