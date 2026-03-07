@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { Server, HardDrive, Camera, Network, LayoutDashboard, Anvil } from 'lucide-react';
+import { Server, HardDrive, Camera, Network, LayoutDashboard, Monitor } from 'lucide-react';
+import mascot from '../assets/mascot.png';
 
 const navItems = [
   { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,18 +12,18 @@ export default function Layout({ children }) {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 shrink-0 border-r border-steel-800/60 bg-steel-950/80 flex flex-col">
+      <aside className="w-[268px] shrink-0 border-r border-steel-800/60 bg-steel-950/80 flex flex-col">
         {/* Logo */}
         <div className="px-5 py-5 border-b border-steel-800/40">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-gradient-to-br from-forge-500 to-forge-700 flex items-center justify-center">
-              <Anvil size={16} className="text-white" />
+            <div className="w-8 h-8 rounded-md bg-forge-900 border border-forge-700/60 flex items-center justify-center shadow-[0_0_10px_rgba(0,255,65,0.2)]">
+              <Monitor size={16} className="text-forge-400" />
             </div>
             <div>
-              <span className="font-display font-bold text-steel-100 text-base tracking-tight">
-                vm<span className="text-forge-400">Smith</span>
+              <span className="font-mono font-bold text-forge-400 text-[24px] tracking-tight" style={{textShadow: '0 0 8px rgba(0,255,65,0.6)'}}>
+                VM <span className="text-forge-300">Smith</span>
               </span>
-              <p className="text-[10px] font-mono text-steel-600 -mt-0.5">vm orchestrator</p>
+              <p className="text-[11px] font-mono text-steel-600 -mt-0.5 whitespace-nowrap">Agent of the Virtual World</p>
             </div>
           </div>
         </div>
@@ -48,9 +49,18 @@ export default function Layout({ children }) {
           ))}
         </nav>
 
+        {/* Mascot */}
+        <div className="px-3 pb-2">
+          <img
+            src={mascot}
+            alt="V.M. Smith"
+            className="w-full rounded-lg opacity-80 hover:opacity-100 transition-opacity duration-300"
+          />
+        </div>
+
         {/* Footer */}
         <div className="px-4 py-3 border-t border-steel-800/40">
-          <p className="text-[10px] font-mono text-steel-700">vmsmith v0.1.0-dev</p>
+          <p className="text-[10px] font-mono text-forge-800">VM Smith v0.1.0-dev</p>
         </div>
       </aside>
 

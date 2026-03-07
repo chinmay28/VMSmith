@@ -528,6 +528,336 @@ func TestCreateVM_WithNetworks(t *testing.T) {
 }
 
 // ============================================================
+// testServerFull — like testServer but also returns the store
+// for test cases that need to seed data directly.
+// ============================================================
+
+func testServerFull(t *testing.T) (*httptest.Server, *vm.MockManager, *store.Store, func()) {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+
+	apiServer := NewServer(mockMgr, storageMgr, portFwd)
+	ts := httptest.NewServer(apiServer)
+
+	cleanup := func() {
+		ts.Close()
+		s.Close()
+	}
+
+	return ts, mockMgr, s, cleanup
+}
+
+// ============================================================
+// VM handler error paths
+// ============================================================
+
+func TestListVMs_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.ListErr = types.ErrTest
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestDeleteVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x"})
+	mockMgr.DeleteErr = types.ErrTest
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-x", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestStartVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateStopped})
+	mockMgr.StartErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/start", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestStopVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.StopErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/stop", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// ============================================================
+// Snapshot handler error paths
+// ============================================================
+
+func TestCreateSnapshot_BadJSON(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/snapshots", "application/json",
+		bytes.NewBufferString("{bad"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestCreateSnapshot_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x"})
+	mockMgr.CreateSnapshotErr = types.ErrTest
+
+	body := jsonBody(t, map[string]string{"name": "snap"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestListSnapshots_VMNotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/nonexistent/snapshots")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestRestoreSnapshot_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-r"})
+	mockMgr.RestoreSnapshotErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-r/snapshots/any/restore", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestDeleteSnapshot_VMNotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/nonexistent/snapshots/snap", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// ============================================================
+// Image handler tests
+// ============================================================
+
+func TestCreateImage_BadJSON(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/images", "application/json",
+		bytes.NewBufferString("{bad"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestCreateImage_VMNotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := jsonBody(t, createImageRequest{VMID: "nonexistent", Name: "img"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images", "application/json", body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestCreateImage_StorageError(t *testing.T) {
+	// VM exists but disk path is invalid — qemu-img convert will fail → 500.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-img", DiskPath: "/nonexistent/disk.qcow2"})
+
+	body := jsonBody(t, createImageRequest{VMID: "vm-img", Name: "myimage"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images", "application/json", body)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestDeleteImage_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/images/nonexistent", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (image not in store)", resp.StatusCode)
+	}
+}
+
+func TestDownloadImage_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images/nonexistent/download")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestDownloadImage_Found(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// Write a real temp file so http.ServeFile can serve it.
+	f, err := os.CreateTemp(t.TempDir(), "*.qcow2")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	f.WriteString("fake qcow2 data")
+	f.Close()
+
+	img := &types.Image{ID: "img-dl", Name: "test-image", Path: f.Name()}
+	if err := s.PutImage(img); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/images/img-dl/download")
+	if err != nil {
+		t.Fatalf("GET download: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "test-image.qcow2") {
+		t.Errorf("Content-Disposition = %q, want filename containing test-image.qcow2", cd)
+	}
+}
+
+// ============================================================
+// Port forward handler tests
+// ============================================================
+
+func TestAddPort_BadJSON(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p", IP: "192.168.100.10"})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p/ports", "application/json",
+		bytes.NewBufferString("{bad"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestAddPort_VMNotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 22})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/nonexistent/ports", "application/json", body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestListPorts_Empty(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-lp/ports")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var ports []*types.PortForward
+	decodeJSON(t, resp, &ports)
+	if len(ports) != 0 {
+		t.Errorf("expected 0 ports, got %d", len(ports))
+	}
+}
+
+func TestListPorts_WithData(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	pf := &types.PortForward{
+		ID: "pf-test", VMID: "vm-lp", HostPort: 2222, GuestPort: 22, Protocol: types.ProtocolTCP,
+	}
+	if err := s.PutPortForward(pf); err != nil {
+		t.Fatalf("seed port forward: %v", err)
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-lp/ports")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var ports []*types.PortForward
+	decodeJSON(t, resp, &ports)
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(ports))
+	}
+	if ports[0].HostPort != 2222 {
+		t.Errorf("HostPort = %d, want 2222", ports[0].HostPort)
+	}
+}
+
+func TestRemovePort_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-x/ports/nonexistent", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (port not found)", resp.StatusCode)
+	}
+}
+
+// ============================================================
 // Content-Type regression tests (web handler vs API routes)
 // ============================================================
 

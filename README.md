@@ -142,7 +142,7 @@ The test suite includes 83 tests across three tiers: unit tests for each package
 Error: creating VM: starting domain: virError(Code=38, Message='Cannot access storage file ... Permission denied')
 ```
 
-The `libvirt-qemu` system user cannot traverse home directories (default mode `750`). vmSmith stores VM disks in `/var/lib/vmsmith/` to avoid this — the install scripts create that directory with the correct ownership. If you set up dependencies manually, create it yourself:
+The `libvirt-qemu` system user cannot traverse home directories (default mode `750`). VM Smith stores VM disks in `/var/lib/vmsmith/` to avoid this — the install scripts create that directory with the correct ownership. If you set up dependencies manually, create it yourself:
 
 ```bash
 sudo mkdir -p /var/lib/vmsmith/vms /var/lib/vmsmith/images
