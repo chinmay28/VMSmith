@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
 	"libvirt.org/go/libvirt"
@@ -47,6 +48,13 @@ func (m *LibvirtManager) Close() error {
 // Create provisions a new VM: creates the overlay disk, cloud-init ISO,
 // defines the domain in libvirt, and starts it.
 func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM, error) {
+	// Ensure the NAT network exists before creating any VM.
+	// This is idempotent — safe to call even if the network already exists.
+	netMgr := network.NewManager(m.conn, m.cfg)
+	if err := netMgr.EnsureNetwork(); err != nil {
+		return nil, fmt.Errorf("ensuring NAT network: %w", err)
+	}
+
 	// Apply defaults
 	if spec.CPUs == 0 {
 		spec.CPUs = m.cfg.Defaults.CPUs
