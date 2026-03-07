@@ -1,6 +1,6 @@
 # VM Smith
 
-<img align="right" width="42%" src="https://github.com/user-attachments/assets/71c510a1-6f43-48a3-a044-e320e5285c53" alt="vmsmith">
+<img align="right" width="43%" alt="vmsmith" src="https://github.com/user-attachments/assets/10b7ffb5-ebd9-47f9-bcf2-9b5212a55492" />
 
 CLI tool, a HTTP REST server, and a handy GUI for provisioning and managing QEMU/KVM virtual machines on Linux.
 
