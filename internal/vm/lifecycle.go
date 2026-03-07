@@ -90,7 +90,10 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 
 	// Create qcow2 overlay backed by the base image
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
-	baseImage := filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
+	baseImage := spec.Image
+	if !filepath.IsAbs(spec.Image) {
+		baseImage = filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
+	}
 	if err := createOverlayDisk(baseImage, diskPath, spec.DiskGB); err != nil {
 		return nil, fmt.Errorf("creating overlay disk: %w", err)
 	}
@@ -492,15 +495,22 @@ func domainStateToVMState(dom *libvirt.Domain) types.VMState {
 }
 
 func getDomainIP(dom *libvirt.Domain) string {
-	// Try to get IP via DHCP leases on the libvirt network
-	ifaces, err := dom.ListAllInterfaceAddresses(libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE)
-	if err != nil || len(ifaces) == 0 {
-		return ""
+	// Try multiple sources in order of reliability.
+	sources := []libvirt.DomainInterfaceAddressesSource{
+		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT, // QEMU guest agent (most accurate)
+		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, // libvirt dnsmasq leases
+		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP,   // host ARP cache
 	}
-	for _, iface := range ifaces {
-		for _, addr := range iface.Addrs {
-			if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 {
-				return addr.Addr
+	for _, src := range sources {
+		ifaces, err := dom.ListAllInterfaceAddresses(src)
+		if err != nil {
+			continue
+		}
+		for _, iface := range ifaces {
+			for _, addr := range iface.Addrs {
+				if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 {
+					return addr.Addr
+				}
 			}
 		}
 	}

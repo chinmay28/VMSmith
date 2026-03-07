@@ -181,7 +181,7 @@ The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVi
 ### 1. VM Lifecycle
 
 **Creating a VM:**
-1. User provides: name, base image, CPU count, RAM, disk size, optional cloud-init data
+1. User provides: name, base image (registered name or absolute path), CPU count, RAM, disk size, optional cloud-init data
 2. VM Smith creates a qcow2 overlay disk backed by the base image (copy-on-write)
 3. Generates libvirt domain XML with the VM's specs
 4. Attaches the VM to the vmsmith NAT network
@@ -317,8 +317,10 @@ POST /api/v1/vms
 **Images** (portable, for distribution to other hosts):
 - Created by exporting a VM's disk to a standalone qcow2 file
 - `vmsmith image create myvm --name "ubuntu-base-configured"`
+- Or uploaded directly via the web GUI (Images → Upload Image, drag-and-drop `.qcow2`)
 - The image is a flattened qcow2 (no backing file dependencies)
-- Stored in `~/.vmsmith/images/` (or configured path)
+- Stored in the configured images directory (default `/var/lib/vmsmith/images/`)
+- Paths are shown in the Images page and can be used directly with `--image /abs/path`
 
 **Image Transfer:**
 - **Push:** `vmsmith image push ubuntu-base-configured user@remote-host`
@@ -357,10 +359,10 @@ All endpoints are prefixed with `/api/v1/`.
 | POST   | /vms/{id}/snapshots/{snapId}/restore    | Restore a snapshot           |
 | DELETE | /vms/{id}/snapshots/{snapId}            | Delete a snapshot            |
 | GET    | /images                                 | List images                  |
-| POST   | /images                                 | Create image from VM         |
+| POST   | /images                                 | Create image from VM disk    |
+| POST   | /images/upload                          | Upload a qcow2 image file    |
 | DELETE | /images/{id}                            | Delete an image              |
 | GET    | /images/{id}/download                   | Download image file          |
-| POST   | /images/upload                          | Upload an image              |
 | GET    | /vms/{id}/ports                         | List port forwards for a VM  |
 | POST   | /vms/{id}/ports                         | Add a port forward           |
 | DELETE | /vms/{id}/ports/{portId}                | Remove a port forward        |
@@ -518,7 +520,7 @@ internal/web/
 | `/`           | Dashboard  | Stats overview, VM list with quick actions          |
 | `/vms`        | VM List    | Create modal, start/stop/delete actions             |
 | `/vms/:id`    | VM Detail  | Info cards, snapshot management, port forwarding     |
-| `/images`     | Images     | List, download, delete portable disk images          |
+| `/images`     | Images     | Upload, list, download, delete portable disk images  |
 
 **Production build:** `make build` runs `npm run build` first (outputting to `internal/web/dist/`), then compiles the Go binary with the SPA embedded. The resulting binary serves the GUI on the same port as the API (default `:8080`).
 
@@ -597,10 +599,10 @@ make test-all
 |---------------|---------------------|-------|------------------------------------------------------|
 | Unit          | store               | 9     | CRUD for VMs, images, ports; persistence; networks   |
 | Unit          | config              | 5     | Defaults, file load, YAML merge, invalid YAML, dirs  |
-| Unit          | vm/domain           | 16    | XML gen, multi-net, macvtap/bridge, MAC, validation  |
+| Unit          | vm/domain           | 18    | XML gen, multi-net, macvtap/bridge/NAT, MAC, validation |
 | Unit          | vm/mock             | 8     | Mock lifecycle, snapshots, error injection, seeding  |
 | Unit          | cli                 | 12    | Network flag parsing, all options, errors, humanSize |
-| Unit          | storage             | 1     | findLastSlash helper                                 |
-| Integration   | api                 | 16    | All REST endpoints, error handling, full lifecycle   |
+| Unit          | storage             | 11    | ImportImage, ListImages, GetImage, DeleteImage, path |
+| Integration   | api                 | 28    | All REST endpoints including upload; error paths     |
 | E2E (browser) | web                 | 16    | Dashboard, VM CRUD, snapshots, images, navigation    |
-| **Total**     |                     | **83**|                                                      |
+| **Total**     |                     | **151**|                                                     |

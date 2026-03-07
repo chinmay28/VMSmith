@@ -259,6 +259,50 @@ func TestValidateNetworkAttachments_Empty(t *testing.T) {
 	}
 }
 
+func TestDomainParamsFromSpec_NATAttachment(t *testing.T) {
+	spec := types.VMSpec{
+		Name: "nat-vm",
+		Networks: []types.NetworkAttachment{
+			{Mode: types.NetworkModeNAT, MacAddress: "52:54:00:aa:bb:cc"},
+		},
+	}
+
+	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net")
+
+	// Should have 2 interfaces: default NAT + extra NAT attachment
+	if len(params.Interfaces) != 2 {
+		t.Fatalf("expected 2 interfaces, got %d", len(params.Interfaces))
+	}
+	if !strings.Contains(params.Interfaces[1].XML, "aa:bb:cc") {
+		t.Error("extra NAT interface should include specified MAC")
+	}
+}
+
+func TestGenerateDomainXML_MultipleInterfaces(t *testing.T) {
+	params := DomainParams{
+		Name:     "multi-vm",
+		CPUs:     2,
+		RAMMB:    2048,
+		DiskPath: "/tmp/disk.qcow2",
+		Interfaces: []InterfaceEntry{
+			{XML: `<interface type='network'><source network='vmsmith-net'/></interface>`},
+			{XML: `<interface type='direct'><source dev='eth1' mode='bridge'/></interface>`},
+		},
+	}
+
+	xml, err := GenerateDomainXML(params)
+	if err != nil {
+		t.Fatalf("GenerateDomainXML: %v", err)
+	}
+
+	if !strings.Contains(xml, "vmsmith-net") {
+		t.Error("should contain NAT network")
+	}
+	if !strings.Contains(xml, "eth1") {
+		t.Error("should contain macvtap interface")
+	}
+}
+
 // --- Cloud-init network config generation tests ---
 
 func TestGenerateNetworkConfig_StaticIP(t *testing.T) {

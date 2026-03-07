@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Server, Play, Square, Trash2, MoreVertical } from 'lucide-react';
-import { vms } from '../api/client';
+import { vms, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner } from '../components/Shared';
 
@@ -135,9 +135,17 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 function CreateVMModal({ open, onClose, onCreated }) {
   const [form, setForm] = useState({ name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' });
   const createMut = useMutation(vms.create);
+  const { data: imageList } = useFetch(() => imagesApi.list(), [], 0);
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
+
+  const humanSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes >= 1073741824) return ` · ${(bytes / 1073741824).toFixed(1)} GB`;
+    if (bytes >= 1048576) return ` · ${(bytes / 1048576).toFixed(1)} MB`;
+    return ` · ${bytes} B`;
+  };
 
   const handleSubmit = async () => {
     try {
@@ -147,6 +155,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
       setForm({ name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' });
     } catch { /* error displayed via mutation */ }
   };
+
+  const noImages = imageList && imageList.length === 0;
 
   return (
     <Modal open={open} onClose={onClose} title="Create Machine" wide>
@@ -158,7 +168,20 @@ function CreateVMModal({ open, onClose, onCreated }) {
           </div>
           <div>
             <label className="label">Base Image</label>
-            <input className="input" placeholder="ubuntu-22.04" value={form.image} onChange={update('image')} />
+            {noImages ? (
+              <div className="input flex items-center text-steel-500 text-xs">
+                No images available — upload one in the Images section first.
+              </div>
+            ) : (
+              <select className="input" value={form.image} onChange={update('image')}>
+                <option value="">Select an image…</option>
+                {(imageList || []).map(img => (
+                  <option key={img.id} value={img.path}>
+                    {img.name}{humanSize(img.size_bytes)}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 

@@ -87,3 +87,31 @@ func (m *Manager) GetImage(id string) (*types.Image, error) {
 func (m *Manager) ImagePath(name string) string {
 	return filepath.Join(m.cfg.Storage.ImagesDir, name+".qcow2")
 }
+
+// ImportImage saves an uploaded file into the images directory and registers it.
+func (m *Manager) ImportImage(name string, src []byte) (*types.Image, error) {
+	if err := os.MkdirAll(m.cfg.Storage.ImagesDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	imagePath := filepath.Join(m.cfg.Storage.ImagesDir, name+".qcow2")
+	if err := os.WriteFile(imagePath, src, 0o644); err != nil {
+		return nil, fmt.Errorf("writing image file: %w", err)
+	}
+
+	img := &types.Image{
+		ID:        fmt.Sprintf("img-%d", time.Now().UnixNano()),
+		Name:      name,
+		Path:      imagePath,
+		SizeBytes: int64(len(src)),
+		Format:    "qcow2",
+		CreatedAt: time.Now(),
+	}
+
+	if err := m.store.PutImage(img); err != nil {
+		os.Remove(imagePath)
+		return nil, err
+	}
+
+	return img, nil
+}

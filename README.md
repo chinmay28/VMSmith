@@ -9,7 +9,7 @@ Features
 - **VM lifecycle management** — create, start, stop, delete VMs with a single command
 - **Cloud-init support** — inject SSH keys and configuration at boot
 - **Snapshots** — capture and restore VM state at any point
-- **Portable images** — export VMs to standalone qcow2 images and distribute via SCP or HTTP
+- **Portable images** — upload, export, download, and distribute qcow2 images via the GUI or SCP/HTTP
 - **NAT networking with port forwarding** — expose VM services to the local network
 - **REST API** — run as a daemon for programmatic access
 - **Web GUI** — React dashboard embedded in the binary, served alongside the API
@@ -54,19 +54,28 @@ make build
 make build-go
 ```
 
-### 4. Download a base image
+### 4. Get a base image
 
+**Option A — download directly:**
 ```bash
-# Example: Ubuntu 22.04 cloud image
 wget -O /var/lib/vmsmith/images/ubuntu-22.04.qcow2 \
   https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+```
+
+**Option B — upload via the web GUI:**
+
+Open `http://localhost:8080`, go to **Images → Upload Image**, drag-and-drop a `.qcow2` file.
+
+**Option C — provide an absolute path when creating a VM:**
+```bash
+vmsmith vm create my-server --image /path/to/ubuntu-22.04.qcow2 ...
 ```
 
 ### 5. Create and manage VMs
 
 ```bash
-# Create a VM
-vmsmith vm create my-server --image ubuntu-22.04.qcow2 --cpus 2 --ram 2048 --disk 20 \
+# Create a VM (image name registered in the image store, or absolute path)
+vmsmith vm create my-server --image ubuntu-22.04 --cpus 2 --ram 2048 --disk 20 \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
 # List VMs
@@ -143,7 +152,7 @@ make test-web
 make test-all
 ```
 
-The test suite includes 83 tests across three tiers: unit tests for each package, API integration tests using a mock VM manager + httptest, and end-to-end headless browser tests using Playwright against a mock API server. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
+The test suite includes 151 tests across three tiers: unit tests for each package, API integration tests using a mock VM manager + httptest, and end-to-end headless browser tests using Playwright against a mock API server. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
 
 ## Troubleshooting
 
