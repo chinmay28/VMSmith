@@ -45,9 +45,12 @@ type DefaultsConfig struct {
 }
 
 // DefaultConfig returns a Config with sensible defaults.
+// Storage paths are placed under /var/lib/vmsmith/ so that the libvirt-qemu
+// system user can access them without requiring home-directory traversal.
+// The install scripts create this directory with the correct ownership.
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
-	baseDir := filepath.Join(homeDir, ".vmsmith")
+	dataDir := "/var/lib/vmsmith"
 
 	return &Config{
 		Daemon: DaemonConfig{
@@ -58,9 +61,10 @@ func DefaultConfig() *Config {
 			URI: "qemu:///system",
 		},
 		Storage: StorageConfig{
-			ImagesDir: filepath.Join(baseDir, "images"),
-			BaseDir:   filepath.Join(baseDir, "vms"),
-			DBPath:    filepath.Join(baseDir, "vmsmith.db"),
+			ImagesDir: filepath.Join(dataDir, "images"),
+			BaseDir:   filepath.Join(dataDir, "vms"),
+			// Keep the DB in ~/.vmsmith so it stays with the user without root.
+			DBPath: filepath.Join(homeDir, ".vmsmith", "vmsmith.db"),
 		},
 		Network: NetworkConfig{
 			Name:      "vmsmith-net",

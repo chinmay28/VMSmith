@@ -46,10 +46,25 @@ fi
 # Enable and start libvirtd
 systemctl enable --now libvirtd
 
-# Add current user to libvirt group
+# Add current user to libvirt group and configure QEMU to run as that user.
+# Without this, QEMU (which runs as libvirt-qemu) cannot access disk images
+# stored under the user's home directory (home dirs are typically mode 750).
 if [ -n "${SUDO_USER:-}" ]; then
     usermod -aG libvirt "$SUDO_USER"
     usermod -aG kvm "$SUDO_USER"
+
+    # Create the vmsmith data directory under /var/lib so that the libvirt-qemu
+    # system user can access VM disk images without needing home-dir traversal.
+    mkdir -p /var/lib/vmsmith/vms /var/lib/vmsmith/images
+    chown -R "${SUDO_USER}:${SUDO_USER}" /var/lib/vmsmith
+    chmod -R 755 /var/lib/vmsmith
+
+    # Also create ~/.vmsmith for the DB file (no root required at runtime).
+    USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    mkdir -p "${USER_HOME}/.vmsmith"
+    chown "${SUDO_USER}:${SUDO_USER}" "${USER_HOME}/.vmsmith"
+
+    systemctl restart libvirtd
     echo "NOTE: Log out and back in for group changes to take effect."
 fi
 

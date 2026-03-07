@@ -99,8 +99,11 @@ func (pf *PortForwarder) applyRule(action string, hostPort, guestPort int, guest
 		return fmt.Errorf("unknown action: %s", action)
 	}
 
-	// DNAT rule: redirect incoming traffic on hostPort to guest
+	// DNAT rule: redirect incoming traffic on hostPort to guest.
+	// -w 5: wait up to 5 s for the xtables lock instead of blocking forever
+	// (libvirt holds the lock while managing its own NAT rules).
 	dnatCmd := exec.Command("iptables",
+		"-w", "5",
 		"-t", "nat",
 		iptAction, "PREROUTING",
 		"-p", proto,
@@ -114,6 +117,7 @@ func (pf *PortForwarder) applyRule(action string, hostPort, guestPort int, guest
 
 	// Allow forwarded traffic
 	fwdCmd := exec.Command("iptables",
+		"-w", "5",
 		iptAction, "FORWARD",
 		"-p", proto,
 		"-d", guestIP,

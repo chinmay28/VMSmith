@@ -56,8 +56,7 @@ make build-go
 
 ```bash
 # Example: Ubuntu 22.04 cloud image
-mkdir -p ~/.vmsmith/images
-wget -O ~/.vmsmith/images/ubuntu-22.04.qcow2 \
+wget -O /var/lib/vmsmith/images/ubuntu-22.04.qcow2 \
   https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
 ```
 
@@ -65,7 +64,7 @@ wget -O ~/.vmsmith/images/ubuntu-22.04.qcow2 \
 
 ```bash
 # Create a VM
-vmsmith vm create my-server --image ubuntu-22.04 --cpus 2 --ram 2048 --disk 20 \
+vmsmith vm create my-server --image ubuntu-22.04.qcow2 --cpus 2 --ram 2048 --disk 20 \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
 # List VMs
@@ -132,6 +131,30 @@ make test-all
 ```
 
 The test suite includes 83 tests across three tiers: unit tests for each package, API integration tests using a mock VM manager + httptest, and end-to-end headless browser tests using Playwright against a mock API server. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
+
+## Troubleshooting
+
+### Permission denied accessing VM disk
+
+```
+Error: creating VM: starting domain: virError(Code=38, Message='Cannot access storage file ... Permission denied')
+```
+
+The `libvirt-qemu` system user cannot traverse home directories (default mode `750`). vmSmith stores VM disks in `/var/lib/vmsmith/` to avoid this — the install scripts create that directory with the correct ownership. If you set up dependencies manually, create it yourself:
+
+```bash
+sudo mkdir -p /var/lib/vmsmith/vms /var/lib/vmsmith/images
+sudo chown -R "$(whoami):$(whoami)" /var/lib/vmsmith
+sudo chmod -R 755 /var/lib/vmsmith
+```
+
+### Network not found: vmsmith-net
+
+```
+Error: creating VM: ensuring NAT network: Network not found
+```
+
+The NAT network is created automatically on first `vm create`. If it was manually deleted, simply run `vm create` again to recreate it.
 
 ## Architecture
 

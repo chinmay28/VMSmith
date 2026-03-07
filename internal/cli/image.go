@@ -143,7 +143,14 @@ func init() {
 	imageCmd.AddCommand(imageDeleteCmd)
 }
 
+// storageManagerOverride can be set in tests to bypass real config/store.
+var storageManagerOverride func() (*storage.Manager, func(), error)
+
 func newStorageManager() (*storage.Manager, func(), error) {
+	if storageManagerOverride != nil {
+		return storageManagerOverride()
+	}
+
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, nil, err

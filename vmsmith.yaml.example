@@ -9,9 +9,9 @@ libvirt:
   uri: "qemu:///system"       # Use qemu:///session for rootless operation
 
 storage:
-  images_dir: "/var/lib/vmsmith/images"
-  base_dir: "/var/lib/vmsmith/vms"
-  db_path: "/var/lib/vmsmith/vmsmith.db"
+  images_dir: "/var/lib/vmsmith/images"   # world-accessible; libvirt-qemu can read here
+  base_dir: "/var/lib/vmsmith/vms"        # world-accessible; libvirt-qemu can read here
+  db_path: "~/.vmsmith/vmsmith.db"        # user-only metadata DB
 
 network:
   name: "vmsmith-net"

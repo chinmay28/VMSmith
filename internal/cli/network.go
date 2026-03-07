@@ -117,7 +117,14 @@ func init() {
 	portCmd.AddCommand(portRemoveCmd)
 }
 
+// portForwarderOverride can be set in tests to bypass real config/store.
+var portForwarderOverride func() (*network.PortForwarder, func(), error)
+
 func newPortForwarder() (*network.PortForwarder, func(), error) {
+	if portForwarderOverride != nil {
+		return portForwarderOverride()
+	}
+
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, nil, err

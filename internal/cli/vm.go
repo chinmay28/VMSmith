@@ -233,9 +233,16 @@ Examples:
 	vmCmd.AddCommand(vmInfoCmd)
 }
 
+// vmManagerOverride can be set in tests to bypass libvirt.
+var vmManagerOverride func() (vm.Manager, func(), error)
+
 // newVMManager is a helper that sets up config, store, and libvirt manager
 // for direct CLI usage (non-daemon mode).
 func newVMManager() (vm.Manager, func(), error) {
+	if vmManagerOverride != nil {
+		return vmManagerOverride()
+	}
+
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading config: %w", err)
