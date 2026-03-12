@@ -1,0 +1,41 @@
+# Git metadata
+.git
+.gitignore
+.gitattributes
+
+# Node modules (rebuilt inside Docker)
+node_modules/
+web/node_modules/
+npm-debug.log*
+
+# Go build artefacts
+bin/
+*.test
+*.out
+coverage.html
+
+# Frontend build outputs (rebuilt inside Docker by the frontend stage)
+web/dist/
+internal/web/dist/
+
+# Local config overrides
+vmsmith.yaml
+*.yaml.local
+.env
+.env.*
+
+# OS noise
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+
+# Test artefacts and docs (not needed in the image)
+tests/
+docs/
+playwright-report/
+test-results/

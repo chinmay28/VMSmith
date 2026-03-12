@@ -4,7 +4,8 @@ BUILD_DIR := ./bin
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
-.PHONY: build install clean test lint fmt deps web web-install test-web-deps
+.PHONY: build install clean test lint fmt deps web web-install test-web-deps \
+        docker-build docker-run docker-stop docker-logs docker-test docker-shell
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -91,3 +92,32 @@ dev-api: build-go
 
 dev-web: web-install
 	cd $(WEB_DIR) && npm run dev
+
+# --- Docker ---
+DOCKER_IMAGE := vmsmith
+DOCKER_TAG   := $(VERSION)
+
+# Build the production runtime image
+docker-build:
+	docker build --target runtime -t $(DOCKER_IMAGE):$(DOCKER_TAG) -t $(DOCKER_IMAGE):latest .
+
+# Start the daemon via Docker Compose (detached)
+docker-run:
+	docker compose up -d
+
+# Stop and remove the container
+docker-stop:
+	docker compose down
+
+# Tail daemon logs
+docker-logs:
+	docker compose logs -f vmsmith
+
+# Run the full Go test suite inside Docker (no real libvirtd required)
+docker-test:
+	docker build --target test -t $(DOCKER_IMAGE):test .
+	docker run --rm $(DOCKER_IMAGE):test
+
+# Open a shell in the running container
+docker-shell:
+	docker exec -it vmsmith bash

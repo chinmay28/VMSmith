@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  vmsmith:
+    build:
+      context: .
+      target: runtime
+    image: vmsmith:latest
+    container_name: vmsmith
+
+    # KVM device passthrough — /dev/kvm must exist on the host.
+    # Verify with: ls -la /dev/kvm
+    devices:
+      - /dev/kvm:/dev/kvm
+
+    # Capabilities required for libvirt + iptables NAT networking:
+    #   NET_ADMIN  — create/modify bridge and TAP interfaces, add iptables rules
+    #   NET_RAW    — iptables MASQUERADE target (used by libvirt NAT)
+    #   SYS_ADMIN  — cgroup management and mount operations needed by libvirtd
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+
+    # AppArmor may block libvirtd on Ubuntu hosts; unconfined disables that.
+    security_opt:
+      - apparmor:unconfined
+
+    # Host networking is required so that bridge/NAT interfaces created by
+    # libvirt inside the container are visible on the host network, allowing
+    # VMs to reach the outside world and host-side port forwards to work.
+    # With host networking the daemon is reachable at http://<host-ip>:8080.
+    network_mode: host
+
+    volumes:
+      # VM disk images and registered base images — large, must persist
+      - vmsmith-data:/var/lib/vmsmith
+      # bbolt metadata DB (config default: /root/.vmsmith/vmsmith.db)
+      - vmsmith-db:/root/.vmsmith
+      # Optional: mount a custom config file (uncomment to use)
+      # - ./vmsmith.yaml.example:/etc/vmsmith/config.yaml:ro
+
+    restart: unless-stopped
+
+volumes:
+  vmsmith-data:
+    driver: local
+  vmsmith-db:
+    driver: local

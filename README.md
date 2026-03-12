@@ -17,7 +17,53 @@ Features
 
 ## Quick Start
 
-### 1. Install dependencies
+### Option A — Docker (recommended)
+
+The easiest way to run VMSmith on any Linux host. No per-distro setup required.
+
+**Prerequisites:**
+- Docker and Docker Compose installed
+- Hardware virtualisation enabled — verify with `ls -la /dev/kvm`
+
+```bash
+# Build the image
+make docker-build
+
+# Start the daemon (detached)
+make docker-run
+# API + web GUI available at http://localhost:8080
+
+# View logs
+make docker-logs
+
+# Stop
+make docker-stop
+```
+
+The container starts libvirtd internally, sets up the NAT network, and persists
+VM disks and metadata in named Docker volumes (`vmsmith-data`, `vmsmith-db`).
+
+**Custom config:** uncomment the volume mount in `docker-compose.yml`:
+```yaml
+- ./vmsmith.yaml.example:/etc/vmsmith/config.yaml:ro
+```
+
+**Troubleshooting:**
+
+| Error | Cause | Fix |
+|---|---|---|
+| `Cannot connect to libvirt` | libvirtd not ready | Check `make docker-logs` |
+| `ioctl(KVM_CREATE_VM) failed` | `/dev/kvm` missing | Enable KVM on host; verify `ls /dev/kvm` |
+| `Failed to add iptables rule` | Missing capability | Ensure `NET_ADMIN` / `NET_RAW` in compose file |
+| `Permission denied` on AppArmor host | AppArmor blocking libvirtd | Keep `apparmor:unconfined` in `security_opt` |
+
+---
+
+### Option B — native install
+
+Install directly on Ubuntu or Rocky Linux.
+
+#### 1. Install dependencies
 
 The install scripts set up all required system packages, Go 1.22+, and Node.js 18+:
 
@@ -35,7 +81,7 @@ After the script finishes, reload your PATH if Go was freshly installed:
 source /etc/profile.d/go.sh
 ```
 
-### 2. Download Go modules
+#### 2. Download Go modules
 
 ```bash
 make deps
@@ -44,7 +90,7 @@ make deps
 This runs `go mod tidy` and `go mod download` to fetch all Go dependencies. The
 `go.sum` lockfile is generated here — **this step is required before building**.
 
-### 3. Build
+#### 3. Build
 
 ```bash
 # Full build: frontend + backend → single binary with embedded GUI
@@ -139,7 +185,10 @@ Copy `vmsmith.yaml.example` to `~/.vmsmith/config.yaml` and adjust as needed.
 ## Testing
 
 ```bash
-# Run all Go tests (unit + integration)
+# Run all Go tests in Docker (no libvirtd or KVM required)
+make docker-test
+
+# Run all Go tests natively (unit + integration)
 make test
 
 # Set up Playwright for E2E tests (run once after cloning)
@@ -148,11 +197,11 @@ make test-web-deps
 # Run web GUI E2E tests (headless Chromium via Playwright)
 make test-web
 
-# Run everything
+# Run everything natively
 make test-all
 ```
 
-The test suite includes 151 tests across three tiers: unit tests for each package, API integration tests using a mock VM manager + httptest, and end-to-end headless browser tests using Playwright against a mock API server. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
+The test suite includes 151 tests across three tiers: unit tests for each package, API integration tests using a mock VM manager + httptest, and end-to-end headless browser tests using Playwright against a mock API server. The Go tests use mocks throughout and do not require a running libvirt daemon — `make docker-test` is the easiest way to run them anywhere. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
 
 ## Troubleshooting
 
@@ -184,8 +233,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design documentati
 
 ## Requirements
 
-- Linux x86_64 (Ubuntu 22.04+ or Rocky Linux 8+)
-- QEMU/KVM with hardware virtualization support
+**Docker (recommended):**
+- Linux x86_64 host with Docker and Docker Compose
+- Hardware virtualisation support (`/dev/kvm` must exist)
+
+**Native install:**
+- Ubuntu 22.04+ or Rocky Linux 8+
+- QEMU/KVM with hardware virtualisation support
 - libvirt
 - Go 1.22+ (for building from source)
 - Node.js 18+ and npm (for building the web GUI)
