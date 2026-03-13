@@ -66,6 +66,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Hypervisor
     qemu-kvm \
+    qemu-system-x86 \
     qemu-utils \
     # VM management
     libvirt-daemon-system \
@@ -88,7 +89,8 @@ RUN mkdir -p \
     /root/.vmsmith \
     /etc/vmsmith \
     /var/run/libvirt \
-    /var/log/libvirt/qemu
+    /var/log/libvirt/qemu \
+    /etc/mdevctl.d
 
 COPY --from=builder /bin/vmsmith /usr/local/bin/vmsmith
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
