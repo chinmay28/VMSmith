@@ -101,17 +101,34 @@ DOCKER_TAG   := $(VERSION)
 docker-build:
 	docker build --target runtime -t $(DOCKER_IMAGE):$(DOCKER_TAG) -t $(DOCKER_IMAGE):latest .
 
-# Start the daemon via Docker Compose (detached)
+# Start an interactive shell in the container (libvirtd started by entrypoint).
+# Uses docker compose when available, falls back to plain docker run.
 docker-run:
-	docker compose up -d
+	@if docker compose version >/dev/null 2>&1; then \
+		docker compose run --rm vmsmith; \
+	else \
+		docker run -it --rm \
+			--name vmsmith \
+			--device /dev/kvm \
+			--cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
+			--security-opt apparmor:unconfined \
+			--network host \
+			-v vmsmith-data:/var/lib/vmsmith \
+			-v vmsmith-db:/root/.vmsmith \
+			$(DOCKER_IMAGE):latest; \
+	fi
 
 # Stop and remove the container
 docker-stop:
-	docker compose down
+	@if docker compose version >/dev/null 2>&1; then \
+		docker compose down; \
+	else \
+		docker stop vmsmith 2>/dev/null || true; \
+	fi
 
 # Tail daemon logs
 docker-logs:
-	docker compose logs -f vmsmith
+	docker logs -f vmsmith
 
 # Run the full Go test suite inside Docker (no real libvirtd required)
 docker-test:
