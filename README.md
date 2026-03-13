@@ -29,11 +29,15 @@ The easiest way to run VMSmith on any Linux host. No per-distro setup required.
 # Build the image
 make docker-build
 
-# Start the daemon (detached)
+# Drop into an interactive shell inside the container
+# (libvirtd is started automatically by the entrypoint)
 make docker-run
-# API + web GUI available at http://localhost:8080
 
-# View logs
+# Inside the container — start the daemon or run CLI commands:
+vmsmith daemon start --port 8080   # start REST API + web GUI
+vmsmith vm list                    # or run any CLI command directly
+
+# View logs (from another terminal)
 make docker-logs
 
 # Stop
@@ -42,6 +46,8 @@ make docker-stop
 
 The container starts libvirtd internally, sets up the NAT network, and persists
 VM disks and metadata in named Docker volumes (`vmsmith-data`, `vmsmith-db`).
+The default entry point drops you into a `bash` shell so you can run CLI
+commands or start the daemon manually.
 
 **Custom config:** uncomment the volume mount in `docker-compose.yml`:
 ```yaml

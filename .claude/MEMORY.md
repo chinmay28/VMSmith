@@ -76,8 +76,11 @@ Container requirements:
 - `--security-opt apparmor:unconfined` (Ubuntu hosts)
 - `--network host` (VM bridge/NAT networking must be in host network namespace)
 
-Entrypoint: `scripts/docker-entrypoint.sh` — starts virtlogd + libvirtd, polls
-for `/var/run/libvirt/libvirt.sock` (max 30s), enables IP forwarding, then `exec "$@"`.
+Entrypoint: `scripts/docker-entrypoint.sh` — starts virtlogd (if present, it's bundled in
+`libvirt-daemon`) + libvirtd, polls for `/var/run/libvirt/libvirt.sock` (max 30s), enables
+IP forwarding, then `exec "$@"`.
+Default CMD is `bash` (interactive shell); run `vmsmith daemon start` inside to bring up the API.
+`docker-compose.yml` sets `stdin_open: true` + `tty: true` so the shell works correctly.
 
 Volumes: `vmsmith-data` → `/var/lib/vmsmith`, `vmsmith-db` → `/root/.vmsmith`
 

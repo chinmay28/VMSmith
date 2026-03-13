@@ -40,6 +40,8 @@ services:
       # Optional: mount a custom config file (uncomment to use)
       # - ./vmsmith.yaml.example:/etc/vmsmith/config.yaml:ro
 
+    stdin_open: true
+    tty: true
     restart: unless-stopped
 
 volumes:

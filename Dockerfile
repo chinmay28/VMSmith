@@ -70,7 +70,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # VM management
     libvirt-daemon-system \
     libvirt-clients \
-    virtlogd \
     # Cloud-init ISO generation (genisoimage is called by lifecycle.go)
     genisoimage \
     # Networking
@@ -101,5 +100,5 @@ EXPOSE 8080
 VOLUME ["/var/lib/vmsmith", "/root/.vmsmith"]
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-# Default: start the daemon (entrypoint prepends service startup before exec)
-CMD ["vmsmith", "daemon", "start"]
+# Default: interactive shell (libvirt started by entrypoint; run vmsmith commands manually)
+CMD ["bash"]

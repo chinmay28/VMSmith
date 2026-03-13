@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # docker-entrypoint.sh — start libvirt services, configure the network stack,
-# then exec the requested command (default: vmsmith daemon start).
+# then exec the requested command (default: bash interactive shell).
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# 1. Start virtlogd — libvirt's log daemon, required before libvirtd on
-#    systems without systemd (i.e. containers).
+# 1. Start virtlogd if available — libvirt's log daemon.  On Debian bookworm
+#    virtlogd ships inside libvirt-daemon so the binary is always present;
+#    the guard is kept for forward compatibility.
 # ---------------------------------------------------------------------------
 if command -v virtlogd &>/dev/null; then
     virtlogd --daemon 2>/dev/null || true
