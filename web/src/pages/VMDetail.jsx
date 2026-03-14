@@ -74,6 +74,32 @@ export default function VMDetail() {
         <InfoCard label="Created" value={new Date(vm.created_at).toLocaleString()} />
       </div>
 
+      {/* Attached Networks */}
+      {vm.spec?.networks?.length > 0 && (
+        <div className="card mb-4">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-steel-800/40">
+            <Network size={14} className="text-steel-500" />
+            <h2 className="text-sm font-display font-semibold text-steel-300">Extra Networks</h2>
+          </div>
+          <div className="divide-y divide-steel-800/40">
+            {vm.spec.networks.map((net, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="font-mono text-xs text-steel-500 w-10">eth{i + 1}</span>
+                <span className="badge bg-steel-800/60 text-steel-400 border-steel-700/40">{net.mode}</span>
+                <span className="font-mono text-sm text-steel-200">
+                  {net.host_interface || net.bridge}
+                </span>
+                {net.static_ip ? (
+                  <span className="font-mono text-xs text-emerald-400">{net.static_ip}</span>
+                ) : (
+                  <span className="text-xs text-steel-500">DHCP</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Snapshots + Ports side by side */}
       <div className="grid grid-cols-2 gap-4">
         {/* Snapshots */}

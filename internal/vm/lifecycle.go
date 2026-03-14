@@ -98,9 +98,11 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, fmt.Errorf("creating overlay disk: %w", err)
 	}
 
-	// Create cloud-init ISO if SSH key, cloud-init file, or static IPs are needed
+	// Create cloud-init ISO if SSH key, cloud-init file, or extra network interfaces
+	// are present. Extra interfaces need a network-config entry so cloud-init
+	// brings them up (even DHCP ones — without it the OS never configures them).
 	var cloudInitISO string
-	needsCloudInit := spec.SSHPubKey != "" || spec.CloudInitFile != "" || hasStaticIPs(spec.Networks)
+	needsCloudInit := spec.SSHPubKey != "" || spec.CloudInitFile != "" || len(spec.Networks) > 0
 	if needsCloudInit {
 		cloudInitISO = filepath.Join(vmDir, "cidata.iso")
 		if err := createCloudInitISO(cloudInitISO, spec); err != nil {
@@ -406,10 +408,10 @@ func createCloudInitISO(isoPath string, spec types.VMSpec) error {
 		return err
 	}
 
-	// Write network-config if any extra interfaces need static IPs.
-	// Uses cloud-init network-config v2 (Netplan-style).
+	// Write network-config for any extra interfaces (DHCP or static).
+	// Without this entry cloud-init leaves extra interfaces unconfigured.
 	// Interface naming: eth0 = NAT (DHCP), eth1..ethN = extra attachments in order.
-	if hasStaticIPs(spec.Networks) {
+	if len(spec.Networks) > 0 {
 		netCfg := generateNetworkConfig(spec.Networks)
 		if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
 			return err

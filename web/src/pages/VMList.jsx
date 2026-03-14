@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical } from 'lucide-react';
-import { vms, images as imagesApi } from '../api/client';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X } from 'lucide-react';
+import { vms, images as imagesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner } from '../components/Shared';
 
@@ -133,9 +133,12 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const [form, setForm] = useState({ name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' });
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' };
+  const [form, setForm] = useState(emptyForm);
+  const [networks, setNetworks] = useState([]);
   const createMut = useMutation(vms.create);
   const { data: imageList } = useFetch(() => imagesApi.list(), [], 0);
+  const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
@@ -147,16 +150,34 @@ function CreateVMModal({ open, onClose, onCreated }) {
     return ` · ${bytes} B`;
   };
 
+  const addNetwork = () => setNetworks(n => [...n, { mode: 'macvtap', host_interface: '', static_ip: '', gateway: '' }]);
+  const removeNetwork = (i) => setNetworks(n => n.filter((_, idx) => idx !== i));
+  const updateNet = (i, field, val) => setNetworks(n => n.map((net, idx) => idx === i ? { ...net, [field]: val } : net));
+
   const handleSubmit = async () => {
+    const spec = { ...form };
+    if (networks.length > 0) {
+      spec.networks = networks.map(n => {
+        const att = { mode: n.mode };
+        if (n.mode === 'bridge') att.bridge = n.host_interface;
+        else att.host_interface = n.host_interface;
+        if (n.static_ip) att.static_ip = n.static_ip;
+        if (n.gateway)   att.gateway   = n.gateway;
+        return att;
+      });
+    }
     try {
-      await createMut.execute(form);
+      await createMut.execute(spec);
       onCreated();
       onClose();
-      setForm({ name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' });
+      setForm(emptyForm);
+      setNetworks([]);
     } catch { /* error displayed via mutation */ }
   };
 
   const noImages = imageList && imageList.length === 0;
+  // Physical interfaces only, for macvtap mode
+  const physIfaces = (hostIfaces || []).filter(i => i.is_physical && i.is_up);
 
   return (
     <Modal open={open} onClose={onClose} title="Create Machine" wide>
@@ -208,6 +229,81 @@ function CreateVMModal({ open, onClose, onCreated }) {
             value={form.ssh_pub_key}
             onChange={update('ssh_pub_key')}
           />
+        </div>
+
+        {/* Extra network attachments */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Extra Networks</label>
+            <button className="btn-ghost text-xs" type="button" onClick={addNetwork}>
+              <Plus size={12} /> Add
+            </button>
+          </div>
+          {networks.length === 0 ? (
+            <p className="text-xs text-steel-500 px-1">
+              Only the default NAT network (192.168.100.0/24, eth0) will be attached.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {networks.map((net, i) => (
+                <div key={i} className="flex items-start gap-2 p-2 rounded border border-steel-700/40 bg-steel-900/40">
+                  <Network size={13} className="text-steel-500 mt-2 shrink-0" />
+                  <div className="flex-1 grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label text-[10px]">Mode</label>
+                      <select className="input py-1 text-xs" value={net.mode} onChange={e => updateNet(i, 'mode', e.target.value)}>
+                        <option value="macvtap">macvtap (direct)</option>
+                        <option value="bridge">bridge</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label text-[10px]">
+                        {net.mode === 'bridge' ? 'Bridge Name' : 'Host Interface'}
+                      </label>
+                      {net.mode === 'macvtap' && physIfaces.length > 0 ? (
+                        <select className="input py-1 text-xs" value={net.host_interface} onChange={e => updateNet(i, 'host_interface', e.target.value)}>
+                          <option value="">Select…</option>
+                          {physIfaces.map(iface => (
+                            <option key={iface.name} value={iface.name}>
+                              {iface.name}{iface.ips?.length ? ` (${iface.ips[0]})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="input py-1 text-xs font-mono"
+                          placeholder={net.mode === 'bridge' ? 'br-data' : 'eth1'}
+                          value={net.host_interface}
+                          onChange={e => updateNet(i, 'host_interface', e.target.value)}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="label text-[10px]">Static IP (optional)</label>
+                      <input
+                        className="input py-1 text-xs font-mono"
+                        placeholder="10.0.0.2/24"
+                        value={net.static_ip}
+                        onChange={e => updateNet(i, 'static_ip', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="label text-[10px]">Gateway (optional)</label>
+                      <input
+                        className="input py-1 text-xs font-mono"
+                        placeholder="10.0.0.1"
+                        value={net.gateway}
+                        onChange={e => updateNet(i, 'gateway', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <button className="btn-ghost text-red-400 hover:text-red-300 mt-1 shrink-0" onClick={() => removeNetwork(i)}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {createMut.error && (

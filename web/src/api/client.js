@@ -58,4 +58,9 @@ export const ports = {
   remove: (vmId, portId) => request(`/vms/${vmId}/ports/${portId}`, { method: 'DELETE' }),
 };
 
-export default { vms, snapshots, images, ports };
+// --- Host ---
+export const host = {
+  interfaces: () => request('/host/interfaces'),
+};
+
+export default { vms, snapshots, images, ports, host };
