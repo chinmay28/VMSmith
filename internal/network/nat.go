@@ -2,6 +2,9 @@ package network
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/vmsmith/vmsmith/internal/config"
 	"libvirt.org/go/libvirt"
@@ -27,12 +30,15 @@ func (m *Manager) EnsureNetwork() error {
 		// Network exists; make sure it's active
 		active, _ := net.IsActive()
 		if !active {
+			// A previous daemon run may have left an orphaned dnsmasq
+			// holding 192.168.100.1:53. Kill it so Create() can start fresh.
+			m.killStaleDnsmasq()
 			return net.Create()
 		}
 		return nil
 	}
 
-	// Create the network
+	// Define and start the network
 	xml := m.networkXML()
 	net, err = m.conn.NetworkDefineXML(xml)
 	if err != nil {
@@ -44,11 +50,28 @@ func (m *Manager) EnsureNetwork() error {
 		return fmt.Errorf("setting autostart: %w", err)
 	}
 
+	m.killStaleDnsmasq()
 	if err := net.Create(); err != nil {
 		return fmt.Errorf("starting network: %w", err)
 	}
 
 	return nil
+}
+
+// killStaleDnsmasq terminates any orphaned dnsmasq left over from a previous
+// daemon run. Libvirt writes a PID file when it starts dnsmasq; if the daemon
+// was killed without a clean shutdown that process may still be running and
+// holding the network address, preventing a fresh Create() from succeeding.
+func (m *Manager) killStaleDnsmasq() {
+	pidFile := fmt.Sprintf("/run/libvirt/network/%s.pid", m.cfg.Network.Name)
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	pid := strings.TrimSpace(string(data))
+	if pid != "" {
+		exec.Command("kill", pid).Run() //nolint:errcheck
+	}
 }
 
 func (m *Manager) networkXML() string {
