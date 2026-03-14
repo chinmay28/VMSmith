@@ -1,31 +1,31 @@
-# VM Smith — Architecture Document
+# VM Smith — Architecture
 
 ## Overview
 
-VM Smith is a CLI tool and daemon for provisioning and managing QEMU/KVM virtual machines on Linux hosts. It provides a unified interface for VM lifecycle management, networking, snapshotting, and image distribution across hosts.
+VM Smith is a CLI tool and daemon for provisioning and managing QEMU/KVM virtual machines on Linux hosts. It provides a unified interface for VM lifecycle management, networking, snapshotting, and image distribution.
 
 **Design principles:**
-- Single static binary, minimal runtime dependencies (libvirt, qemu-kvm)
-- Operate as both a CLI tool and a long-running daemon with REST API
-- Backend-agnostic VM management layer (QEMU/libvirt now, KubeVirt later)
-- Simple, predictable networking with NAT and explicit port forwarding
+- Single static binary — CLI + REST API + embedded React GUI, no sidecar processes
+- Minimal runtime dependencies — only libvirt and qemu-kvm on the host
+- Backend-agnostic VM management layer (QEMU/libvirt today, KubeVirt later)
+- Simple, predictable networking: NAT by default, explicit port forwarding
 - Image portability via qcow2 + SCP/HTTP distribution
 
 ---
 
 ## Technology Stack
 
-| Component         | Choice                | Rationale                                       |
-|-------------------|-----------------------|-------------------------------------------------|
-| Language          | Go 1.22+              | Single binary, strong concurrency, good libvirt bindings |
-| VM Management     | libvirt (via libvirt-go) | Mature API for QEMU/KVM, snapshot support, network management |
-| REST Framework    | Chi                   | Idiomatic, lightweight, standard net/http compatible |
-| CLI Framework     | Cobra                 | Industry standard for Go CLIs                    |
-| Metadata Store    | bbolt                 | Embedded, pure Go, zero config, transactional    |
-| Image Format      | qcow2                 | Copy-on-write, snapshot support, thin provisioning |
-| Networking        | libvirt NAT + iptables | Predictable, no host bridge setup required       |
-| Image Transfer    | SCP / built-in HTTP   | Simple, works everywhere, no registry needed     |
-| Target OS         | Ubuntu 22.04+, Rocky Linux 8+ | Broad enterprise + community coverage   |
+| Component       | Choice                        | Rationale                                         |
+|-----------------|-------------------------------|---------------------------------------------------|
+| Language        | Go 1.22+, CGO_ENABLED=1       | Single binary, strong concurrency, libvirt C bindings |
+| VM backend      | libvirt + QEMU/KVM            | Mature API, snapshot support, network management  |
+| REST framework  | Chi v5                        | Idiomatic, lightweight, standard net/http          |
+| CLI framework   | Cobra                         | Industry standard for Go CLIs                     |
+| Metadata store  | bbolt                         | Embedded, pure Go, zero config, transactional     |
+| Image format    | qcow2                         | CoW, snapshot support, thin provisioning          |
+| Networking      | libvirt NAT + iptables DNAT   | No host bridge setup required                     |
+| Frontend        | React 18 + Vite + Tailwind    | Embedded via `go:embed`, dark industrial theme    |
+| Target OS       | Ubuntu 22.04+, Rocky Linux 8+ | Broad enterprise + community coverage             |
 
 ---
 
@@ -33,146 +33,91 @@ VM Smith is a CLI tool and daemon for provisioning and managing QEMU/KVM virtual
 
 ```
 vmsmith/
-├── cmd/
-│   └── vmsmith/
-│       └── main.go              # Entrypoint: CLI + daemon mode
+├── cmd/vmsmith/main.go              # Entrypoint → cli.Execute()
 ├── internal/
-│   ├── api/                     # REST API layer
-│   │   ├── router.go            # Chi router setup, middleware
-│   │   ├── handlers_vm.go       # VM CRUD + lifecycle endpoints
-│   │   ├── handlers_snapshot.go # Snapshot endpoints
-│   │   ├── handlers_image.go    # Image management endpoints
-│   │   ├── handlers_network.go  # Port forwarding endpoints
-│   │   └── middleware.go        # Logging, auth, error handling
-│   ├── cli/                     # Cobra CLI commands
-│   │   ├── root.go              # Root command, global flags
-│   │   ├── vm.go                # vmsmith vm create|start|stop|delete|list|ssh
-│   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|delete
-│   │   ├── image.go             # vmsmith image list|export|import|pull|push
-│   │   ├── network.go           # vmsmith port add|remove|list
-│   │   └── daemon.go            # vmsmith daemon start|stop|status
-│   ├── vm/                      # VM lifecycle management
-│   │   ├── manager.go           # VMManager interface + libvirt implementation
-│   │   ├── domain.go            # libvirt domain XML generation
-│   │   ├── lifecycle.go         # Create, start, stop, delete, status
-│   │   └── console.go           # Serial/VNC console access
-│   ├── network/                 # Network management
-│   │   ├── manager.go           # NetworkManager interface
-│   │   ├── nat.go               # libvirt NAT network setup
-│   │   └── portforward.go       # iptables port forwarding rules
-│   ├── storage/                 # Image and disk management
-│   │   ├── manager.go           # StorageManager interface
-│   │   ├── image.go             # qcow2 image operations (create, convert, info)
-│   │   ├── snapshot.go          # Snapshot create/restore/delete via libvirt
-│   │   └── transfer.go          # SCP/HTTP image push/pull
-│   ├── store/                   # Persistent metadata
-│   │   ├── bolt.go              # bbolt implementation
-│   │   └── models.go            # Stored data structures
-│   ├── config/                  # Configuration
-│   │   └── config.go            # Config file parsing, defaults
-│   ├── daemon/                  # Daemon/service management
-│       └── daemon.go            # Daemonize, PID file, signal handling
-│   └── web/                     # Embedded frontend
-│       ├── embed.go             # go:embed dist/*
-│       └── dist/                # Built SPA (generated by `make web`)
-├── pkg/
-│   └── types/                   # Shared types (used by API clients too)
-│       ├── vm.go                # VM, VMSpec, VMStatus
-│       ├── snapshot.go          # Snapshot
-│       ├── image.go             # Image
-│       └── network.go           # PortForward, NetworkInfo
+│   ├── api/
+│   │   ├── router.go                # Chi router, middleware wiring
+│   │   ├── handlers_vm.go           # VM CRUD + lifecycle endpoints
+│   │   ├── handlers_snapshot.go     # Snapshot endpoints
+│   │   ├── handlers_image.go        # Image upload/download/list/delete
+│   │   ├── handlers_network.go      # Port forward + host interface endpoints
+│   │   └── middleware.go            # Logging, CORS, error response helpers
+│   ├── cli/
+│   │   ├── root.go                  # Root command, global --config flag
+│   │   ├── vm.go                    # vmsmith vm create|list|start|stop|delete
+│   │   ├── snapshot.go              # vmsmith snapshot create|restore|list|delete
+│   │   ├── image.go                 # vmsmith image list|create|delete|push|pull
+│   │   ├── net.go                   # vmsmith net interfaces
+│   │   ├── network.go               # vmsmith port add|remove|list
+│   │   └── daemon.go                # vmsmith daemon start
+│   ├── config/config.go             # Config struct, DefaultConfig(), EnsureDirs()
+│   ├── daemon/daemon.go             # HTTP server, libvirt connect, signal handling
+│   ├── network/
+│   │   ├── nat.go                   # libvirt NAT network setup + stale-dnsmasq cleanup
+│   │   ├── portforward.go           # iptables DNAT rules, persist + restore
+│   │   └── discover.go              # Host interface enumeration (/sys/class/net)
+│   ├── storage/
+│   │   ├── image.go                 # qcow2 import, export, list (qemu-img)
+│   │   └── transfer.go              # SCP push/pull helpers
+│   ├── store/
+│   │   ├── bolt.go                  # bbolt CRUD for VMs, images, port forwards
+│   │   └── models.go                # Stored data structures
+│   ├── vm/
+│   │   ├── manager.go               # VMManager interface
+│   │   ├── lifecycle.go             # LibvirtManager: Create/Start/Stop/Delete/Get/List + snapshots
+│   │   ├── domain.go                # libvirt domain XML generation, multi-network, cloud-init
+│   │   └── mock_manager.go          # In-memory mock for tests
+│   └── web/
+│       ├── embed.go                 # go:embed dist/*
+│       └── dist/                    # Built SPA (gitignored; built by `make build`)
+├── pkg/types/
+│   ├── vm.go                        # VM, VMSpec, VMState
+│   ├── snapshot.go                  # Snapshot
+│   ├── image.go                     # Image
+│   ├── network.go                   # NetworkAttachment, PortForward, HostInterface
+│   └── errors.go                    # Typed API errors
+├── web/                             # React source
+│   ├── src/api/client.js            # REST API client (vms, snapshots, images, ports, host)
+│   ├── src/components/              # Layout, Shared (StatusBadge, Modal, etc.)
+│   ├── src/pages/                   # Dashboard, VMList, VMDetail, ImageList
+│   ├── src/hooks/useFetch.js        # Data fetching with polling + mutation helpers
+│   └── vite.config.js               # Outputs to ../internal/web/dist/
 ├── scripts/
-│   ├── install-deps-ubuntu.sh   # apt-get install libvirt, qemu-kvm, etc.
-│   └── install-deps-rocky.sh    # dnf install libvirt, qemu-kvm, etc.
-├── web/                         # React SPA (embedded into binary)
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── tailwind.config.js
-│   ├── index.html
-│   └── src/
-│       ├── main.jsx
-│       ├── App.jsx
-│       ├── index.css
-│       ├── api/
-│       │   └── client.js        # REST API client
-│       ├── components/
-│       │   ├── Layout.jsx       # App shell with sidebar
-│       │   └── Shared.jsx       # StatusBadge, Modal, StatCard, etc.
-│       ├── pages/
-│       │   ├── Dashboard.jsx
-│       │   ├── VMList.jsx
-│       │   ├── VMDetail.jsx
-│       │   └── ImageList.jsx
-│       └── hooks/
-│           └── useFetch.js      # Data fetching with polling
-├── go.mod
-├── go.sum
+│   ├── install-deps-ubuntu.sh
+│   └── install-deps-rocky.sh
 ├── Makefile
-├── README.md
-└── vmsmith.yaml.example         # Example config file
+├── vmsmith.yaml.example
+└── docs/ARCHITECTURE.md             # This file
 ```
 
 ---
 
 ## Core Architecture
 
-### Component Diagram
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        VM Smith                              │
-│                                                             │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │  CLI      │    │  REST API    │    │  Web GUI         │   │
-│  │  (Cobra)  │    │  (Chi)       │    │  (React, embed)  │   │
-│  └─────┬─────┘    └──────┬───────┘    └────────┬─────────┘   │
-│        │                 │                     │             │
-│        └────────────┬────┴─────────────────────┘             │
-│                     ▼                                        │
-│  ┌─────────────────────────────────────────────────────┐     │
-│  │              Service Layer                          │     │
-│  │  ┌───────────┐ ┌──────────┐ ┌───────────────────┐   │     │
-│  │  │ VMManager │ │ Storage  │ │ NetworkManager    │   │     │
-│  │  │           │ │ Manager  │ │                   │   │     │
-│  │  └─────┬─────┘ └────┬─────┘ └────────┬──────────┘   │     │
-│  └────────┼─────────────┼────────────────┼──────────────┘     │
-│           │             │                │                    │
-│  ┌────────┼─────────────┼────────────────┼──────────────┐     │
-│  │        ▼             ▼                ▼   Infra      │     │
-│  │  ┌──────────┐  ┌──────────┐    ┌──────────────┐      │     │
-│  │  │ libvirt  │  │  qcow2   │    │  iptables    │      │     │
-│  │  │ (domains │  │  images   │    │  (NAT, port  │      │     │
-│  │  │  + snaps)│  │  + SCP   │    │   forward)   │      │     │
-│  │  └──────────┘  └──────────┘    └──────────────┘      │     │
-│  │                                                      │     │
-│  │  ┌──────────────────────────────────────────────┐     │     │
-│  │  │  bbolt (metadata, VM records, image catalog) │     │     │
-│  │  └──────────────────────────────────────────────┘     │     │
-│  └──────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                        VM Smith                          │
+│                                                          │
+│  ┌──────────┐    ┌──────────────┐    ┌────────────────┐  │
+│  │  CLI      │    │  REST API    │    │  Web GUI       │  │
+│  │ (Cobra)   │    │  (Chi v5)    │    │ (React, embed) │  │
+│  └─────┬─────┘    └──────┬───────┘    └───────┬────────┘  │
+│        └────────────┬────┴───────────────────┘           │
+│                     ▼                                    │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │                 Service Layer                   │     │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌────────┐  │     │
+│  │  │  VMManager  │  │StorageManager│  │Network │  │     │
+│  │  │ (libvirt)   │  │ (qemu-img)   │  │Manager │  │     │
+│  │  └──────┬──────┘  └──────┬───────┘  └───┬────┘  │     │
+│  └─────────┼────────────────┼──────────────┼───────┘     │
+│            ▼                ▼              ▼             │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │  libvirt   │  qcow2 files  │  iptables DNAT      │    │
+│  │  bbolt (metadata: VMs, images, port forwards)    │    │
+│  └──────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘
 ```
-
-### Backend Abstraction (for future KubeVirt support)
-
-The `VMManager` interface is the key abstraction point:
-
-```go
-type VMManager interface {
-    Create(ctx context.Context, spec VMSpec) (*VM, error)
-    Start(ctx context.Context, id string) error
-    Stop(ctx context.Context, id string) error
-    Delete(ctx context.Context, id string) error
-    Get(ctx context.Context, id string) (*VM, error)
-    List(ctx context.Context) ([]*VM, error)
-
-    CreateSnapshot(ctx context.Context, vmID string, name string) (*Snapshot, error)
-    RestoreSnapshot(ctx context.Context, vmID string, snapshotID string) error
-    ListSnapshots(ctx context.Context, vmID string) ([]*Snapshot, error)
-    DeleteSnapshot(ctx context.Context, vmID string, snapshotID string) error
-}
-```
-
-The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVirtVMManager` implements the same interface, and the daemon selects the backend based on config or auto-detection.
 
 ---
 
@@ -180,429 +125,295 @@ The MVP implements `LibvirtVMManager`. When KubeVirt support is added, a `KubeVi
 
 ### 1. VM Lifecycle
 
-**Creating a VM:**
-1. User provides: name, base image (registered name or absolute path), CPU count, RAM, disk size, optional cloud-init data
-2. VM Smith creates a qcow2 overlay disk backed by the base image (copy-on-write)
-3. Generates libvirt domain XML with the VM's specs
-4. Attaches the VM to the vmsmith NAT network
-5. Defines + starts the domain via libvirt
-6. Records metadata in bbolt
-7. Returns VM ID, assigned internal IP, and any port forwards
+**Creating a VM (`lifecycle.go`):**
 
-**VM states:** `creating → running → stopped → deleted`
+1. `EnsureNetwork()` — create or activate the vmsmith-net NAT network (idempotent)
+2. Validate + default `VMSpec` fields (CPUs, RAM, disk)
+3. Validate extra `NetworkAttachment` entries if present
+4. Generate a unique VM ID (`vm-<unix-nano>`)
+5. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
+6. `createCloudInitISO()` if SSH key, custom cloud-init, or extra network interfaces are present
+7. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML
+8. `conn.DomainDefineXML()` + `dom.Create()` — register and boot
+9. Persist VM record in bbolt
 
-**Cloud-init support:** VM Smith generates a cloud-init ISO (NoCloud datasource) with user-provided SSH keys, hostname, and user-data. This is attached as a CD-ROM device to the VM.
+**VM states:** `running → stopped → deleted`
+
+**Cloud-init (NoCloud datasource):**
+
+A cloud-init ISO (`cidata.iso`) is attached as a CD-ROM when:
+- An SSH public key is provided
+- A custom cloud-init file is provided
+- **Any extra network interfaces are attached** — even DHCP ones, because without a `network-config` entry cloud-init leaves extra interfaces unconfigured and they receive no IP address
+
+The ISO contains `meta-data`, `user-data`, and (when needed) `network-config` (Netplan v2 format).
+
+---
 
 ### 2. Networking
 
-**Default NAT Network:**
-- VM Smith creates a dedicated libvirt NAT network (e.g., `vmsmith-net`, `192.168.100.0/24`)
-- This is always the first interface (eth0) on every VM
-- VMs get DHCP addresses on this subnet
+#### Default NAT Network
+
+Every VM gets **eth0** on `vmsmith-net` (`192.168.100.0/24`):
+
+- Created automatically by `network.Manager.EnsureNetwork()` on first daemon start or VM create
+- Implemented as a libvirt NAT network with built-in dnsmasq DHCP
+- VMs get DHCP addresses in the configured range (default `.10–.254`)
+- Outbound internet access via libvirt's NAT/masquerade
 - Host can always reach VMs directly on the NAT subnet
-- Outbound internet access works via libvirt's built-in NAT/masquerade
 
-**Port Forwarding (NAT):**
-- Users explicitly map `host_port → vm_ip:vm_port`
-- Implemented via iptables DNAT rules on the host
-- Rules are persisted in bbolt and restored on daemon startup
-- Example: `vmsmith port add myvm --host 2222 --guest 22` maps host:2222 → vm:22
+**Restart resilience:** When the daemon is killed without clean shutdown, libvirtd marks the network inactive but leaves the dnsmasq process running (orphaned). On the next `EnsureNetwork()` call, VM Smith reads the libvirt PID file at `/run/libvirt/network/<name>.pid` and sends SIGTERM to the orphan before calling `net.Create()`.
+
+#### Port Forwarding
 
 ```
-External Host                   VM Smith Host                    VM
-─────────────                   ────────────                    ──
-ssh -p 2222 host_ip  ──────►  iptables DNAT ──────►  192.168.100.x:22
-                               host:2222 → vm:22
+External host                  VM Smith host                  VM
+──────────────                 ─────────────                 ───
+ssh -p 2222 hostip  ──────►  iptables DNAT ──────►  192.168.100.x:22
+                              hostport → vmip:guestport
 ```
 
-**Multi-Network Support (macvtap / bridge):**
+- Rules stored in bbolt and restored via `portforward.RestoreAll()` on daemon startup
+- Implemented with `iptables -t nat -A PREROUTING -j DNAT` + corresponding FORWARD rules
+- `-w 5` timeout prevents races with libvirt's own iptables usage
 
-The host may have multiple interfaces on different private networks. VMs can be attached to any combination of these networks in addition to the default NAT.
+#### Multi-Network (macvtap / bridge)
 
-Example host:
-```
-eth0  10.21.100.101/24     ← management (NAT default)
-eth1  192.168.1.16/24      ← data network 1
-eth2  192.168.2.16/24      ← data network 2
-eth3  192.168.3.16/24      ← storage network
-eth4  192.168.4.16/24      ← backup network
-```
+Additional interfaces are specified as `--network <iface[:opts]>` (CLI) or via the `networks` array in the API/GUI. They become **eth1, eth2, …** inside the VM.
 
-Attachment modes:
+| Mode     | Libvirt XML                             | When to use                                     |
+|----------|-----------------------------------------|-------------------------------------------------|
+| macvtap  | `<interface type='direct' mode='bridge'>` | VM needs its own MAC/IP on the physical network; no host bridge config needed |
+| bridge   | `<interface type='bridge'>`             | Full host↔VM communication on the same subnet; requires pre-configured Linux bridge |
 
-| Mode      | Mechanism                           | Pros                                    | Cons                                    |
-|-----------|-------------------------------------|-----------------------------------------|-----------------------------------------|
-| macvtap   | Direct attach to host NIC           | Zero host config, VM gets own MAC/IP    | Host ↔ VM on same NIC needs VEPA switch |
-| bridge    | Attach to pre-configured Linux bridge | Full host ↔ VM communication           | Requires bridge setup on host           |
+**Cloud-init network-config** is always written when extra interfaces are present, configuring each as DHCP or static IP. Without it the OS never brings up extra interfaces.
 
-**macvtap (default):** Uses libvirt `<interface type='direct'>` with macvtap in bridge mode. The VM gets its own MAC address on the physical network segment and can communicate with all other hosts and VMs on that subnet. This is the simplest option — no bridge configuration needed.
+**CLI syntax:**
 
-**bridge mode:** Uses `<interface type='bridge'>` to attach to a pre-existing Linux bridge. Requires the admin to have set up the bridge (e.g., `br-eth1` bridging `eth1`), but allows the host itself to communicate with the VM on the same interface.
-
-**Interface ordering inside the VM:**
-```
-eth0 → vmsmith NAT network (always present, DHCP)
-eth1 → first --network attachment
-eth2 → second --network attachment
-...
-```
-
-**Static IP support:** When `ip=` is specified on a network attachment, VM Smith generates a cloud-init network-config v2 file that configures the interface with the given static IP. If no IP is specified, the interface uses DHCP.
-
-**CLI usage:**
 ```bash
-# Discover available host interfaces
-vmsmith net interfaces
+vmsmith net interfaces                    # discover available host NICs
 
-# Attach to one extra network (DHCP)
-vmsmith vm create myvm --image ubuntu --network eth1
+# DHCP on eth1
+vmsmith vm create db01 --image ubuntu --network eth1
 
-# Attach to multiple networks with static IPs
-vmsmith vm create myvm --image ubuntu \
+# Static IP on eth1, DHCP on eth3
+vmsmith vm create db01 --image ubuntu \
   --network eth1:ip=192.168.1.100/24,gw=192.168.1.1,name=data \
-  --network eth2:ip=192.168.2.100/24,name=storage \
   --network eth3
 
-# Using bridge mode
-vmsmith vm create myvm --image ubuntu \
+# Bridge mode
+vmsmith vm create db01 --image ubuntu \
   --network eth1:mode=bridge,bridge=br-data
 ```
 
-**API usage:**
-```json
-POST /api/v1/vms
-{
-  "name": "myvm",
-  "image": "ubuntu-22.04",
-  "cpus": 4,
-  "ram_mb": 4096,
-  "networks": [
-    {"host_interface": "eth1", "mode": "macvtap", "name": "data-net"},
-    {"host_interface": "eth2", "mode": "macvtap", "static_ip": "192.168.2.100/24", "gateway": "192.168.2.1"},
-    {"host_interface": "eth3", "mode": "macvtap"},
-    {"host_interface": "eth4", "mode": "macvtap"}
-  ]
-}
+**Network layout inside VM:**
+
+```
+eth0  192.168.100.x   ← vmsmith-net NAT (always, DHCP)
+eth1  <host-net IP>   ← first --network attachment
+eth2  <host-net IP>   ← second --network attachment
+...
 ```
 
-**Network diagram with multi-attach:**
-```
-                       VM Smith Host
- ┌───────────────────────────────────────────────┐
- │                                               │
- │  eth0 (10.21.100.101) ──── management         │
- │  eth1 (192.168.1.16)  ──┬─ data network 1     │
- │  eth2 (192.168.2.16)  ──┼─ data network 2     │
- │  eth3 (192.168.3.16)  ──┼─ storage network    │
- │  eth4 (192.168.4.16)  ──┼─ backup network     │
- │                          │                     │
- │  ┌─── VM: myvm ────────────────────────┐       │
- │  │ eth0 192.168.100.x  (NAT, mgmt)    │       │
- │  │ eth1 192.168.1.100  ◄──macvtap──► eth1     │
- │  │ eth2 192.168.2.100  ◄──macvtap──► eth2     │
- │  │ eth3 (DHCP)         ◄──macvtap──► eth3     │
- │  │ eth4 (DHCP)         ◄──macvtap──► eth4     │
- │  └─────────────────────────────────────┘       │
- └───────────────────────────────────────────────┘
-```
+---
 
 ### 3. Snapshots and Images
 
-**Snapshots** (point-in-time state, stays on the same host):
-- Uses libvirt's internal snapshot mechanism (memory + disk state)
-- `vmsmith snapshot create myvm --name "before-update"`
-- `vmsmith snapshot restore myvm --name "before-update"`
-- Metadata tracked in bbolt, actual data managed by libvirt/qcow2
+**Snapshots** — point-in-time state, stays on the same host:
+- libvirt internal snapshot mechanism (memory + disk)
+- Metadata tracked by libvirt; listed via `dom.ListAllSnapshots()`
 
-**Images** (portable, for distribution to other hosts):
-- Created by exporting a VM's disk to a standalone qcow2 file
-- `vmsmith image create myvm --name "ubuntu-base-configured"`
-- Or uploaded directly via the web GUI (Images → Upload Image, drag-and-drop `.qcow2`)
-- The image is a flattened qcow2 (no backing file dependencies)
-- Stored in the configured images directory (default `/var/lib/vmsmith/images/`)
-- Paths are shown in the Images page and can be used directly with `--image /abs/path`
+**Images** — portable qcow2 files for distribution:
+- Created by flattening a VM overlay onto its base: `qemu-img convert -O qcow2`
+- Uploaded via GUI (drag-and-drop) or `vmsmith image create`
+- Stored in `/var/lib/vmsmith/images/`
+- Transferred between hosts via SCP (`image push/pull`) or HTTP download
 
-**Image Transfer:**
-- **Push:** `vmsmith image push ubuntu-base-configured user@remote-host`
-  - SCPs the qcow2 file + metadata to the remote host's vmsmith image store
-- **Pull:** `vmsmith image pull user@remote-host/ubuntu-base-configured`
-  - SCPs the image from a remote host
-- **HTTP serve:** When running as a daemon, optionally serves images over HTTP
-  - `vmsmith image pull http://host:8080/images/ubuntu-base-configured`
+---
 
 ### 4. Daemon Mode
 
-When started as a daemon (`vmsmith daemon start`), VM Smith:
-1. Opens a libvirt connection and maintains it
-2. Starts the Chi HTTP server on a configurable port (default: `8080`)
-3. Restores iptables port-forwarding rules from bbolt
-4. Exposes the full REST API
-5. Writes a PID file to `/var/run/vmsmith.pid`
-6. Handles SIGTERM/SIGINT for clean shutdown
+`vmsmith daemon start` (`internal/daemon/daemon.go`):
 
-Can also be run as a systemd service via an install command.
+1. Opens and holds a libvirt connection (`qemu:///system`)
+2. Calls `EnsureNetwork()` to set up the NAT network
+3. Calls `portforward.RestoreAll()` to re-apply iptables rules from bbolt
+4. Starts the Chi HTTP server on the configured port
+5. Handles `SIGTERM`/`SIGINT` for clean shutdown (network teardown, libvirt disconnect)
+
+---
 
 ### 5. REST API
 
-All endpoints are prefixed with `/api/v1/`.
+All endpoints are prefixed `/api/v1/`.
 
-| Method | Path                                    | Description                  |
-|--------|-----------------------------------------|------------------------------|
-| POST   | /vms                                    | Create a new VM              |
-| GET    | /vms                                    | List all VMs                 |
-| GET    | /vms/{id}                               | Get VM details               |
-| POST   | /vms/{id}/start                         | Start a VM                   |
-| POST   | /vms/{id}/stop                          | Stop a VM                    |
-| DELETE | /vms/{id}                               | Delete a VM                  |
-| POST   | /vms/{id}/snapshots                     | Create a snapshot            |
-| GET    | /vms/{id}/snapshots                     | List snapshots               |
-| POST   | /vms/{id}/snapshots/{snapId}/restore    | Restore a snapshot           |
-| DELETE | /vms/{id}/snapshots/{snapId}            | Delete a snapshot            |
-| GET    | /images                                 | List images                  |
-| POST   | /images                                 | Create image from VM disk    |
-| POST   | /images/upload                          | Upload a qcow2 image file    |
-| DELETE | /images/{id}                            | Delete an image              |
-| GET    | /images/{id}/download                   | Download image file          |
-| GET    | /vms/{id}/ports                         | List port forwards for a VM  |
-| POST   | /vms/{id}/ports                         | Add a port forward           |
-| DELETE | /vms/{id}/ports/{portId}                | Remove a port forward        |
+| Method | Path                                     | Description                   |
+|--------|------------------------------------------|-------------------------------|
+| GET    | /vms                                     | List all VMs                  |
+| POST   | /vms                                     | Create a new VM               |
+| GET    | /vms/{id}                                | Get VM details                |
+| POST   | /vms/{id}/start                          | Start a stopped VM            |
+| POST   | /vms/{id}/stop                           | Stop a running VM             |
+| DELETE | /vms/{id}                                | Delete a VM                   |
+| GET    | /vms/{id}/snapshots                      | List snapshots                |
+| POST   | /vms/{id}/snapshots                      | Create snapshot               |
+| POST   | /vms/{id}/snapshots/{name}/restore       | Restore snapshot              |
+| DELETE | /vms/{id}/snapshots/{name}               | Delete snapshot               |
+| GET    | /images                                  | List images                   |
+| POST   | /images                                  | Create image from VM disk     |
+| POST   | /images/upload                           | Upload qcow2 file             |
+| DELETE | /images/{id}                             | Delete image                  |
+| GET    | /images/{id}/download                    | Download image file           |
+| GET    | /vms/{id}/ports                          | List port forwards            |
+| POST   | /vms/{id}/ports                          | Add port forward              |
+| DELETE | /vms/{id}/ports/{portId}                 | Remove port forward           |
+| GET    | /host/interfaces                         | List host network interfaces  |
 
-### 6. CLI Commands
+---
 
+### 6. Web GUI
+
+The React SPA is embedded into the binary via `go:embed dist/*`. The same port serves both the API and the GUI.
+
+**Pages:**
+
+| Route     | Features                                                               |
+|-----------|------------------------------------------------------------------------|
+| `/`       | Dashboard — VM count, state breakdown, quick actions                   |
+| `/vms`    | VM list; Create modal with name, image, resources, SSH key, extra networks |
+| `/vms/:id`| VM detail — info cards, extra network display, snapshots, port forwards |
+| `/images` | Upload (drag-and-drop), list, download, delete qcow2 images            |
+
+**Network UI (Create VM modal):**
+- "Extra Networks" section with Add/Remove buttons
+- Fetches physical host interfaces from `GET /api/v1/host/interfaces`
+- Per-attachment: mode (macvtap/bridge), interface dropdown or text input, optional static IP + gateway
+
+**VM Detail network display:**
+- Shows attached networks (eth1…) with mode, host interface, and IP or DHCP label
+
+**Development:**
+
+```bash
+make dev-api   # Go daemon on :8080
+make dev-web   # Vite dev server on :3000, proxies /api/* → :8080
 ```
-vmsmith vm create <n> --image <image> --cpus <n> --ram <mb> --disk <gb> \
-  [--cloud-init <file>] [--ssh-key <key>] [--network <iface[:opts]>]...
-vmsmith vm list
-vmsmith vm start <name>
-vmsmith vm stop <name>
-vmsmith vm delete <name>
-vmsmith vm ssh <name> [--port <port>]
-vmsmith vm info <name>
 
-vmsmith snapshot create <vm> --name <snapshot-name>
-vmsmith snapshot restore <vm> --name <snapshot-name>
-vmsmith snapshot list <vm>
-vmsmith snapshot delete <vm> --name <snapshot-name>
-
-vmsmith image list
-vmsmith image create <vm> --name <image-name>
-vmsmith image delete <image-name>
-vmsmith image push <image-name> <user@host>
-vmsmith image pull <user@host>/<image-name>
-vmsmith image pull <http-url>
-
-vmsmith port add <vm> --host <host-port> --guest <guest-port> [--proto tcp|udp]
-vmsmith port remove <vm> --host <host-port>
-vmsmith port list <vm>
-
-vmsmith net interfaces [--all]
-
-vmsmith daemon start [--port 8080] [--config vmsmith.yaml]
-vmsmith daemon stop
-vmsmith daemon status
-```
+---
 
 ### 7. Configuration
 
-Config file: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
+File: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
 
 ```yaml
-# vmsmith.yaml
 daemon:
   listen: "0.0.0.0:8080"
   pid_file: "/var/run/vmsmith.pid"
 
 libvirt:
-  uri: "qemu:///system"       # or qemu:///session for rootless
+  uri: "qemu:///system"        # use qemu:///session for rootless
 
 storage:
   images_dir: "/var/lib/vmsmith/images"
-  base_dir: "/var/lib/vmsmith/vms"
-  db_path: "/var/lib/vmsmith/vmsmith.db"
+  base_dir:   "/var/lib/vmsmith/vms"
+  db_path:    "~/.vmsmith/vmsmith.db"
 
 network:
-  name: "vmsmith-net"
-  subnet: "192.168.100.0/24"
+  name:       "vmsmith-net"
+  subnet:     "192.168.100.0/24"
   dhcp_start: "192.168.100.10"
-  dhcp_end: "192.168.100.254"
+  dhcp_end:   "192.168.100.254"
 
 defaults:
-  cpus: 2
-  ram_mb: 2048
+  cpus:    2
+  ram_mb:  2048
   disk_gb: 20
 ```
 
 ---
 
-## Data Model (bbolt)
+### 8. Data Model (bbolt)
 
-bbolt buckets:
-
-- **vms** — key: VM ID, value: JSON-serialized VM record
-- **images** — key: image name, value: JSON-serialized image metadata
-- **snapshots** — key: `{vmID}/{snapshotName}`, value: snapshot metadata
-- **port_forwards** — key: `{vmID}/{hostPort}`, value: port forward rule
-- **config** — key-value pairs for runtime configuration
-
----
-
-## Dependency Installation
-
-VM Smith requires these host packages:
-
-**Ubuntu:**
-```bash
-apt-get install -y qemu-kvm libvirt-daemon-system libvirt-dev \
-  virtinst genisoimage iptables
-```
-
-**Rocky Linux:**
-```bash
-dnf install -y qemu-kvm libvirt libvirt-devel virt-install \
-  genisoimage iptables-nft
-```
-
-The `vmsmith setup` command can auto-detect the OS and install these.
-
----
-
-## Build & Install
-
-```bash
-# Build
-make build       # → ./bin/vmsmith
-
-# Install system-wide
-make install     # → /usr/local/bin/vmsmith
-
-# Install systemd service
-vmsmith daemon install
-```
-
----
-
-### 8. Web GUI
-
-The web GUI is a React SPA embedded directly into the Go binary via `go:embed`. This means the entire tool — CLI, REST API, and web interface — ships as a single static binary with zero runtime dependencies beyond libvirt/QEMU.
-
-**Stack:**
-- React 18 with React Router for client-side navigation
-- Tailwind CSS for styling (custom dark industrial theme)
-- Vite for build tooling
-- Lucide React for icons
-
-**Embedding architecture:**
-```
-web/                          ← React source
-  src/
-    api/client.js             ← REST API client (same /api/v1/ endpoints)
-    components/               ← Layout, shared UI components
-    pages/                    ← Dashboard, VM list/detail, Images
-    hooks/                    ← Data fetching with polling
-  vite.config.js              ← Builds to internal/web/dist/
-
-internal/web/
-  embed.go                    ← go:embed dist/*
-  dist/                       ← Built SPA (gitignored, built by `make web`)
-```
-
-**SPA routing:** The embed handler serves static files first, then falls back to `index.html` for any unmatched path, enabling React Router's client-side routing. API requests (`/api/*`) are excluded from the fallback.
-
-**Development workflow:**
-- `make dev-api` — Run the Go daemon on `:8080`
-- `make dev-web` — Run Vite dev server on `:3000` with proxy to `:8080`
-- Vite proxies `/api/*` to the Go backend, enabling hot reload during development
-
-**Pages:**
-
-| Route         | Page       | Features                                           |
-|---------------|------------|----------------------------------------------------|
-| `/`           | Dashboard  | Stats overview, VM list with quick actions          |
-| `/vms`        | VM List    | Create modal, start/stop/delete actions             |
-| `/vms/:id`    | VM Detail  | Info cards, snapshot management, port forwarding     |
-| `/images`     | Images     | Upload, list, download, delete portable disk images  |
-
-**Production build:** `make build` runs `npm run build` first (outputting to `internal/web/dist/`), then compiles the Go binary with the SPA embedded. The resulting binary serves the GUI on the same port as the API (default `:8080`).
-
----
-
-## Future Enhancements
-
-- **KubeVirt backend:** Implement `KubeVirtVMManager` behind the same interface
-- **Cloud-init templates:** Predefined profiles for common setups
-- **VM templates:** Named specs (e.g., "small", "medium", "large")
-- **Cluster mode:** Multiple VM Smith hosts with shared image catalog
-- **OCI image support:** Pull VM images from container registries
-- **VNC/SPICE proxy:** Browser-accessible console via the web GUI
+| Bucket         | Key                        | Value                        |
+|----------------|----------------------------|------------------------------|
+| `vms`          | VM ID                      | JSON `types.VM`              |
+| `images`       | image ID                   | JSON `types.Image`           |
+| `port_forwards`| `{vmID}/{hostPort}`        | JSON `types.PortForward`     |
 
 ---
 
 ## Testing Strategy
 
-VM Smith uses a three-tier testing approach: unit tests, integration tests, and end-to-end tests with a headless browser for the web GUI.
+VM Smith uses a three-tier approach. No real libvirt or QEMU is needed for any test.
 
 ### Test Structure
 
 ```
 internal/
-├── store/bolt_test.go          # bbolt CRUD: VMs, images, port forwards, persistence
-├── config/config_test.go       # Config loading, defaults, YAML merge, EnsureDirs
+├── store/bolt_test.go           # bbolt CRUD: VMs, images, port forwards, persistence
+├── config/config_test.go        # Config loading, defaults, YAML merge, EnsureDirs
+├── network/
+│   ├── discover_test.go         # Host interface enumeration (mocked /sys/class/net)
+│   └── portforward_test.go      # iptables rule construction and restoration
 ├── vm/
-│   ├── domain_test.go          # XML generation, multi-network, MAC generation, validation
-│   ├── mock_manager.go         # Mock VM manager (implements Manager interface)
-│   └── mock_manager_test.go    # Mock correctness: lifecycle, snapshots, error injection
-├── cli/cli_test.go             # parseNetworkFlags parsing, humanSize formatting
-├── storage/transfer_test.go    # findLastSlash, URL parsing
-└── api/api_test.go             # REST API integration: httptest + mock VM manager
-tests/
-└── web/
-    ├── mock-server.js          # Node.js mock API server for browser tests
-    ├── test-gui.html           # Minimal GUI exercising API client patterns
-    ├── run-gui-tests.js        # Playwright headless browser E2E test runner
-    └── gui.spec.js             # Playwright test specs (for npx playwright test)
+│   ├── domain_test.go           # XML generation, multi-network, MAC, validation
+│   ├── mock_manager.go          # In-memory VM manager (implements Manager interface)
+│   └── mock_manager_test.go     # Mock lifecycle, snapshots, error injection
+├── cli/
+│   ├── cli_test.go              # parseNetworkFlags, humanSize, command wiring
+│   └── commands_test.go         # Additional CLI command tests
+├── storage/image_test.go        # ImportImage, ListImages, GetImage, DeleteImage
+└── api/api_test.go              # All REST endpoints via httptest + MockManager
+tests/web/
+├── mock-server.js               # Node.js mock API server for browser tests
+├── gui.spec.js                  # Playwright test specs
+└── run-gui-tests.js             # Playwright runner
 ```
 
 ### Mock VM Manager
 
-The `MockManager` (in `internal/vm/mock_manager.go`) implements the `vm.Manager` interface entirely in-memory. It supports:
-
-- Full VM lifecycle (create/start/stop/delete/get/list) with state tracking
+`internal/vm/mock_manager.go` implements `vm.Manager` entirely in-memory:
+- Full VM lifecycle with state tracking
 - Snapshot CRUD
-- Error injection via exported `CreateErr`, `StartErr`, etc. fields
-- `SeedVM()` for test data setup
+- Error injection via exported `CreateErr`, `StartErr`, etc.
+- `SeedVM()` helper for test data setup
 - Thread-safe via `sync.RWMutex`
 
-This is the key enabler for API integration tests — no libvirt needed.
+This enables API integration tests with zero libvirt dependency.
 
 ### Running Tests
 
 ```bash
-# All Go tests (unit + integration)
-make test
-
-# Unit tests only
-make test-unit
-
-# API integration tests only
-make test-integration
-
-# Web GUI E2E tests (headless Chromium via Playwright)
-make test-web
-
-# Everything
-make test-all
+make test             # all Go tests
+make test-unit        # unit tests only
+make test-integration # API integration tests (httptest + mock)
+make test-web-deps    # install Playwright (run once)
+make test-web         # headless Chromium E2E
+make test-all         # everything
 ```
 
-### Test Coverage Summary
+### Coverage Summary
 
-| Layer         | Package             | Tests | What's Covered                                       |
-|---------------|---------------------|-------|------------------------------------------------------|
-| Unit          | store               | 9     | CRUD for VMs, images, ports; persistence; networks   |
-| Unit          | config              | 5     | Defaults, file load, YAML merge, invalid YAML, dirs  |
-| Unit          | vm/domain           | 18    | XML gen, multi-net, macvtap/bridge/NAT, MAC, validation |
-| Unit          | vm/mock             | 8     | Mock lifecycle, snapshots, error injection, seeding  |
-| Unit          | cli                 | 12    | Network flag parsing, all options, errors, humanSize |
-| Unit          | storage             | 11    | ImportImage, ListImages, GetImage, DeleteImage, path |
-| Integration   | api                 | 28    | All REST endpoints including upload; error paths     |
-| E2E (browser) | web                 | 16    | Dashboard, VM CRUD, snapshots, images, navigation    |
-| **Total**     |                     | **151**|                                                     |
+| Layer       | Package       | Tests | Coverage                                              |
+|-------------|---------------|-------|-------------------------------------------------------|
+| Unit        | store         | 9     | CRUD for VMs, images, ports; persistence              |
+| Unit        | config        | 5     | Defaults, file load, YAML merge, invalid YAML         |
+| Unit        | vm/domain     | 18    | XML gen, multi-net, macvtap/bridge/NAT, MAC           |
+| Unit        | vm/mock       | 8     | Mock lifecycle, snapshots, error injection            |
+| Unit        | cli           | 17    | Network flag parsing, all modes, humanSize            |
+| Unit        | network       | 10    | Interface discovery, portforward rule construction    |
+| Unit        | storage       | 11    | Import, list, get, delete, path handling              |
+| Integration | api           | 28    | All REST endpoints incl. upload; error paths          |
+| E2E         | web           | 50    | Dashboard, VM CRUD, snapshots, images, navigation     |
+| **Total**   |               | **156** |                                                     |
+
+---
+
+## Future Enhancements
+
+- **KubeVirt backend** — `KubeVirtVMManager` behind the same interface
+- **Second NAT networks** — create per-VM isolated private subnets
+- **VNC/SPICE proxy** — browser-accessible console via the web GUI
+- **VM templates** — named resource presets ("small", "medium", "large")
+- **OCI image support** — pull cloud images from container registries
+- **Cluster mode** — multiple VM Smith hosts with shared image catalog
