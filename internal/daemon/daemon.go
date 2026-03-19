@@ -13,6 +13,7 @@ import (
 
 	"github.com/vmsmith/vmsmith/internal/api"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -34,33 +35,49 @@ type Daemon struct {
 
 // New creates and initializes a new daemon.
 func New(cfg *config.Config) (*Daemon, error) {
+	// Initialise structured logger.
+	if err := logger.Init(cfg.Daemon.LogFile, logger.LevelInfo); err != nil {
+		// Non-fatal: fall back to stderr logging.
+		fmt.Printf("warning: could not open log file: %v\n", err)
+	}
+	logger.Info("daemon", "initialising vmSmith daemon", "listen", cfg.Daemon.Listen)
+
 	s, err := store.New(cfg.Storage.DBPath)
 	if err != nil {
+		logger.Error("daemon", "opening store failed", "error", err.Error())
 		return nil, fmt.Errorf("opening store: %w", err)
 	}
+	logger.Info("daemon", "store opened", "path", cfg.Storage.DBPath)
 
 	vmMgr, err := vm.NewLibvirtManager(cfg, s)
 	if err != nil {
 		s.Close()
+		logger.Error("daemon", "connecting to libvirt failed", "error", err.Error())
 		return nil, fmt.Errorf("connecting to libvirt: %w", err)
 	}
+	logger.Info("daemon", "connected to libvirt", "uri", cfg.Libvirt.URI)
 
-	// Set up the NAT network
+	// Set up the NAT network.
 	conn, err := libvirt.NewConnect(cfg.Libvirt.URI)
 	if err != nil {
+		logger.Error("daemon", "libvirt connection for network failed", "error", err.Error())
 		return nil, fmt.Errorf("libvirt connection for network: %w", err)
 	}
 	netMgr := network.NewManager(conn, cfg)
 	if err := netMgr.EnsureNetwork(); err != nil {
+		logger.Error("daemon", "ensuring NAT network failed", "error", err.Error())
 		return nil, fmt.Errorf("ensuring network: %w", err)
 	}
+	logger.Info("daemon", "NAT network ready", "network", cfg.Network.Name)
 
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
-	// Restore port forwarding rules
+	// Restore port forwarding rules.
 	if err := portFwd.RestoreAll(); err != nil {
-		fmt.Printf("warning: failed to restore some port forwards: %v\n", err)
+		logger.Warn("daemon", "failed to restore some port forwards", "error", err.Error())
+	} else {
+		logger.Info("daemon", "port forwarding rules restored")
 	}
 
 	apiServer := api.NewServerWithWeb(vmMgr, storageMgr, portFwd, web.Handler())
@@ -81,19 +98,20 @@ func New(cfg *config.Config) (*Daemon, error) {
 
 // Run starts the HTTP server and blocks until shutdown signal.
 func (d *Daemon) Run() error {
-	// Write PID file
+	// Write PID file.
 	if err := writePIDFile(d.cfg.Daemon.PIDFile); err != nil {
-		fmt.Printf("warning: could not write PID file: %v\n", err)
+		logger.Warn("daemon", "could not write PID file", "error", err.Error())
 	}
 	defer os.Remove(d.cfg.Daemon.PIDFile)
 
-	// Handle shutdown signals
+	// Handle shutdown signals.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Start server in goroutine
+	// Start server in goroutine.
 	errCh := make(chan error, 1)
 	go func() {
+		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen)
 		fmt.Printf("vmSmith daemon listening on %s\n", d.cfg.Daemon.Listen)
 		if err := d.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -101,24 +119,29 @@ func (d *Daemon) Run() error {
 		close(errCh)
 	}()
 
-	// Wait for signal or error
+	// Wait for signal or error.
 	select {
 	case <-ctx.Done():
+		logger.Info("daemon", "shutdown signal received")
 		fmt.Println("\nShutting down daemon...")
 	case err := <-errCh:
+		logger.Error("daemon", "HTTP server error", "error", err.Error())
 		return err
 	}
 
-	// Graceful shutdown with timeout
+	// Graceful shutdown with timeout.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := d.server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("daemon", "graceful shutdown error", "error", err.Error())
 		return fmt.Errorf("shutdown: %w", err)
 	}
 
 	d.vmManager.Close()
 	d.store.Close()
+	logger.Info("daemon", "daemon stopped cleanly")
+	logger.Close()
 
 	fmt.Println("Daemon stopped")
 	return nil
@@ -156,13 +179,13 @@ func Status(pidFile string) (bool, int) {
 		return false, 0
 	}
 
-	// Check if process exists
+	// Check if process exists.
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false, 0
 	}
 
-	// Signal 0 checks if process exists without actually sending a signal
+	// Signal 0 checks if process exists without actually sending a signal.
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
 		return false, 0
 	}

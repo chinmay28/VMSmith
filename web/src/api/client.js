@@ -63,4 +63,14 @@ export const host = {
   interfaces: () => request('/host/interfaces'),
 };
 
-export default { vms, snapshots, images, ports, host };
+// --- Logs ---
+export const logs = {
+  list: ({ level = 'debug', limit = 200, since = '', source = '' } = {}) => {
+    const params = new URLSearchParams({ level, limit });
+    if (since) params.set('since', since);
+    if (source) params.set('source', source);
+    return request(`/logs?${params}`);
+  },
+};
+
+export default { vms, snapshots, images, ports, host, logs };

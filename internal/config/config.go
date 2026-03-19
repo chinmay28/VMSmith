@@ -9,16 +9,17 @@ import (
 
 // Config holds the full vmSmith configuration.
 type Config struct {
-	Daemon  DaemonConfig  `yaml:"daemon"`
-	Libvirt LibvirtConfig `yaml:"libvirt"`
-	Storage StorageConfig `yaml:"storage"`
-	Network NetworkConfig `yaml:"network"`
+	Daemon   DaemonConfig   `yaml:"daemon"`
+	Libvirt  LibvirtConfig  `yaml:"libvirt"`
+	Storage  StorageConfig  `yaml:"storage"`
+	Network  NetworkConfig  `yaml:"network"`
 	Defaults DefaultsConfig `yaml:"defaults"`
 }
 
 type DaemonConfig struct {
 	Listen  string `yaml:"listen"`
 	PIDFile string `yaml:"pid_file"`
+	LogFile string `yaml:"log_file"`
 }
 
 type LibvirtConfig struct {
@@ -56,6 +57,7 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			Listen:  "0.0.0.0:8080",
 			PIDFile: "/var/run/vmsmith.pid",
+			LogFile: filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
 		},
 		Libvirt: LibvirtConfig{
 			URI: "qemu:///system",
