@@ -1,4 +1,9 @@
-"""Shared helpers for E2E tests."""
+"""Shared helpers for E2E tests.
+
+Configuration is resolved in order: pytest CLI option → environment variable → default.
+Module-level variables below are set to env-var defaults at import time and then
+overridden by conftest.py ``pytest_configure`` with any CLI option values.
+"""
 
 import os
 import subprocess
@@ -9,19 +14,19 @@ import requests
 
 
 # ---------------------------------------------------------------------------
-# Configuration from environment
+# Configuration — defaults from environment, overridden by conftest.py
 # ---------------------------------------------------------------------------
 
-VMSMITH_BIN = os.environ.get("VMSMITH_BIN", "vmsmith")
-VMSMITH_API = os.environ.get("VMSMITH_API", "http://localhost:8080")
-ROCKY_IMAGE = os.environ.get("VMSMITH_ROCKY_IMAGE", "")
-SSH_PRIVATE_KEY = os.environ.get("VMSMITH_SSH_PRIVATE_KEY", os.path.expanduser("~/.ssh/id_rsa"))
-SSH_USER = os.environ.get("VMSMITH_SSH_USER", "rocky")
+VMSMITH_BIN: str = os.environ.get("VMSMITH_BIN", "vmsmith")
+VMSMITH_API: str = os.environ.get("VMSMITH_API", "http://localhost:8080")
+ROCKY_IMAGE: str = os.environ.get("VMSMITH_ROCKY_IMAGE", "")
+SSH_PRIVATE_KEY: str = os.environ.get("VMSMITH_SSH_PRIVATE_KEY", os.path.expanduser("~/.ssh/id_rsa"))
+SSH_USER: str = os.environ.get("VMSMITH_SSH_USER", "rocky")
 
 # Timeouts (seconds)
-VM_IP_TIMEOUT = int(os.environ.get("VMSMITH_IP_TIMEOUT", "120"))
-VM_SSH_TIMEOUT = int(os.environ.get("VMSMITH_SSH_TIMEOUT", "180"))
-POLL_INTERVAL = 5
+VM_IP_TIMEOUT: int = int(os.environ.get("VMSMITH_IP_TIMEOUT", "120"))
+VM_SSH_TIMEOUT: int = int(os.environ.get("VMSMITH_SSH_TIMEOUT", "180"))
+POLL_INTERVAL: int = 5
 
 
 # ---------------------------------------------------------------------------

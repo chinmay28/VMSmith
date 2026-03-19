@@ -78,9 +78,20 @@ vmsmith/
 │   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
-│   ├── gui.spec.js              # Playwright E2E test specs
+│   ├── gui.spec.js              # Playwright E2E test specs (mock server)
 │   ├── mock-server.js           # Node.js mock API server for browser tests
 │   └── run-gui-tests.js         # Playwright runner script
+├── tests/e2e/
+│   ├── conftest.py              # Fixtures, CLI option registration, prereq checks
+│   ├── helpers.py               # CLI runner, API client, SSH/ping, polling utilities
+│   ├── pytest.ini               # Pytest config (markers, timeouts)
+│   ├── requirements.txt         # Python deps (pytest, requests, paramiko)
+│   ├── test_cli_vm_lifecycle.py # CLI E2E: create, snapshot, image, re-create
+│   ├── test_cli_networking.py   # CLI E2E: multi-NIC, port forwarding
+│   ├── test_api_vm_lifecycle.py # API E2E: same lifecycle via REST
+│   ├── test_api_networking.py   # API E2E: same networking via REST
+│   ├── gui-e2e.spec.js          # Playwright E2E against live daemon
+│   └── playwright.config.js     # Playwright config for live daemon
 ├── scripts/
 │   ├── install-deps-ubuntu.sh
 │   └── install-deps-rocky.sh
@@ -105,9 +116,16 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make test` | All Go tests with race detector |
 | `make test-unit` | Unit tests only (store, config, vm, cli, storage) |
 | `make test-integration` | API integration tests only (internal/api) |
-| `make test-web` | Headless Playwright E2E tests |
+| `make test-web` | Headless Playwright E2E tests (mock server) |
 | `make test-all` | All Go + web tests |
 | `make test-web-deps` | Install Playwright + Chromium (run once) |
+| `make test-e2e` | All real E2E tests (CLI + API + GUI, requires daemon) |
+| `make test-e2e-cli` | CLI E2E tests only (pytest) |
+| `make test-e2e-api` | API E2E tests only (pytest) |
+| `make test-e2e-gui` | GUI E2E tests (Playwright against live daemon) |
+| `make test-e2e-networking` | Multi-NIC networking E2E tests only |
+| `make test-e2e-portforward` | Port forwarding E2E tests only |
+| `make test-e2e-deps` | Install Python + Playwright deps for E2E tests |
 | `make lint` | golangci-lint |
 | `make fmt` | gofmt |
 | `make install` | Build + install to `/usr/local/bin/vmsmith` |
@@ -185,17 +203,21 @@ The React app in `web/` builds into `internal/web/dist/`. The Go binary embeds t
 
 ## Testing Conventions
 
-No real libvirt or QEMU is needed for any test. Tests run entirely in-process or with mock processes.
-
 ### Test Tiers
 
-1. **Unit tests** (`make test-unit`) — `internal/logger`, `internal/store`, `internal/config`, `internal/vm`, `internal/cli`, `internal/storage`, `internal/network`
-2. **API integration tests** (`make test-integration`) — `internal/api/api_test.go` uses `httptest` + `MockManager`; includes `/logs` endpoint tests
-3. **E2E browser tests** (`make test-web`) — Playwright + headless Chromium against `tests/web/mock-server.js`; includes Log Viewer tests
+| Tier | Command | Requires daemon? | Description |
+|---|---|---|---|
+| 1. Unit | `make test-unit` | No | `internal/logger`, `internal/store`, `config`, `vm`, `cli`, `storage`, `network` |
+| 2. API integration | `make test-integration` | No | `internal/api/api_test.go` with `httptest` + `MockManager`; includes `/logs` endpoint tests |
+| 3. GUI mock tests | `make test-web` | No | Playwright against `tests/web/mock-server.js`; includes Log Viewer tests |
+| 4. **Real E2E** | `make test-e2e` | **Yes** | pytest + Playwright against live daemon + QEMU/KVM |
+
+Tiers 1–3 need no real libvirt or QEMU — they run entirely in-process or with mock processes.
+Tier 4 (real E2E) requires a running daemon, a Rocky Linux qcow2 image, and SSH key access.
 
 ### MockManager Usage
 
-When writing API tests, use `vm.MockManager`:
+When writing API integration tests (tier 2), use `vm.MockManager`:
 
 ```go
 mock := vm.NewMockManager()
@@ -205,13 +227,78 @@ mock.CreateErr = someError    // inject errors for error-path tests
 
 `MockManager` is thread-safe (`sync.RWMutex`).
 
-### Running Tests
+### Running Unit / Integration Tests
 
 ```bash
 make test                  # all Go tests (use this before committing)
 make test-unit             # faster; no httptest overhead
 go test -v -run TestFoo ./internal/vm/...  # single test
 ```
+
+### Running Real E2E Tests
+
+E2E tests live in `tests/e2e/` and use **pytest** (CLI + API) and **Playwright** (GUI).
+They test against a live vmsmith daemon with real QEMU/KVM virtual machines.
+
+**Setup (one-time):**
+
+```bash
+make test-e2e-deps         # install pytest, requests, paramiko, Playwright + Chromium
+```
+
+**Configuration** — every setting can be passed as a pytest CLI option or env var
+(CLI option takes precedence):
+
+| CLI option | Env variable | Default | Description |
+|---|---|---|---|
+| `--rocky-image` | `VMSMITH_ROCKY_IMAGE` | *(required)* | Rocky Linux qcow2 image path |
+| `--ssh-key` | `VMSMITH_SSH_PRIVATE_KEY` | `~/.ssh/id_rsa` | SSH private key |
+| `--ssh-user` | `VMSMITH_SSH_USER` | `rocky` | SSH username |
+| `--vmsmith-bin` | `VMSMITH_BIN` | `vmsmith` | vmsmith binary path |
+| `--vmsmith-api` | `VMSMITH_API` | `http://localhost:8080` | Daemon API URL |
+| `--host-iface` | `VMSMITH_HOST_IFACE` | — | Host interface for multi-NIC tests |
+| `--host-iface2` | `VMSMITH_HOST_IFACE2` | — | Second host interface for dual-NIC |
+| `--ip-timeout` | `VMSMITH_IP_TIMEOUT` | `120` | Seconds to wait for VM IP |
+| `--ssh-timeout` | `VMSMITH_SSH_TIMEOUT` | `180` | Seconds to wait for SSH |
+
+**Running:**
+
+```bash
+# All E2E tests (CLI + API + GUI)
+make test-e2e
+
+# Individual layers
+make test-e2e-cli
+make test-e2e-api
+make test-e2e-gui
+
+# By scenario
+make test-e2e-networking
+make test-e2e-portforward
+
+# pytest directly with CLI options
+cd tests/e2e && python -m pytest test_cli_vm_lifecycle.py \
+    --rocky-image /images/rocky-9.qcow2 \
+    --ssh-key ~/.ssh/e2e_key \
+    --host-iface eth1 -v
+
+# By marker
+cd tests/e2e && python -m pytest -m networking -v
+cd tests/e2e && python -m pytest -m portforward -v
+
+# GUI E2E (Playwright against live daemon)
+VMSMITH_GUI_URL=http://localhost:8080 \
+    npx playwright test --config tests/e2e/playwright.config.js
+```
+
+**E2E test scenarios:**
+
+1. **VM Lifecycle** — Create Rocky VM → verify management IP → ping → SSH → list
+2. **Snapshots & Images** — Snapshot → modify → restore → export image → create from image → verify SSH
+3. **Multi-NIC Networking** — Extra macvtap interfaces → DHCP IPs → inter-VM ping → dual-NIC
+4. **Port Forwarding** — Add DNAT rule → SSH via forwarded port → CRUD operations
+
+See `tests/e2e/README.md` for full documentation.
 
 ---
 
