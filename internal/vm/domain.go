@@ -1,11 +1,12 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"text/template"
-	"bytes"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -15,7 +16,7 @@ const domainXMLTemplate = `<domain type='kvm'>
   <memory unit='MiB'>{{.RAMMB}}</memory>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
   <os>
-    <type arch='x86_64' machine='pc-q35-6.2'>hvm</type>
+    <type arch='x86_64' machine='{{.Machine}}'>hvm</type>
     <boot dev='hd'/>
   </os>
   <features>
@@ -75,6 +76,7 @@ type DomainParams struct {
 	DiskPath     string
 	CloudInitISO string
 	Interfaces   []InterfaceEntry
+	Machine      string // e.g. "pc-q35-6.2" or "pc-q35-rhel9.6.0"
 }
 
 // DomainParamsFromSpec converts a VMSpec into DomainParams, building all
@@ -147,6 +149,7 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		DiskPath:     diskPath,
 		CloudInitISO: cloudInitISO,
 		Interfaces:   ifaces,
+		Machine:      "pc-q35-6.2",
 	}
 }
 
@@ -163,6 +166,70 @@ func GenerateDomainXML(params DomainParams) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// machineTypeFromCaps parses a libvirt capabilities XML string and returns the
+// best pc-q35-* machine type for x86_64 KVM guests.
+//
+// Selection order:
+//  1. The canonical name of the "q35" alias (e.g. "pc-q35-rhel9.6.0")
+//  2. The first machine whose name starts with "pc-q35-"
+//  3. The provided fallback value
+func machineTypeFromCaps(capsXMLStr, fallback string) string {
+	type capsMachine struct {
+		Canonical string `xml:"canonical,attr"`
+		Name      string `xml:",chardata"`
+	}
+	type capsDomain struct {
+		Type string `xml:"type,attr"`
+	}
+	type capsArch struct {
+		Name     string        `xml:"name,attr"`
+		Machines []capsMachine `xml:"machine"`
+		Domains  []capsDomain  `xml:"domain"`
+	}
+	type capsGuest struct {
+		OSType string   `xml:"os_type"`
+		Arch   capsArch `xml:"arch"`
+	}
+	type capsRoot struct {
+		Guests []capsGuest `xml:"guest"`
+	}
+
+	var caps capsRoot
+	if err := xml.Unmarshal([]byte(capsXMLStr), &caps); err != nil {
+		return fallback
+	}
+
+	for _, guest := range caps.Guests {
+		if guest.OSType != "hvm" || guest.Arch.Name != "x86_64" {
+			continue
+		}
+		hasKVM := false
+		for _, d := range guest.Arch.Domains {
+			if d.Type == "kvm" {
+				hasKVM = true
+				break
+			}
+		}
+		if !hasKVM {
+			continue
+		}
+		// Prefer the canonical target of the "q35" alias.
+		for _, m := range guest.Arch.Machines {
+			if m.Name == "q35" && m.Canonical != "" {
+				return m.Canonical
+			}
+		}
+		// Fall back to the first pc-q35-* machine listed.
+		for _, m := range guest.Arch.Machines {
+			if strings.HasPrefix(m.Name, "pc-q35-") {
+				return m.Name
+			}
+		}
+	}
+
+	return fallback
 }
 
 // generateMAC creates a random MAC address with the local/unicast prefix 52:54:00

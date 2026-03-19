@@ -375,6 +375,96 @@ func TestGenerateNetworkConfig_RouteMetric(t *testing.T) {
 	}
 }
 
+func TestMachineTypeFromCaps(t *testing.T) {
+	rhel96Caps := `<capabilities>
+  <guest>
+    <os_type>hvm</os_type>
+    <arch name='x86_64'>
+      <machine canonical='pc-q35-rhel9.6.0' maxCpus='255'>q35</machine>
+      <machine maxCpus='255'>pc-q35-rhel9.6.0</machine>
+      <machine maxCpus='255'>pc-q35-rhel9.5.0</machine>
+      <domain type='kvm'/>
+    </arch>
+  </guest>
+</capabilities>`
+
+	upstreamCaps := `<capabilities>
+  <guest>
+    <os_type>hvm</os_type>
+    <arch name='x86_64'>
+      <machine maxCpus='255'>pc-q35-9.2</machine>
+      <machine maxCpus='255'>pc-q35-9.1</machine>
+      <domain type='kvm'/>
+    </arch>
+  </guest>
+</capabilities>`
+
+	noKVMCaps := `<capabilities>
+  <guest>
+    <os_type>hvm</os_type>
+    <arch name='x86_64'>
+      <machine maxCpus='255'>pc-q35-9.2</machine>
+      <domain type='qemu'/>
+    </arch>
+  </guest>
+</capabilities>`
+
+	tests := []struct {
+		name     string
+		caps     string
+		fallback string
+		want     string
+	}{
+		{
+			name:     "rhel9.6 q35 alias with canonical",
+			caps:     rhel96Caps,
+			fallback: "pc-q35-6.2",
+			want:     "pc-q35-rhel9.6.0",
+		},
+		{
+			name:     "upstream first pc-q35 listed",
+			caps:     upstreamCaps,
+			fallback: "pc-q35-6.2",
+			want:     "pc-q35-9.2",
+		},
+		{
+			name:     "no kvm domain falls back",
+			caps:     noKVMCaps,
+			fallback: "pc-q35-6.2",
+			want:     "pc-q35-6.2",
+		},
+		{
+			name:     "invalid xml falls back",
+			caps:     "not xml",
+			fallback: "pc-q35-6.2",
+			want:     "pc-q35-6.2",
+		},
+		{
+			name:     "empty caps falls back",
+			caps:     "<capabilities/>",
+			fallback: "pc-q35-6.2",
+			want:     "pc-q35-6.2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := machineTypeFromCaps(tt.caps, tt.fallback)
+			if got != tt.want {
+				t.Errorf("machineTypeFromCaps = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDomainParamsFromSpec_DefaultMachine(t *testing.T) {
+	spec := types.VMSpec{Name: "test", CPUs: 1, RAMMB: 1024}
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	if params.Machine != "pc-q35-6.2" {
+		t.Errorf("default Machine = %q, want %q", params.Machine, "pc-q35-6.2")
+	}
+}
+
 func TestHasStaticIPs(t *testing.T) {
 	tests := []struct {
 		name string
