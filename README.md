@@ -90,6 +90,12 @@ sudo ./bin/vmsmith vm create web01 \
   --disk 40 \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
+# With a custom default user (e.g. Rocky Linux images use "rocky")
+sudo ./bin/vmsmith vm create rocky01 \
+  --image rocky-9 \
+  --default-user rocky \
+  --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
+
 # List VMs
 sudo ./bin/vmsmith vm list
 ```
@@ -122,7 +128,7 @@ ssh -p 2222 ubuntu@<host-machine-ip>
 ssh ubuntu@192.168.100.10
 ```
 
-The default username depends on the image: `ubuntu` for Ubuntu cloud images, `cloud-user` for Rocky Linux.
+The default SSH user depends on the cloud image (`ubuntu` for Ubuntu, `rocky` for Rocky Linux, etc.). You can set it explicitly with `--default-user` when creating a VM, or change the global default in `config.yaml` under `defaults.ssh_user`. The SSH connection string is shown in `vm info` and the web GUI VM detail page.
 
 ---
 
@@ -302,6 +308,7 @@ curl -X POST http://localhost:8080/api/v1/vms \
     "ram_mb": 2048,
     "disk_gb": 20,
     "ssh_pub_key": "ssh-rsa AAAA...",
+    "default_user": "ubuntu",
     "networks": [
       {"host_interface": "eth1", "mode": "macvtap"}
     ]
@@ -324,7 +331,8 @@ Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
 
 ```
 vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
-                           [--ssh-key "ssh-rsa ..."] [--cloud-init <file>]
+                           [--ssh-key "ssh-rsa ..."] [--default-user <user>]
+                           [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm list
 vmsmith vm start  <id>
@@ -376,9 +384,10 @@ network:
   dhcp_end:   "192.168.100.254"
 
 defaults:
-  cpus:    2
-  ram_mb:  2048
-  disk_gb: 20
+  cpus:     2
+  ram_mb:   2048
+  disk_gb:  20
+  ssh_user: ubuntu   # default SSH username (override per-VM with --default-user)
 ```
 
 ---

@@ -24,3 +24,4 @@ defaults:
   cpus: 2
   ram_mb: 2048
   disk_gb: 20
+  ssh_user: ubuntu   # default SSH username injected via cloud-init (e.g. ubuntu, rocky, debian)

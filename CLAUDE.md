@@ -341,7 +341,8 @@ Key config fields:
 - `storage.base_dir` — VM disk overlays (must also be world-readable)
 - `storage.db_path` — bbolt database path
 - `network.*` — NAT network name and DHCP range
-- `defaults.*` — default VM resource sizes
+- `defaults.cpus/ram_mb/disk_gb` — default VM resource sizes
+- `defaults.ssh_user` — default SSH username injected via cloud-init (default: `"ubuntu"`); override per-VM with `VMSpec.DefaultUser` / `--default-user` CLI flag / `default_user` JSON field
 
 ---
 
@@ -373,7 +374,7 @@ All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 
 ```
 GET    /vms                            List all VMs
-POST   /vms                            Create VM (VMSpec JSON body)
+POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM

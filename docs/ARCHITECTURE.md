@@ -152,6 +152,24 @@ The `network-config` uses `match: macaddress:` for every interface rather than h
 
 MAC addresses are generated in `lifecycle.go` before creating either the ISO or the domain XML, so the same value appears in both the libvirt `<interface>` definition and the cloud-init `network-config`.
 
+**SSH user injection:**
+
+When `DefaultUser` is set (from the per-VM spec or `defaults.ssh_user` in config), the generated `user-data` uses a `users:` stanza to explicitly create/configure the named user with the injected SSH key:
+
+```yaml
+#cloud-config
+users:
+  - default                    # preserves the image's built-in default user
+  - name: ubuntu
+    ssh_authorized_keys:
+      - ssh-rsa AAAA...
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+```
+
+When no `DefaultUser` is set, the key is added via top-level `ssh_authorized_keys:` (which goes to the image's default user).
+
 ---
 
 ### 2. Networking
@@ -340,8 +358,8 @@ The React SPA is embedded into the binary via `go:embed dist/*`. The same port s
 | Route     | Features                                                               |
 |-----------|------------------------------------------------------------------------|
 | `/`       | Dashboard — VM count, state breakdown, quick actions                   |
-| `/vms`    | VM list; Create modal with name, image, resources, SSH key, extra networks |
-| `/vms/:id`| VM detail — info cards, extra network display, snapshots, port forwards |
+| `/vms`    | VM list; Create modal with name, image, resources, SSH user, SSH key, extra networks |
+| `/vms/:id`| VM detail — info cards (incl. SSH connection string), extra network display, snapshots, port forwards |
 | `/images` | Upload (drag-and-drop), list, download, delete qcow2 images            |
 | `/logs`   | Log viewer — level/source filters, auto-scroll, pause/resume, 3s polling |
 
@@ -387,9 +405,10 @@ network:
   dhcp_end:   "192.168.100.254"
 
 defaults:
-  cpus:    2
-  ram_mb:  2048
-  disk_gb: 20
+  cpus:     2
+  ram_mb:   2048
+  disk_gb:  20
+  ssh_user: ubuntu   # default SSH username injected via cloud-init; override per-VM with default_user in VMSpec
 ```
 
 ---

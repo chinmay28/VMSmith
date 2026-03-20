@@ -152,6 +152,7 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 		"--ram", "8192",
 		"--disk", "50",
 		"--ssh-key", "ssh-ed25519 AAAA test",
+		"--default-user", "rocky",
 	)
 	if err != nil {
 		t.Fatalf("vm create: %v", err)
@@ -169,6 +170,9 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 	}
 	if vms[0].Spec.RAMMB != 8192 {
 		t.Errorf("RAMMB = %d, want 8192", vms[0].Spec.RAMMB)
+	}
+	if vms[0].Spec.DefaultUser != "rocky" {
+		t.Errorf("DefaultUser = %q, want rocky", vms[0].Spec.DefaultUser)
 	}
 }
 
@@ -325,14 +329,14 @@ func TestCLI_VMInfo(t *testing.T) {
 		IP:        "192.168.100.42",
 		DiskPath:  "/var/lib/vmsmith/vms/vm-info/disk.qcow2",
 		CreatedAt: time.Now(),
-		Spec:      types.VMSpec{CPUs: 4, RAMMB: 8192, DiskGB: 20, Image: "ubuntu-22.04"},
+		Spec:      types.VMSpec{CPUs: 4, RAMMB: 8192, DiskGB: 20, Image: "ubuntu-22.04", DefaultUser: "ubuntu"},
 	})
 
 	out, err := runCLI("vm", "info", "vm-info")
 	if err != nil {
 		t.Fatalf("vm info: %v", err)
 	}
-	for _, want := range []string{"infovm", "running", "192.168.100.42", "4", "8192", "ubuntu-22.04"} {
+	for _, want := range []string{"infovm", "running", "192.168.100.42", "4", "8192", "ubuntu-22.04", "ubuntu", "ssh ubuntu@192.168.100.42"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output, got: %q", want, out)
 		}
