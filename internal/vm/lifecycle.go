@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -231,7 +233,7 @@ func (m *LibvirtManager) Get(ctx context.Context, id string) (*types.VM, error) 
 	if err == nil {
 		defer dom.Free()
 		vm.State = domainStateToVMState(dom)
-		vm.IP = getDomainIP(dom)
+		vm.IP = getDomainIP(dom, m.conn)
 	}
 
 	return vm, nil
@@ -248,7 +250,7 @@ func (m *LibvirtManager) List(ctx context.Context) ([]*types.VM, error) {
 		dom, err := m.conn.LookupDomainByName(vm.Name)
 		if err == nil {
 			vm.State = domainStateToVMState(dom)
-			vm.IP = getDomainIP(dom)
+			vm.IP = getDomainIP(dom, m.conn)
 			dom.Free()
 		}
 	}
@@ -508,25 +510,126 @@ func detectMachineType(conn *libvirt.Connect) string {
 	return machineTypeFromCaps(capsXMLStr, fallback)
 }
 
-func getDomainIP(dom *libvirt.Domain) string {
+func getDomainIP(dom *libvirt.Domain, conn *libvirt.Connect) string {
+	name, _ := dom.GetName()
+
 	// Try multiple sources in order of reliability.
+	sourceNames := []string{"agent", "lease", "arp"}
 	sources := []libvirt.DomainInterfaceAddressesSource{
 		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT, // QEMU guest agent (most accurate)
 		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, // libvirt dnsmasq leases
 		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP,   // host ARP cache
 	}
-	for _, src := range sources {
+	for i, src := range sources {
 		ifaces, err := dom.ListAllInterfaceAddresses(src)
 		if err != nil {
+			logger.Debug("daemon", "getDomainIP: source failed",
+				"vm", name, "source", sourceNames[i], "error", err.Error())
 			continue
 		}
 		for _, iface := range ifaces {
 			for _, addr := range iface.Addrs {
-				if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 {
+				if addr.Type == libvirt.IP_ADDR_TYPE_IPV4 && addr.Addr != "127.0.0.1" {
+					logger.Debug("daemon", "getDomainIP: found IP",
+						"vm", name, "source", sourceNames[i], "ip", addr.Addr,
+						"iface", iface.Name)
 					return addr.Addr
 				}
 			}
 		}
+		logger.Debug("daemon", "getDomainIP: source returned no IPv4",
+			"vm", name, "source", sourceNames[i], "iface_count", fmt.Sprintf("%d", len(ifaces)))
 	}
+
+	// Fallback: query DHCP leases from the libvirt network directly.
+	// This works even when ListAllInterfaceAddresses fails (e.g. no guest
+	// agent, session-mode libvirt, or lease source not linked to domain).
+	if ip := getDomainIPFromNetworkLeases(dom, conn); ip != "" {
+		return ip
+	}
+
+	logger.Debug("daemon", "getDomainIP: no IP found from any source", "vm", name)
 	return ""
+}
+
+// getDomainIPFromNetworkLeases queries all libvirt networks for DHCP leases
+// matching the domain's MAC addresses.
+func getDomainIPFromNetworkLeases(dom *libvirt.Domain, conn *libvirt.Connect) string {
+	name, _ := dom.GetName()
+
+	// Get the domain's MAC addresses from its XML definition.
+	macs := getDomainMACs(dom)
+	if len(macs) == 0 {
+		return ""
+	}
+
+	// List all networks and check their DHCP leases.
+	nets, err := conn.ListAllNetworks(libvirt.CONNECT_LIST_NETWORKS_ACTIVE)
+	if err != nil {
+		logger.Debug("daemon", "getDomainIP: failed to list networks",
+			"vm", name, "error", err.Error())
+		return ""
+	}
+
+	var foundIP string
+	for i := range nets {
+		netName, _ := nets[i].GetName()
+		leases, err := nets[i].GetDHCPLeases()
+		if err != nil {
+			nets[i].Free()
+			continue
+		}
+		if foundIP == "" {
+			for _, lease := range leases {
+				for _, mac := range macs {
+					if strings.EqualFold(lease.Mac, mac) && lease.IPaddr != "" {
+						logger.Debug("daemon", "getDomainIP: found IP via network lease",
+							"vm", name, "network", netName, "ip", lease.IPaddr, "mac", mac)
+						foundIP = lease.IPaddr
+						break
+					}
+				}
+				if foundIP != "" {
+					break
+				}
+			}
+		}
+		nets[i].Free()
+	}
+
+	return foundIP
+}
+
+// getDomainMACs extracts all MAC addresses from a domain's XML definition.
+func getDomainMACs(dom *libvirt.Domain) []string {
+	xmlStr, err := dom.GetXMLDesc(0)
+	if err != nil {
+		return nil
+	}
+
+	type macAddr struct {
+		Address string `xml:"address,attr"`
+	}
+	type iface struct {
+		MAC macAddr `xml:"mac"`
+	}
+	type devices struct {
+		Interfaces []iface `xml:"interface"`
+	}
+	type domainXML struct {
+		Devices devices `xml:"devices"`
+	}
+
+	var d domainXML
+	if err := xml.Unmarshal([]byte(xmlStr), &d); err != nil {
+		return nil
+	}
+
+	var macs []string
+	for _, i := range d.Devices.Interfaces {
+		if i.MAC.Address != "" {
+			macs = append(macs, i.MAC.Address)
+		}
+	}
+	return macs
 }

@@ -4,7 +4,8 @@ BUILD_DIR := ./bin
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
-.PHONY: build install clean test lint fmt deps web web-install test-web-deps
+.PHONY: build install clean test lint fmt deps web web-install test-web-deps \
+       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -55,6 +56,35 @@ test-web:
 	node tests/web/run-gui-tests.js
 
 test-all: test test-web
+
+# --- Real E2E tests (require running daemon + Rocky image) ---
+# Install Python deps for E2E tests
+test-e2e-deps:
+	pip install -r tests/e2e/requirements.txt
+	npx playwright install chromium
+
+# All E2E tests (CLI + API + GUI)
+test-e2e: test-e2e-cli test-e2e-api test-e2e-gui
+
+# CLI E2E tests only
+test-e2e-cli:
+	cd tests/e2e && python -m pytest test_cli_vm_lifecycle.py test_cli_networking.py -v
+
+# API E2E tests only
+test-e2e-api:
+	cd tests/e2e && python -m pytest test_api_vm_lifecycle.py test_api_networking.py -v
+
+# GUI E2E tests (Playwright against live daemon)
+test-e2e-gui:
+	npx playwright test --config tests/e2e/playwright.config.js
+
+# Run only networking E2E tests
+test-e2e-networking:
+	cd tests/e2e && python -m pytest -m networking -v
+
+# Run only port forwarding E2E tests
+test-e2e-portforward:
+	cd tests/e2e && python -m pytest -m portforward -v
 
 lint:
 	golangci-lint run ./...
