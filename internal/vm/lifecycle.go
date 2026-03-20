@@ -112,6 +112,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 
 	// Generate and define domain XML
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name)
+	params.Machine = detectMachineType(m.conn)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		return nil, err
@@ -494,6 +495,17 @@ func domainStateToVMState(dom *libvirt.Domain) types.VMState {
 	default:
 		return types.VMStateUnknown
 	}
+}
+
+// detectMachineType queries libvirt capabilities to find the best pc-q35-*
+// machine type for x86_64 KVM guests, falling back to "pc-q35-6.2".
+func detectMachineType(conn *libvirt.Connect) string {
+	const fallback = "pc-q35-6.2"
+	capsXMLStr, err := conn.GetCapabilities()
+	if err != nil {
+		return fallback
+	}
+	return machineTypeFromCaps(capsXMLStr, fallback)
 }
 
 func getDomainIP(dom *libvirt.Domain) string {
