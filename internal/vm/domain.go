@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/xml"
 	"fmt"
+	"os"
 	"strings"
 	"text/template"
 
@@ -30,7 +31,7 @@ const domainXMLTemplate = `<domain type='kvm'>
     <timer name='hpet' present='no'/>
   </clock>
   <devices>
-    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <emulator>{{.Emulator}}</emulator>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2' discard='unmap'/>
       <source file='{{.DiskPath}}'/>
@@ -77,6 +78,26 @@ type DomainParams struct {
 	CloudInitISO string
 	Interfaces   []InterfaceEntry
 	Machine      string // e.g. "pc-q35-6.2" or "pc-q35-rhel9.6.0"
+	Emulator     string // path to QEMU binary, e.g. /usr/libexec/qemu-kvm
+}
+
+// qemuBinaryCandidates is the ordered list of QEMU binary paths to probe.
+// RHEL/Rocky use /usr/libexec/qemu-kvm; Debian/Ubuntu use /usr/bin/qemu-system-x86_64.
+var qemuBinaryCandidates = []string{
+	"/usr/libexec/qemu-kvm",
+	"/usr/bin/qemu-system-x86_64",
+	"/usr/bin/qemu-kvm",
+}
+
+// detectQEMUBinary returns the first QEMU binary that exists on the system.
+// Falls back to /usr/bin/qemu-system-x86_64 if none are found.
+func detectQEMUBinary() string {
+	for _, path := range qemuBinaryCandidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return "/usr/bin/qemu-system-x86_64"
 }
 
 // DomainParamsFromSpec converts a VMSpec into DomainParams, building all
@@ -150,6 +171,7 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		CloudInitISO: cloudInitISO,
 		Interfaces:   ifaces,
 		Machine:      "pc-q35-6.2",
+		Emulator:     detectQEMUBinary(),
 	}
 }
 
