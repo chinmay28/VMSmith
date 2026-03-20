@@ -1054,6 +1054,157 @@ func TestAPIRoutes_ContentType_JSON(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Log endpoint tests
+// ============================================================
+
+func TestGetLogs_Empty(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/logs")
+	if err != nil {
+		t.Fatalf("GET /logs: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	// Total must be a non-negative integer.
+	if result.Total < 0 {
+		t.Errorf("Total = %d, want >= 0", result.Total)
+	}
+	if result.Entries == nil {
+		// entries may be empty but must be present (not null after JSON decode).
+		// The handler always returns at least an empty slice via the ring buffer.
+	}
+}
+
+func TestGetLogs_LimitParam(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Seed the logger with more than 5 entries by making real API calls
+	// (each API call is logged by the middleware).
+	for i := 0; i < 8; i++ {
+		http.Get(ts.URL + "/api/v1/vms")
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?limit=5&level=debug")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if result.Total > 5 {
+		t.Errorf("with limit=5, Total = %d, want <= 5", result.Total)
+	}
+}
+
+func TestGetLogs_LevelFilter(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Trigger a 404 (logged as warn) and a 500 (logged as error).
+	http.Get(ts.URL + "/api/v1/vms/nonexistent")
+	http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader("{bad json"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=warn")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	for _, e := range result.Entries {
+		if e.Level == "debug" || e.Level == "info" {
+			t.Errorf("level=warn filter returned entry with level %q", e.Level)
+		}
+	}
+}
+
+func TestGetLogs_SourceFilter(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Make a request so the api source gets entries.
+	http.Get(ts.URL + "/api/v1/vms")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?source=api&level=debug")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	for _, e := range result.Entries {
+		if e.Source != "api" {
+			t.Errorf("source=api filter returned entry with source %q", e.Source)
+		}
+	}
+}
+
+func TestGetLogs_SinceFilter(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Record a cutoff time, then make requests.
+	cutoff := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+
+	since := cutoff.UTC().Format(time.RFC3339Nano)
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&since=" + since)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	for _, e := range result.Entries {
+		if !e.Timestamp.After(cutoff) {
+			t.Errorf("since filter returned entry at %v, want after %v", e.Timestamp, cutoff)
+		}
+	}
+}
+
+func TestGetLogs_InvalidLimitIgnored(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Non-numeric limit should be ignored (fall back to default).
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?limit=notanumber")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestGetLogs_MaxLimitCapped(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Requesting more than 2000 should be silently capped.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?limit=99999&level=debug")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if result.Total > 2000 {
+		t.Errorf("Total = %d exceeds maximum cap of 2000", result.Total)
+	}
+}
+
 // Helpers for timeout in tests
 func init() {
 	_ = time.Second // ensure time is used

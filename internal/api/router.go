@@ -39,11 +39,15 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	r := chi.NewRouter()
 
 	// Middleware
-	r.Use(middleware.Logger)
+	r.Use(requestLogger) // structured request/response logging
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.SetHeader("Content-Type", "application/json"))
+
+		// Log viewer endpoint
+		r.Get("/logs", s.GetLogs)
+
 		// VM endpoints
 		r.Route("/vms", func(r chi.Router) {
 			r.Post("/", s.CreateVM)

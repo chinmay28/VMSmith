@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 )
 
@@ -16,16 +17,19 @@ var netCmd = &cobra.Command{
 }
 
 var netListIfacesCmd = &cobra.Command{
-	Use:   "interfaces",
-	Short: "List host network interfaces available for VM attachment",
+	Use:     "interfaces",
+	Short:   "List host network interfaces available for VM attachment",
 	Aliases: []string{"ifaces", "if"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		all, _ := cmd.Flags().GetBool("all")
+		logger.Info("cli", "net interfaces", "all", fmt.Sprintf("%v", all))
 
 		ifaces, err := network.DiscoverInterfaces()
 		if err != nil {
+			logger.Error("cli", "net interfaces failed", "error", err.Error())
 			return err
 		}
+		logger.Info("cli", "net interfaces result", "count", fmt.Sprintf("%d", len(ifaces)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "INTERFACE\tIPs\tMAC\tSTATUS\tTYPE")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -33,8 +34,13 @@ var vmCreateCmd = &cobra.Command{
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
 
+		logger.Info("cli", "vm create", "name", name, "image", image,
+			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
+			"disk", fmt.Sprintf("%d", disk))
+
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm create: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
@@ -42,6 +48,7 @@ var vmCreateCmd = &cobra.Command{
 		// Parse --network flags into NetworkAttachment structs
 		networks, err := parseNetworkFlags(networkFlags)
 		if err != nil {
+			logger.Error("cli", "vm create: invalid network flags", "error", err.Error())
 			return err
 		}
 
@@ -58,8 +65,11 @@ var vmCreateCmd = &cobra.Command{
 
 		result, err := mgr.Create(context.Background(), spec)
 		if err != nil {
+			logger.Error("cli", "vm create failed", "name", name, "error", err.Error())
 			return fmt.Errorf("creating VM: %w", err)
 		}
+
+		logger.Info("cli", "vm created", "id", result.ID, "name", result.Name, "state", string(result.State))
 
 		fmt.Printf("VM created successfully:\n")
 		fmt.Printf("  ID:    %s\n", result.ID)
@@ -87,20 +97,25 @@ var vmCreateCmd = &cobra.Command{
 }
 
 var vmListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all VMs",
+	Use:     "list",
+	Short:   "List all VMs",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm list: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
 		vms, err := mgr.List(context.Background())
 		if err != nil {
+			logger.Error("cli", "vm list failed", "error", err.Error())
 			return err
 		}
+
+		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tSTATE\tIP\tCPUS\tRAM (MB)")
@@ -118,16 +133,21 @@ var vmStartCmd = &cobra.Command{
 	Short: "Start a stopped VM",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm start", "id", id)
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm start: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		if err := mgr.Start(context.Background(), args[0]); err != nil {
+		if err := mgr.Start(context.Background(), id); err != nil {
+			logger.Error("cli", "vm start failed", "id", id, "error", err.Error())
 			return err
 		}
-		fmt.Printf("VM %s started\n", args[0])
+		logger.Info("cli", "vm started", "id", id)
+		fmt.Printf("VM %s started\n", id)
 		return nil
 	},
 }
@@ -137,16 +157,21 @@ var vmStopCmd = &cobra.Command{
 	Short: "Stop a running VM",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm stop", "id", id)
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm stop: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		if err := mgr.Stop(context.Background(), args[0]); err != nil {
+		if err := mgr.Stop(context.Background(), id); err != nil {
+			logger.Error("cli", "vm stop failed", "id", id, "error", err.Error())
 			return err
 		}
-		fmt.Printf("VM %s stopped\n", args[0])
+		logger.Info("cli", "vm stopped", "id", id)
+		fmt.Printf("VM %s stopped\n", id)
 		return nil
 	},
 }
@@ -156,16 +181,21 @@ var vmDeleteCmd = &cobra.Command{
 	Short: "Delete a VM and its resources",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm delete", "id", id)
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm delete: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		if err := mgr.Delete(context.Background(), args[0]); err != nil {
+		if err := mgr.Delete(context.Background(), id); err != nil {
+			logger.Error("cli", "vm delete failed", "id", id, "error", err.Error())
 			return err
 		}
-		fmt.Printf("VM %s deleted\n", args[0])
+		logger.Info("cli", "vm deleted", "id", id)
+		fmt.Printf("VM %s deleted\n", id)
 		return nil
 	},
 }
@@ -175,16 +205,22 @@ var vmInfoCmd = &cobra.Command{
 	Short: "Show detailed VM information",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm info", "id", id)
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "vm info: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		v, err := mgr.Get(context.Background(), args[0])
+		v, err := mgr.Get(context.Background(), id)
 		if err != nil {
+			logger.Error("cli", "vm info failed", "id", id, "error", err.Error())
 			return err
 		}
+
+		logger.Info("cli", "vm info result", "id", v.ID, "name", v.Name, "state", string(v.State))
 
 		fmt.Printf("ID:        %s\n", v.ID)
 		fmt.Printf("Name:      %s\n", v.Name)

@@ -12,6 +12,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.Listen != "0.0.0.0:8080" {
 		t.Errorf("Daemon.Listen = %q, want 0.0.0.0:8080", cfg.Daemon.Listen)
 	}
+	if cfg.Daemon.LogFile == "" {
+		t.Error("Daemon.LogFile should have a default value")
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -57,6 +60,7 @@ func TestLoadFromFile(t *testing.T) {
 	content := `
 daemon:
   listen: "127.0.0.1:9090"
+  log_file: "/var/log/vmsmith.log"
 defaults:
   cpus: 8
   ram_mb: 16384
@@ -73,6 +77,9 @@ network:
 
 	if cfg.Daemon.Listen != "127.0.0.1:9090" {
 		t.Errorf("Daemon.Listen = %q, want 127.0.0.1:9090", cfg.Daemon.Listen)
+	}
+	if cfg.Daemon.LogFile != "/var/log/vmsmith.log" {
+		t.Errorf("Daemon.LogFile = %q, want /var/log/vmsmith.log", cfg.Daemon.LogFile)
 	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)

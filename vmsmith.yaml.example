@@ -4,6 +4,7 @@
 daemon:
   listen: "0.0.0.0:8080"
   pid_file: "/var/run/vmsmith.pid"
+  log_file: "~/.vmsmith/vmsmith.log"   # structured log output; leave empty to disable file logging
 
 libvirt:
   uri: "qemu:///system"       # Use qemu:///session for rootless operation

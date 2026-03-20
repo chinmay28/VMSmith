@@ -33,7 +33,8 @@ vmsmith/
 │   │   ├── handlers_snapshot.go # Snapshot endpoints
 │   │   ├── handlers_image.go    # Image upload/download/list/delete
 │   │   ├── handlers_network.go  # Port forward + host interface endpoints
-│   │   └── middleware.go        # Logging, CORS, error response helpers
+│   │   ├── handlers_logs.go     # Log viewer endpoint (GET /api/v1/logs)
+│   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
 │   │   ├── vm.go                # vmsmith vm create|list|start|stop|delete
@@ -43,7 +44,9 @@ vmsmith/
 │   │   ├── network.go           # vmsmith port add|remove|list
 │   │   └── daemon.go            # vmsmith daemon start
 │   ├── config/config.go         # Config struct, DefaultConfig(), EnsureDirs()
-│   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, signal handling
+│   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, signal handling, logger init
+│   ├── logger/
+│   │   └── logger.go            # Structured logger: global singleton, ring buffer, file output
 │   ├── network/
 │   │   ├── nat.go               # libvirt NAT network setup + stale-dnsmasq cleanup
 │   │   ├── portforward.go       # iptables DNAT rules — add, remove, restore
@@ -69,10 +72,10 @@ vmsmith/
 │   ├── network.go               # NetworkAttachment, PortForward, HostInterface
 │   └── errors.go                # Typed API errors
 ├── web/                         # React source (separate npm project)
-│   ├── src/api/client.js        # REST API client (all resource types)
+│   ├── src/api/client.js        # REST API client (vms, snapshots, images, ports, host, logs)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs
@@ -125,6 +128,22 @@ All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go
 
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
+### Structured Logging
+
+`internal/logger` provides a global singleton structured logger with:
+- **Log levels:** `debug` < `info` < `warn` < `error` — configurable minimum level
+- **In-memory ring buffer** of 2000 entries, always available for GUI polling via `GET /api/v1/logs`
+- **File output** to `daemon.log_file` (default `~/.vmsmith/vmsmith.log`)
+- **Sources:** `daemon` (startup/shutdown), `api` (every HTTP request via middleware), `cli` (every command)
+
+**Initialization order:**
+- Daemon: `logger.Init(cfg.Daemon.LogFile, logger.LevelInfo)` called at top of `daemon.New()`
+- CLI: initialized via `PersistentPreRunE` on `rootCmd` so all subcommands share one log file
+
+**HTTP request middleware** (`middleware.go`) logs every request except `GET /api/v1/logs` (to avoid self-noise). POST/PUT body snippets (up to 4096 bytes) are captured and re-injected into `r.Body`.
+
+**Package-level helpers** for convenience: `logger.Info("source", "message", "key", "val", ...)`
+
 ### Public Types vs Internal Packages
 
 - **`pkg/types/`** — shared types used by both the API layer and the VM/storage packages. These are the wire format types (JSON-serializable). Do not add business logic here.
@@ -170,9 +189,9 @@ No real libvirt or QEMU is needed for any test. Tests run entirely in-process or
 
 ### Test Tiers
 
-1. **Unit tests** (`make test-unit`) — `internal/store`, `internal/config`, `internal/vm`, `internal/cli`, `internal/storage`, `internal/network`
-2. **API integration tests** (`make test-integration`) — `internal/api/api_test.go` uses `httptest` + `MockManager`
-3. **E2E browser tests** (`make test-web`) — Playwright + headless Chromium against `tests/web/mock-server.js`
+1. **Unit tests** (`make test-unit`) — `internal/logger`, `internal/store`, `internal/config`, `internal/vm`, `internal/cli`, `internal/storage`, `internal/network`
+2. **API integration tests** (`make test-integration`) — `internal/api/api_test.go` uses `httptest` + `MockManager`; includes `/logs` endpoint tests
+3. **E2E browser tests** (`make test-web`) — Playwright + headless Chromium against `tests/web/mock-server.js`; includes Log Viewer tests
 
 ### MockManager Usage
 
@@ -229,6 +248,7 @@ The config struct is in `internal/config/config.go`. `DefaultConfig()` returns u
 
 Key config fields:
 - `daemon.listen` — HTTP listen address (default `0.0.0.0:8080`)
+- `daemon.log_file` — structured log output path (default `~/.vmsmith/vmsmith.log`); leave empty to disable file logging
 - `libvirt.uri` — libvirt connection URI (use `qemu:///session` for rootless)
 - `storage.images_dir` — must be world-readable (libvirt-qemu user reads VM disks)
 - `storage.base_dir` — VM disk overlays (must also be world-readable)
@@ -242,7 +262,7 @@ Key config fields:
 
 - **Error handling:** Return errors; do not panic. API handlers wrap errors into typed `pkg/types` error responses via middleware helpers.
 - **Context:** All `vm.Manager` methods take `context.Context` as the first argument. Pass it through.
-- **Logging:** Use `log.Printf` for daemon-level logging. No structured logging library.
+- **Logging:** Use `internal/logger` package helpers (`logger.Info`, `logger.Warn`, etc.) for all structured log output. Never use `log.Printf` or `fmt.Printf` for operational messages — those bypass the ring buffer and file output. Use `fmt.Printf` only for direct terminal output to end-users (e.g., CLI result tables).
 - **JSON tags:** All public types in `pkg/types/` have `json:"..."` tags. Use `omitempty` for optional fields.
 - **IDs:** VM IDs are `vm-<unix-nano>` (e.g., `vm-1741234567890123`). Image IDs follow a similar convention.
 - **CGO:** Required for libvirt bindings. Do not set `CGO_ENABLED=0` anywhere.
@@ -284,6 +304,7 @@ GET    /vms/{id}/ports                 List port forwards
 POST   /vms/{id}/ports                 Add port forward
 DELETE /vms/{id}/ports/{portId}        Remove port forward
 GET    /host/interfaces                List host network interfaces
+GET    /logs                           Query log entries (level, limit, since, source)
 ```
 
 ---

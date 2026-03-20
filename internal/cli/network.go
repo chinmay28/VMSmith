@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -22,19 +23,27 @@ var portAddCmd = &cobra.Command{
 	Short: "Add a port forwarding rule",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vmID := args[0]
 		hostPort, _ := cmd.Flags().GetInt("host")
 		guestPort, _ := cmd.Flags().GetInt("guest")
 		proto, _ := cmd.Flags().GetString("proto")
 
+		logger.Info("cli", "port add", "vm_id", vmID,
+			"host_port", fmt.Sprintf("%d", hostPort),
+			"guest_port", fmt.Sprintf("%d", guestPort),
+			"proto", proto)
+
 		vmMgr, vmCleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "port add: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer vmCleanup()
 
 		// Get VM IP
-		vm, err := vmMgr.Get(cmd.Context(), args[0])
+		vm, err := vmMgr.Get(cmd.Context(), vmID)
 		if err != nil {
+			logger.Error("cli", "port add: VM not found", "vm_id", vmID, "error", err.Error())
 			return fmt.Errorf("VM not found: %w", err)
 		}
 		if vm.IP == "" {
@@ -43,14 +52,24 @@ var portAddCmd = &cobra.Command{
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
+			logger.Error("cli", "port add: failed to init port forwarder", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		rule, err := pf.Add(args[0], hostPort, guestPort, vm.IP, types.Protocol(proto))
+		rule, err := pf.Add(vmID, hostPort, guestPort, vm.IP, types.Protocol(proto))
 		if err != nil {
+			logger.Error("cli", "port add failed", "vm_id", vmID,
+				"host_port", fmt.Sprintf("%d", hostPort),
+				"guest_port", fmt.Sprintf("%d", guestPort),
+				"error", err.Error())
 			return err
 		}
+
+		logger.Info("cli", "port added", "id", rule.ID,
+			"host_port", fmt.Sprintf("%d", rule.HostPort),
+			"guest", fmt.Sprintf("%s:%d", rule.GuestIP, rule.GuestPort),
+			"proto", string(rule.Protocol))
 
 		fmt.Printf("Port forward added: host:%d -> %s:%d (%s)\n",
 			rule.HostPort, rule.GuestIP, rule.GuestPort, rule.Protocol)
@@ -64,16 +83,22 @@ var portListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vmID := args[0]
+		logger.Info("cli", "port list", "vm_id", vmID)
+
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
+			logger.Error("cli", "port list: failed to init port forwarder", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		ports, err := pf.List(args[0])
+		ports, err := pf.List(vmID)
 		if err != nil {
+			logger.Error("cli", "port list failed", "vm_id", vmID, "error", err.Error())
 			return err
 		}
+		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tHOST PORT\tGUEST\tPROTOCOL")
@@ -91,16 +116,22 @@ var portRemoveCmd = &cobra.Command{
 	Short: "Remove a port forwarding rule",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		portID := args[0]
+		logger.Info("cli", "port remove", "id", portID)
+
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
+			logger.Error("cli", "port remove: failed to init port forwarder", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		if err := pf.Remove(args[0]); err != nil {
+		if err := pf.Remove(portID); err != nil {
+			logger.Error("cli", "port remove failed", "id", portID, "error", err.Error())
 			return err
 		}
-		fmt.Printf("Port forward %s removed\n", args[0])
+		logger.Info("cli", "port removed", "id", portID)
+		fmt.Printf("Port forward %s removed\n", portID)
 		return nil
 	},
 }

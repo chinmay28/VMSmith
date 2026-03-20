@@ -1,8 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/vmsmith/vmsmith/internal/logger"
 )
 
 type errorResponse struct {
@@ -17,4 +21,103 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
+}
+
+// responseRecorder wraps http.ResponseWriter to capture status code and body size.
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+	size   int
+}
+
+func (r *responseRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(b)
+	r.size += n
+	return n, err
+}
+
+// requestLogger is a chi-compatible middleware that logs every HTTP request
+// and its response to the structured logger.
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Skip logging for the log-polling endpoint to avoid noise.
+		if r.URL.Path == "/api/v1/logs" && r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		rec := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		// Capture request body for mutation methods (POST, PUT, PATCH).
+		var bodySnippet string
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			if r.ContentLength > 0 && r.ContentLength < 4096 {
+				buf := new(bytes.Buffer)
+				buf.ReadFrom(r.Body)
+				bodySnippet = buf.String()
+				// Put the body back so the handler can read it.
+				r.Body = http.NoBody
+				r.Body = nopCloser{bytes.NewReader(buf.Bytes())}
+			}
+		}
+
+		next.ServeHTTP(rec, r)
+
+		duration := time.Since(start)
+		fields := []string{
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusText(rec.status),
+			"status_code", itoa(rec.status),
+			"duration_ms", itoa(int(duration.Milliseconds())),
+			"bytes", itoa(rec.size),
+			"remote", r.RemoteAddr,
+		}
+		if r.URL.RawQuery != "" {
+			fields = append(fields, "query", r.URL.RawQuery)
+		}
+		if bodySnippet != "" {
+			fields = append(fields, "body", bodySnippet)
+		}
+
+		msg := r.Method + " " + r.URL.Path
+		if rec.status >= 500 {
+			logger.Error("api", msg, fields...)
+		} else if rec.status >= 400 {
+			logger.Warn("api", msg, fields...)
+		} else {
+			logger.Info("api", msg, fields...)
+		}
+	})
+}
+
+// nopCloser pairs an io.Reader with a no-op Close method.
+type nopCloser struct{ *bytes.Reader }
+
+func (nopCloser) Close() error { return nil }
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := make([]byte, 0, 10)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		buf = append([]byte{byte('0' + n%10)}, buf...)
+		n /= 10
+	}
+	if neg {
+		buf = append([]byte{'-'}, buf...)
+	}
+	return string(buf)
 }

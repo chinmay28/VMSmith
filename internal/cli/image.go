@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
 )
@@ -22,16 +23,20 @@ var imageListCmd = &cobra.Command{
 	Short:   "List available images",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger.Info("cli", "image list")
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
+			logger.Error("cli", "image list: failed to init storage manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
 		imgs, err := mgr.ListImages()
 		if err != nil {
+			logger.Error("cli", "image list failed", "error", err.Error())
 			return err
 		}
+		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tSIZE\tFORMAT\tCREATED")
@@ -50,32 +55,39 @@ var imageCreateCmd = &cobra.Command{
 	Short: "Create a portable image from a VM",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vmID := args[0]
 		name, _ := cmd.Flags().GetString("name")
+		logger.Info("cli", "image create", "vm_id", vmID, "name", name)
 
 		vmMgr, vmCleanup, err := newVMManager()
 		if err != nil {
+			logger.Error("cli", "image create: failed to init VM manager", "error", err.Error())
 			return err
 		}
 		defer vmCleanup()
 
 		storageMgr, storageCleanup, err := newStorageManager()
 		if err != nil {
+			logger.Error("cli", "image create: failed to init storage manager", "error", err.Error())
 			return err
 		}
 		defer storageCleanup()
 
 		// Get VM disk path
-		vm, err := vmMgr.Get(cmd.Context(), args[0])
+		vm, err := vmMgr.Get(cmd.Context(), vmID)
 		if err != nil {
+			logger.Error("cli", "image create: VM not found", "vm_id", vmID, "error", err.Error())
 			return fmt.Errorf("VM not found: %w", err)
 		}
 
 		fmt.Printf("Creating image %q from VM %s (this may take a while)...\n", name, vm.Name)
 		img, err := storageMgr.CreateImage(vm.DiskPath, name, vm.ID)
 		if err != nil {
+			logger.Error("cli", "image create failed", "vm_id", vmID, "name", name, "error", err.Error())
 			return err
 		}
 
+		logger.Info("cli", "image created", "id", img.ID, "name", img.Name, "size", humanSize(img.SizeBytes))
 		fmt.Printf("Image created: %s (%s)\n", img.Name, humanSize(img.SizeBytes))
 		return nil
 	},
@@ -86,14 +98,23 @@ var imagePushCmd = &cobra.Command{
 	Short: "Push an image to a remote host via SCP",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		imageName, dest := args[0], args[1]
+		logger.Info("cli", "image push", "name", imageName, "dest", dest)
+
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
+			logger.Error("cli", "image push: failed to init storage manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		fmt.Printf("Pushing image %q to %s...\n", args[0], args[1])
-		return mgr.Push(args[0], args[1])
+		fmt.Printf("Pushing image %q to %s...\n", imageName, dest)
+		if err := mgr.Push(imageName, dest); err != nil {
+			logger.Error("cli", "image push failed", "name", imageName, "dest", dest, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "image pushed", "name", imageName, "dest", dest)
+		return nil
 	},
 }
 
@@ -102,14 +123,23 @@ var imagePullCmd = &cobra.Command{
 	Short: "Pull an image from a remote host (SCP or HTTP)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		src := args[0]
+		logger.Info("cli", "image pull", "source", src)
+
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
+			logger.Error("cli", "image pull: failed to init storage manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		fmt.Printf("Pulling image from %s...\n", args[0])
-		return mgr.Pull(args[0])
+		fmt.Printf("Pulling image from %s...\n", src)
+		if err := mgr.Pull(src); err != nil {
+			logger.Error("cli", "image pull failed", "source", src, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "image pulled", "source", src)
+		return nil
 	},
 }
 
@@ -118,16 +148,22 @@ var imageDeleteCmd = &cobra.Command{
 	Short: "Delete an image",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "image delete", "id", id)
+
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
+			logger.Error("cli", "image delete: failed to init storage manager", "error", err.Error())
 			return err
 		}
 		defer cleanup()
 
-		if err := mgr.DeleteImage(args[0]); err != nil {
+		if err := mgr.DeleteImage(id); err != nil {
+			logger.Error("cli", "image delete failed", "id", id, "error", err.Error())
 			return err
 		}
-		fmt.Printf("Image %s deleted\n", args[0])
+		logger.Info("cli", "image deleted", "id", id)
+		fmt.Printf("Image %s deleted\n", id)
 		return nil
 	},
 }
