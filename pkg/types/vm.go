@@ -22,6 +22,7 @@ type VMSpec struct {
 	DiskGB        int    `json:"disk_gb" yaml:"disk_gb"`
 	CloudInitFile string `json:"cloud_init_file,omitempty" yaml:"cloud_init_file,omitempty"`
 	SSHPubKey     string `json:"ssh_pub_key,omitempty" yaml:"ssh_pub_key,omitempty"`
+	DefaultUser   string `json:"default_user,omitempty" yaml:"default_user,omitempty"`
 
 	// Networks defines additional network attachments beyond the default NAT.
 	// The vmsmith NAT network is always attached as the first interface.

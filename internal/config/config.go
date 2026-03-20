@@ -40,9 +40,10 @@ type NetworkConfig struct {
 }
 
 type DefaultsConfig struct {
-	CPUs   int `yaml:"cpus"`
-	RAMMB  int `yaml:"ram_mb"`
-	DiskGB int `yaml:"disk_gb"`
+	CPUs    int    `yaml:"cpus"`
+	RAMMB   int    `yaml:"ram_mb"`
+	DiskGB  int    `yaml:"disk_gb"`
+	SSHUser string `yaml:"ssh_user"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -75,9 +76,10 @@ func DefaultConfig() *Config {
 			DHCPEnd:   "192.168.100.254",
 		},
 		Defaults: DefaultsConfig{
-			CPUs:   2,
-			RAMMB:  2048,
-			DiskGB: 20,
+			CPUs:    2,
+			RAMMB:   2048,
+			DiskGB:  20,
+			SSHUser: "ubuntu",
 		},
 	}
 }
