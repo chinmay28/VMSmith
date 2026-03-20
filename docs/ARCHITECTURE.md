@@ -136,7 +136,7 @@ vmsmith/
 4. Generate a unique VM ID (`vm-<unix-nano>`)
 5. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
 6. `createCloudInitISO()` if SSH key, custom cloud-init, or extra network interfaces are present
-7. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML
+7. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
 8. `conn.DomainDefineXML()` + `dom.Create()` — register and boot
 9. Persist VM record in bbolt
 
