@@ -209,9 +209,76 @@ test.describe("Navigation", () => {
     await page.getByTestId("nav-images").click();
     await expect(page.getByTestId("image-table")).toBeVisible();
 
+    // Logs
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
     // Back to dashboard
     await page.getByTestId("nav-dashboard").click();
     await expect(page.getByTestId("stat-total")).toBeVisible();
+  });
+});
+
+// ============================================================
+// Log Viewer
+// ============================================================
+test.describe("Log Viewer", () => {
+  test("shows log table on navigation", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    await expect(page.getByTestId("log-table")).toBeVisible();
+  });
+
+  test("displays seeded log entries", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    // Mock server seeds entries with source "daemon", "api", "cli"
+    await expect(page.getByTestId("log-source-daemon")).toBeVisible();
+    await expect(page.getByTestId("log-source-api")).toBeVisible();
+  });
+
+  test("level filter hides lower-level entries", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    // Select error-only filter
+    await page.getByTestId("log-level-filter").selectOption("error");
+
+    // info entries should not be visible
+    await expect(page.getByTestId("log-level-info")).not.toBeVisible();
+  });
+
+  test("source filter shows only selected source", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    await page.getByTestId("log-source-filter").selectOption("daemon");
+
+    // api and cli entries should not be visible
+    await expect(page.getByTestId("log-source-api")).not.toBeVisible();
+    await expect(page.getByTestId("log-source-daemon")).toBeVisible();
+  });
+
+  test("pause button stops auto-refresh", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    await page.getByTestId("btn-log-pause").click();
+
+    // Button text should switch to Resume
+    await expect(page.getByTestId("btn-log-pause")).toHaveText("Resume");
+  });
+
+  test("resume button restarts auto-refresh", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+
+    await page.getByTestId("btn-log-pause").click();
+    await page.getByTestId("btn-log-pause").click();
+
+    await expect(page.getByTestId("btn-log-pause")).toHaveText("Pause");
   });
 });
 

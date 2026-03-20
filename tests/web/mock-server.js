@@ -112,6 +112,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 201, pf);
   }
   if (p === "/api/v1/images" && method === "GET") return json(res, 200, [...images.values()]);
+  if (p === "/api/v1/logs" && method === "GET") {
+    const entries = [
+      { ts: new Date().toISOString(), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },
+      { ts: new Date().toISOString(), level: "info", source: "api", msg: "GET /api/v1/vms", fields: { status_code: "200", duration_ms: "1" } },
+      { ts: new Date().toISOString(), level: "info", source: "cli", msg: "vm list", fields: {} },
+      { ts: new Date().toISOString(), level: "warn", source: "daemon", msg: "port forward restore skipped", fields: { error: "iptables not available" } },
+      { ts: new Date().toISOString(), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5" } },
+    ];
+    const level = url.searchParams.get("level") || "debug";
+    const limit = parseInt(url.searchParams.get("limit") || "200", 10);
+    const source = url.searchParams.get("source") || "";
+    const levelOrder = { debug: 0, info: 1, warn: 2, error: 3 };
+    const minLevel = levelOrder[level] ?? 0;
+    let filtered = entries.filter(e => (levelOrder[e.level] ?? 0) >= minLevel);
+    if (source) filtered = filtered.filter(e => e.source === source);
+    if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
+    return json(res, 200, { entries: filtered, total: filtered.length });
+  }
   if (p === "/api/v1/host/interfaces" && method === "GET") {
     return json(res, 200, [
       { name: "eth0", ips: ["10.21.100.101/24"], mac: "52:54:00:00:00:01", is_up: true, is_physical: true },
