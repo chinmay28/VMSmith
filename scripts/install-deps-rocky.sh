@@ -31,10 +31,10 @@ else
     echo "Go $(go version) already installed, skipping."
 fi
 
-# --- Node.js 18+ ---
-if ! command -v node &>/dev/null || ! node --version 2>/dev/null | grep -qE 'v(1[89]|[2-9][0-9])'; then
-    echo "Installing Node.js 18..."
-    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+# --- Node.js 22+ ---
+if ! command -v node &>/dev/null || ! node --version 2>/dev/null | grep -qE 'v(2[2-9]|[3-9][0-9])'; then
+    echo "Installing Node.js 22..."
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
     dnf install -y nodejs
     echo "Node.js $(node --version) installed."
 else
