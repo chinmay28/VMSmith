@@ -187,10 +187,10 @@ Three buckets in `~/.vmsmith/vmsmith.db`:
 
 ### Networking
 
-- Every VM gets `eth0` on the `vmsmith-net` libvirt NAT network (`192.168.100.0/24`)
-- Extra interfaces (`--network eth1`) attach as macvtap or bridge and become `eth1`, `eth2`, etc.
+- Every VM gets a primary interface on the `vmsmith-net` libvirt NAT network (`192.168.100.0/24`). The OS-visible name depends on the distro (`eth0` on Ubuntu, `enp1s0`/`ens3` on Rocky/RHEL)
+- Extra interfaces (`--network eth1`) attach as macvtap or bridge; their OS-visible names are also distro-dependent
 - Port forwarding uses `iptables -t nat PREROUTING DNAT` rules — stored in bbolt and restored at daemon startup
-- Cloud-init ISO (`cidata.iso`) is always generated when extra network interfaces are attached, even for DHCP — without a `network-config` entry, the OS never brings up extra interfaces
+- Cloud-init ISO (`cidata.iso`) is **always** generated with a `network-config` that matches every interface by MAC address (not by name). This is required for Rocky/RHEL guests, which rely entirely on cloud-init to bring up networking
 
 ### Frontend Build Integration
 
@@ -362,7 +362,7 @@ Key config fields:
 - **Missing frontend build:** If the web GUI shows stale content, run `make web` to rebuild the embedded assets.
 - **Permission denied on VM disk:** Storage dirs must be at `/var/lib/vmsmith/` with world-execute permission (755). Home directory paths will fail because libvirt-qemu cannot enter mode-750 home dirs.
 - **Orphaned dnsmasq:** If the daemon exits uncleanly, the next startup automatically kills the stale process via the libvirt PID file at `/run/libvirt/network/<name>.pid`.
-- **Extra network interfaces without IPs:** Cloud-init network-config is required even for DHCP interfaces. The `createCloudInitISO()` call in `lifecycle.go` handles this — do not skip it.
+- **VM gets no IP on Rocky/RHEL:** Unlike Ubuntu, RHEL-based images do not have fallback network config and rely entirely on cloud-init. The cloud-init ISO is always generated and uses `match: macaddress:` to configure every interface regardless of distro-specific naming (`eth0` vs `enp1s0`). Do not add conditions that skip ISO generation or omit `network-config`.
 - **CGO_ENABLED=0 builds fail:** The `libvirt.org/go/libvirt` package requires cgo.
 
 ---

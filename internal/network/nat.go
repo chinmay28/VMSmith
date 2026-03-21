@@ -74,6 +74,43 @@ func (m *Manager) killStaleDnsmasq() {
 	}
 }
 
+// AddDHCPHost adds a static DHCP host entry so dnsmasq always assigns ip to
+// mac. The update takes effect immediately on the live network and is
+// persisted to the network definition, so it survives daemon restarts.
+func (m *Manager) AddDHCPHost(mac, ip, name string) error {
+	net, err := m.conn.LookupNetworkByName(m.cfg.Network.Name)
+	if err != nil {
+		return fmt.Errorf("looking up network: %w", err)
+	}
+	defer net.Free()
+
+	hostXML := fmt.Sprintf(`<host mac='%s' name='%s' ip='%s'/>`, mac, name, ip)
+	return net.Update(
+		libvirt.NETWORK_UPDATE_COMMAND_ADD_LAST,
+		libvirt.NETWORK_SECTION_IP_DHCP_HOST,
+		-1, hostXML,
+		libvirt.NETWORK_UPDATE_AFFECT_LIVE|libvirt.NETWORK_UPDATE_AFFECT_CONFIG,
+	)
+}
+
+// RemoveDHCPHost removes the static DHCP host reservation for the given MAC.
+// Errors are ignored — the entry may not exist.
+func (m *Manager) RemoveDHCPHost(mac, ip string) {
+	net, err := m.conn.LookupNetworkByName(m.cfg.Network.Name)
+	if err != nil {
+		return
+	}
+	defer net.Free()
+
+	hostXML := fmt.Sprintf(`<host mac='%s' ip='%s'/>`, mac, ip)
+	net.Update( //nolint:errcheck
+		libvirt.NETWORK_UPDATE_COMMAND_DELETE,
+		libvirt.NETWORK_SECTION_IP_DHCP_HOST,
+		-1, hostXML,
+		libvirt.NETWORK_UPDATE_AFFECT_LIVE|libvirt.NETWORK_UPDATE_AFFECT_CONFIG,
+	)
+}
+
 func (m *Manager) networkXML() string {
 	return fmt.Sprintf(`<network>
   <name>%s</name>

@@ -33,6 +33,8 @@ var vmCreateCmd = &cobra.Command{
 		sshKey, _ := cmd.Flags().GetString("ssh-key")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
+		natIP, _ := cmd.Flags().GetString("nat-ip")
+		natGW, _ := cmd.Flags().GetString("nat-gw")
 
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
@@ -61,6 +63,8 @@ var vmCreateCmd = &cobra.Command{
 			SSHPubKey:     sshKey,
 			CloudInitFile: cloudInit,
 			Networks:      networks,
+			NatStaticIP:   natIP,
+			NatGateway:    natGW,
 		}
 
 		result, err := mgr.Create(context.Background(), spec)
@@ -243,6 +247,10 @@ func init() {
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")
 	vmCreateCmd.Flags().String("ssh-key", "", "SSH public key to inject")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
+	vmCreateCmd.Flags().String("nat-ip", "",
+		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
+	vmCreateCmd.Flags().String("nat-gw", "",
+		"gateway for --nat-ip (e.g. 192.168.100.1); required when --nat-ip is set")
 	vmCreateCmd.Flags().StringSlice("network", nil,
 		`attach VM to host network (repeatable)
 Format: iface[:key=val,...]
