@@ -47,8 +47,13 @@ class TestCLIVMLifecycle:
         assert vm_id.startswith("vm-"), f"Unexpected VM ID: {vm_id}"
         assert info["name"] == "e2e-cli-rocky"
 
-        # Wait for management IP
-        ip = wait_for_vm_ip(vm_id, source="cli")
+        # With static IP pre-assignment, the IP should appear immediately in the
+        # create output — no polling required.  Fall back to polling for the
+        # rare case where the DHCP range is exhausted and dynamic assignment is used.
+        if info.get("ip"):
+            ip = info["ip"]
+        else:
+            ip = wait_for_vm_ip(vm_id, source="cli")
         assert ip, "VM did not get an IP"
 
         # Verify reachability via ping

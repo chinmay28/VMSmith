@@ -6,7 +6,7 @@ against a running vmsmith daemon with actual QEMU/KVM virtual machines.
 ## Prerequisites
 
 1. **Running vmsmith daemon** on `localhost:8080` (or override with `--vmsmith-api`)
-2. **Rocky Linux qcow2 image** accessible to the daemon
+2. **Rocky Linux qcow2 image** accessible to the daemon — the file **must** have a `.qcow2` extension (e.g. `rocky9.qcow2`) so libvirt's AppArmor driver correctly follows the backing-file chain. Pass the full path with extension to `--rocky-image`.
 3. **SSH key pair** for VM access
 4. **libvirt + QEMU/KVM** configured on the host
 
@@ -136,7 +136,7 @@ VMSMITH_GUI_URL=http://192.168.1.50:8080 \
 
 ### Test 1: VM Lifecycle (CLI + API + GUI)
 - Create a VM from a Rocky qcow2 image
-- Wait for and verify a management IP on the NAT network (192.168.100.0/24)
+- Verify the management IP is shown immediately in `vmsmith vm create` output (static IP pre-assignment)
 - Verify the IP is reachable via ping
 - Verify SSH access works (paramiko with key auth)
 - Verify `vmsmith vm list` / `GET /vms` includes the VM

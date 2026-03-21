@@ -132,13 +132,16 @@ vmsmith/
 
 1. `EnsureNetwork()` — create or activate the vmsmith-net NAT network (idempotent)
 2. Validate + default `VMSpec` fields (CPUs, RAM, disk)
-3. Validate extra `NetworkAttachment` entries if present
-4. Generate a unique VM ID (`vm-<unix-nano>`)
-5. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
-6. `createCloudInitISO()` — always created; generates `meta-data`, `user-data`, and `network-config` (Netplan v2) with MAC-based interface matching so it works on any distro
-7. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
-8. `conn.DomainDefineXML()` + `dom.Create()` — register and boot
-9. Persist VM record in bbolt
+3. Validate extra `NetworkAttachment` entries if present; pre-assign MACs for each extra interface
+4. Generate a NAT interface MAC address (`natMAC`)
+5. **Static IP pre-assignment** — pick an available IP from the DHCP range and call `netMgr.AddDHCPHost(natMAC, ip, name)` so dnsmasq always gives this VM a predictable address. Any stale reservation for the same VM name is removed first via `RemoveDHCPHostByName`. The IP is embedded in the NM keyfile (`method=manual`) to eliminate DHCP race conditions on Rocky/RHEL. Falls back to dynamic assignment if the range is exhausted or the reservation fails.
+6. Generate a unique VM ID (`vm-<unix-nano>`)
+7. **Image path resolution** — if the image name is relative, it is looked up under `storage.images_dir`. If the exact path does not exist, `.qcow2` is appended (e.g. `rocky9` → `rocky9.qcow2`). Images **must** have a `.qcow2` extension so libvirt's AppArmor driver follows the backing-file chain and allows QEMU to open them.
+8. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
+9. `createCloudInitISO()` — always created; generates `meta-data`, `user-data`, and `network-config` (Netplan v2) with MAC-based interface matching so it works on any distro
+10. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
+11. `conn.DomainDefineXML()` + `dom.Create()` — register and boot; on failure, the DHCP reservation and VM directory are cleaned up
+12. Persist VM record in bbolt; launch `startIPMonitor` goroutine (120 s timeout)
 
 **VM states:** `running → stopped → deleted`
 
@@ -156,22 +159,30 @@ MAC addresses are generated in `lifecycle.go` before creating either the ISO or 
 
 **`user-data` — NM keyfile approach (`buildCloudConfig`):**
 
-The `user-data` uses `write_files` to drop a NetworkManager keyfile for the primary NAT interface, then activates it via `runcmd`. This is more reliable on Rocky/RHEL than cloud-init's Netplan/NM renderer:
+The `user-data` uses `write_files` to drop a NetworkManager keyfile for the primary NAT interface, then activates it via `runcmd`. This is more reliable on Rocky/RHEL than cloud-init's Netplan/NM renderer. When a static IP was pre-assigned, the keyfile uses `method=manual`; otherwise `method=auto` (DHCP):
 
 ```yaml
 #cloud-config
 write_files:
   - path: /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection
     permissions: '0600'
+    makedirs: true
     content: |
       [connection]
       id=vmsmith-nat
       type=ethernet
       ...
+      [ipv4]
+      method=manual          # static; or method=auto for DHCP fallback
+      addresses=192.168.100.x/24
+      gateway=192.168.100.1
 runcmd:
+  - restorecon -v /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection 2>/dev/null || true
   - nmcli connection reload
   - nmcli connection up vmsmith-nat
 ```
+
+`restorecon` sets the correct SELinux file context on Rocky/RHEL so NetworkManager can read the keyfile.
 
 **SSH user injection:**
 
@@ -207,6 +218,8 @@ Every VM gets a primary interface on `vmsmith-net` (`192.168.100.0/24`). The OS 
 - VMs get DHCP addresses in the configured range (default `.10–.254`)
 - Outbound internet access via libvirt's NAT/masquerade
 - Host can always reach VMs directly on the NAT subnet
+
+**Static IP pre-assignment:** At VM creation time, `LibvirtManager.Create()` picks the first unused address in the DHCP range and registers a static DHCP host entry (`netMgr.AddDHCPHost`) before generating the cloud-init ISO. The IP is written directly into the NM keyfile as `method=manual`, so the VM interface comes up on first boot without any DHCP exchange. Any stale reservation left by a previous failed create with the same VM name is removed first via `RemoveDHCPHostByName`. The IP is shown immediately in `vmsmith vm create` output — no polling needed. On `dom.Create()` failure, the reservation is removed automatically.
 
 **Restart resilience:** When the daemon is killed without clean shutdown, libvirtd marks the network inactive but leaves the dnsmasq process running (orphaned). On the next `EnsureNetwork()` call, VM Smith reads the libvirt PID file at `/run/libvirt/network/<name>.pid` and sends SIGTERM to the orphan before calling `net.Create()`.
 
