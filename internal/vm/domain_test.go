@@ -489,9 +489,9 @@ func TestDetectQEMUBinary(t *testing.T) {
 	}
 	// Must be one of the known candidates or the default fallback.
 	known := map[string]bool{
-		"/usr/libexec/qemu-kvm":        true,
-		"/usr/bin/qemu-system-x86_64":  true,
-		"/usr/bin/qemu-kvm":            true,
+		"/usr/libexec/qemu-kvm":       true,
+		"/usr/bin/qemu-system-x86_64": true,
+		"/usr/bin/qemu-kvm":           true,
 	}
 	if !known[path] {
 		t.Errorf("detectQEMUBinary returned unexpected path %q", path)

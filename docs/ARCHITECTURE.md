@@ -135,7 +135,7 @@ vmsmith/
 3. Validate extra `NetworkAttachment` entries if present
 4. Generate a unique VM ID (`vm-<unix-nano>`)
 5. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
-6. `createCloudInitISO()` if SSH key, custom cloud-init, or extra network interfaces are present
+6. `createCloudInitISO()` — always created; generates `meta-data`, `user-data`, and `network-config` (Netplan v2) with MAC-based interface matching so it works on any distro
 7. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
 8. `conn.DomainDefineXML()` + `dom.Create()` — register and boot
 9. Persist VM record in bbolt
@@ -144,12 +144,13 @@ vmsmith/
 
 **Cloud-init (NoCloud datasource):**
 
-A cloud-init ISO (`cidata.iso`) is attached as a CD-ROM when:
-- An SSH public key is provided
-- A custom cloud-init file is provided
-- **Any extra network interfaces are attached** — even DHCP ones, because without a `network-config` entry cloud-init leaves extra interfaces unconfigured and they receive no IP address
+A cloud-init ISO (`cidata.iso`) is **always** attached as a CD-ROM. It contains `meta-data`, `user-data`, and `network-config` (Netplan v2 format).
 
-The ISO contains `meta-data`, `user-data`, and (when needed) `network-config` (Netplan v2 format).
+The `network-config` uses `match: macaddress:` for every interface rather than hardcoded names (`eth0`, `eth1`, …). This is required because:
+- Rocky Linux / RHEL use predictable interface names (`enp1s0`, `ens3`, …) and rely entirely on cloud-init to configure networking — without the ISO the primary NAT interface never comes up and the VM gets no IP address
+- Ubuntu cloud images have fallback network config so they work either way, but MAC-based matching is correct for both
+
+MAC addresses are generated in `lifecycle.go` before creating either the ISO or the domain XML, so the same value appears in both the libvirt `<interface>` definition and the cloud-init `network-config`.
 
 ---
 
@@ -157,7 +158,7 @@ The ISO contains `meta-data`, `user-data`, and (when needed) `network-config` (N
 
 #### Default NAT Network
 
-Every VM gets **eth0** on `vmsmith-net` (`192.168.100.0/24`):
+Every VM gets a primary interface on `vmsmith-net` (`192.168.100.0/24`). The OS may name it `eth0` (Ubuntu) or `enp1s0` / `ens3` (Rocky Linux / RHEL) — cloud-init configures it via MAC address matching regardless of name:
 
 - Created automatically by `network.Manager.EnsureNetwork()` on first daemon start or VM create
 - Implemented as a libvirt NAT network with built-in dnsmasq DHCP
@@ -182,14 +183,14 @@ ssh -p 2222 hostip  ──────►  iptables DNAT ──────►  
 
 #### Multi-Network (macvtap / bridge)
 
-Additional interfaces are specified as `--network <iface[:opts]>` (CLI) or via the `networks` array in the API/GUI. They become **eth1, eth2, …** inside the VM.
+Additional interfaces are specified as `--network <iface[:opts]>` (CLI) or via the `networks` array in the API/GUI. Their OS-visible names depend on the distro (`eth1`, `enp2s0`, etc.) — cloud-init matches them by MAC address.
 
 | Mode     | Libvirt XML                             | When to use                                     |
 |----------|-----------------------------------------|-------------------------------------------------|
 | macvtap  | `<interface type='direct' mode='bridge'>` | VM needs its own MAC/IP on the physical network; no host bridge config needed |
 | bridge   | `<interface type='bridge'>`             | Full host↔VM communication on the same subnet; requires pre-configured Linux bridge |
 
-**Cloud-init network-config** is always written when extra interfaces are present, configuring each as DHCP or static IP. Without it the OS never brings up extra interfaces.
+**Cloud-init network-config** is always written for every interface (NAT and extra), matching each by MAC address and configuring DHCP or static IP as requested. Without it the OS never brings up extra interfaces.
 
 **CLI syntax:**
 
@@ -209,12 +210,12 @@ vmsmith vm create db01 --image ubuntu \
   --network eth1:mode=bridge,bridge=br-data
 ```
 
-**Network layout inside VM:**
+**Network layout inside VM** (interface names are distro-dependent; cloud-init matches by MAC):
 
 ```
-eth0  192.168.100.x   ← vmsmith-net NAT (always, DHCP)
-eth1  <host-net IP>   ← first --network attachment
-eth2  <host-net IP>   ← second --network attachment
+<NAT iface>   192.168.100.x   ← vmsmith-net NAT (always, DHCP)  e.g. eth0 / enp1s0
+<extra iface> <host-net IP>   ← first --network attachment       e.g. eth1 / enp2s0
+<extra iface> <host-net IP>   ← second --network attachment      e.g. eth2 / enp3s0
 ...
 ```
 
