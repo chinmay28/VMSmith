@@ -130,6 +130,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make fmt` | gofmt |
 | `make install` | Build + install to `/usr/local/bin/vmsmith` |
 | `make clean` | Remove `./bin/`, `internal/web/dist/`, `web/node_modules/` |
+| `make purge` | Remove all VMSmith runtime resources (VMs, network, images, DB, log) — requires root; supports `PURGE_ARGS="--dry-run"` |
 | `make dist` | Cross-compile linux/amd64 release binary |
 | `make dev-api` | Build Go backend and start daemon on :8080 |
 | `make dev-web` | Start Vite dev server on :3000 (proxies /api → :8080) |
