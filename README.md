@@ -470,7 +470,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
 - Linux x86_64 (Ubuntu 22.04+ or Rocky Linux 8+)
 - QEMU/KVM with hardware virtualization (`/dev/kvm` must exist)
 - libvirt (`libvirtd` running)
-- Go 1.22+ and Node.js 18+ (for building from source)
+- Go 1.22+ and Node.js 22+ (for building from source)
 
 ## License
 
