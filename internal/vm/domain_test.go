@@ -81,13 +81,17 @@ func TestDomainParamsFromSpec_NATOnly(t *testing.T) {
 		RAMMB: 2048,
 	}
 
-	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	natMAC := "52:54:00:11:22:33"
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", natMAC)
 
 	if len(params.Interfaces) != 1 {
 		t.Fatalf("expected 1 interface (NAT), got %d", len(params.Interfaces))
 	}
 	if !strings.Contains(params.Interfaces[0].XML, "vmsmith-net") {
 		t.Error("first interface should be NAT network")
+	}
+	if !strings.Contains(params.Interfaces[0].XML, natMAC) {
+		t.Error("first interface should include the NAT MAC address")
 	}
 }
 
@@ -103,7 +107,7 @@ func TestDomainParamsFromSpec_MultiNetwork(t *testing.T) {
 		},
 	}
 
-	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 
 	// NAT + 3 extra = 4
 	if len(params.Interfaces) != 4 {
@@ -143,7 +147,7 @@ func TestDomainParamsFromSpec_BridgeDefaultName(t *testing.T) {
 		},
 	}
 
-	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 
 	// Bridge should default to "br-eth3" when Bridge field is empty
 	if !strings.Contains(params.Interfaces[1].XML, "br-eth3") {
@@ -159,7 +163,7 @@ func TestDomainParamsFromSpec_SkipsEmptyInterface(t *testing.T) {
 		},
 	}
 
-	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 
 	// Only NAT interface (the empty macvtap should be skipped)
 	if len(params.Interfaces) != 1 {
@@ -270,7 +274,7 @@ func TestDomainParamsFromSpec_NATAttachment(t *testing.T) {
 		},
 	}
 
-	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/d.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 
 	// Should have 2 interfaces: default NAT + extra NAT attachment
 	if len(params.Interfaces) != 2 {
@@ -310,21 +314,20 @@ func TestGenerateDomainXML_MultipleInterfaces(t *testing.T) {
 // --- Cloud-init network config generation tests ---
 
 func TestGenerateNetworkConfig_StaticIP(t *testing.T) {
+	natMAC := "52:54:00:aa:bb:cc"
 	networks := []types.NetworkAttachment{
-		{StaticIP: "192.168.1.100/24", Gateway: "192.168.1.1"},
-		{StaticIP: "192.168.2.100/24"},
+		{StaticIP: "192.168.1.100/24", Gateway: "192.168.1.1", MacAddress: "52:54:00:11:22:01"},
+		{StaticIP: "192.168.2.100/24", MacAddress: "52:54:00:11:22:02"},
 	}
 
-	cfg := generateNetworkConfig(networks)
+	cfg := generateNetworkConfig(networks, natMAC)
 
 	checks := []string{
 		"version: 2",
-		"eth0:",
-		"dhcp4: true",
-		"eth1:",
+		natMAC,        // NAT interface matched by MAC
+		"dhcp4: true", // NAT is DHCP
 		"192.168.1.100/24",
 		"via: 192.168.1.1",
-		"eth2:",
 		"192.168.2.100/24",
 	}
 
@@ -333,49 +336,56 @@ func TestGenerateNetworkConfig_StaticIP(t *testing.T) {
 			t.Errorf("expected %q in network config:\n%s", needle, cfg)
 		}
 	}
-
-	// eth2 has no gateway, should not have routes
-	eth2Section := cfg[strings.Index(cfg, "eth2:"):]
-	if strings.Contains(eth2Section, "routes:") && !strings.Contains(eth2Section, "eth1") {
-		// More precise check: eth2 section specifically should not have routes
-	}
 }
 
 func TestGenerateNetworkConfig_DHCP(t *testing.T) {
+	natMAC := "52:54:00:aa:bb:cc"
 	networks := []types.NetworkAttachment{
-		{}, // No static IP → DHCP
+		{MacAddress: "52:54:00:11:22:01"}, // No static IP → DHCP
 	}
 
-	cfg := generateNetworkConfig(networks)
+	cfg := generateNetworkConfig(networks, natMAC)
 
-	// eth1 should be DHCP
-	if !strings.Contains(cfg, "eth1:") {
-		t.Error("expected eth1 in config")
+	// Extra interface should be DHCP and matched by MAC
+	if !strings.Contains(cfg, "52:54:00:11:22:01") {
+		t.Error("extra interface MAC should be in config")
 	}
-
-	lines := strings.Split(cfg, "\n")
-	for i, line := range lines {
-		if strings.Contains(line, "eth1:") && i+1 < len(lines) {
-			if !strings.Contains(lines[i+1], "dhcp4: true") {
-				t.Error("eth1 should use DHCP when no static IP specified")
-			}
-		}
+	if !strings.Contains(cfg, "dhcp4: true") {
+		t.Error("extra interface should use DHCP when no static IP specified")
 	}
 }
 
 func TestGenerateNetworkConfig_RouteMetric(t *testing.T) {
+	natMAC := "52:54:00:aa:bb:cc"
 	networks := []types.NetworkAttachment{
-		{StaticIP: "10.0.1.100/24", Gateway: "10.0.1.1"},
-		{StaticIP: "10.0.2.100/24", Gateway: "10.0.2.1"},
+		{StaticIP: "10.0.1.100/24", Gateway: "10.0.1.1", MacAddress: "52:54:00:11:22:01"},
+		{StaticIP: "10.0.2.100/24", Gateway: "10.0.2.1", MacAddress: "52:54:00:11:22:02"},
 	}
 
-	cfg := generateNetworkConfig(networks)
+	cfg := generateNetworkConfig(networks, natMAC)
 
 	if !strings.Contains(cfg, "metric: 200") {
 		t.Error("first network should have metric 200")
 	}
 	if !strings.Contains(cfg, "metric: 201") {
 		t.Error("second network should have metric 201")
+	}
+}
+
+func TestGenerateNetworkConfig_NATOnlyNoExtraNetworks(t *testing.T) {
+	natMAC := "52:54:00:aa:bb:cc"
+	cfg := generateNetworkConfig(nil, natMAC)
+
+	// Must include NAT interface matched by MAC
+	if !strings.Contains(cfg, natMAC) {
+		t.Errorf("expected NAT MAC %q in config:\n%s", natMAC, cfg)
+	}
+	if !strings.Contains(cfg, "dhcp4: true") {
+		t.Errorf("NAT interface should be DHCP:\n%s", cfg)
+	}
+	// Must NOT contain eth0 (no hardcoded names)
+	if strings.Contains(cfg, "eth0:") {
+		t.Errorf("config should not hardcode eth0:\n%s", cfg)
 	}
 }
 
@@ -463,7 +473,7 @@ func TestMachineTypeFromCaps(t *testing.T) {
 
 func TestDomainParamsFromSpec_DefaultMachine(t *testing.T) {
 	spec := types.VMSpec{Name: "test", CPUs: 1, RAMMB: 1024}
-	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 	if params.Machine != "pc-q35-6.2" {
 		t.Errorf("default Machine = %q, want %q", params.Machine, "pc-q35-6.2")
 	}
@@ -490,7 +500,7 @@ func TestDetectQEMUBinary(t *testing.T) {
 
 func TestDomainParamsFromSpec_EmulatorDetected(t *testing.T) {
 	spec := types.VMSpec{Name: "test", CPUs: 1, RAMMB: 1024}
-	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
 	if params.Emulator == "" {
 		t.Error("DomainParamsFromSpec should populate Emulator")
 	}

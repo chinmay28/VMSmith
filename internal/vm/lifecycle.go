@@ -73,13 +73,23 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		if err := ValidateNetworkAttachments(spec.Networks); err != nil {
 			return nil, err
 		}
-		// Default empty mode to macvtap
+		// Default empty mode to macvtap; pre-assign MACs so the same value
+		// ends up in both the libvirt XML and the cloud-init network-config.
 		for i := range spec.Networks {
 			if spec.Networks[i].Mode == "" {
 				spec.Networks[i].Mode = types.NetworkModeMacvtap
 			}
+			if spec.Networks[i].MacAddress == "" {
+				spec.Networks[i].MacAddress = generateMAC()
+			}
 		}
 	}
+
+	// Pre-generate the NAT interface MAC so it can be used consistently in
+	// both the libvirt domain XML and the cloud-init network-config.  Without
+	// a deterministic MAC we cannot match the interface by address, and
+	// Rocky/RHEL guests use predictable names (enp1s0, ens3…) not eth0.
+	natMAC := generateMAC()
 
 	// Generate a unique ID
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
@@ -106,12 +116,12 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// Ubuntu cloud images have fallback network config so they work either way,
 	// but generating the ISO unconditionally is correct for all distros.
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
-	if err := createCloudInitISO(cloudInitISO, spec); err != nil {
+	if err := createCloudInitISO(cloudInitISO, spec, natMAC); err != nil {
 		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
 	}
 
 	// Generate and define domain XML
-	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name)
+	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = detectMachineType(m.conn)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
@@ -380,7 +390,7 @@ func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 	return nil
 }
 
-func createCloudInitISO(isoPath string, spec types.VMSpec) error {
+func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error {
 	tmpDir, err := os.MkdirTemp("", "vmsmith-ci-")
 	if err != nil {
 		return err
@@ -409,10 +419,11 @@ func createCloudInitISO(isoPath string, spec types.VMSpec) error {
 		return err
 	}
 
-	// Always write network-config so cloud-init configures eth0 (NAT/DHCP) on
-	// every distro, including RHEL-based images like Rocky Linux that do not
-	// bring up interfaces without explicit cloud-init direction.
-	netCfg := generateNetworkConfig(spec.Networks)
+	// Always write network-config so cloud-init configures the NAT interface
+	// on every distro.  We match by MAC address rather than interface name so
+	// the config works regardless of whether the guest uses traditional names
+	// (eth0) or predictable names (enp1s0, ens3, …) as Rocky/RHEL do.
+	netCfg := generateNetworkConfig(spec.Networks, natMAC)
 	if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
 		return err
 	}
@@ -439,19 +450,24 @@ func createCloudInitISO(isoPath string, spec types.VMSpec) error {
 }
 
 // generateNetworkConfig produces cloud-init network-config v2 YAML.
-// eth0 is always DHCP (the NAT interface). Extra interfaces get their
-// configured static IP or DHCP as specified.
-func generateNetworkConfig(networks []types.NetworkAttachment) string {
+// Interfaces are matched by MAC address so the config works on both
+// traditional (eth0) and predictable-name (enp1s0, ens3, …) guests.
+// natMAC is the MAC of the primary NAT interface.  Extra interfaces must
+// have their MAC pre-populated in types.NetworkAttachment.MacAddress.
+func generateNetworkConfig(networks []types.NetworkAttachment, natMAC string) string {
 	var sb strings.Builder
 	sb.WriteString("version: 2\nethernets:\n")
 
-	// eth0: NAT interface, always DHCP
-	sb.WriteString("  eth0:\n    dhcp4: true\n")
+	// NAT interface: match by MAC, always DHCP
+	sb.WriteString("  nat0:\n")
+	sb.WriteString(fmt.Sprintf("    match:\n      macaddress: \"%s\"\n", natMAC))
+	sb.WriteString("    dhcp4: true\n")
 
-	// eth1..ethN: extra attachments
+	// Extra attachments: match by MAC, static or DHCP as configured
 	for i, net := range networks {
-		ifName := fmt.Sprintf("eth%d", i+1)
-		sb.WriteString(fmt.Sprintf("  %s:\n", ifName))
+		id := fmt.Sprintf("eth%d", i+1)
+		sb.WriteString(fmt.Sprintf("  %s:\n", id))
+		sb.WriteString(fmt.Sprintf("    match:\n      macaddress: \"%s\"\n", net.MacAddress))
 
 		if net.StaticIP != "" {
 			sb.WriteString(fmt.Sprintf("    addresses:\n      - %s\n", net.StaticIP))
