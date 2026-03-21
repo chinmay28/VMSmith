@@ -4,7 +4,7 @@ BUILD_DIR := ./bin
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
-.PHONY: build install clean test lint fmt deps web web-install test-web-deps \
+.PHONY: build install clean purge test lint fmt deps web web-install test-web-deps \
        test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps
 
 # --- Full build (frontend + backend) ---
@@ -30,6 +30,11 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf internal/web/dist
 	rm -rf $(WEB_DIR)/node_modules
+
+# Remove all VMSmith-managed runtime resources (VMs, network, images, DB, logs).
+# Requires root (sudo). Use --dry-run to preview first.
+purge:
+	sudo bash scripts/cleanup.sh $(PURGE_ARGS)
 
 # --- Frontend ---
 web-install:
