@@ -201,6 +201,19 @@ users:
 
 When no `DefaultUser` is set, the key is added via top-level `ssh_authorized_keys:` (which goes to the image's built-in default user).
 
+**Supported Rocky Linux image variants:**
+
+| Variant | Works? | Notes |
+|---|---|---|
+| `Rocky-9-GenericCloud-Base` | **Yes** | Designed for VMs/clouds; includes cloud-init and NetworkManager |
+| `Rocky-9-OCP-Base` | **No** | OpenShift nodes; uses Ignition (not cloud-init) — NM keyfile is ignored, no network |
+
+Download the correct image:
+```bash
+wget -O /var/lib/vmsmith/images/rocky9.qcow2 \
+  https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
+```
+
 **`network-config` — Netplan v2 (belt-and-suspenders):**
 
 A Netplan v2 `network-config` is also written. It uses `match: macaddress:` for every interface (primary NAT + any extra attachments). Ubuntu/Debian apply this directly; Rocky/RHEL ignore it in favour of the NM keyfile above.

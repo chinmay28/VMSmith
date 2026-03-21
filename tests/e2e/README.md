@@ -6,7 +6,12 @@ against a running vmsmith daemon with actual QEMU/KVM virtual machines.
 ## Prerequisites
 
 1. **Running vmsmith daemon** on `localhost:8080` (or override with `--vmsmith-api`)
-2. **Rocky Linux qcow2 image** accessible to the daemon — the file **must** have a `.qcow2` extension (e.g. `rocky9.qcow2`) so libvirt's AppArmor driver correctly follows the backing-file chain. Pass the full path with extension to `--rocky-image`.
+2. **Rocky Linux GenericCloud qcow2 image** accessible to the daemon — use the **GenericCloud** variant (not OCP-Base, which uses Ignition instead of cloud-init and won't work). The file must have a `.qcow2` extension. Download:
+   ```bash
+   wget -O /var/lib/vmsmith/images/rocky9.qcow2 \
+     https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
+   ```
+   Then pass `--rocky-image /var/lib/vmsmith/images/rocky9.qcow2` (or just `--image rocky9` to vmsmith).
 3. **SSH key pair** for VM access
 4. **libvirt + QEMU/KVM** configured on the host
 

@@ -367,6 +367,11 @@ Key config fields:
 - **Orphaned dnsmasq:** If the daemon exits uncleanly, the next startup automatically kills the stale process via the libvirt PID file at `/run/libvirt/network/<name>.pid`.
 - **VM gets no IP on Rocky/RHEL:** The primary mechanism is the NM keyfile written via `write_files` in `user-data` (`buildCloudConfig`). The Netplan v2 `network-config` is ignored on Rocky/RHEL but Ubuntu/Debian use it. Do not add conditions that skip ISO generation or omit the NM keyfile — if the ISO is not attached the primary NAT interface never comes up on RHEL-based images.
 - **Image files must have a `.qcow2` extension:** libvirt's AppArmor driver scans backing-file chains only for files whose names end in `.qcow2`. An extension-less base image (e.g. `rocky9` instead of `rocky9.qcow2`) causes QEMU to fail with "Permission denied" at boot. `lifecycle.go` tries the name as-is first; if not found, appends `.qcow2` automatically. Always store images as `<name>.qcow2` in the images directory.
+- **Use the GenericCloud image, not the OCP image:** Rocky Linux offers several image variants. The `Rocky-9-OCP-Base` image is designed for OpenShift nodes and uses **Ignition** for first-boot configuration — cloud-init is ignored, so the NM keyfile is never written and the VM gets no network. Always use `Rocky-9-GenericCloud-Base` which includes cloud-init and works with vmsmith. Download command:
+  ```bash
+  wget -O /var/lib/vmsmith/images/rocky9.qcow2 \
+    https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
+  ```
 - **Stale DHCP reservations:** If VM creation fails after a DHCP reservation is registered, the reservation is automatically cleaned up. If a previous failed create left a reservation with the same VM name, `RemoveDHCPHostByName` removes it before adding the new one (both MAC and name are unique keys in libvirt DHCP host entries).
 - **SSH key injection in CLI:** Use `"$(cat ~/.ssh/id_ed25519.pub)"` — not `"$(~/.ssh/id_ed25519.pub)"` (which executes the file as a shell command).
 - **CGO_ENABLED=0 builds fail:** The `libvirt.org/go/libvirt` package requires cgo.
