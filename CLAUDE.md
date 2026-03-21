@@ -192,6 +192,7 @@ Three buckets in `~/.vmsmith/vmsmith.db`:
 - Extra interfaces (`--network eth1`) attach as macvtap or bridge; their OS-visible names are also distro-dependent
 - Port forwarding uses `iptables -t nat PREROUTING DNAT` rules — stored in bbolt and restored at daemon startup
 - Cloud-init ISO (`cidata.iso`) is **always** generated. `user-data` uses `buildCloudConfig()` which writes a NetworkManager keyfile for the primary NAT interface via `write_files` + `runcmd` — this is the primary networking mechanism on Rocky/RHEL. A Netplan v2 `network-config` is also included for Ubuntu/Debian (belt-and-suspenders). Both files match interfaces by MAC address, not by distro-specific name
+- **Static IP pre-assignment:** Before generating the cloud-init ISO, `Create()` picks an available IP from the DHCP range and calls `netMgr.AddDHCPHost(mac, ip, name)` to register a DHCP host reservation. The resulting static IP is embedded in the NM keyfile (`method=manual`) so the interface comes up deterministically on first boot — no DHCP race. The IP is shown in `vmsmith vm create` output immediately. If DHCP range is exhausted or the reservation fails, it falls back to dynamic assignment. Any stale reservation left by a previous failed create with the same VM name is removed via `RemoveDHCPHostByName` before adding the new one. If `dom.Create()` fails, the reservation is also cleaned up.
 
 ### Frontend Build Integration
 
@@ -365,6 +366,9 @@ Key config fields:
 - **Permission denied on VM disk:** Storage dirs must be at `/var/lib/vmsmith/` with world-execute permission (755). Home directory paths will fail because libvirt-qemu cannot enter mode-750 home dirs.
 - **Orphaned dnsmasq:** If the daemon exits uncleanly, the next startup automatically kills the stale process via the libvirt PID file at `/run/libvirt/network/<name>.pid`.
 - **VM gets no IP on Rocky/RHEL:** The primary mechanism is the NM keyfile written via `write_files` in `user-data` (`buildCloudConfig`). The Netplan v2 `network-config` is ignored on Rocky/RHEL but Ubuntu/Debian use it. Do not add conditions that skip ISO generation or omit the NM keyfile — if the ISO is not attached the primary NAT interface never comes up on RHEL-based images.
+- **Image files must have a `.qcow2` extension:** libvirt's AppArmor driver scans backing-file chains only for files whose names end in `.qcow2`. An extension-less base image (e.g. `rocky9` instead of `rocky9.qcow2`) causes QEMU to fail with "Permission denied" at boot. `lifecycle.go` tries the name as-is first; if not found, appends `.qcow2` automatically. Always store images as `<name>.qcow2` in the images directory.
+- **Stale DHCP reservations:** If VM creation fails after a DHCP reservation is registered, the reservation is automatically cleaned up. If a previous failed create left a reservation with the same VM name, `RemoveDHCPHostByName` removes it before adding the new one (both MAC and name are unique keys in libvirt DHCP host entries).
+- **SSH key injection in CLI:** Use `"$(cat ~/.ssh/id_ed25519.pub)"` — not `"$(~/.ssh/id_ed25519.pub)"` (which executes the file as a shell command).
 - **CGO_ENABLED=0 builds fail:** The `libvirt.org/go/libvirt` package requires cgo.
 
 ---
