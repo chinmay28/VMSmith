@@ -100,16 +100,14 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, fmt.Errorf("creating overlay disk: %w", err)
 	}
 
-	// Create cloud-init ISO if SSH key, cloud-init file, or extra network interfaces
-	// are present. Extra interfaces need a network-config entry so cloud-init
-	// brings them up (even DHCP ones — without it the OS never configures them).
-	var cloudInitISO string
-	needsCloudInit := spec.SSHPubKey != "" || spec.CloudInitFile != "" || len(spec.Networks) > 0
-	if needsCloudInit {
-		cloudInitISO = filepath.Join(vmDir, "cidata.iso")
-		if err := createCloudInitISO(cloudInitISO, spec); err != nil {
-			return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
-		}
+	// Always create a cloud-init ISO. Rocky Linux (and other RHEL-based images)
+	// rely entirely on cloud-init to bring up eth0 with DHCP — without it the
+	// primary NAT interface is never configured and the VM gets no IP address.
+	// Ubuntu cloud images have fallback network config so they work either way,
+	// but generating the ISO unconditionally is correct for all distros.
+	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
+	if err := createCloudInitISO(cloudInitISO, spec); err != nil {
+		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
 	}
 
 	// Generate and define domain XML
@@ -411,14 +409,12 @@ func createCloudInitISO(isoPath string, spec types.VMSpec) error {
 		return err
 	}
 
-	// Write network-config for any extra interfaces (DHCP or static).
-	// Without this entry cloud-init leaves extra interfaces unconfigured.
-	// Interface naming: eth0 = NAT (DHCP), eth1..ethN = extra attachments in order.
-	if len(spec.Networks) > 0 {
-		netCfg := generateNetworkConfig(spec.Networks)
-		if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
-			return err
-		}
+	// Always write network-config so cloud-init configures eth0 (NAT/DHCP) on
+	// every distro, including RHEL-based images like Rocky Linux that do not
+	// bring up interfaces without explicit cloud-init direction.
+	netCfg := generateNetworkConfig(spec.Networks)
+	if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
+		return err
 	}
 
 	// Generate ISO
