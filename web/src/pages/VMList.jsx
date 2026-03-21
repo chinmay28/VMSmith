@@ -133,7 +133,7 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '', nat_static_ip: '', nat_gateway: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const createMut = useMutation(vms.create);
@@ -156,6 +156,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
 
   const handleSubmit = async () => {
     const spec = { ...form };
+    if (!spec.nat_static_ip) delete spec.nat_static_ip;
+    if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -178,6 +180,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const noImages = imageList && imageList.length === 0;
   // Physical interfaces only, for macvtap mode
   const physIfaces = (hostIfaces || []).filter(i => i.is_physical && i.is_up);
+  // vmsmith NAT bridge interface (informational)
+  const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
 
   return (
     <Modal open={open} onClose={onClose} title="Create Machine" wide>
@@ -231,6 +235,43 @@ function CreateVMModal({ open, onClose, onCreated }) {
           />
         </div>
 
+        {/* Primary NAT network */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">Primary Network (NAT)</label>
+            {natIface && (
+              <span className="text-xs font-mono text-steel-500">
+                {natIface.name}{natIface.ips?.length ? ` · ${natIface.ips[0]}` : ''}{natIface.is_up ? '' : ' · down'}
+              </span>
+            )}
+          </div>
+          <div className="p-2 rounded border border-steel-700/40 bg-steel-900/40">
+            <p className="text-xs text-steel-500 mb-2">
+              vmsmith-net (192.168.100.0/24) — leave blank for DHCP, or set a static IP.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="label text-[10px]">Static IP (optional)</label>
+                <input
+                  className="input py-1 text-xs font-mono"
+                  placeholder="192.168.100.50/24"
+                  value={form.nat_static_ip}
+                  onChange={update('nat_static_ip')}
+                />
+              </div>
+              <div>
+                <label className="label text-[10px]">Gateway (optional)</label>
+                <input
+                  className="input py-1 text-xs font-mono"
+                  placeholder="192.168.100.1"
+                  value={form.nat_gateway}
+                  onChange={update('nat_gateway')}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Extra network attachments */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -241,7 +282,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
           </div>
           {networks.length === 0 ? (
             <p className="text-xs text-steel-500 px-1">
-              Only the default NAT network (192.168.100.0/24, eth0) will be attached.
+              No extra interfaces. The NAT network above is always attached.
             </p>
           ) : (
             <div className="space-y-2">

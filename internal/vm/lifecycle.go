@@ -111,10 +111,12 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	}
 
 	// Always create a cloud-init ISO. Rocky Linux (and other RHEL-based images)
-	// rely entirely on cloud-init to bring up eth0 with DHCP — without it the
+	// rely entirely on cloud-init to bring up networking — without it the
 	// primary NAT interface is never configured and the VM gets no IP address.
 	// Ubuntu cloud images have fallback network config so they work either way,
 	// but generating the ISO unconditionally is correct for all distros.
+	// If NatStaticIP is set the NAT interface is configured with a static
+	// address instead of DHCP, which avoids Rocky/RHEL DHCP timing issues.
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
 	if err := createCloudInitISO(cloudInitISO, spec, natMAC); err != nil {
 		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
@@ -423,7 +425,7 @@ func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error 
 	// on every distro.  We match by MAC address rather than interface name so
 	// the config works regardless of whether the guest uses traditional names
 	// (eth0) or predictable names (enp1s0, ens3, …) as Rocky/RHEL do.
-	netCfg := generateNetworkConfig(spec.Networks, natMAC)
+	netCfg := generateNetworkConfig(spec.Networks, natMAC, spec.NatStaticIP, spec.NatGateway)
 	if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
 		return err
 	}
@@ -454,14 +456,24 @@ func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error 
 // traditional (eth0) and predictable-name (enp1s0, ens3, …) guests.
 // natMAC is the MAC of the primary NAT interface.  Extra interfaces must
 // have their MAC pre-populated in types.NetworkAttachment.MacAddress.
-func generateNetworkConfig(networks []types.NetworkAttachment, natMAC string) string {
+// natStaticIP (CIDR, e.g. "192.168.100.50/24") and natGateway are optional;
+// when set the NAT interface gets a static address instead of DHCP.
+func generateNetworkConfig(networks []types.NetworkAttachment, natMAC, natStaticIP, natGateway string) string {
 	var sb strings.Builder
 	sb.WriteString("version: 2\nethernets:\n")
 
-	// NAT interface: match by MAC, always DHCP
+	// NAT interface: match by MAC, static or DHCP as configured.
 	sb.WriteString("  nat0:\n")
 	sb.WriteString(fmt.Sprintf("    match:\n      macaddress: \"%s\"\n", natMAC))
-	sb.WriteString("    dhcp4: true\n")
+	if natStaticIP != "" {
+		sb.WriteString(fmt.Sprintf("    addresses:\n      - %s\n", natStaticIP))
+		if natGateway != "" {
+			sb.WriteString(fmt.Sprintf("    routes:\n      - to: 0.0.0.0/0\n        via: %s\n        metric: 100\n", natGateway))
+		}
+		sb.WriteString("    dhcp4: false\n")
+	} else {
+		sb.WriteString("    dhcp4: true\n")
+	}
 
 	// Extra attachments: match by MAC, static or DHCP as configured
 	for i, net := range networks {

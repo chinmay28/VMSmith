@@ -27,6 +27,14 @@ type VMSpec struct {
 	// The vmsmith NAT network is always attached as the first interface.
 	// These are extra interfaces for reaching private/data networks on the host.
 	Networks []NetworkAttachment `json:"networks,omitempty" yaml:"networks,omitempty"`
+
+	// NatStaticIP optionally sets a static IP for the primary NAT interface
+	// in CIDR notation (e.g. "192.168.100.50/24"). Leave empty for DHCP.
+	NatStaticIP string `json:"nat_static_ip,omitempty" yaml:"nat_static_ip,omitempty"`
+
+	// NatGateway is the gateway for NatStaticIP (e.g. "192.168.100.1").
+	// Only used when NatStaticIP is set.
+	NatGateway string `json:"nat_gateway,omitempty" yaml:"nat_gateway,omitempty"`
 }
 
 // VM represents a virtual machine and its current state.
