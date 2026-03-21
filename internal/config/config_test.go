@@ -27,6 +27,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Defaults.DiskGB != 20 {
 		t.Errorf("Defaults.DiskGB = %d, want 20", cfg.Defaults.DiskGB)
 	}
+	if cfg.Defaults.SSHUser != "ubuntu" {
+		t.Errorf("Defaults.SSHUser = %q, want ubuntu", cfg.Defaults.SSHUser)
+	}
 	if cfg.Network.Name != "vmsmith-net" {
 		t.Errorf("Network.Name = %q, want vmsmith-net", cfg.Network.Name)
 	}

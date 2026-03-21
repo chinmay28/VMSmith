@@ -144,13 +144,55 @@ vmsmith/
 
 **Cloud-init (NoCloud datasource):**
 
-A cloud-init ISO (`cidata.iso`) is **always** attached as a CD-ROM. It contains `meta-data`, `user-data`, and `network-config` (Netplan v2 format).
+A cloud-init ISO (`cidata.iso`) is **always** attached as a CD-ROM. It contains three files:
 
-The `network-config` uses `match: macaddress:` for every interface rather than hardcoded names (`eth0`, `eth1`, …). This is required because:
-- Rocky Linux / RHEL use predictable interface names (`enp1s0`, `ens3`, …) and rely entirely on cloud-init to configure networking — without the ISO the primary NAT interface never comes up and the VM gets no IP address
-- Ubuntu cloud images have fallback network config so they work either way, but MAC-based matching is correct for both
+| File | Purpose |
+|------|---------|
+| `meta-data` | Instance ID and local hostname |
+| `user-data` | SSH keys, user creation, NM keyfile for primary NAT interface |
+| `network-config` | Netplan v2 belt-and-suspenders config for Ubuntu/Debian |
 
-MAC addresses are generated in `lifecycle.go` before creating either the ISO or the domain XML, so the same value appears in both the libvirt `<interface>` definition and the cloud-init `network-config`.
+MAC addresses are generated in `lifecycle.go` before creating either the ISO or the domain XML, so the same value appears in both the libvirt `<interface>` definition and the cloud-init configs.
+
+**`user-data` — NM keyfile approach (`buildCloudConfig`):**
+
+The `user-data` uses `write_files` to drop a NetworkManager keyfile for the primary NAT interface, then activates it via `runcmd`. This is more reliable on Rocky/RHEL than cloud-init's Netplan/NM renderer:
+
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection
+    permissions: '0600'
+    content: |
+      [connection]
+      id=vmsmith-nat
+      type=ethernet
+      ...
+runcmd:
+  - nmcli connection reload
+  - nmcli connection up vmsmith-nat
+```
+
+**SSH user injection:**
+
+When `DefaultUser` is set (from the per-VM spec or `defaults.ssh_user` in config), `buildCloudConfig` emits a `users:` stanza to create the named user with the SSH key:
+
+```yaml
+users:
+  - default                    # preserves the image's built-in default user
+  - name: ubuntu
+    ssh_authorized_keys:
+      - ssh-rsa AAAA...
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+```
+
+When no `DefaultUser` is set, the key is added via top-level `ssh_authorized_keys:` (which goes to the image's built-in default user).
+
+**`network-config` — Netplan v2 (belt-and-suspenders):**
+
+A Netplan v2 `network-config` is also written. It uses `match: macaddress:` for every interface (primary NAT + any extra attachments). Ubuntu/Debian apply this directly; Rocky/RHEL ignore it in favour of the NM keyfile above.
 
 ---
 
@@ -340,8 +382,8 @@ The React SPA is embedded into the binary via `go:embed dist/*`. The same port s
 | Route     | Features                                                               |
 |-----------|------------------------------------------------------------------------|
 | `/`       | Dashboard — VM count, state breakdown, quick actions                   |
-| `/vms`    | VM list; Create modal with name, image, resources, SSH key, extra networks |
-| `/vms/:id`| VM detail — info cards, extra network display, snapshots, port forwards |
+| `/vms`    | VM list; Create modal with name, image, resources, SSH user, SSH key, extra networks |
+| `/vms/:id`| VM detail — info cards (incl. SSH connection string), extra network display, snapshots, port forwards |
 | `/images` | Upload (drag-and-drop), list, download, delete qcow2 images            |
 | `/logs`   | Log viewer — level/source filters, auto-scroll, pause/resume, 3s polling |
 
@@ -387,9 +429,10 @@ network:
   dhcp_end:   "192.168.100.254"
 
 defaults:
-  cpus:    2
-  ram_mb:  2048
-  disk_gb: 20
+  cpus:     2
+  ram_mb:   2048
+  disk_gb:  20
+  ssh_user: ubuntu   # default SSH username injected via cloud-init; override per-VM with default_user in VMSpec
 ```
 
 ---

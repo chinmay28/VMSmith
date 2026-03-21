@@ -31,6 +31,7 @@ var vmCreateCmd = &cobra.Command{
 		ram, _ := cmd.Flags().GetInt("ram")
 		disk, _ := cmd.Flags().GetInt("disk")
 		sshKey, _ := cmd.Flags().GetString("ssh-key")
+		defaultUser, _ := cmd.Flags().GetString("default-user")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
@@ -61,6 +62,7 @@ var vmCreateCmd = &cobra.Command{
 			RAMMB:         ram,
 			DiskGB:        disk,
 			SSHPubKey:     sshKey,
+			DefaultUser:   defaultUser,
 			CloudInitFile: cloudInit,
 			Networks:      networks,
 			NatStaticIP:   natIP,
@@ -226,16 +228,20 @@ var vmInfoCmd = &cobra.Command{
 
 		logger.Info("cli", "vm info result", "id", v.ID, "name", v.Name, "state", string(v.State))
 
-		fmt.Printf("ID:        %s\n", v.ID)
-		fmt.Printf("Name:      %s\n", v.Name)
-		fmt.Printf("State:     %s\n", v.State)
-		fmt.Printf("IP:        %s\n", v.IP)
-		fmt.Printf("CPUs:      %d\n", v.Spec.CPUs)
-		fmt.Printf("RAM:       %d MB\n", v.Spec.RAMMB)
-		fmt.Printf("Disk:      %d GB\n", v.Spec.DiskGB)
-		fmt.Printf("Image:     %s\n", v.Spec.Image)
-		fmt.Printf("Disk Path: %s\n", v.DiskPath)
-		fmt.Printf("Created:   %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
+		fmt.Printf("ID:           %s\n", v.ID)
+		fmt.Printf("Name:         %s\n", v.Name)
+		fmt.Printf("State:        %s\n", v.State)
+		fmt.Printf("IP:           %s\n", v.IP)
+		fmt.Printf("CPUs:         %d\n", v.Spec.CPUs)
+		fmt.Printf("RAM:          %d MB\n", v.Spec.RAMMB)
+		fmt.Printf("Disk:         %d GB\n", v.Spec.DiskGB)
+		fmt.Printf("Image:        %s\n", v.Spec.Image)
+		fmt.Printf("Default User: %s\n", v.Spec.DefaultUser)
+		if v.IP != "" && v.Spec.DefaultUser != "" {
+			fmt.Printf("SSH:          ssh %s@%s\n", v.Spec.DefaultUser, v.IP)
+		}
+		fmt.Printf("Disk Path:    %s\n", v.DiskPath)
+		fmt.Printf("Created:      %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
 		return nil
 	},
 }
@@ -246,6 +252,7 @@ func init() {
 	vmCreateCmd.Flags().Int("ram", 0, "RAM in MB (default from config)")
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")
 	vmCreateCmd.Flags().String("ssh-key", "", "SSH public key to inject")
+	vmCreateCmd.Flags().String("default-user", "", "default SSH username (default from config, typically ubuntu)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")

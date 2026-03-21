@@ -133,7 +133,7 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '', nat_static_ip: '', nat_gateway: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '', default_user: 'ubuntu', nat_static_ip: '', nat_gateway: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const createMut = useMutation(vms.create);
@@ -226,14 +226,15 @@ function CreateVMModal({ open, onClose, onCreated }) {
           </div>
         </div>
 
-        <div>
-          <label className="label">SSH Public Key (optional)</label>
-          <textarea
-            className="input h-20 resize-none"
-            placeholder="ssh-rsa AAAA..."
-            value={form.ssh_pub_key}
-            onChange={update('ssh_pub_key')}
-          />
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Default SSH User</label>
+            <input className="input font-mono" placeholder="ubuntu" value={form.default_user} onChange={update('default_user')} />
+          </div>
+          <div>
+            <label className="label">SSH Public Key (optional)</label>
+            <input className="input font-mono" placeholder="ssh-rsa AAAA..." value={form.ssh_pub_key} onChange={update('ssh_pub_key')} />
+          </div>
         </div>
 
         {/* Primary NAT network */}

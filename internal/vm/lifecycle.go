@@ -69,6 +69,9 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if spec.DiskGB == 0 {
 		spec.DiskGB = m.cfg.Defaults.DiskGB
 	}
+	if spec.DefaultUser == "" {
+		spec.DefaultUser = m.cfg.Defaults.SSHUser
+	}
 
 	// Validate network attachments
 	if len(spec.Networks) > 0 {
@@ -506,7 +509,11 @@ func buildCloudConfig(spec types.VMSpec, natMAC string) string {
 
 	var sb strings.Builder
 	sb.WriteString("#cloud-config\n")
-	if spec.SSHPubKey != "" {
+	if spec.SSHPubKey != "" && spec.DefaultUser != "" {
+		// Inject the SSH key into the named user explicitly. The `default`
+		// entry preserves the image's built-in default user alongside ours.
+		sb.WriteString(fmt.Sprintf("users:\n  - default\n  - name: %s\n    ssh_authorized_keys:\n      - %s\n    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n    lock_passwd: true\n", spec.DefaultUser, spec.SSHPubKey))
+	} else if spec.SSHPubKey != "" {
 		sb.WriteString("ssh_authorized_keys:\n  - ")
 		sb.WriteString(spec.SSHPubKey)
 		sb.WriteString("\n")
