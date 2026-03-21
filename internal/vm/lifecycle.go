@@ -96,6 +96,34 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// Rocky/RHEL guests use predictable names (enp1s0, ens3…) not eth0.
 	natMAC := generateMAC()
 
+	// Pre-assign a static IP from the DHCP range before creating the
+	// cloud-init ISO.  On Rocky 9 (and other RHEL-based images), NetworkManager
+	// may issue its DHCP request before dnsmasq responds, or the startIPMonitor
+	// goroutine may kill the VM before cloud-init has had a chance to write the
+	// NM keyfile — leaving the second boot with no network configuration at all.
+	// Embedding a static IP directly in the NM keyfile (method=manual) removes
+	// this race entirely: the interface comes up deterministically on first boot
+	// without any DHCP exchange.
+	//
+	// If the caller already specified a static IP, or if the DHCP range is
+	// exhausted / the reservation fails, we fall back to the existing dynamic
+	// assignment path (startIPMonitor with DHCP-then-static-fallback).
+	if spec.NatStaticIP == "" {
+		if staticIP, err := m.findAvailableIP(); err == nil {
+			gw := gatewayFromSubnet(m.cfg.Network.Subnet)
+			if err := netMgr.AddDHCPHost(natMAC, staticIP, spec.Name); err == nil {
+				spec.NatStaticIP = staticIP + "/24"
+				spec.NatGateway = gw
+			} else {
+				logger.Warn("daemon", "failed to reserve DHCP IP; falling back to dynamic assignment",
+					"vm", spec.Name, "ip", staticIP, "error", err.Error())
+			}
+		} else {
+			logger.Warn("daemon", "DHCP range exhausted; falling back to dynamic IP assignment",
+				"vm", spec.Name, "error", err.Error())
+		}
+	}
+
 	// Generate a unique ID
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
 
