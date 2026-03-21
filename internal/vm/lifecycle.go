@@ -3,7 +3,9 @@ package vm
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,6 +148,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		Name:      spec.Name,
 		Spec:      spec,
 		State:     types.VMStateRunning,
+		NatMAC:    natMAC,
 		DiskPath:  diskPath,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -155,6 +158,10 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if err := m.store.PutVM(vm); err != nil {
 		return nil, fmt.Errorf("storing VM metadata: %w", err)
 	}
+
+	// Monitor in background: wait for DHCP IP; if none after 60 s apply a
+	// static IP fallback via libvirt DHCP reservation + VM restart.
+	go m.startIPMonitor(id, spec.Name, vmDir, natMAC, spec)
 
 	return vm, nil
 }
@@ -224,6 +231,15 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 		dom.UndefineFlags(libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA)
 	}
 
+	// Remove any DHCP host reservation we may have added for this VM.
+	if vm.NatMAC != "" && vm.Spec.NatStaticIP != "" {
+		natIP, _, _ := net.ParseCIDR(vm.Spec.NatStaticIP)
+		if natIP != nil {
+			netMgr := network.NewManager(m.conn, m.cfg)
+			netMgr.RemoveDHCPHost(vm.NatMAC, natIP.String())
+		}
+	}
+
 	// Remove VM directory (disk, cloud-init, etc.)
 	vmDir := filepath.Dir(vm.DiskPath)
 	os.RemoveAll(vmDir)
@@ -246,6 +262,13 @@ func (m *LibvirtManager) Get(ctx context.Context, id string) (*types.VM, error) 
 		vm.IP = getDomainIP(dom, m.conn)
 	}
 
+	// If no IP detected and VM has a stored static IP, return that.
+	if vm.IP == "" && vm.Spec.NatStaticIP != "" {
+		if parsed, _, err := net.ParseCIDR(vm.Spec.NatStaticIP); err == nil {
+			vm.IP = parsed.String()
+		}
+	}
+
 	return vm, nil
 }
 
@@ -262,6 +285,11 @@ func (m *LibvirtManager) List(ctx context.Context) ([]*types.VM, error) {
 			vm.State = domainStateToVMState(dom)
 			vm.IP = getDomainIP(dom, m.conn)
 			dom.Free()
+		}
+		if vm.IP == "" && vm.Spec.NatStaticIP != "" {
+			if parsed, _, err := net.ParseCIDR(vm.Spec.NatStaticIP); err == nil {
+				vm.IP = parsed.String()
+			}
 		}
 	}
 
@@ -399,56 +427,132 @@ func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error 
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write meta-data
+	// meta-data
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", spec.Name, spec.Name)
 	if err := os.WriteFile(filepath.Join(tmpDir, "meta-data"), []byte(metaData), 0644); err != nil {
 		return err
 	}
 
-	// Write user-data
-	userData := "#cloud-config\n"
-	if spec.SSHPubKey != "" {
-		userData += fmt.Sprintf("ssh_authorized_keys:\n  - %s\n", spec.SSHPubKey)
-	}
+	// user-data: prefer a custom file, otherwise generate one with an NM
+	// connection keyfile embedded via write_files.  Writing the keyfile
+	// directly is more reliable on Rocky/RHEL than cloud-init's NM renderer
+	// interpreting the v2 network-config (which may silently do nothing).
+	var userData string
 	if spec.CloudInitFile != "" {
 		custom, err := os.ReadFile(spec.CloudInitFile)
 		if err != nil {
 			return fmt.Errorf("reading cloud-init file: %w", err)
 		}
 		userData = string(custom)
+	} else {
+		userData = buildCloudConfig(spec, natMAC)
 	}
 	if err := os.WriteFile(filepath.Join(tmpDir, "user-data"), []byte(userData), 0644); err != nil {
 		return err
 	}
 
-	// Always write network-config so cloud-init configures the NAT interface
-	// on every distro.  We match by MAC address rather than interface name so
-	// the config works regardless of whether the guest uses traditional names
-	// (eth0) or predictable names (enp1s0, ens3, …) as Rocky/RHEL do.
+	// network-config (v2) as belt-and-suspenders for Ubuntu/netplan.
+	// Rocky/RHEL rely on the NM keyfile written via user-data above.
 	netCfg := generateNetworkConfig(spec.Networks, natMAC, spec.NatStaticIP, spec.NatGateway)
 	if err := os.WriteFile(filepath.Join(tmpDir, "network-config"), []byte(netCfg), 0644); err != nil {
 		return err
 	}
 
-	// Generate ISO
-	cmd := exec.Command("genisoimage",
-		"-output", isoPath,
-		"-volid", "cidata",
-		"-joliet",
-		"-rock",
-		filepath.Join(tmpDir, "meta-data"),
-		filepath.Join(tmpDir, "user-data"),
-	)
-	// Include network-config if it exists
-	netCfgPath := filepath.Join(tmpDir, "network-config")
-	if _, err := os.Stat(netCfgPath); err == nil {
-		cmd.Args = append(cmd.Args, netCfgPath)
+	return writeCloudInitISO(isoPath, tmpDir)
+}
+
+// buildNMKeyfile returns the body of a NetworkManager keyfile connection for
+// the primary NAT interface.  When staticIP (CIDR) and gateway are provided
+// the interface is configured with a static address; otherwise DHCP is used.
+func buildNMKeyfile(mac, staticIP, gateway string) string {
+	var sb strings.Builder
+	sb.WriteString("[connection]\n")
+	sb.WriteString("id=vmsmith-nat\n")
+	sb.WriteString("type=ethernet\n")
+	sb.WriteString("autoconnect=true\n")
+	sb.WriteString("autoconnect-priority=200\n")
+	sb.WriteString("\n[ethernet]\n")
+	sb.WriteString("mac-address=" + mac + "\n")
+	if staticIP != "" {
+		sb.WriteString("\n[ipv4]\n")
+		sb.WriteString("method=manual\n")
+		sb.WriteString("addresses=" + staticIP + "\n")
+		if gateway != "" {
+			sb.WriteString("gateway=" + gateway + "\n")
+			sb.WriteString("dns=" + gateway + ";8.8.8.8;\n")
+		}
+	} else {
+		sb.WriteString("\n[ipv4]\n")
+		sb.WriteString("method=auto\n")
 	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("genisoimage: %s: %w", string(out), err)
+	sb.WriteString("\n[ipv6]\n")
+	sb.WriteString("method=ignore\n")
+	return sb.String()
+}
+
+// buildCloudConfig generates a cloud-config user-data string that writes an
+// NM connection keyfile for the primary NAT interface and activates it.
+// This approach is reliable on Rocky/RHEL where the cloud-init v2
+// network-config renderer may fail to configure NetworkManager correctly.
+func buildCloudConfig(spec types.VMSpec, natMAC string) string {
+	nmContent := buildNMKeyfile(natMAC, spec.NatStaticIP, spec.NatGateway)
+
+	// Indent each line of the NM keyfile by 6 spaces so YAML block scalar
+	// indentation is handled correctly (YAML strips those 6 leading spaces).
+	var indented strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(nmContent, "\n"), "\n") {
+		indented.WriteString("      " + line + "\n")
 	}
 
-	return nil
+	var sb strings.Builder
+	sb.WriteString("#cloud-config\n")
+	if spec.SSHPubKey != "" {
+		sb.WriteString("ssh_authorized_keys:\n  - ")
+		sb.WriteString(spec.SSHPubKey)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("write_files:\n")
+	sb.WriteString("  - path: /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
+	sb.WriteString("    permissions: '0600'\n")
+	sb.WriteString("    owner: root:root\n")
+	sb.WriteString("    content: |\n")
+	sb.WriteString(indented.String())
+	sb.WriteString("runcmd:\n")
+	sb.WriteString("  - chmod 600 /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
+	sb.WriteString("  - nmcli connection reload\n")
+	sb.WriteString("  - nmcli connection up vmsmith-nat 2>/dev/null || true\n")
+	return sb.String()
+}
+
+// writeCloudInitISO creates the cidata ISO from files in tmpDir.
+// Tries genisoimage first, then falls back to mkisofs (available on Rocky/RHEL).
+func writeCloudInitISO(isoPath, tmpDir string) error {
+	files := []string{
+		filepath.Join(tmpDir, "meta-data"),
+		filepath.Join(tmpDir, "user-data"),
+		filepath.Join(tmpDir, "network-config"),
+	}
+	baseArgs := []string{"-output", isoPath, "-volid", "cidata", "-joliet", "-rock"}
+	args := append(baseArgs, files...)
+
+	for _, bin := range []string{"genisoimage", "mkisofs"} {
+		cmd := exec.Command(bin, args...)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		if isExecNotFound(err) {
+			continue
+		}
+		return fmt.Errorf("%s: %s: %w", bin, strings.TrimSpace(string(out)), err)
+	}
+	return fmt.Errorf("neither genisoimage nor mkisofs found; install one (e.g. yum install genisoimage)")
+}
+
+// isExecNotFound returns true when err indicates the binary was not in PATH.
+func isExecNotFound(err error) bool {
+	var execErr *exec.Error
+	return errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound)
 }
 
 // generateNetworkConfig produces cloud-init network-config v2 YAML.
@@ -476,16 +580,16 @@ func generateNetworkConfig(networks []types.NetworkAttachment, natMAC, natStatic
 	}
 
 	// Extra attachments: match by MAC, static or DHCP as configured
-	for i, net := range networks {
+	for i, att := range networks {
 		id := fmt.Sprintf("eth%d", i+1)
 		sb.WriteString(fmt.Sprintf("  %s:\n", id))
-		sb.WriteString(fmt.Sprintf("    match:\n      macaddress: \"%s\"\n", net.MacAddress))
+		sb.WriteString(fmt.Sprintf("    match:\n      macaddress: \"%s\"\n", att.MacAddress))
 
-		if net.StaticIP != "" {
-			sb.WriteString(fmt.Sprintf("    addresses:\n      - %s\n", net.StaticIP))
-			if net.Gateway != "" {
+		if att.StaticIP != "" {
+			sb.WriteString(fmt.Sprintf("    addresses:\n      - %s\n", att.StaticIP))
+			if att.Gateway != "" {
 				sb.WriteString(fmt.Sprintf("    routes:\n      - to: 0.0.0.0/0\n        via: %s\n        metric: %d\n",
-					net.Gateway, 200+i)) // higher metric than NAT default route
+					att.Gateway, 200+i)) // higher metric than NAT default route
 			}
 			sb.WriteString("    dhcp4: false\n")
 		} else {
@@ -498,12 +602,197 @@ func generateNetworkConfig(networks []types.NetworkAttachment, natMAC, natStatic
 
 // hasStaticIPs returns true if any network attachment requires static IP config.
 func hasStaticIPs(networks []types.NetworkAttachment) bool {
-	for _, net := range networks {
-		if net.StaticIP != "" {
+	for _, n := range networks {
+		if n.StaticIP != "" {
 			return true
 		}
 	}
 	return false
+}
+
+// startIPMonitor runs in a goroutine after VM creation.  It waits up to 60 s
+// for the VM to acquire a pingable IP via DHCP.  If that times out it finds
+// an available IP, adds a libvirt DHCP host reservation so dnsmasq always
+// gives that IP to the VM's MAC, restarts the VM, and waits another 60 s to
+// verify the IP is reachable.
+func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec types.VMSpec) {
+	const dhcpTimeout = 60 * time.Second
+	const pollInterval = 5 * time.Second
+
+	// For user-specified static IP: just verify it becomes pingable.
+	if spec.NatStaticIP != "" {
+		ip, _, err := net.ParseCIDR(spec.NatStaticIP)
+		if err != nil {
+			return
+		}
+		deadline := time.Now().Add(dhcpTimeout)
+		for time.Now().Before(deadline) {
+			time.Sleep(pollInterval)
+			if pingable(ip.String()) {
+				logger.Info("daemon", "VM static IP verified pingable", "vm", vmName, "ip", ip.String())
+				return
+			}
+		}
+		logger.Warn("daemon", "VM static IP not pingable after 60s", "vm", vmName, "ip", ip.String())
+		return
+	}
+
+	// Auto-assign path: wait for DHCP.
+	logger.Info("daemon", "waiting for VM to get DHCP IP", "vm", vmName)
+	deadline := time.Now().Add(dhcpTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(pollInterval)
+		dom, err := m.conn.LookupDomainByName(vmName)
+		if err != nil {
+			continue
+		}
+		ip := getDomainIP(dom, m.conn)
+		dom.Free()
+		if ip != "" && pingable(ip) {
+			logger.Info("daemon", "VM got pingable DHCP IP", "vm", vmName, "ip", ip)
+			return
+		}
+	}
+
+	// DHCP timed out — fall back to a static IP via DHCP reservation.
+	logger.Warn("daemon", "DHCP timeout: applying static IP fallback", "vm", vmName)
+	staticIP, err := m.findAvailableIP()
+	if err != nil {
+		logger.Error("daemon", "could not find available static IP", "vm", vmName, "error", err.Error())
+		return
+	}
+	if err := m.applyStaticIPFallback(vmID, vmName, natMAC, spec, staticIP); err != nil {
+		logger.Error("daemon", "static IP fallback failed", "vm", vmName, "ip", staticIP, "error", err.Error())
+		return
+	}
+	logger.Info("daemon", "static IP fallback succeeded", "vm", vmName, "ip", staticIP)
+}
+
+// findAvailableIP returns an unallocated IP from the NAT network's DHCP range.
+// It checks active DHCP leases and existing host reservations.
+func (m *LibvirtManager) findAvailableIP() (string, error) {
+	libvirtNet, err := m.conn.LookupNetworkByName(m.cfg.Network.Name)
+	if err != nil {
+		return "", fmt.Errorf("looking up network: %w", err)
+	}
+	defer libvirtNet.Free()
+
+	// Collect IPs currently leased or reserved.
+	used := make(map[string]bool)
+	if leases, err := libvirtNet.GetDHCPLeases(); err == nil {
+		for _, l := range leases {
+			used[l.IPaddr] = true
+		}
+	}
+	if xmlStr, err := libvirtNet.GetXMLDesc(0); err == nil {
+		for _, ip := range parseNetworkHostIPs(xmlStr) {
+			used[ip] = true
+		}
+	}
+
+	start := net.ParseIP(m.cfg.Network.DHCPStart).To4()
+	end := net.ParseIP(m.cfg.Network.DHCPEnd).To4()
+	if start == nil || end == nil {
+		return "", fmt.Errorf("invalid DHCP range in config: %s - %s",
+			m.cfg.Network.DHCPStart, m.cfg.Network.DHCPEnd)
+	}
+	for i := int(start[3]); i <= int(end[3]); i++ {
+		candidate := fmt.Sprintf("%d.%d.%d.%d", start[0], start[1], start[2], i)
+		if !used[candidate] {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no free IP in DHCP range %s-%s",
+		m.cfg.Network.DHCPStart, m.cfg.Network.DHCPEnd)
+}
+
+// applyStaticIPFallback adds a DHCP host reservation for staticIP, restarts
+// the VM so it picks up the reserved IP, and waits up to 60 s to verify.
+func (m *LibvirtManager) applyStaticIPFallback(vmID, vmName, natMAC string, spec types.VMSpec, staticIP string) error {
+	netMgr := network.NewManager(m.conn, m.cfg)
+	if err := netMgr.AddDHCPHost(natMAC, staticIP, vmName); err != nil {
+		return fmt.Errorf("adding DHCP reservation: %w", err)
+	}
+
+	// Restart the VM so it requests DHCP again and gets the reserved IP.
+	dom, err := m.conn.LookupDomainByName(vmName)
+	if err != nil {
+		return fmt.Errorf("looking up domain: %w", err)
+	}
+	defer dom.Free()
+	dom.Destroy() //nolint:errcheck — force stop regardless of state
+	if err := dom.Create(); err != nil {
+		return fmt.Errorf("restarting domain: %w", err)
+	}
+
+	// Wait for the reserved IP to become pingable.
+	const waitTimeout = 60 * time.Second
+	deadline := time.Now().Add(waitTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(5 * time.Second)
+		if pingable(staticIP) {
+			// Persist the auto-assigned IP in the VM spec so Get/List can
+			// return it even when DHCP lease lookup is unavailable.
+			if vm, err := m.store.GetVM(vmID); err == nil {
+				vm.Spec.NatStaticIP = staticIP + "/24"
+				vm.Spec.NatGateway = gatewayFromSubnet(m.cfg.Network.Subnet)
+				vm.UpdatedAt = time.Now()
+				_ = m.store.PutVM(vm)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("VM still not pingable at %s after 60s", staticIP)
+}
+
+// pingable returns true if ip responds to a single ICMP echo within 3 s.
+func pingable(ip string) bool {
+	cmd := exec.Command("ping", "-c", "1", "-W", "3", ip)
+	return cmd.Run() == nil
+}
+
+// gatewayFromSubnet derives the first host address from a CIDR subnet string
+// (e.g. "192.168.100.0/24" → "192.168.100.1").
+func gatewayFromSubnet(subnet string) string {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return ""
+	}
+	gw := make(net.IP, len(ipNet.IP))
+	copy(gw, ipNet.IP)
+	gw[len(gw)-1]++
+	return gw.String()
+}
+
+// parseNetworkHostIPs extracts <host ip='...'> addresses from a libvirt
+// network XML description, used to avoid assigning already-reserved IPs.
+func parseNetworkHostIPs(xmlStr string) []string {
+	type hostEntry struct {
+		IP string `xml:"ip,attr"`
+	}
+	type dhcpBlock struct {
+		Hosts []hostEntry `xml:"host"`
+	}
+	type ipElem struct {
+		DHCP dhcpBlock `xml:"dhcp"`
+	}
+	type networkXML struct {
+		IPs []ipElem `xml:"ip"`
+	}
+
+	var n networkXML
+	if err := xml.Unmarshal([]byte(xmlStr), &n); err != nil {
+		return nil
+	}
+	var ips []string
+	for _, ipEl := range n.IPs {
+		for _, h := range ipEl.DHCP.Hosts {
+			if h.IP != "" {
+				ips = append(ips, h.IP)
+			}
+		}
+	}
+	return ips
 }
 
 func domainStateToVMState(dom *libvirt.Domain) types.VMState {

@@ -44,8 +44,8 @@ type VM struct {
 	Spec      VMSpec    `json:"spec"`
 	State     VMState   `json:"state"`
 	IP        string    `json:"ip,omitempty"`
+	NatMAC    string    `json:"nat_mac,omitempty"`
 	DiskPath  string    `json:"disk_path"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-
