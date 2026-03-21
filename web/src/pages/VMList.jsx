@@ -185,7 +185,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
 
   return (
     <Modal open={open} onClose={onClose} title="Create Machine" wide>
-      <div className="space-y-4">
+      <div className="flex flex-col max-h-[75vh]">
+      <div className="overflow-y-auto flex-1 space-y-4 pr-1 pb-1">
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Name</label>
@@ -347,17 +348,21 @@ function CreateVMModal({ open, onClose, onCreated }) {
           )}
         </div>
 
-        {createMut.error && (
-          <p className="text-sm text-red-400">Error: {createMut.error}</p>
-        )}
+      </div>
 
-        <div className="flex justify-end gap-2 pt-2">
+      {/* Pinned footer — always visible regardless of scroll position */}
+      <div className="shrink-0 pt-3 mt-1 border-t border-steel-800/60">
+        {createMut.error && (
+          <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
+        )}
+        <div className="flex justify-end gap-2">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image}>
             {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
             Create
           </button>
         </div>
+      </div>
       </div>
     </Modal>
   );
