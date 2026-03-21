@@ -320,7 +320,7 @@ func TestGenerateNetworkConfig_StaticIP(t *testing.T) {
 		{StaticIP: "192.168.2.100/24", MacAddress: "52:54:00:11:22:02"},
 	}
 
-	cfg := generateNetworkConfig(networks, natMAC)
+	cfg := generateNetworkConfig(networks, natMAC, "", "")
 
 	checks := []string{
 		"version: 2",
@@ -344,7 +344,7 @@ func TestGenerateNetworkConfig_DHCP(t *testing.T) {
 		{MacAddress: "52:54:00:11:22:01"}, // No static IP → DHCP
 	}
 
-	cfg := generateNetworkConfig(networks, natMAC)
+	cfg := generateNetworkConfig(networks, natMAC, "", "")
 
 	// Extra interface should be DHCP and matched by MAC
 	if !strings.Contains(cfg, "52:54:00:11:22:01") {
@@ -362,7 +362,7 @@ func TestGenerateNetworkConfig_RouteMetric(t *testing.T) {
 		{StaticIP: "10.0.2.100/24", Gateway: "10.0.2.1", MacAddress: "52:54:00:11:22:02"},
 	}
 
-	cfg := generateNetworkConfig(networks, natMAC)
+	cfg := generateNetworkConfig(networks, natMAC, "", "")
 
 	if !strings.Contains(cfg, "metric: 200") {
 		t.Error("first network should have metric 200")
@@ -374,7 +374,7 @@ func TestGenerateNetworkConfig_RouteMetric(t *testing.T) {
 
 func TestGenerateNetworkConfig_NATOnlyNoExtraNetworks(t *testing.T) {
 	natMAC := "52:54:00:aa:bb:cc"
-	cfg := generateNetworkConfig(nil, natMAC)
+	cfg := generateNetworkConfig(nil, natMAC, "", "")
 
 	// Must include NAT interface matched by MAC
 	if !strings.Contains(cfg, natMAC) {

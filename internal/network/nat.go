@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -91,6 +92,57 @@ func (m *Manager) AddDHCPHost(mac, ip, name string) error {
 		-1, hostXML,
 		libvirt.NETWORK_UPDATE_AFFECT_LIVE|libvirt.NETWORK_UPDATE_AFFECT_CONFIG,
 	)
+}
+
+// RemoveDHCPHostByName removes the static DHCP host reservation whose name
+// matches vmName.  This is used to clean up stale reservations left by a
+// previously failed VM creation.  Errors and missing entries are silently
+// ignored.
+func (m *Manager) RemoveDHCPHostByName(vmName string) {
+	net, err := m.conn.LookupNetworkByName(m.cfg.Network.Name)
+	if err != nil {
+		return
+	}
+	defer net.Free()
+
+	xmlStr, err := net.GetXMLDesc(0)
+	if err != nil {
+		return
+	}
+
+	// Find a host entry whose name matches.
+	type hostEntry struct {
+		MAC  string `xml:"mac,attr"`
+		Name string `xml:"name,attr"`
+		IP   string `xml:"ip,attr"`
+	}
+	type dhcpBlock struct {
+		Hosts []hostEntry `xml:"host"`
+	}
+	type ipElem struct {
+		DHCP dhcpBlock `xml:"dhcp"`
+	}
+	type networkXML struct {
+		IPs []ipElem `xml:"ip"`
+	}
+
+	var parsed networkXML
+	if err := xml.Unmarshal([]byte(xmlStr), &parsed); err != nil {
+		return
+	}
+	for _, ipEl := range parsed.IPs {
+		for _, h := range ipEl.DHCP.Hosts {
+			if h.Name == vmName && h.MAC != "" {
+				hostXML := fmt.Sprintf(`<host mac='%s' name='%s' ip='%s'/>`, h.MAC, h.Name, h.IP)
+				net.Update( //nolint:errcheck
+					libvirt.NETWORK_UPDATE_COMMAND_DELETE,
+					libvirt.NETWORK_SECTION_IP_DHCP_HOST,
+					-1, hostXML,
+					libvirt.NETWORK_UPDATE_AFFECT_LIVE|libvirt.NETWORK_UPDATE_AFFECT_CONFIG,
+				)
+			}
+		}
+	}
 }
 
 // RemoveDHCPHost removes the static DHCP host reservation for the given MAC.

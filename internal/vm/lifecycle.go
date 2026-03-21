@@ -111,6 +111,9 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if spec.NatStaticIP == "" {
 		if staticIP, err := m.findAvailableIP(); err == nil {
 			gw := gatewayFromSubnet(m.cfg.Network.Subnet)
+			// Remove any stale reservation with this VM name (left by a previous
+			// failed create attempt) before adding the new one.
+			netMgr.RemoveDHCPHostByName(spec.Name)
 			if err := netMgr.AddDHCPHost(natMAC, staticIP, spec.Name); err == nil {
 				spec.NatStaticIP = staticIP + "/24"
 				spec.NatGateway = gw
@@ -137,7 +140,17 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
 	baseImage := spec.Image
 	if !filepath.IsAbs(spec.Image) {
-		baseImage = filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
+		candidate := filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
+		// Images must have a .qcow2 extension so libvirt's AppArmor driver
+		// correctly follows the backing-file chain and allows QEMU to open them.
+		// Try the name as-is first; if it doesn't exist, append .qcow2.
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			withExt := candidate + ".qcow2"
+			if _, err2 := os.Stat(withExt); err2 == nil {
+				candidate = withExt
+			}
+		}
+		baseImage = candidate
 	}
 	if err := createOverlayDisk(baseImage, diskPath, spec.DiskGB); err != nil {
 		return nil, fmt.Errorf("creating overlay disk: %w", err)
@@ -171,6 +184,14 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// Start the domain
 	if err := dom.Create(); err != nil {
 		dom.Undefine()
+		// Clean up the DHCP reservation we made — otherwise the next create
+		// attempt for the same VM name will fail with a name conflict.
+		if spec.NatStaticIP != "" {
+			if ip, _, parseErr := net.ParseCIDR(spec.NatStaticIP); parseErr == nil {
+				netMgr.RemoveDHCPHost(natMAC, ip.String())
+			}
+		}
+		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("starting domain: %w", err)
 	}
 
@@ -550,10 +571,14 @@ func buildCloudConfig(spec types.VMSpec, natMAC string) string {
 	sb.WriteString("  - path: /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
 	sb.WriteString("    permissions: '0600'\n")
 	sb.WriteString("    owner: root:root\n")
+	sb.WriteString("    makedirs: true\n")
 	sb.WriteString("    content: |\n")
 	sb.WriteString(indented.String())
 	sb.WriteString("runcmd:\n")
 	sb.WriteString("  - chmod 600 /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
+	// restorecon fixes SELinux file context on Rocky/RHEL so NetworkManager can read the keyfile.
+	// Without this, NM may silently ignore the file due to SELinux type mismatch.
+	sb.WriteString("  - restorecon -v /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection 2>/dev/null || true\n")
 	sb.WriteString("  - nmcli connection reload\n")
 	sb.WriteString("  - nmcli connection up vmsmith-nat 2>/dev/null || true\n")
 	return sb.String()
@@ -651,7 +676,10 @@ func hasStaticIPs(networks []types.NetworkAttachment) bool {
 // gives that IP to the VM's MAC, restarts the VM, and waits another 60 s to
 // verify the IP is reachable.
 func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec types.VMSpec) {
-	const dhcpTimeout = 60 * time.Second
+	// 120 s gives Rocky 9 (and other RHEL-based images) enough time for cloud-init to
+	// finish writing the NM keyfile and bring the interface up.  Ubuntu typically
+	// completes in ~30 s, so this longer window does not hurt.
+	const dhcpTimeout = 120 * time.Second
 	const pollInterval = 5 * time.Second
 
 	// For user-specified static IP: just verify it becomes pingable.

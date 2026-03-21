@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -81,8 +82,16 @@ var vmCreateCmd = &cobra.Command{
 		fmt.Printf("  ID:    %s\n", result.ID)
 		fmt.Printf("  Name:  %s\n", result.Name)
 		fmt.Printf("  State: %s\n", result.State)
-		if result.IP != "" {
-			fmt.Printf("  IP:    %s\n", result.IP)
+		// Show the IP immediately.  When a static IP was pre-assigned the VM
+		// record carries it in Spec.NatStaticIP before the interface is up.
+		displayIP := result.IP
+		if displayIP == "" && result.Spec.NatStaticIP != "" {
+			if parsed, _, err := net.ParseCIDR(result.Spec.NatStaticIP); err == nil {
+				displayIP = parsed.String()
+			}
+		}
+		if displayIP != "" {
+			fmt.Printf("  IP:    %s\n", displayIP)
 		}
 		if len(spec.Networks) > 0 {
 			fmt.Printf("  Extra networks: %d attached\n", len(spec.Networks))
