@@ -13,6 +13,7 @@ func TestGenerateDomainXML_Basic(t *testing.T) {
 		CPUs:     2,
 		RAMMB:    2048,
 		DiskPath: "/var/lib/vmsmith/vms/vm-1/disk.qcow2",
+		Emulator: "/usr/bin/qemu-system-x86_64",
 		Interfaces: []InterfaceEntry{
 			{XML: `<interface type='network'><source network='vmsmith-net'/><model type='virtio'/></interface>`},
 		},
@@ -34,6 +35,7 @@ func TestGenerateDomainXML_Basic(t *testing.T) {
 		{"disk path", "file='/var/lib/vmsmith/vms/vm-1/disk.qcow2'"},
 		{"virtio model", "type='virtio'"},
 		{"network interface", "vmsmith-net"},
+		{"emulator path", "<emulator>/usr/bin/qemu-system-x86_64</emulator>"},
 	}
 
 	for _, c := range checks {
@@ -55,6 +57,7 @@ func TestGenerateDomainXML_WithCloudInit(t *testing.T) {
 		RAMMB:        1024,
 		DiskPath:     "/tmp/disk.qcow2",
 		CloudInitISO: "/tmp/cidata.iso",
+		Emulator:     "/usr/bin/qemu-system-x86_64",
 		Interfaces:   []InterfaceEntry{{XML: "<interface type='network'/>"}},
 	}
 
@@ -284,6 +287,7 @@ func TestGenerateDomainXML_MultipleInterfaces(t *testing.T) {
 		CPUs:     2,
 		RAMMB:    2048,
 		DiskPath: "/tmp/disk.qcow2",
+		Emulator: "/usr/bin/qemu-system-x86_64",
 		Interfaces: []InterfaceEntry{
 			{XML: `<interface type='network'><source network='vmsmith-net'/></interface>`},
 			{XML: `<interface type='direct'><source dev='eth1' mode='bridge'/></interface>`},
@@ -462,6 +466,45 @@ func TestDomainParamsFromSpec_DefaultMachine(t *testing.T) {
 	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
 	if params.Machine != "pc-q35-6.2" {
 		t.Errorf("default Machine = %q, want %q", params.Machine, "pc-q35-6.2")
+	}
+}
+
+func TestDetectQEMUBinary(t *testing.T) {
+	path := detectQEMUBinary()
+	if path == "" {
+		t.Fatal("detectQEMUBinary returned empty string")
+	}
+	if !strings.HasPrefix(path, "/") {
+		t.Errorf("detectQEMUBinary should return an absolute path, got %q", path)
+	}
+	// Must be one of the known candidates or the default fallback.
+	known := map[string]bool{
+		"/usr/libexec/qemu-kvm":        true,
+		"/usr/bin/qemu-system-x86_64":  true,
+		"/usr/bin/qemu-kvm":            true,
+	}
+	if !known[path] {
+		t.Errorf("detectQEMUBinary returned unexpected path %q", path)
+	}
+}
+
+func TestDomainParamsFromSpec_EmulatorDetected(t *testing.T) {
+	spec := types.VMSpec{Name: "test", CPUs: 1, RAMMB: 1024}
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net")
+	if params.Emulator == "" {
+		t.Error("DomainParamsFromSpec should populate Emulator")
+	}
+	if !strings.HasPrefix(params.Emulator, "/") {
+		t.Errorf("Emulator should be an absolute path, got %q", params.Emulator)
+	}
+
+	// The emulator path must appear in the generated XML.
+	xml, err := GenerateDomainXML(params)
+	if err != nil {
+		t.Fatalf("GenerateDomainXML: %v", err)
+	}
+	if !strings.Contains(xml, "<emulator>"+params.Emulator+"</emulator>") {
+		t.Errorf("emulator path %q not found in XML:\n%s", params.Emulator, xml)
 	}
 }
 
