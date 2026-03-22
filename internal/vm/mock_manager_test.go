@@ -169,6 +169,87 @@ func TestMockManager_List(t *testing.T) {
 	}
 }
 
+func TestMockManager_Update(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "updatable", CPUs: 2, RAMMB: 2048, DiskGB: 20})
+	id := vm.ID
+
+	updated, err := m.Update(ctx, id, types.VMUpdateSpec{CPUs: 4, RAMMB: 8192})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Spec.CPUs != 4 {
+		t.Errorf("CPUs = %d, want 4", updated.Spec.CPUs)
+	}
+	if updated.Spec.RAMMB != 8192 {
+		t.Errorf("RAMMB = %d, want 8192", updated.Spec.RAMMB)
+	}
+	if updated.Spec.DiskGB != 20 {
+		t.Errorf("DiskGB changed unexpectedly: %d", updated.Spec.DiskGB)
+	}
+}
+
+func TestMockManager_Update_DiskGrow(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "growable", DiskGB: 20})
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{DiskGB: 40})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Spec.DiskGB != 40 {
+		t.Errorf("DiskGB = %d, want 40", updated.Spec.DiskGB)
+	}
+}
+
+func TestMockManager_Update_DiskShrinkRejected(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "fixed", DiskGB: 40})
+	_, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{DiskGB: 20})
+	if err == nil {
+		t.Error("expected error when attempting to shrink disk")
+	}
+}
+
+func TestMockManager_Update_NotFound(t *testing.T) {
+	m := NewMockManager()
+	_, err := m.Update(context.Background(), "nope", types.VMUpdateSpec{CPUs: 4})
+	if err == nil {
+		t.Error("expected not found error")
+	}
+}
+
+func TestMockManager_Update_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	m.UpdateErr = types.ErrTest
+
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "blocked", CPUs: 2, RAMMB: 2048, DiskGB: 20})
+	_, err := m.Update(context.Background(), vm.ID, types.VMUpdateSpec{CPUs: 4})
+	if err != types.ErrTest {
+		t.Errorf("err = %v, want ErrTest", err)
+	}
+}
+
+func TestMockManager_Update_NoChange(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "unchanged", CPUs: 2, RAMMB: 2048, DiskGB: 20})
+	// Empty patch — zero values are ignored
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{})
+	if err != nil {
+		t.Fatalf("Update with empty patch: %v", err)
+	}
+	if updated.Spec.CPUs != 2 {
+		t.Errorf("CPUs changed unexpectedly: %d", updated.Spec.CPUs)
+	}
+}
+
 func TestMockManager_SeedVM(t *testing.T) {
 	m := NewMockManager()
 

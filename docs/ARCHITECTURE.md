@@ -45,7 +45,7 @@ vmsmith/
 │   │   └── middleware.go            # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go                  # Root command, global --config flag
-│   │   ├── vm.go                    # vmsmith vm create|list|start|stop|delete
+│   │   ├── vm.go                    # vmsmith vm create|edit|list|start|stop|delete
 │   │   ├── snapshot.go              # vmsmith snapshot create|restore|list|delete
 │   │   ├── image.go                 # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go                   # vmsmith net interfaces
@@ -142,6 +142,18 @@ vmsmith/
 10. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
 11. `conn.DomainDefineXML()` + `dom.Create()` — register and boot; on failure, the DHCP reservation and VM directory are cleaned up
 12. Persist VM record in bbolt; launch `startIPMonitor` goroutine (120 s timeout)
+
+**Updating a VM (`Update` in `lifecycle.go`):**
+
+`PATCH /api/v1/vms/{id}` (body: `VMUpdateSpec{cpus, ram_mb, disk_gb}`) — zero values are ignored:
+
+1. Look up VM in store; look up libvirt domain by name
+2. If running → graceful `Shutdown()`; poll for `DOMAIN_SHUTOFF` (up to 60 s); force `Destroy()` if graceful fails
+3. If CPU or RAM changed → regenerate domain XML using updated spec + stored disk/ISO paths → `DomainDefineXML()`
+4. If disk size increased → `qemu-img resize <diskPath> <NGB>`. Shrinking is rejected with an error.
+5. Persist updated `Spec` in bbolt
+6. Restart domain (`dom.Create()`) if it was running before
+7. Return updated `VM`
 
 **VM states:** `running → stopped → deleted`
 
@@ -386,6 +398,7 @@ All endpoints are prefixed `/api/v1/`.
 | GET    | /vms                                     | List all VMs                  |
 | POST   | /vms                                     | Create a new VM               |
 | GET    | /vms/{id}                                | Get VM details                |
+| PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk) |
 | POST   | /vms/{id}/start                          | Start a stopped VM            |
 | POST   | /vms/{id}/stop                           | Stop a running VM             |
 | DELETE | /vms/{id}                                | Delete a VM                   |
@@ -417,15 +430,28 @@ The React SPA is embedded into the binary via `go:embed dist/*`. The same port s
 | Route     | Features                                                               |
 |-----------|------------------------------------------------------------------------|
 | `/`       | Dashboard — VM count, state breakdown, quick actions                   |
-| `/vms`    | VM list; Create modal with name, image, resources, SSH user, SSH key, extra networks |
-| `/vms/:id`| VM detail — info cards (incl. SSH connection string), extra network display, snapshots, port forwards |
+| `/vms`    | VM list; Create modal (Basic / Advanced tabs); Edit modal              |
+| `/vms/:id`| VM detail — info cards (incl. SSH connection string), Edit button, extra network display, snapshots, port forwards |
 | `/images` | Upload (drag-and-drop), list, download, delete qcow2 images            |
 | `/logs`   | Log viewer — level/source filters, auto-scroll, pause/resume, 3s polling |
 
-**Network UI (Create VM modal):**
-- "Extra Networks" section with Add/Remove buttons
-- Fetches physical host interfaces from `GET /api/v1/host/interfaces`
-- Per-attachment: mode (macvtap/bridge), interface dropdown or text input, optional static IP + gateway
+**Create VM modal (Basic / Advanced tabs):**
+
+The modal is split into two tabs to keep the default experience simple:
+
+- **Basic tab** — mandatory fields only: name, base image, vCPU count, RAM (MB), disk (GB) with defaults.
+- **Advanced tab** — optional customisations: SSH public key, default SSH user (blank = root), primary NAT static IP + gateway, extra network interfaces. A badge on the tab header shows how many advanced fields are set.
+
+**Extra network attachments (Advanced tab):**
+- Fetches physical host interfaces from `GET /api/v1/host/interfaces` for macvtap interface selection
+- Per-attachment: mode (macvtap/bridge), interface dropdown or text input
+- Static IP + gateway shown by default; a "Use DHCP" checkbox hides these fields and sends no static-IP to the API
+
+**Edit VM modal (`/vms/:id`):**
+- Opened via the **Edit** button in the VM detail header
+- Fields: vCPU count, RAM (MB), disk (GB); all pre-filled with current values
+- Shows "current: X" hint below each field; disk field enforces `min = current disk` (grow-only)
+- On submit: API sends `PATCH /api/v1/vms/{id}` with only changed fields; the backend stops the VM, applies changes, then restarts it
 
 **VM Detail network display:**
 - Shows attached networks (eth1…) with mode, host interface, and IP or DHCP label
