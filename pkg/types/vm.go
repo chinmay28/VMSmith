@@ -38,6 +38,14 @@ type VMSpec struct {
 	NatGateway string `json:"nat_gateway,omitempty" yaml:"nat_gateway,omitempty"`
 }
 
+// NetworkIPUpdate specifies a new static IP for an extra network interface.
+// Index is the zero-based position in VMSpec.Networks.
+type NetworkIPUpdate struct {
+	Index    int    `json:"index"`
+	StaticIP string `json:"static_ip"`          // CIDR notation; empty to switch to DHCP
+	Gateway  string `json:"gateway,omitempty"`
+}
+
 // VMUpdateSpec defines fields that can be changed on an existing VM.
 // Zero / empty values are ignored (no change). Disk can only grow, not shrink.
 type VMUpdateSpec struct {
@@ -45,16 +53,12 @@ type VMUpdateSpec struct {
 	RAMMB  int `json:"ram_mb,omitempty"`
 	DiskGB int `json:"disk_gb,omitempty"`
 
-	// NatStaticIP reassigns the primary NAT interface IP address in CIDR
-	// notation (e.g. "192.168.100.50/24"). The DHCP host reservation is
-	// updated, the cloud-init ISO is regenerated with a new instance-id so
-	// cloud-init re-runs on the next boot and writes the updated NM keyfile.
-	// Leave empty for no change.
-	NatStaticIP string `json:"nat_static_ip,omitempty"`
-
-	// NatGateway overrides the gateway when NatStaticIP is also set.
-	// Defaults to the subnet gateway (e.g. 192.168.100.1) when omitted.
-	NatGateway string `json:"nat_gateway,omitempty"`
+	// NetworkIPs updates the static IP of one or more extra network interfaces
+	// (spec.networks). Each entry targets an interface by zero-based index.
+	// The cloud-init ISO is regenerated so the new address takes effect on
+	// the next boot. The NAT (primary) interface is not affected here as it
+	// uses a DHCP reservation managed at creation time.
+	NetworkIPs []NetworkIPUpdate `json:"network_ips,omitempty"`
 }
 
 // VM represents a virtual machine and its current state.

@@ -145,7 +145,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 
 All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go`). The production implementation is `LibvirtManager` (`internal/vm/lifecycle.go`). Tests use `MockManager` (`internal/vm/mock_manager.go`), an in-memory implementation with error injection.
 
-The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, `NatStaticIP`, and `NatGateway`; zero/empty values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, then applies each changed field: IP change updates the DHCP host reservation and regenerates the cloud-init ISO with a new instance-id (forces cloud-init re-run on restart), CPU/RAM change redefines the domain XML (preserving the existing UUID), disk growth calls `qemu-img resize` (shrink is rejected). The VM is then restarted.
+The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, and `NetworkIPs`; zero/empty values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, then applies each changed field: `NetworkIPs` is a slice of `{Index, StaticIP, Gateway}` targeting extra network interfaces by zero-based index — the cloud-init ISO is regenerated with a new instance-id so cloud-init re-runs on restart and writes updated NM keyfiles; CPU/RAM change redefines the domain XML (preserving the existing UUID); disk growth calls `qemu-img resize` (shrink is rejected). The NAT (primary) interface IP is not editable here — it is assigned at creation time via DHCP reservation. The VM is then restarted.
 
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
@@ -389,7 +389,7 @@ All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 GET    /vms                            List all VMs
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
-PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
+PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, network_ips — zero/empty ignored; disk grow-only; network_ips is [{index, static_ip, gateway}] targeting extra interfaces; cloud-init ISO regenerated with new instance-id when network_ips change)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 DELETE /vms/{id}                       Delete VM

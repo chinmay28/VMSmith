@@ -334,40 +334,34 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		newDiskGB = patch.DiskGB
 	}
 
-	// Handle static IP change.
-	newNatStaticIP := storedVM.Spec.NatStaticIP
-	newNatGateway := storedVM.Spec.NatGateway
-	ipChanged := false
-	if patch.NatStaticIP != "" {
-		parsedIP, _, err := net.ParseCIDR(patch.NatStaticIP)
-		if err != nil {
-			return nil, fmt.Errorf("invalid nat_static_ip %q: must be CIDR notation e.g. 192.168.100.50/24", patch.NatStaticIP)
+	// Handle extra network static IP changes.
+	// Build a copy of the networks slice so we can compare and modify.
+	newNetworks := make([]types.NetworkAttachment, len(storedVM.Spec.Networks))
+	copy(newNetworks, storedVM.Spec.Networks)
+	netIPChanged := false
+	for _, nu := range patch.NetworkIPs {
+		if nu.Index < 0 || nu.Index >= len(newNetworks) {
+			return nil, fmt.Errorf("network_ips index %d out of range (VM has %d extra networks)", nu.Index, len(newNetworks))
 		}
-		normalized := parsedIP.String() + "/24"
-		if normalized != storedVM.Spec.NatStaticIP {
-			newNatStaticIP = normalized
-			newNatGateway = patch.NatGateway
-			if newNatGateway == "" {
-				newNatGateway = gatewayFromSubnet(m.cfg.Network.Subnet)
-			}
-			ipChanged = true
+		old := newNetworks[nu.Index]
+		newIP := nu.StaticIP
+		newGW := nu.Gateway
+		if newIP != old.StaticIP || newGW != old.Gateway {
+			newNetworks[nu.Index].StaticIP = newIP
+			newNetworks[nu.Index].Gateway = newGW
+			netIPChanged = true
 		}
 	}
 
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && !ipChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && !netIPChanged {
 		return storedVM, nil
 	}
 
 	// Stop the VM if it is running.
 	if wasRunning {
-		if err := dom.Shutdown(); err != nil {
-			// Graceful shutdown failed; force-stop.
-			if err2 := dom.Destroy(); err2 != nil {
-				return nil, fmt.Errorf("force-stopping domain: %w", err2)
-			}
-		}
-		// Wait up to 60 s for the domain to reach the shut-off state.
+		_ = dom.Shutdown() // send ACPI power-off; ignore error (may already be stopping)
+		// Wait up to 60 s for graceful shutdown.
 		deadline := time.Now().Add(60 * time.Second)
 		for time.Now().Before(deadline) {
 			s, _, _ := dom.GetState()
@@ -376,29 +370,22 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
+		// If not shut off after graceful wait, force-destroy.
+		if s, _, _ := dom.GetState(); s != libvirt.DOMAIN_SHUTOFF {
+			if err := dom.Destroy(); err != nil {
+				return nil, fmt.Errorf("force-stopping domain: %w", err)
+			}
+		}
 	}
 
-	// Update DHCP reservation and regenerate cloud-init ISO if IP changed.
+	// Regenerate cloud-init ISO if extra network IPs changed.
 	// The new instance-id forces cloud-init to re-run on the next boot so it
-	// overwrites the NM keyfile with the new static IP address.
-	if ipChanged {
-		netMgr := network.NewManager(m.conn, m.cfg)
-		if storedVM.Spec.NatStaticIP != "" {
-			if oldIP, _, err := net.ParseCIDR(storedVM.Spec.NatStaticIP); err == nil {
-				netMgr.RemoveDHCPHost(storedVM.NatMAC, oldIP.String())
-			}
-		}
-		newIPHost, _, _ := net.ParseCIDR(newNatStaticIP)
-		if newIPHost != nil {
-			if err := netMgr.AddDHCPHost(storedVM.NatMAC, newIPHost.String(), storedVM.Name); err != nil {
-				return nil, fmt.Errorf("updating DHCP reservation: %w", err)
-			}
-		}
+	// overwrites the NM keyfiles with the updated static IP addresses.
+	if netIPChanged {
 		updatedSpec := storedVM.Spec
-		updatedSpec.NatStaticIP = newNatStaticIP
-		updatedSpec.NatGateway = newNatGateway
+		updatedSpec.Networks = newNetworks
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
-		newInstanceID := fmt.Sprintf("%s-ip-%d", storedVM.Name, time.Now().UnixNano())
+		newInstanceID := fmt.Sprintf("%s-netip-%d", storedVM.Name, time.Now().UnixNano())
 		if err := createCloudInitISO(cloudInitISO, updatedSpec, storedVM.NatMAC, newInstanceID); err != nil {
 			return nil, fmt.Errorf("regenerating cloud-init ISO: %w", err)
 		}
@@ -437,12 +424,8 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	storedVM.Spec.CPUs = newCPUs
 	storedVM.Spec.RAMMB = newRAMMB
 	storedVM.Spec.DiskGB = newDiskGB
-	if ipChanged {
-		storedVM.Spec.NatStaticIP = newNatStaticIP
-		storedVM.Spec.NatGateway = newNatGateway
-		if newIPHost, _, _ := net.ParseCIDR(newNatStaticIP); newIPHost != nil {
-			storedVM.IP = newIPHost.String()
-		}
+	if netIPChanged {
+		storedVM.Spec.Networks = newNetworks
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {

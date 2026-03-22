@@ -3,7 +3,6 @@ package vm
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -98,16 +97,12 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 		}
 		vm.Spec.DiskGB = patch.DiskGB
 	}
-	if patch.NatStaticIP != "" {
-		parsedIP, _, err := net.ParseCIDR(patch.NatStaticIP)
-		if err != nil {
-			return nil, fmt.Errorf("invalid nat_static_ip %q: must be CIDR notation e.g. 192.168.100.50/24", patch.NatStaticIP)
+	for _, nu := range patch.NetworkIPs {
+		if nu.Index < 0 || nu.Index >= len(vm.Spec.Networks) {
+			return nil, fmt.Errorf("network_ips index %d out of range (VM has %d extra networks)", nu.Index, len(vm.Spec.Networks))
 		}
-		vm.Spec.NatStaticIP = parsedIP.String() + "/24"
-		vm.IP = parsedIP.String()
-		if patch.NatGateway != "" {
-			vm.Spec.NatGateway = patch.NatGateway
-		}
+		vm.Spec.Networks[nu.Index].StaticIP = nu.StaticIP
+		vm.Spec.Networks[nu.Index].Gateway = nu.Gateway
 	}
 
 	vm.UpdatedAt = time.Now()

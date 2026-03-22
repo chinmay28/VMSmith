@@ -217,22 +217,39 @@ var vmDeleteCmd = &cobra.Command{
 
 var vmEditCmd = &cobra.Command{
 	Use:   "edit <id>",
-	Short: "Edit VM resources (CPU, RAM, disk). VM is stopped, updated, then restarted.",
+	Short: "Edit VM resources (CPU, RAM, disk) or extra network IPs. VM is stopped, updated, then restarted.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 		cpus, _ := cmd.Flags().GetInt("cpus")
 		ram, _ := cmd.Flags().GetInt("ram")
 		disk, _ := cmd.Flags().GetInt("disk")
-		natIP, _ := cmd.Flags().GetString("nat-ip")
-		natGW, _ := cmd.Flags().GetString("nat-gw")
+		netIPs, _ := cmd.Flags().GetStringArray("net-ip")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, or --nat-ip")
+		if cpus == 0 && ram == 0 && disk == 0 && len(netIPs) == 0 {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, or --net-ip")
+		}
+
+		// Parse --net-ip flags: format is "<index>:<ip/cidr>[:<gateway>]"
+		var networkIPs []types.NetworkIPUpdate
+		for _, s := range netIPs {
+			parts := strings.SplitN(s, ":", 3)
+			if len(parts) < 2 {
+				return fmt.Errorf("invalid --net-ip %q: expected format <index>:<ip>[:<gateway>]", s)
+			}
+			idx := 0
+			if _, err := fmt.Sscanf(parts[0], "%d", &idx); err != nil {
+				return fmt.Errorf("invalid --net-ip %q: index must be an integer", s)
+			}
+			nu := types.NetworkIPUpdate{Index: idx, StaticIP: parts[1]}
+			if len(parts) == 3 {
+				nu.Gateway = parts[2]
+			}
+			networkIPs = append(networkIPs, nu)
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
-			"ram", fmt.Sprintf("%d", ram), "disk", fmt.Sprintf("%d", disk), "nat_ip", natIP)
+			"ram", fmt.Sprintf("%d", ram), "disk", fmt.Sprintf("%d", disk))
 
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -242,11 +259,10 @@ var vmEditCmd = &cobra.Command{
 		defer cleanup()
 
 		patch := types.VMUpdateSpec{
-			CPUs:        cpus,
-			RAMMB:       ram,
-			DiskGB:      disk,
-			NatStaticIP: natIP,
-			NatGateway:  natGW,
+			CPUs:       cpus,
+			RAMMB:      ram,
+			DiskGB:     disk,
+			NetworkIPs: networkIPs,
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -267,6 +283,11 @@ var vmEditCmd = &cobra.Command{
 		fmt.Printf("  Disk:  %d GB\n", result.Spec.DiskGB)
 		if result.IP != "" {
 			fmt.Printf("  IP:    %s\n", result.IP)
+		}
+		for i, n := range result.Spec.Networks {
+			if n.StaticIP != "" {
+				fmt.Printf("  eth%d: %s\n", i+1, n.StaticIP)
+			}
 		}
 		return nil
 	},
@@ -349,8 +370,7 @@ Examples:
 	vmEditCmd.Flags().Int("cpus", 0, "new vCPU count (0 = no change)")
 	vmEditCmd.Flags().Int("ram", 0, "new RAM in MB (0 = no change)")
 	vmEditCmd.Flags().Int("disk", 0, "new disk size in GB — can only grow (0 = no change)")
-	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
-	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
+	vmEditCmd.Flags().StringArray("net-ip", nil, "set static IP for an extra network interface: <index>:<ip>[:<gateway>] (e.g. 0:10.0.0.5/24:10.0.0.1); repeatable")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)

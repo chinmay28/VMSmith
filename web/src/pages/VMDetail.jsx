@@ -175,18 +175,19 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [cpus, setCpus] = useState('');
   const [ramMb, setRamMb] = useState('');
   const [diskGb, setDiskGb] = useState('');
-  const [natIP, setNatIP] = useState('');
+  // netIPs mirrors vm.spec.networks: array of { static_ip, gateway }
+  const [netIPs, setNetIPs] = useState([]);
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
-
-  // Current IP shown as a plain address; strip /24 suffix if present
-  const currentIP = vm.ip || (vm.spec.nat_static_ip ? vm.spec.nat_static_ip.replace(/\/\d+$/, '') : '');
 
   useEffect(() => {
     if (open && vm) {
       setCpus(String(vm.spec.cpus));
       setRamMb(String(vm.spec.ram_mb));
       setDiskGb(String(vm.spec.disk_gb));
-      setNatIP(currentIP);
+      setNetIPs((vm.spec.networks || []).map(n => ({
+        static_ip: n.static_ip || '',
+        gateway: n.gateway || '',
+      })));
     }
   }, [open, vm]);
 
@@ -199,11 +200,16 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     if (newRam  !== vm.spec.ram_mb)  patch.ram_mb  = newRam;
     if (newDisk !== vm.spec.disk_gb) patch.disk_gb = newDisk;
 
-    // Normalise the IP: accept bare IP and append /24 for the API
-    const trimmedIP = natIP.trim();
-    if (trimmedIP && trimmedIP !== currentIP) {
-      patch.nat_static_ip = trimmedIP.includes('/') ? trimmedIP : `${trimmedIP}/24`;
-    }
+    const networkIPUpdates = netIPs
+      .map((n, i) => {
+        const orig = vm.spec.networks?.[i] || {};
+        if (n.static_ip !== (orig.static_ip || '') || n.gateway !== (orig.gateway || '')) {
+          return { index: i, static_ip: n.static_ip, gateway: n.gateway };
+        }
+        return null;
+      })
+      .filter(Boolean);
+    if (networkIPUpdates.length > 0) patch.network_ips = networkIPUpdates;
 
     if (Object.keys(patch).length === 0) { onClose(); return; }
 
@@ -219,9 +225,8 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
       <div className="space-y-4">
         <p className="text-xs text-steel-500">
           The VM will be powered off, changes applied, then powered back on.
-          Disk size can only increase. Changing the IP updates the DHCP
-          reservation and regenerates the cloud-init config — the new address
-          takes effect on restart.
+          Disk size can only increase. Changing extra network IPs regenerates
+          the cloud-init config — the new address takes effect on restart.
         </p>
 
         <div className="grid grid-cols-3 gap-4">
@@ -264,20 +269,35 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           </div>
         </div>
 
-        <div>
-          <label className="label">NAT IP Address</label>
-          <input
-            data-testid="input-edit-nat-ip"
-            className="input font-mono"
-            type="text"
-            placeholder="192.168.100.50"
-            value={natIP}
-            onChange={e => setNatIP(e.target.value)}
-          />
-          <p className="text-[10px] text-steel-600 mt-1">
-            current: {currentIP || 'not assigned'} · plain IP or CIDR (e.g. 192.168.100.50)
-          </p>
-        </div>
+        {netIPs.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">Extra Network IPs</p>
+            {netIPs.map((n, i) => {
+              const net = vm.spec.networks?.[i] || {};
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-steel-500 w-10 shrink-0">eth{i + 1}</span>
+                  <span className="badge bg-steel-800/60 text-steel-400 border-steel-700/40 shrink-0">{net.mode}</span>
+                  <span className="font-mono text-xs text-steel-400 shrink-0">{net.host_interface || net.bridge}</span>
+                  <input
+                    className="input font-mono flex-1"
+                    type="text"
+                    placeholder="10.0.0.5/24"
+                    value={n.static_ip}
+                    onChange={e => setNetIPs(prev => prev.map((x, j) => j === i ? { ...x, static_ip: e.target.value } : x))}
+                  />
+                  <input
+                    className="input font-mono flex-1"
+                    type="text"
+                    placeholder="gateway (optional)"
+                    value={n.gateway}
+                    onChange={e => setNetIPs(prev => prev.map((x, j) => j === i ? { ...x, gateway: e.target.value } : x))}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 
