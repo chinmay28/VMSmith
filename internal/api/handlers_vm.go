@@ -25,6 +25,23 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, vm)
 }
 
+// UpdateVM handles PATCH /api/v1/vms/{vmID}
+// It stops the VM if running, applies CPU/RAM/disk changes, then restarts it.
+func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	var patch types.VMUpdateSpec
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	vm, err := s.vmManager.Update(r.Context(), id, patch)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, vm)
+}
+
 // ListVMs handles GET /api/v1/vms
 func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	vms, err := s.vmManager.List(r.Context())

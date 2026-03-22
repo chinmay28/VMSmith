@@ -18,6 +18,7 @@ type MockManager struct {
 
 	// Hooks for injecting errors in tests
 	CreateErr          error
+	UpdateErr          error
 	StartErr           error
 	StopErr            error
 	DeleteErr          error
@@ -69,6 +70,37 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 
 	m.vms[id] = vm
 	return vm, nil
+}
+
+func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error) {
+	if m.UpdateErr != nil {
+		return nil, m.UpdateErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	vm, ok := m.vms[id]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+
+	if patch.CPUs > 0 {
+		vm.Spec.CPUs = patch.CPUs
+	}
+	if patch.RAMMB > 0 {
+		vm.Spec.RAMMB = patch.RAMMB
+	}
+	if patch.DiskGB > 0 {
+		if patch.DiskGB < vm.Spec.DiskGB {
+			return nil, fmt.Errorf("disk can only grow: requested %d GB is less than current %d GB", patch.DiskGB, vm.Spec.DiskGB)
+		}
+		vm.Spec.DiskGB = patch.DiskGB
+	}
+
+	vm.UpdatedAt = time.Now()
+	vmCopy := *vm
+	return &vmCopy, nil
 }
 
 func (m *MockManager) Start(ctx context.Context, id string) error {

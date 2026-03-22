@@ -298,6 +298,118 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	return m.store.DeleteVM(id)
 }
 
+// Update modifies the CPU count, RAM, or disk size of a VM.
+// The VM is stopped if running, the changes are applied, then it is restarted.
+// Disk can only grow (qemu-img resize), not shrink.
+func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error) {
+	storedVM, err := m.store.GetVM(id)
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := m.conn.LookupDomainByName(storedVM.Name)
+	if err != nil {
+		return nil, fmt.Errorf("looking up domain %s: %w", storedVM.Name, err)
+	}
+	defer dom.Free()
+
+	// Determine whether VM is currently running.
+	state, _, _ := dom.GetState()
+	wasRunning := state == libvirt.DOMAIN_RUNNING
+
+	// Resolve new values (zero means no change).
+	newCPUs := storedVM.Spec.CPUs
+	if patch.CPUs > 0 {
+		newCPUs = patch.CPUs
+	}
+	newRAMMB := storedVM.Spec.RAMMB
+	if patch.RAMMB > 0 {
+		newRAMMB = patch.RAMMB
+	}
+	newDiskGB := storedVM.Spec.DiskGB
+	if patch.DiskGB > 0 {
+		if patch.DiskGB < storedVM.Spec.DiskGB {
+			return nil, fmt.Errorf("disk can only grow: requested %d GB is less than current %d GB", patch.DiskGB, storedVM.Spec.DiskGB)
+		}
+		newDiskGB = patch.DiskGB
+	}
+
+	// Nothing to do?
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB {
+		return storedVM, nil
+	}
+
+	// Stop the VM if it is running.
+	if wasRunning {
+		if err := dom.Shutdown(); err != nil {
+			// Graceful shutdown failed; force-stop.
+			if err2 := dom.Destroy(); err2 != nil {
+				return nil, fmt.Errorf("force-stopping domain: %w", err2)
+			}
+		}
+		// Wait up to 60 s for the domain to reach the shut-off state.
+		deadline := time.Now().Add(60 * time.Second)
+		for time.Now().Before(deadline) {
+			s, _, _ := dom.GetState()
+			if s == libvirt.DOMAIN_SHUTOFF {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// Redefine the domain XML with updated CPU/RAM.
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB {
+		updatedSpec := storedVM.Spec
+		updatedSpec.CPUs = newCPUs
+		updatedSpec.RAMMB = newRAMMB
+		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
+		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
+		params.Machine = detectMachineType(m.conn)
+		xmlDoc, err := GenerateDomainXML(params)
+		if err != nil {
+			return nil, fmt.Errorf("generating domain XML: %w", err)
+		}
+		if _, err := m.conn.DomainDefineXML(xmlDoc); err != nil {
+			return nil, fmt.Errorf("redefining domain: %w", err)
+		}
+	}
+
+	// Grow the disk if requested.
+	if newDiskGB > storedVM.Spec.DiskGB {
+		cmd := exec.Command("qemu-img", "resize", storedVM.DiskPath, fmt.Sprintf("%dG", newDiskGB))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("resizing disk: %s: %w", string(out), err)
+		}
+	}
+
+	// Persist updated spec.
+	storedVM.Spec.CPUs = newCPUs
+	storedVM.Spec.RAMMB = newRAMMB
+	storedVM.Spec.DiskGB = newDiskGB
+	storedVM.UpdatedAt = time.Now()
+	if err := m.store.PutVM(storedVM); err != nil {
+		return nil, fmt.Errorf("storing updated VM: %w", err)
+	}
+
+	// Restart if it was running.
+	if wasRunning {
+		dom2, err := m.conn.LookupDomainByName(storedVM.Name)
+		if err != nil {
+			return nil, fmt.Errorf("looking up domain after update: %w", err)
+		}
+		defer dom2.Free()
+		if err := dom2.Create(); err != nil {
+			return nil, fmt.Errorf("restarting domain: %w", err)
+		}
+		storedVM.State = types.VMStateRunning
+	} else {
+		storedVM.State = types.VMStateStopped
+	}
+
+	return storedVM, nil
+}
+
 // Get returns the current state of a VM, refreshing from libvirt.
 func (m *LibvirtManager) Get(ctx context.Context, id string) (*types.VM, error) {
 	vm, err := m.store.GetVM(id)

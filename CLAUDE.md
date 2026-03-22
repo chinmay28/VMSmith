@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|list|start|stop|delete
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
@@ -144,6 +144,8 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 ### VMManager Interface
 
 All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go`). The production implementation is `LibvirtManager` (`internal/vm/lifecycle.go`). Tests use `MockManager` (`internal/vm/mock_manager.go`), an in-memory implementation with error injection.
+
+The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, and `DiskGB`; zero values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, regenerates and redefines the domain XML for CPU/RAM changes, calls `qemu-img resize` for disk growth (shrink is rejected), then restarts.
 
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
@@ -387,6 +389,7 @@ All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 GET    /vms                            List all VMs
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
+PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb — zero values ignored; disk grow-only)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 DELETE /vms/{id}                       Delete VM

@@ -250,6 +250,133 @@ func TestStopVM(t *testing.T) {
 }
 
 // ============================================================
+// Update VM endpoint tests
+// ============================================================
+
+func TestUpdateVM_CPUAndRAM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID: "vm-upd", Name: "resizable",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20},
+	})
+
+	patch := types.VMUpdateSpec{CPUs: 4, RAMMB: 8192}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-upd", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /vms/vm-upd: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+
+	if updated.Spec.CPUs != 4 {
+		t.Errorf("CPUs = %d, want 4", updated.Spec.CPUs)
+	}
+	if updated.Spec.RAMMB != 8192 {
+		t.Errorf("RAMMB = %d, want 8192", updated.Spec.RAMMB)
+	}
+	if updated.Spec.DiskGB != 20 {
+		t.Errorf("DiskGB changed unexpectedly: got %d, want 20", updated.Spec.DiskGB)
+	}
+}
+
+func TestUpdateVM_DiskGrow(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID: "vm-disk", Name: "expandable",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20},
+	})
+
+	patch := types.VMUpdateSpec{DiskGB: 40}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-disk", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+
+	if updated.Spec.DiskGB != 40 {
+		t.Errorf("DiskGB = %d, want 40", updated.Spec.DiskGB)
+	}
+}
+
+func TestUpdateVM_DiskShrinkRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID: "vm-shrink", Name: "locked",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 40},
+	})
+
+	patch := types.VMUpdateSpec{DiskGB: 20}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-shrink", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 for disk shrink attempt", resp.StatusCode)
+	}
+}
+
+func TestUpdateVM_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	patch := types.VMUpdateSpec{CPUs: 4}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/nonexistent", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 for not found", resp.StatusCode)
+	}
+}
+
+func TestUpdateVM_BadJSON(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-x",
+		bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateVM_ErrorInjection(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-err", Name: "broken", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.UpdateErr = types.ErrTest
+
+	patch := types.VMUpdateSpec{CPUs: 4}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-err", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// ============================================================
 // Snapshot endpoint tests
 // ============================================================
 

@@ -215,6 +215,56 @@ var vmDeleteCmd = &cobra.Command{
 	},
 }
 
+var vmEditCmd = &cobra.Command{
+	Use:   "edit <id>",
+	Short: "Edit VM resources (CPU, RAM, disk). VM is stopped, updated, then restarted.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		cpus, _ := cmd.Flags().GetInt("cpus")
+		ram, _ := cmd.Flags().GetInt("ram")
+		disk, _ := cmd.Flags().GetInt("disk")
+
+		if cpus == 0 && ram == 0 && disk == 0 {
+			return fmt.Errorf("specify at least one of --cpus, --ram, or --disk")
+		}
+
+		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
+			"ram", fmt.Sprintf("%d", ram), "disk", fmt.Sprintf("%d", disk))
+
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm edit: failed to init VM manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		patch := types.VMUpdateSpec{
+			CPUs:   cpus,
+			RAMMB:  ram,
+			DiskGB: disk,
+		}
+
+		result, err := mgr.Update(context.Background(), id, patch)
+		if err != nil {
+			logger.Error("cli", "vm edit failed", "id", id, "error", err.Error())
+			return fmt.Errorf("updating VM: %w", err)
+		}
+
+		logger.Info("cli", "vm updated", "id", result.ID, "cpus", fmt.Sprintf("%d", result.Spec.CPUs),
+			"ram", fmt.Sprintf("%d", result.Spec.RAMMB), "disk", fmt.Sprintf("%d", result.Spec.DiskGB))
+
+		fmt.Printf("VM updated successfully:\n")
+		fmt.Printf("  ID:    %s\n", result.ID)
+		fmt.Printf("  Name:  %s\n", result.Name)
+		fmt.Printf("  State: %s\n", result.State)
+		fmt.Printf("  CPUs:  %d\n", result.Spec.CPUs)
+		fmt.Printf("  RAM:   %d MB\n", result.Spec.RAMMB)
+		fmt.Printf("  Disk:  %d GB\n", result.Spec.DiskGB)
+		return nil
+	},
+}
+
 var vmInfoCmd = &cobra.Command{
 	Use:   "info <id>",
 	Short: "Show detailed VM information",
@@ -289,7 +339,12 @@ Examples:
   --network eth1 --network eth2 --network eth3`)
 	vmCreateCmd.MarkFlagRequired("image")
 
+	vmEditCmd.Flags().Int("cpus", 0, "new vCPU count (0 = no change)")
+	vmEditCmd.Flags().Int("ram", 0, "new RAM in MB (0 = no change)")
+	vmEditCmd.Flags().Int("disk", 0, "new disk size in GB — can only grow (0 = no change)")
+
 	vmCmd.AddCommand(vmCreateCmd)
+	vmCmd.AddCommand(vmEditCmd)
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmStartCmd)
 	vmCmd.AddCommand(vmStopCmd)

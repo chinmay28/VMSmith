@@ -70,6 +70,19 @@ const server = http.createServer(async (req, res) => {
     const vm = vms.get(m[1]);
     return vm ? json(res, 200, vm) : json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)$/)) && method === "PATCH") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { error: "not found" });
+    const body = await parseBody(req);
+    if (body.cpus > 0) vm.spec.cpus = body.cpus;
+    if (body.ram_mb > 0) vm.spec.ram_mb = body.ram_mb;
+    if (body.disk_gb > 0) {
+      if (body.disk_gb < vm.spec.disk_gb) return json(res, 500, { error: "disk can only grow" });
+      vm.spec.disk_gb = body.disk_gb;
+    }
+    vm.updated_at = new Date().toISOString();
+    return json(res, 200, vm);
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)$/)) && method === "DELETE") {
     vms.delete(m[1]); res.writeHead(204); return res.end();
   }

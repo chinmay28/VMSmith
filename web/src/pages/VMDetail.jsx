@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, Download, Clock
+  Plus, RotateCcw, Download, Clock, Pencil
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -18,6 +18,7 @@ export default function VMDetail() {
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const startMut  = useMutation(vms.start);
   const stopMut   = useMutation(vms.stop);
@@ -60,6 +61,9 @@ export default function VMDetail() {
               <Square size={14} /> Stop
             </button>
           )}
+          <button className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">
+            <Pencil size={14} /> Edit
+          </button>
           <button className="btn-danger" onClick={handleDelete}>
             <Trash2 size={14} /> Delete
           </button>
@@ -149,6 +153,7 @@ export default function VMDetail() {
       </div>
 
       {/* Modals */}
+      <EditVMModal vm={vm} open={showEditModal} onClose={() => setShowEditModal(false)} onUpdated={refresh} />
       <CreateSnapshotModal vmId={id} open={showSnapModal} onClose={() => setShowSnapModal(false)} onCreated={refreshSnaps} />
       <AddPortModal vmId={id} open={showPortModal} onClose={() => setShowPortModal(false)} onCreated={refreshPorts} />
       <ExportImageModal vmId={id} open={showImageModal} onClose={() => setShowImageModal(false)} />
@@ -162,6 +167,97 @@ function InfoCard({ label, value, mono }) {
       <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
       <p className={`text-sm text-steel-200 mt-0.5 ${mono ? 'font-mono' : ''}`}>{value}</p>
     </div>
+  );
+}
+
+// --- Edit VM Modal ---
+function EditVMModal({ vm, open, onClose, onUpdated }) {
+  const [cpus, setCpus] = useState('');
+  const [ramMb, setRamMb] = useState('');
+  const [diskGb, setDiskGb] = useState('');
+  const updateMut = useMutation((patch) => vms.update(vm.id, patch));
+
+  useEffect(() => {
+    if (open && vm) {
+      setCpus(String(vm.spec.cpus));
+      setRamMb(String(vm.spec.ram_mb));
+      setDiskGb(String(vm.spec.disk_gb));
+    }
+  }, [open, vm]);
+
+  const handleSubmit = async () => {
+    const patch = {};
+    const newCpus = parseInt(cpus, 10);
+    const newRam  = parseInt(ramMb, 10);
+    const newDisk = parseInt(diskGb, 10);
+    if (newCpus !== vm.spec.cpus)   patch.cpus   = newCpus;
+    if (newRam  !== vm.spec.ram_mb) patch.ram_mb  = newRam;
+    if (newDisk !== vm.spec.disk_gb) patch.disk_gb = newDisk;
+    if (Object.keys(patch).length === 0) { onClose(); return; }
+
+    try {
+      await updateMut.execute(patch);
+      onUpdated();
+      onClose();
+    } catch { /* error shown via mutation */ }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Machine">
+      <div className="space-y-4">
+        <p className="text-xs text-steel-500">
+          The VM will be powered off, changes applied, then powered back on.
+          Disk size can only increase.
+        </p>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="label">vCPUs</label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              value={cpus}
+              onChange={e => setCpus(e.target.value)}
+            />
+            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.cpus}</p>
+          </div>
+          <div>
+            <label className="label">RAM (MB)</label>
+            <input
+              className="input"
+              type="number"
+              min={256}
+              step={256}
+              value={ramMb}
+              onChange={e => setRamMb(e.target.value)}
+            />
+            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.ram_mb}</p>
+          </div>
+          <div>
+            <label className="label">Disk (GB)</label>
+            <input
+              className="input"
+              type="number"
+              min={vm.spec.disk_gb}
+              value={diskGb}
+              onChange={e => setDiskGb(e.target.value)}
+            />
+            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.disk_gb} · grow only</p>
+          </div>
+        </div>
+
+        {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
+
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" onClick={handleSubmit} disabled={updateMut.loading}>
+            {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />}
+            {updateMut.loading ? 'Applying…' : 'Apply Changes'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

@@ -145,6 +145,36 @@ sudo ./bin/vmsmith vm start web01
 sudo ./bin/vmsmith vm delete web01
 ```
 
+### Step 4b — Edit VM resources
+
+Increase vCPU count, RAM, or disk size on an existing VM. The VM is powered off automatically, the changes are applied, and it is powered back on.
+
+```bash
+# Scale up to 8 vCPUs and 16 GB RAM
+sudo ./bin/vmsmith vm edit web01 --cpus 8 --ram 16384
+
+# Grow the disk (can only grow, not shrink)
+sudo ./bin/vmsmith vm edit web01 --disk 80
+
+# All three at once
+sudo ./bin/vmsmith vm edit web01 --cpus 4 --ram 8192 --disk 60
+```
+
+Output:
+```
+VM updated successfully:
+  ID:    vm-1741234567890123
+  Name:  web01
+  State: running
+  CPUs:  4
+  RAM:   8192 MB
+  Disk:  60 GB
+```
+
+You can also edit resources from the **VM detail page** in the web GUI — click the **Edit** button next to start/stop.
+
+> **Note:** Disk resize only grows the virtual device. The guest OS filesystem still needs to be expanded manually (e.g. `growpart` + `resize2fs` / `xfs_growfs` on Linux).
+
 ---
 
 ### Step 5 — Snapshots
@@ -281,9 +311,13 @@ GUI: VM Image Management
 | Route | What you can do |
 |---|---|
 | `/` | Dashboard — VM count, state overview, quick actions |
-| `/vms` | List VMs, create with full spec including extra networks |
-| `/vms/:id` | VM detail — snapshots, port forwards, attached networks |
+| `/vms` | List VMs; Create modal (Basic / Advanced tabs) |
+| `/vms/:id` | VM detail — edit resources, snapshots, port forwards, attached networks |
 | `/images` | Upload, list, download, delete portable qcow2 images |
+
+**Create Machine modal (Basic / Advanced tabs):**
+- **Basic** — name, image, vCPU, RAM, disk; everything you need to launch a VM immediately
+- **Advanced** — SSH key, default user, primary NAT static IP, extra network interfaces (static IP by default; "Use DHCP" checkbox to opt out)
 
 ---
 
@@ -317,6 +351,11 @@ curl -X POST http://localhost:8080/api/v1/vms \
 # Get VM
 curl http://localhost:8080/api/v1/vms/<id>
 
+# Update VM resources (stops VM, applies, restarts)
+curl -X PATCH http://localhost:8080/api/v1/vms/<id> \
+  -H 'Content-Type: application/json' \
+  -d '{"cpus": 4, "ram_mb": 8192, "disk_gb": 60}'
+
 # Port forward
 curl -X POST http://localhost:8080/api/v1/vms/<id>/ports \
   -H 'Content-Type: application/json' \
@@ -334,6 +373,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--ssh-key "ssh-rsa ..."] [--default-user <user>]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
+vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB]
 vmsmith vm list
 vmsmith vm start  <id>
 vmsmith vm stop   <id>
@@ -403,7 +443,7 @@ make test-web         # headless browser E2E tests
 make test-all         # everything
 ```
 
-156 tests across unit, API integration, and Playwright E2E tiers — no real libvirt or QEMU needed for any of them. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
+Tests span unit, API integration, and Playwright E2E tiers — no real libvirt or QEMU needed for any of them. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing-strategy) for details.
 
 ---
 

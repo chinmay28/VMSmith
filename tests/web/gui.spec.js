@@ -53,15 +53,50 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
   });
 
-  test("new VM button opens create modal", async ({ page }) => {
+  test("new VM button opens create modal on basic tab", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
 
     await page.getByTestId("btn-new-vm").click();
 
-    // Modal should be visible
+    // Basic tab fields should be visible by default
     await expect(page.getByTestId("input-vm-name")).toBeVisible();
     await expect(page.getByTestId("input-vm-image")).toBeVisible();
+    await expect(page.getByTestId("input-vm-cpus")).toBeVisible();
+    await expect(page.getByTestId("input-vm-ram")).toBeVisible();
+    await expect(page.getByTestId("input-vm-disk")).toBeVisible();
+  });
+
+  test("advanced tab shows SSH and network options", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    // Switch to advanced tab
+    await page.getByTestId("tab-advanced").click();
+
+    // Advanced-only fields should now be visible
+    await expect(page.getByTestId("input-vm-ssh-key")).toBeVisible();
+    await expect(page.getByTestId("input-vm-default-user")).toBeVisible();
+    await expect(page.getByTestId("btn-add-network")).toBeVisible();
+  });
+
+  test("extra network uses static IP by default with DHCP checkbox", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+    await page.getByTestId("tab-advanced").click();
+
+    // Add an extra network
+    await page.getByTestId("btn-add-network").click();
+
+    // Static IP field should be visible by default
+    await expect(page.getByTestId("input-net-0-static-ip")).toBeVisible();
+    await expect(page.getByTestId("input-net-0-gateway")).toBeVisible();
+
+    // Check the DHCP checkbox — static IP fields should disappear
+    await page.getByTestId("checkbox-net-0-dhcp").check();
+    await expect(page.getByTestId("input-net-0-static-ip")).not.toBeVisible();
   });
 
   test("create VM flow", async ({ page }) => {
@@ -69,7 +104,7 @@ test.describe("VM List", () => {
     await page.getByTestId("nav-vms").click();
     await page.getByTestId("btn-new-vm").click();
 
-    // Fill the form
+    // Fill the form (basic tab)
     await page.getByTestId("input-vm-name").fill("test-new-vm");
     await page.getByTestId("input-vm-image").fill("ubuntu-22.04");
     await page.getByTestId("input-vm-cpus").fill("4");
@@ -164,6 +199,52 @@ test.describe("VM Detail", () => {
 
     // Should be removed
     await expect(page.getByTestId("snap-before-deploy")).not.toBeVisible();
+  });
+
+  test("edit button opens edit modal pre-filled with current values", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-vm").click();
+
+    // Modal should appear with current values pre-filled
+    await expect(page.getByTestId("input-edit-cpus")).toBeVisible();
+    await expect(page.getByTestId("input-edit-ram")).toBeVisible();
+    await expect(page.getByTestId("input-edit-disk")).toBeVisible();
+
+    // Values should match the seeded VM (cpus=2, ram=4096, disk=40)
+    await expect(page.getByTestId("input-edit-cpus")).toHaveValue("2");
+    await expect(page.getByTestId("input-edit-ram")).toHaveValue("4096");
+  });
+
+  test("edit VM updates resources", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-vm").click();
+
+    // Change CPU count
+    await page.getByTestId("input-edit-cpus").fill("8");
+    await page.getByTestId("btn-submit-edit").click();
+
+    // Modal should close
+    await expect(page.getByTestId("input-edit-cpus")).not.toBeVisible();
+
+    // Resources should now reflect updated values
+    await expect(page.getByTestId("vm-detail-resources")).toContainText("8 vCPU");
+  });
+
+  test("cancel edit closes modal without changes", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-vm").click();
+    await page.getByTestId("input-edit-cpus").fill("16");
+    await page.getByTestId("btn-cancel-edit").click();
+
+    await expect(page.getByTestId("input-edit-cpus")).not.toBeVisible();
+    // Original resources unchanged
+    await expect(page.getByTestId("vm-detail-resources")).toContainText("2 vCPU");
   });
 
   test("back link returns to VM list", async ({ page }) => {
@@ -310,19 +391,25 @@ test.describe("Full Lifecycle", () => {
     await page.getByTestId("btn-submit-snapshot").click();
     await expect(page.getByTestId("snap-e2e-checkpoint")).toBeVisible();
 
-    // 5. Stop the VM
+    // 5. Edit resources
+    await page.getByTestId("btn-edit-vm").click();
+    await page.getByTestId("input-edit-cpus").fill("4");
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("vm-detail-resources")).toContainText("4 vCPU");
+
+    // 6. Stop the VM
     await page.getByTestId("btn-stop").click();
     await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
 
-    // 6. Start it back
+    // 7. Start it back
     await page.getByTestId("btn-start").click();
     await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
 
-    // 7. Delete the VM
+    // 8. Delete the VM
     page.on("dialog", (dialog) => dialog.accept());
     await page.getByTestId("btn-delete").click();
 
-    // 8. Should be back on VM list, e2e-test-vm gone
+    // 9. Should be back on VM list, e2e-test-vm gone
     await expect(page.getByTestId("vm-card-e2e-test-vm")).not.toBeVisible();
   });
 });
