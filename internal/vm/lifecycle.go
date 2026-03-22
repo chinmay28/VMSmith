@@ -360,11 +360,15 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 
 	// Redefine the domain XML with updated CPU/RAM.
 	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB {
+		// Preserve the existing domain UUID so libvirt accepts the redefinition.
+		existingUUID, _ := dom.GetUUIDString()
+
 		updatedSpec := storedVM.Spec
 		updatedSpec.CPUs = newCPUs
 		updatedSpec.RAMMB = newRAMMB
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
+		params.UUID = existingUUID
 		params.Machine = detectMachineType(m.conn)
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
