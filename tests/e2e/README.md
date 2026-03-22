@@ -35,7 +35,7 @@ Resolution order: CLI option → env var → built-in default.
 |---|---|---|---|
 | `--rocky-image PATH` | `VMSMITH_ROCKY_IMAGE` | *(required)* | Path to Rocky Linux qcow2 image |
 | `--ssh-key PATH` | `VMSMITH_SSH_PRIVATE_KEY` | `~/.ssh/id_rsa` | SSH private key for VM access |
-| `--ssh-user USER` | `VMSMITH_SSH_USER` | `rocky` | SSH username for the Rocky image |
+| `--ssh-user USER` | `VMSMITH_SSH_USER` | `root` | SSH username for VM access (VMs use root by default) |
 | `--vmsmith-bin PATH` | `VMSMITH_BIN` | `vmsmith` | Path to vmsmith binary |
 | `--vmsmith-api URL` | `VMSMITH_API` | `http://localhost:8080` | Daemon API base URL |
 | `--host-iface NAME` | `VMSMITH_HOST_IFACE` | — | Host interface for multi-NIC tests |
@@ -83,7 +83,7 @@ python -m pytest test_cli_vm_lifecycle.py test_cli_networking.py \
     --rocky-image /images/rocky-9.qcow2 \
     --vmsmith-bin /usr/local/bin/vmsmith \
     --ssh-key ~/.ssh/vmsmith_e2e \
-    --ssh-user rocky \
+    --ssh-user root \
     --host-iface eth1 \
     --host-iface2 eth2 \
     --ip-timeout 180

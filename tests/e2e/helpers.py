@@ -21,7 +21,7 @@ VMSMITH_BIN: str = os.environ.get("VMSMITH_BIN", "vmsmith")
 VMSMITH_API: str = os.environ.get("VMSMITH_API", "http://localhost:8080")
 ROCKY_IMAGE: str = os.environ.get("VMSMITH_ROCKY_IMAGE", "")
 SSH_PRIVATE_KEY: str = os.environ.get("VMSMITH_SSH_PRIVATE_KEY", os.path.expanduser("~/.ssh/id_rsa"))
-SSH_USER: str = os.environ.get("VMSMITH_SSH_USER", "rocky")
+SSH_USER: str = os.environ.get("VMSMITH_SSH_USER", "root")
 
 # Timeouts (seconds)
 VM_IP_TIMEOUT: int = int(os.environ.get("VMSMITH_IP_TIMEOUT", "120"))

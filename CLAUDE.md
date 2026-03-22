@@ -191,7 +191,8 @@ Three buckets in `~/.vmsmith/vmsmith.db`:
 - Every VM gets a primary interface on the `vmsmith-net` libvirt NAT network (`192.168.100.0/24`). The OS-visible name depends on the distro (`eth0` on Ubuntu, `enp1s0`/`ens3` on Rocky/RHEL)
 - Extra interfaces (`--network eth1`) attach as macvtap or bridge; their OS-visible names are also distro-dependent
 - Port forwarding uses `iptables -t nat PREROUTING DNAT` rules — stored in bbolt and restored at daemon startup
-- Cloud-init ISO (`cidata.iso`) is **always** generated. `user-data` uses `buildCloudConfig()` which writes a NetworkManager keyfile for the primary NAT interface via `write_files` + `runcmd` — this is the primary networking mechanism on Rocky/RHEL. A Netplan v2 `network-config` is also included for Ubuntu/Debian (belt-and-suspenders). Both files match interfaces by MAC address, not by distro-specific name
+- Cloud-init ISO (`cidata.iso`) is **always** generated. `user-data` uses `buildCloudConfig()` which sets up the SSH user and writes a NetworkManager keyfile for the primary NAT interface via `write_files` + `runcmd` — this is the primary networking mechanism on Rocky/RHEL. A Netplan v2 `network-config` is also included for Ubuntu/Debian (belt-and-suspenders). Both files match interfaces by MAC address, not by distro-specific name
+- **Root-by-default:** When no `default_user` is specified, `buildCloudConfig()` emits `disable_root: false`, injects the SSH public key into root's `authorized_keys`, and writes `/etc/ssh/sshd_config.d/99-vmsmith-root.conf` with `PermitRootLogin prohibit-password` to ensure key-based root SSH works across all distros. When `default_user` is provided, a named sudo user is created with the SSH key, root login is disabled (`disable_root: true`), and the image's built-in default user is preserved alongside it
 - **Static IP pre-assignment:** Before generating the cloud-init ISO, `Create()` picks an available IP from the DHCP range and calls `netMgr.AddDHCPHost(mac, ip, name)` to register a DHCP host reservation. The resulting static IP is embedded in the NM keyfile (`method=manual`) so the interface comes up deterministically on first boot — no DHCP race. The IP is shown in `vmsmith vm create` output immediately. If DHCP range is exhausted or the reservation fails, it falls back to dynamic assignment. Any stale reservation left by a previous failed create with the same VM name is removed via `RemoveDHCPHostByName` before adding the new one. If `dom.Create()` fails, the reservation is also cleaned up.
 
 ### Frontend Build Integration
@@ -255,7 +256,7 @@ make test-e2e-deps         # install pytest, requests, paramiko, Playwright + Ch
 |---|---|---|---|
 | `--rocky-image` | `VMSMITH_ROCKY_IMAGE` | *(required)* | Rocky Linux qcow2 image path |
 | `--ssh-key` | `VMSMITH_SSH_PRIVATE_KEY` | `~/.ssh/id_rsa` | SSH private key |
-| `--ssh-user` | `VMSMITH_SSH_USER` | `rocky` | SSH username |
+| `--ssh-user` | `VMSMITH_SSH_USER` | `root` | SSH username |
 | `--vmsmith-bin` | `VMSMITH_BIN` | `vmsmith` | vmsmith binary path |
 | `--vmsmith-api` | `VMSMITH_API` | `http://localhost:8080` | Daemon API URL |
 | `--host-iface` | `VMSMITH_HOST_IFACE` | — | Host interface for multi-NIC tests |
@@ -344,7 +345,7 @@ Key config fields:
 - `storage.db_path` — bbolt database path
 - `network.*` — NAT network name and DHCP range
 - `defaults.cpus/ram_mb/disk_gb` — default VM resource sizes
-- `defaults.ssh_user` — default SSH username injected via cloud-init (default: `"ubuntu"`); override per-VM with `VMSpec.DefaultUser` / `--default-user` CLI flag / `default_user` JSON field
+- `defaults.ssh_user` — retained for config file compatibility but no longer used as a VM default. VMs use `root` by default; override per-VM with `VMSpec.DefaultUser` / `--default-user` CLI flag / `default_user` JSON field to create a named sudo user instead
 
 ---
 

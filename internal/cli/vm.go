@@ -245,9 +245,13 @@ var vmInfoCmd = &cobra.Command{
 		fmt.Printf("RAM:          %d MB\n", v.Spec.RAMMB)
 		fmt.Printf("Disk:         %d GB\n", v.Spec.DiskGB)
 		fmt.Printf("Image:        %s\n", v.Spec.Image)
-		fmt.Printf("Default User: %s\n", v.Spec.DefaultUser)
-		if v.IP != "" && v.Spec.DefaultUser != "" {
-			fmt.Printf("SSH:          ssh %s@%s\n", v.Spec.DefaultUser, v.IP)
+		sshUser := v.Spec.DefaultUser
+		if sshUser == "" {
+			sshUser = "root"
+		}
+		fmt.Printf("Default User: %s\n", sshUser)
+		if v.IP != "" {
+			fmt.Printf("SSH:          ssh %s@%s\n", sshUser, v.IP)
 		}
 		fmt.Printf("Disk Path:    %s\n", v.DiskPath)
 		fmt.Printf("Created:      %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
@@ -261,7 +265,7 @@ func init() {
 	vmCreateCmd.Flags().Int("ram", 0, "RAM in MB (default from config)")
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")
 	vmCreateCmd.Flags().String("ssh-key", "", "SSH public key to inject")
-	vmCreateCmd.Flags().String("default-user", "", "default SSH username (default from config, typically ubuntu)")
+	vmCreateCmd.Flags().String("default-user", "", "create a named sudo user and disable root (omit to use root by default)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")

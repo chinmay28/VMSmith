@@ -72,13 +72,16 @@ export default function VMDetail() {
         <InfoCard label="Image" value={vm.spec.image} mono />
         <InfoCard label="Resources" value={`${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB RAM · ${vm.spec.disk_gb} GB disk`} />
         <InfoCard label="Created" value={new Date(vm.created_at).toLocaleString()} />
-        {vm.spec.default_user && (
-          <InfoCard
-            label="SSH"
-            value={vm.ip ? `ssh ${vm.spec.default_user}@${vm.ip}` : `user: ${vm.spec.default_user}`}
-            mono
-          />
-        )}
+        {(() => {
+          const sshUser = vm.spec.default_user || 'root';
+          return (
+            <InfoCard
+              label="SSH"
+              value={vm.ip ? `ssh ${sshUser}@${vm.ip}` : `user: ${sshUser}`}
+              mono
+            />
+          );
+        })()}
       </div>
 
       {/* Attached Networks */}
