@@ -69,9 +69,8 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if spec.DiskGB == 0 {
 		spec.DiskGB = m.cfg.Defaults.DiskGB
 	}
-	if spec.DefaultUser == "" {
-		spec.DefaultUser = m.cfg.Defaults.SSHUser
-	}
+	// DefaultUser intentionally left empty here: empty means "use root".
+	// A non-empty DefaultUser creates a named sudo user and disables root.
 
 	// Validate network attachments
 	if len(spec.Networks) > 0 {
@@ -558,14 +557,20 @@ func buildCloudConfig(spec types.VMSpec, natMAC string) string {
 
 	var sb strings.Builder
 	sb.WriteString("#cloud-config\n")
-	if spec.SSHPubKey != "" && spec.DefaultUser != "" {
-		// Inject the SSH key into the named user explicitly. The `default`
-		// entry preserves the image's built-in default user alongside ours.
-		sb.WriteString(fmt.Sprintf("users:\n  - default\n  - name: %s\n    ssh_authorized_keys:\n      - %s\n    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n    lock_passwd: true\n", spec.DefaultUser, spec.SSHPubKey))
-	} else if spec.SSHPubKey != "" {
-		sb.WriteString("ssh_authorized_keys:\n  - ")
-		sb.WriteString(spec.SSHPubKey)
-		sb.WriteString("\n")
+	if spec.DefaultUser != "" {
+		// A named user was requested: create it with SSH key + sudo and disable root.
+		sb.WriteString("disable_root: true\n")
+		if spec.SSHPubKey != "" {
+			sb.WriteString(fmt.Sprintf("users:\n  - default\n  - name: %s\n    ssh_authorized_keys:\n      - %s\n    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n    lock_passwd: true\n", spec.DefaultUser, spec.SSHPubKey))
+		} else {
+			sb.WriteString(fmt.Sprintf("users:\n  - default\n  - name: %s\n    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n    lock_passwd: false\n", spec.DefaultUser))
+		}
+	} else {
+		// Default: enable root login. Inject SSH key into root if provided.
+		sb.WriteString("disable_root: false\n")
+		if spec.SSHPubKey != "" {
+			sb.WriteString(fmt.Sprintf("users:\n  - name: root\n    ssh_authorized_keys:\n      - %s\n", spec.SSHPubKey))
+		}
 	}
 	sb.WriteString("write_files:\n")
 	sb.WriteString("  - path: /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
@@ -574,11 +579,24 @@ func buildCloudConfig(spec types.VMSpec, natMAC string) string {
 	sb.WriteString("    makedirs: true\n")
 	sb.WriteString("    content: |\n")
 	sb.WriteString(indented.String())
+	if spec.DefaultUser == "" {
+		// Drop-in sshd config to allow key-based root login across all distros.
+		sb.WriteString("  - path: /etc/ssh/sshd_config.d/99-vmsmith-root.conf\n")
+		sb.WriteString("    permissions: '0600'\n")
+		sb.WriteString("    owner: root:root\n")
+		sb.WriteString("    makedirs: true\n")
+		sb.WriteString("    content: |\n")
+		sb.WriteString("      PermitRootLogin prohibit-password\n")
+	}
 	sb.WriteString("runcmd:\n")
 	sb.WriteString("  - chmod 600 /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection\n")
 	// restorecon fixes SELinux file context on Rocky/RHEL so NetworkManager can read the keyfile.
 	// Without this, NM may silently ignore the file due to SELinux type mismatch.
 	sb.WriteString("  - restorecon -v /etc/NetworkManager/system-connections/vmsmith-nat.nmconnection 2>/dev/null || true\n")
+	if spec.DefaultUser == "" {
+		sb.WriteString("  - restorecon -v /etc/ssh/sshd_config.d/99-vmsmith-root.conf 2>/dev/null || true\n")
+		sb.WriteString("  - systemctl reload-or-restart sshd 2>/dev/null || systemctl reload-or-restart ssh 2>/dev/null || true\n")
+	}
 	sb.WriteString("  - nmcli connection reload\n")
 	sb.WriteString("  - nmcli connection up vmsmith-nat 2>/dev/null || true\n")
 	return sb.String()
