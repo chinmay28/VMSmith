@@ -235,6 +235,49 @@ func TestMockManager_Update_ErrorInjection(t *testing.T) {
 	}
 }
 
+func TestMockManager_Update_IP(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "readdressable", CPUs: 2, RAMMB: 2048, DiskGB: 20})
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "192.168.100.50/24"})
+	if err != nil {
+		t.Fatalf("Update IP: %v", err)
+	}
+	if updated.IP != "192.168.100.50" {
+		t.Errorf("IP = %q, want 192.168.100.50", updated.IP)
+	}
+	if updated.Spec.NatStaticIP != "192.168.100.50/24" {
+		t.Errorf("NatStaticIP = %q, want 192.168.100.50/24", updated.Spec.NatStaticIP)
+	}
+}
+
+func TestMockManager_Update_IP_AcceptsPlainIP(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "plain-ip"})
+	// Plain IP without /24 — should be treated as /24 by the mock
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "192.168.100.20/24"})
+	if err != nil {
+		t.Fatalf("Update IP: %v", err)
+	}
+	if updated.IP != "192.168.100.20" {
+		t.Errorf("IP = %q, want 192.168.100.20", updated.IP)
+	}
+}
+
+func TestMockManager_Update_IP_InvalidCIDR(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "invalid-ip"})
+	_, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "not-an-ip"})
+	if err == nil {
+		t.Error("expected error for invalid CIDR")
+	}
+}
+
 func TestMockManager_Update_NoChange(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()

@@ -163,7 +163,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// If NatStaticIP is set the NAT interface is configured with a static
 	// address instead of DHCP, which avoids Rocky/RHEL DHCP timing issues.
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
-	if err := createCloudInitISO(cloudInitISO, spec, natMAC); err != nil {
+	if err := createCloudInitISO(cloudInitISO, spec, natMAC, ""); err != nil {
 		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
 	}
 
@@ -334,8 +334,28 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		newDiskGB = patch.DiskGB
 	}
 
+	// Handle static IP change.
+	newNatStaticIP := storedVM.Spec.NatStaticIP
+	newNatGateway := storedVM.Spec.NatGateway
+	ipChanged := false
+	if patch.NatStaticIP != "" {
+		parsedIP, _, err := net.ParseCIDR(patch.NatStaticIP)
+		if err != nil {
+			return nil, fmt.Errorf("invalid nat_static_ip %q: must be CIDR notation e.g. 192.168.100.50/24", patch.NatStaticIP)
+		}
+		normalized := parsedIP.String() + "/24"
+		if normalized != storedVM.Spec.NatStaticIP {
+			newNatStaticIP = normalized
+			newNatGateway = patch.NatGateway
+			if newNatGateway == "" {
+				newNatGateway = gatewayFromSubnet(m.cfg.Network.Subnet)
+			}
+			ipChanged = true
+		}
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && !ipChanged {
 		return storedVM, nil
 	}
 
@@ -355,6 +375,32 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 				break
 			}
 			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// Update DHCP reservation and regenerate cloud-init ISO if IP changed.
+	// The new instance-id forces cloud-init to re-run on the next boot so it
+	// overwrites the NM keyfile with the new static IP address.
+	if ipChanged {
+		netMgr := network.NewManager(m.conn, m.cfg)
+		if storedVM.Spec.NatStaticIP != "" {
+			if oldIP, _, err := net.ParseCIDR(storedVM.Spec.NatStaticIP); err == nil {
+				netMgr.RemoveDHCPHost(storedVM.NatMAC, oldIP.String())
+			}
+		}
+		newIPHost, _, _ := net.ParseCIDR(newNatStaticIP)
+		if newIPHost != nil {
+			if err := netMgr.AddDHCPHost(storedVM.NatMAC, newIPHost.String(), storedVM.Name); err != nil {
+				return nil, fmt.Errorf("updating DHCP reservation: %w", err)
+			}
+		}
+		updatedSpec := storedVM.Spec
+		updatedSpec.NatStaticIP = newNatStaticIP
+		updatedSpec.NatGateway = newNatGateway
+		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
+		newInstanceID := fmt.Sprintf("%s-ip-%d", storedVM.Name, time.Now().UnixNano())
+		if err := createCloudInitISO(cloudInitISO, updatedSpec, storedVM.NatMAC, newInstanceID); err != nil {
+			return nil, fmt.Errorf("regenerating cloud-init ISO: %w", err)
 		}
 	}
 
@@ -391,6 +437,13 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	storedVM.Spec.CPUs = newCPUs
 	storedVM.Spec.RAMMB = newRAMMB
 	storedVM.Spec.DiskGB = newDiskGB
+	if ipChanged {
+		storedVM.Spec.NatStaticIP = newNatStaticIP
+		storedVM.Spec.NatGateway = newNatGateway
+		if newIPHost, _, _ := net.ParseCIDR(newNatStaticIP); newIPHost != nil {
+			storedVM.IP = newIPHost.String()
+		}
+	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {
 		return nil, fmt.Errorf("storing updated VM: %w", err)
@@ -587,7 +640,15 @@ func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 	return nil
 }
 
-func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error {
+// createCloudInitISO writes a NoCloud cloud-init ISO to isoPath.
+// instanceID overrides the cloud-init instance identifier; empty defaults to
+// spec.Name.  Pass a unique value (e.g. "name-ip-<nano>") to force cloud-init
+// to re-run on next boot (cloud-init re-runs when the instance-id changes).
+func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC, instanceID string) error {
+	if instanceID == "" {
+		instanceID = spec.Name
+	}
+
 	tmpDir, err := os.MkdirTemp("", "vmsmith-ci-")
 	if err != nil {
 		return err
@@ -595,7 +656,7 @@ func createCloudInitISO(isoPath string, spec types.VMSpec, natMAC string) error 
 	defer os.RemoveAll(tmpDir)
 
 	// meta-data
-	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", spec.Name, spec.Name)
+	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", instanceID, spec.Name)
 	if err := os.WriteFile(filepath.Join(tmpDir, "meta-data"), []byte(metaData), 0644); err != nil {
 		return err
 	}

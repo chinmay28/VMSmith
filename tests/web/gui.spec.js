@@ -234,6 +234,23 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-resources")).toContainText("8 vCPU");
   });
 
+  test("edit IP field is visible and accepts new address", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-vm").click();
+
+    // IP field should be visible
+    await expect(page.getByTestId("input-edit-nat-ip")).toBeVisible();
+
+    // Change the IP and submit
+    await page.getByTestId("input-edit-nat-ip").fill("192.168.100.99");
+    await page.getByTestId("btn-submit-edit").click();
+
+    // Modal closes after submit
+    await expect(page.getByTestId("input-edit-nat-ip")).not.toBeVisible();
+  });
+
   test("cancel edit closes modal without changes", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
