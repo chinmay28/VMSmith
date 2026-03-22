@@ -54,6 +54,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Get("/", s.ListVMs)
 			r.Route("/{vmID}", func(r chi.Router) {
 				r.Get("/", s.GetVM)
+				r.Patch("/", s.UpdateVM)
 				r.Delete("/", s.DeleteVM)
 				r.Post("/start", s.StartVM)
 				r.Post("/stop", s.StopVM)

@@ -38,6 +38,14 @@ type VMSpec struct {
 	NatGateway string `json:"nat_gateway,omitempty" yaml:"nat_gateway,omitempty"`
 }
 
+// VMUpdateSpec defines fields that can be changed on an existing VM.
+// Zero values are ignored (no change). Disk can only grow, not shrink.
+type VMUpdateSpec struct {
+	CPUs   int `json:"cpus,omitempty"`
+	RAMMB  int `json:"ram_mb,omitempty"`
+	DiskGB int `json:"disk_gb,omitempty"`
+}
+
 // VM represents a virtual machine and its current state.
 type VM struct {
 	ID        string    `json:"id"`
