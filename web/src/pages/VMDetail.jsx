@@ -61,7 +61,7 @@ export default function VMDetail() {
               <Square size={14} /> Stop
             </button>
           )}
-          <button className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">
+          <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">
             <Pencil size={14} /> Edit
           </button>
           <button className="btn-danger" onClick={handleDelete}>
@@ -175,13 +175,18 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [cpus, setCpus] = useState('');
   const [ramMb, setRamMb] = useState('');
   const [diskGb, setDiskGb] = useState('');
+  const [natIP, setNatIP] = useState('');
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
+
+  // Current IP shown as a plain address; strip /24 suffix if present
+  const currentIP = vm.ip || (vm.spec.nat_static_ip ? vm.spec.nat_static_ip.replace(/\/\d+$/, '') : '');
 
   useEffect(() => {
     if (open && vm) {
       setCpus(String(vm.spec.cpus));
       setRamMb(String(vm.spec.ram_mb));
       setDiskGb(String(vm.spec.disk_gb));
+      setNatIP(currentIP);
     }
   }, [open, vm]);
 
@@ -190,9 +195,16 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     const newCpus = parseInt(cpus, 10);
     const newRam  = parseInt(ramMb, 10);
     const newDisk = parseInt(diskGb, 10);
-    if (newCpus !== vm.spec.cpus)   patch.cpus   = newCpus;
-    if (newRam  !== vm.spec.ram_mb) patch.ram_mb  = newRam;
+    if (newCpus !== vm.spec.cpus)    patch.cpus    = newCpus;
+    if (newRam  !== vm.spec.ram_mb)  patch.ram_mb  = newRam;
     if (newDisk !== vm.spec.disk_gb) patch.disk_gb = newDisk;
+
+    // Normalise the IP: accept bare IP and append /24 for the API
+    const trimmedIP = natIP.trim();
+    if (trimmedIP && trimmedIP !== currentIP) {
+      patch.nat_static_ip = trimmedIP.includes('/') ? trimmedIP : `${trimmedIP}/24`;
+    }
+
     if (Object.keys(patch).length === 0) { onClose(); return; }
 
     try {
@@ -207,13 +219,16 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
       <div className="space-y-4">
         <p className="text-xs text-steel-500">
           The VM will be powered off, changes applied, then powered back on.
-          Disk size can only increase.
+          Disk size can only increase. Changing the IP updates the DHCP
+          reservation and regenerates the cloud-init config — the new address
+          takes effect on restart.
         </p>
 
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="label">vCPUs</label>
             <input
+              data-testid="input-edit-cpus"
               className="input"
               type="number"
               min={1}
@@ -225,6 +240,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           <div>
             <label className="label">RAM (MB)</label>
             <input
+              data-testid="input-edit-ram"
               className="input"
               type="number"
               min={256}
@@ -237,6 +253,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           <div>
             <label className="label">Disk (GB)</label>
             <input
+              data-testid="input-edit-disk"
               className="input"
               type="number"
               min={vm.spec.disk_gb}
@@ -247,11 +264,26 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           </div>
         </div>
 
+        <div>
+          <label className="label">NAT IP Address</label>
+          <input
+            data-testid="input-edit-nat-ip"
+            className="input font-mono"
+            type="text"
+            placeholder="192.168.100.50"
+            value={natIP}
+            onChange={e => setNatIP(e.target.value)}
+          />
+          <p className="text-[10px] text-steel-600 mt-1">
+            current: {currentIP || 'not assigned'} · plain IP or CIDR (e.g. 192.168.100.50)
+          </p>
+        </div>
+
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 
         <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={updateMut.loading}>
+          <button data-testid="btn-cancel-edit" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button data-testid="btn-submit-edit" className="btn-primary" onClick={handleSubmit} disabled={updateMut.loading}>
             {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />}
             {updateMut.loading ? 'Applying…' : 'Apply Changes'}
           </button>

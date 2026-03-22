@@ -224,13 +224,15 @@ var vmEditCmd = &cobra.Command{
 		cpus, _ := cmd.Flags().GetInt("cpus")
 		ram, _ := cmd.Flags().GetInt("ram")
 		disk, _ := cmd.Flags().GetInt("disk")
+		natIP, _ := cmd.Flags().GetString("nat-ip")
+		natGW, _ := cmd.Flags().GetString("nat-gw")
 
-		if cpus == 0 && ram == 0 && disk == 0 {
-			return fmt.Errorf("specify at least one of --cpus, --ram, or --disk")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, or --nat-ip")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
-			"ram", fmt.Sprintf("%d", ram), "disk", fmt.Sprintf("%d", disk))
+			"ram", fmt.Sprintf("%d", ram), "disk", fmt.Sprintf("%d", disk), "nat_ip", natIP)
 
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -240,9 +242,11 @@ var vmEditCmd = &cobra.Command{
 		defer cleanup()
 
 		patch := types.VMUpdateSpec{
-			CPUs:   cpus,
-			RAMMB:  ram,
-			DiskGB: disk,
+			CPUs:        cpus,
+			RAMMB:       ram,
+			DiskGB:      disk,
+			NatStaticIP: natIP,
+			NatGateway:  natGW,
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -261,6 +265,9 @@ var vmEditCmd = &cobra.Command{
 		fmt.Printf("  CPUs:  %d\n", result.Spec.CPUs)
 		fmt.Printf("  RAM:   %d MB\n", result.Spec.RAMMB)
 		fmt.Printf("  Disk:  %d GB\n", result.Spec.DiskGB)
+		if result.IP != "" {
+			fmt.Printf("  IP:    %s\n", result.IP)
+		}
 		return nil
 	},
 }
@@ -342,6 +349,8 @@ Examples:
 	vmEditCmd.Flags().Int("cpus", 0, "new vCPU count (0 = no change)")
 	vmEditCmd.Flags().Int("ram", 0, "new RAM in MB (0 = no change)")
 	vmEditCmd.Flags().Int("disk", 0, "new disk size in GB — can only grow (0 = no change)")
+	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
+	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)

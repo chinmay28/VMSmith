@@ -376,6 +376,54 @@ func TestUpdateVM_ErrorInjection(t *testing.T) {
 	}
 }
 
+func TestUpdateVM_IP(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID: "vm-ip", Name: "readdressable",
+		IP:   "192.168.100.10",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, NatStaticIP: "192.168.100.10/24"},
+	})
+
+	patch := types.VMUpdateSpec{NatStaticIP: "192.168.100.50/24"}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-ip", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+
+	if updated.IP != "192.168.100.50" {
+		t.Errorf("IP = %q, want 192.168.100.50", updated.IP)
+	}
+	if updated.Spec.NatStaticIP != "192.168.100.50/24" {
+		t.Errorf("NatStaticIP = %q, want 192.168.100.50/24", updated.Spec.NatStaticIP)
+	}
+}
+
+func TestUpdateVM_IP_InvalidCIDR(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-ip2", Name: "addr", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{NatStaticIP: "not-an-ip"}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-ip2", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 for invalid CIDR", resp.StatusCode)
+	}
+}
+
 // ============================================================
 // Snapshot endpoint tests
 // ============================================================

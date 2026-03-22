@@ -80,6 +80,12 @@ const server = http.createServer(async (req, res) => {
       if (body.disk_gb < vm.spec.disk_gb) return json(res, 500, { error: "disk can only grow" });
       vm.spec.disk_gb = body.disk_gb;
     }
+    if (body.nat_static_ip) {
+      // Accept plain IP or CIDR; normalise to x.x.x.x
+      const ipStr = body.nat_static_ip.replace(/\/\d+$/, "");
+      vm.spec.nat_static_ip = `${ipStr}/24`;
+      vm.ip = ipStr;
+    }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);
   }

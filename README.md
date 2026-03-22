@@ -145,9 +145,9 @@ sudo ./bin/vmsmith vm start web01
 sudo ./bin/vmsmith vm delete web01
 ```
 
-### Step 4b — Edit VM resources
+### Step 4b — Edit VM resources and IP
 
-Increase vCPU count, RAM, or disk size on an existing VM. The VM is powered off automatically, the changes are applied, and it is powered back on.
+Increase vCPU count, RAM, disk size, or change the primary NAT IP address. The VM is powered off automatically, the changes are applied, and it is powered back on.
 
 ```bash
 # Scale up to 8 vCPUs and 16 GB RAM
@@ -156,8 +156,11 @@ sudo ./bin/vmsmith vm edit web01 --cpus 8 --ram 16384
 # Grow the disk (can only grow, not shrink)
 sudo ./bin/vmsmith vm edit web01 --disk 80
 
-# All three at once
-sudo ./bin/vmsmith vm edit web01 --cpus 4 --ram 8192 --disk 60
+# Change the primary NAT IP
+sudo ./bin/vmsmith vm edit web01 --nat-ip 192.168.100.50/24
+
+# Combine resource and IP changes in one call
+sudo ./bin/vmsmith vm edit web01 --cpus 4 --ram 8192 --disk 60 --nat-ip 192.168.100.50/24
 ```
 
 Output:
@@ -169,11 +172,14 @@ VM updated successfully:
   CPUs:  4
   RAM:   8192 MB
   Disk:  60 GB
+  IP:    192.168.100.50
 ```
 
-You can also edit resources from the **VM detail page** in the web GUI — click the **Edit** button next to start/stop.
+You can also edit resources and IP from the **VM detail page** in the web GUI — click the **Edit** button next to start/stop.
 
-> **Note:** Disk resize only grows the virtual device. The guest OS filesystem still needs to be expanded manually (e.g. `growpart` + `resize2fs` / `xfs_growfs` on Linux).
+> **Note — Disk:** resize only grows the virtual device; the guest OS filesystem still needs expanding manually (`growpart` + `resize2fs` / `xfs_growfs`).
+>
+> **Note — IP:** changing the IP updates the DHCP reservation and regenerates the cloud-init config with a new instance-id. cloud-init re-runs on the next boot (which Update triggers automatically) and overwrites the NM keyfile with the new static address.
 
 ---
 
@@ -373,7 +379,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--ssh-key "ssh-rsa ..."] [--default-user <user>]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
-vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB]
+vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
 vmsmith vm list
 vmsmith vm start  <id>
 vmsmith vm stop   <id>

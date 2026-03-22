@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -96,6 +97,17 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 			return nil, fmt.Errorf("disk can only grow: requested %d GB is less than current %d GB", patch.DiskGB, vm.Spec.DiskGB)
 		}
 		vm.Spec.DiskGB = patch.DiskGB
+	}
+	if patch.NatStaticIP != "" {
+		parsedIP, _, err := net.ParseCIDR(patch.NatStaticIP)
+		if err != nil {
+			return nil, fmt.Errorf("invalid nat_static_ip %q: must be CIDR notation e.g. 192.168.100.50/24", patch.NatStaticIP)
+		}
+		vm.Spec.NatStaticIP = parsedIP.String() + "/24"
+		vm.IP = parsedIP.String()
+		if patch.NatGateway != "" {
+			vm.Spec.NatGateway = patch.NatGateway
+		}
 	}
 
 	vm.UpdatedAt = time.Now()

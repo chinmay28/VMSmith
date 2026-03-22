@@ -39,11 +39,22 @@ type VMSpec struct {
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
-// Zero values are ignored (no change). Disk can only grow, not shrink.
+// Zero / empty values are ignored (no change). Disk can only grow, not shrink.
 type VMUpdateSpec struct {
 	CPUs   int `json:"cpus,omitempty"`
 	RAMMB  int `json:"ram_mb,omitempty"`
 	DiskGB int `json:"disk_gb,omitempty"`
+
+	// NatStaticIP reassigns the primary NAT interface IP address in CIDR
+	// notation (e.g. "192.168.100.50/24"). The DHCP host reservation is
+	// updated, the cloud-init ISO is regenerated with a new instance-id so
+	// cloud-init re-runs on the next boot and writes the updated NM keyfile.
+	// Leave empty for no change.
+	NatStaticIP string `json:"nat_static_ip,omitempty"`
+
+	// NatGateway overrides the gateway when NatStaticIP is also set.
+	// Defaults to the subnet gateway (e.g. 192.168.100.1) when omitted.
+	NatGateway string `json:"nat_gateway,omitempty"`
 }
 
 // VM represents a virtual machine and its current state.

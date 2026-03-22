@@ -14,6 +14,9 @@ import (
 
 const domainXMLTemplate = `<domain type='kvm'>
   <name>{{.Name}}</name>
+  {{- if .UUID}}
+  <uuid>{{.UUID}}</uuid>
+  {{- end}}
   <memory unit='MiB'>{{.RAMMB}}</memory>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
   <os>
@@ -72,6 +75,7 @@ type InterfaceEntry struct {
 // DomainParams holds parameters for generating libvirt domain XML.
 type DomainParams struct {
 	Name         string
+	UUID         string // preserve existing UUID on redefinition; empty = let libvirt assign
 	CPUs         int
 	RAMMB        int
 	DiskPath     string

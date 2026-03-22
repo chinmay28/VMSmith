@@ -145,7 +145,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 
 All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go`). The production implementation is `LibvirtManager` (`internal/vm/lifecycle.go`). Tests use `MockManager` (`internal/vm/mock_manager.go`), an in-memory implementation with error injection.
 
-The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, and `DiskGB`; zero values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, regenerates and redefines the domain XML for CPU/RAM changes, calls `qemu-img resize` for disk growth (shrink is rejected), then restarts.
+The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, `NatStaticIP`, and `NatGateway`; zero/empty values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, then applies each changed field: IP change updates the DHCP host reservation and regenerates the cloud-init ISO with a new instance-id (forces cloud-init re-run on restart), CPU/RAM change redefines the domain XML (preserving the existing UUID), disk growth calls `qemu-img resize` (shrink is rejected). The VM is then restarted.
 
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
@@ -389,7 +389,7 @@ All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 GET    /vms                            List all VMs
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
-PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb — zero values ignored; disk grow-only)
+PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 DELETE /vms/{id}                       Delete VM

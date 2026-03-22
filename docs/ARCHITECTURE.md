@@ -145,15 +145,16 @@ vmsmith/
 
 **Updating a VM (`Update` in `lifecycle.go`):**
 
-`PATCH /api/v1/vms/{id}` (body: `VMUpdateSpec{cpus, ram_mb, disk_gb}`) — zero values are ignored:
+`PATCH /api/v1/vms/{id}` (body: `VMUpdateSpec{cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway}`) — zero/empty values are ignored:
 
 1. Look up VM in store; look up libvirt domain by name
 2. If running → graceful `Shutdown()`; poll for `DOMAIN_SHUTOFF` (up to 60 s); force `Destroy()` if graceful fails
-3. If CPU or RAM changed → regenerate domain XML using updated spec + stored disk/ISO paths → `DomainDefineXML()`
-4. If disk size increased → `qemu-img resize <diskPath> <NGB>`. Shrinking is rejected with an error.
-5. Persist updated `Spec` in bbolt
-6. Restart domain (`dom.Create()`) if it was running before
-7. Return updated `VM`
+3. If static IP changed → remove old DHCP host reservation → add new reservation → regenerate cloud-init ISO with updated NM keyfile **and a new instance-id** so cloud-init re-runs on next boot and applies the new address
+4. If CPU or RAM changed → regenerate domain XML using updated spec + stored disk/ISO paths → `DomainDefineXML()` (the existing domain UUID is preserved to avoid the "domain already exists" error)
+5. If disk size increased → `qemu-img resize <diskPath> <NGB>`. Shrinking is rejected with an error.
+6. Persist updated `Spec` (incl. `NatStaticIP`, `NatGateway`, `IP`) in bbolt
+7. Restart domain (`dom.Create()`) if it was running before
+8. Return updated `VM`
 
 **VM states:** `running → stopped → deleted`
 
@@ -398,7 +399,7 @@ All endpoints are prefixed `/api/v1/`.
 | GET    | /vms                                     | List all VMs                  |
 | POST   | /vms                                     | Create a new VM               |
 | GET    | /vms/{id}                                | Get VM details                |
-| PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk) |
+| PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk/IP) |
 | POST   | /vms/{id}/start                          | Start a stopped VM            |
 | POST   | /vms/{id}/stop                           | Stop a running VM             |
 | DELETE | /vms/{id}                                | Delete a VM                   |
@@ -449,9 +450,11 @@ The modal is split into two tabs to keep the default experience simple:
 
 **Edit VM modal (`/vms/:id`):**
 - Opened via the **Edit** button in the VM detail header
-- Fields: vCPU count, RAM (MB), disk (GB); all pre-filled with current values
+- Fields: vCPU count, RAM (MB), disk (GB), NAT IP address — all pre-filled with current values
 - Shows "current: X" hint below each field; disk field enforces `min = current disk` (grow-only)
+- IP field accepts a plain IP (`192.168.100.50`) or CIDR (`192.168.100.50/24`); `/24` is appended automatically if omitted
 - On submit: API sends `PATCH /api/v1/vms/{id}` with only changed fields; the backend stops the VM, applies changes, then restarts it
+- IP change takes effect on restart: the new instance-id in the regenerated cloud-init ISO causes cloud-init to re-run and overwrite the NM keyfile with the new static address
 
 **VM Detail network display:**
 - Shows attached networks (eth1…) with mode, host interface, and IP or DHCP label
