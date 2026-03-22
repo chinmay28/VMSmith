@@ -234,21 +234,25 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-resources")).toContainText("8 vCPU");
   });
 
-  test("edit IP field is visible and accepts new address", async ({ page }) => {
+  test("edit extra network IP fields visible and editable for VM with extra networks", async ({ page }) => {
     await page.goto(BASE_URL);
-    await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("vm-row-storage-node").click();
 
     await page.getByTestId("btn-edit-vm").click();
 
-    // IP field should be visible
-    await expect(page.getByTestId("input-edit-nat-ip")).toBeVisible();
+    // Extra network IP inputs should be visible (one per extra network)
+    await expect(page.getByTestId("input-edit-net-0-static-ip")).toBeVisible();
+    await expect(page.getByTestId("input-edit-net-0-gateway")).toBeVisible();
 
-    // Change the IP and submit
-    await page.getByTestId("input-edit-nat-ip").fill("192.168.100.99");
+    // Current IP should be pre-filled
+    await expect(page.getByTestId("input-edit-net-0-static-ip")).toHaveValue("10.0.0.5/24");
+
+    // Change the static IP and submit
+    await page.getByTestId("input-edit-net-0-static-ip").fill("10.0.0.99/24");
     await page.getByTestId("btn-submit-edit").click();
 
     // Modal closes after submit
-    await expect(page.getByTestId("input-edit-nat-ip")).not.toBeVisible();
+    await expect(page.getByTestId("input-edit-net-0-static-ip")).not.toBeVisible();
   });
 
   test("cancel edit closes modal without changes", async ({ page }) => {

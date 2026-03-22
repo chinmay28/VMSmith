@@ -235,46 +235,64 @@ func TestMockManager_Update_ErrorInjection(t *testing.T) {
 	}
 }
 
-func TestMockManager_Update_IP(t *testing.T) {
+func TestMockManager_Update_NetworkIP(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()
 
-	vm, _ := m.Create(ctx, types.VMSpec{Name: "readdressable", CPUs: 2, RAMMB: 2048, DiskGB: 20})
-	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "192.168.100.50/24"})
+	spec := types.VMSpec{
+		Name: "multi-net", CPUs: 2, RAMMB: 2048, DiskGB: 20,
+		Networks: []types.NetworkAttachment{
+			{Name: "data", Mode: types.NetworkModeMacvtap, HostInterface: "eth1", StaticIP: "10.0.0.5/24"},
+		},
+	}
+	vm, _ := m.Create(ctx, spec)
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{
+		NetworkIPs: []types.NetworkIPUpdate{{Index: 0, StaticIP: "10.0.0.99/24", Gateway: "10.0.0.1"}},
+	})
 	if err != nil {
-		t.Fatalf("Update IP: %v", err)
+		t.Fatalf("Update network IP: %v", err)
 	}
-	if updated.IP != "192.168.100.50" {
-		t.Errorf("IP = %q, want 192.168.100.50", updated.IP)
+	if updated.Spec.Networks[0].StaticIP != "10.0.0.99/24" {
+		t.Errorf("StaticIP = %q, want 10.0.0.99/24", updated.Spec.Networks[0].StaticIP)
 	}
-	if updated.Spec.NatStaticIP != "192.168.100.50/24" {
-		t.Errorf("NatStaticIP = %q, want 192.168.100.50/24", updated.Spec.NatStaticIP)
+	if updated.Spec.Networks[0].Gateway != "10.0.0.1" {
+		t.Errorf("Gateway = %q, want 10.0.0.1", updated.Spec.Networks[0].Gateway)
 	}
 }
 
-func TestMockManager_Update_IP_AcceptsPlainIP(t *testing.T) {
+func TestMockManager_Update_NetworkIP_ClearIP(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()
 
-	vm, _ := m.Create(ctx, types.VMSpec{Name: "plain-ip"})
-	// Plain IP without /24 — should be treated as /24 by the mock
-	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "192.168.100.20/24"})
-	if err != nil {
-		t.Fatalf("Update IP: %v", err)
+	spec := types.VMSpec{
+		Name: "clear-ip", CPUs: 2, RAMMB: 2048, DiskGB: 20,
+		Networks: []types.NetworkAttachment{
+			{Name: "data", Mode: types.NetworkModeMacvtap, HostInterface: "eth1", StaticIP: "10.0.0.5/24"},
+		},
 	}
-	if updated.IP != "192.168.100.20" {
-		t.Errorf("IP = %q, want 192.168.100.20", updated.IP)
+	vm, _ := m.Create(ctx, spec)
+	// Empty static_ip switches the interface to DHCP
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{
+		NetworkIPs: []types.NetworkIPUpdate{{Index: 0, StaticIP: ""}},
+	})
+	if err != nil {
+		t.Fatalf("Update network IP: %v", err)
+	}
+	if updated.Spec.Networks[0].StaticIP != "" {
+		t.Errorf("StaticIP = %q, want empty (DHCP)", updated.Spec.Networks[0].StaticIP)
 	}
 }
 
-func TestMockManager_Update_IP_InvalidCIDR(t *testing.T) {
+func TestMockManager_Update_NetworkIP_OutOfRange(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()
 
-	vm, _ := m.Create(ctx, types.VMSpec{Name: "invalid-ip"})
-	_, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{NatStaticIP: "not-an-ip"})
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "no-extra-nets", CPUs: 2, RAMMB: 2048, DiskGB: 20})
+	_, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{
+		NetworkIPs: []types.NetworkIPUpdate{{Index: 0, StaticIP: "10.0.0.5/24"}},
+	})
 	if err == nil {
-		t.Error("expected error for invalid CIDR")
+		t.Error("expected error for out-of-range network index")
 	}
 }
 

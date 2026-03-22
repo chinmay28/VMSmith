@@ -79,6 +79,7 @@ export default function LogViewer() {
           <div className="flex items-center gap-2">
             {/* Source filter */}
             <select
+              data-testid="log-source-filter"
               className="input py-1 text-xs w-28"
               value={sourceFilter}
               onChange={e => setSourceFilter(e.target.value)}
@@ -91,6 +92,7 @@ export default function LogViewer() {
 
             {/* Level filter */}
             <select
+              data-testid="log-level-filter"
               className="input py-1 text-xs w-24"
               value={levelFilter}
               onChange={e => setLevelFilter(e.target.value)}
@@ -103,6 +105,7 @@ export default function LogViewer() {
 
             {/* Pause / resume */}
             <button
+              data-testid="btn-log-pause"
               className={`btn-secondary text-xs py-1 px-3 ${paused ? 'text-amber-400 border-amber-700/40' : ''}`}
               onClick={() => setPaused(p => !p)}
             >
@@ -121,6 +124,7 @@ export default function LogViewer() {
 
       {/* Log table */}
       <div
+        data-testid="log-table"
         ref={listRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto rounded-lg border border-steel-800/60 bg-steel-950/60 font-mono text-xs"
@@ -185,9 +189,9 @@ function LogRow({ entry }) {
       >
         <td className="px-3 py-1.5 text-steel-500 whitespace-nowrap">{timeStr}</td>
         <td className="px-3 py-1.5">
-          <span className={levelBadge(entry.level)}>{entry.level}</span>
+          <span data-testid={`log-level-${entry.level}`} className={levelBadge(entry.level)}>{entry.level}</span>
         </td>
-        <td className={`px-3 py-1.5 ${sourceBadge(entry.source)}`}>{entry.source}</td>
+        <td data-testid={`log-source-${entry.source}`} className={`px-3 py-1.5 ${sourceBadge(entry.source)}`}>{entry.source}</td>
         <td className="px-3 py-1.5 text-steel-200">{entry.msg}</td>
       </tr>
       {expanded && hasFields && (

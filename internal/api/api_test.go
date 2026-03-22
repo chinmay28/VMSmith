@@ -376,18 +376,24 @@ func TestUpdateVM_ErrorInjection(t *testing.T) {
 	}
 }
 
-func TestUpdateVM_IP(t *testing.T) {
+func TestUpdateVM_NetworkIP(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{
-		ID: "vm-ip", Name: "readdressable",
-		IP:   "192.168.100.10",
-		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, NatStaticIP: "192.168.100.10/24"},
+		ID: "vm-net", Name: "multi-net",
+		Spec: types.VMSpec{
+			CPUs: 2, RAMMB: 2048, DiskGB: 20,
+			Networks: []types.NetworkAttachment{
+				{Name: "data", Mode: types.NetworkModeMacvtap, HostInterface: "eth1", StaticIP: "10.0.0.5/24"},
+			},
+		},
 	})
 
-	patch := types.VMUpdateSpec{NatStaticIP: "192.168.100.50/24"}
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-ip", jsonBody(t, patch))
+	patch := types.VMUpdateSpec{
+		NetworkIPs: []types.NetworkIPUpdate{{Index: 0, StaticIP: "10.0.0.99/24", Gateway: "10.0.0.1"}},
+	}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-net", jsonBody(t, patch))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -400,27 +406,29 @@ func TestUpdateVM_IP(t *testing.T) {
 	var updated types.VM
 	decodeJSON(t, resp, &updated)
 
-	if updated.IP != "192.168.100.50" {
-		t.Errorf("IP = %q, want 192.168.100.50", updated.IP)
+	if updated.Spec.Networks[0].StaticIP != "10.0.0.99/24" {
+		t.Errorf("StaticIP = %q, want 10.0.0.99/24", updated.Spec.Networks[0].StaticIP)
 	}
-	if updated.Spec.NatStaticIP != "192.168.100.50/24" {
-		t.Errorf("NatStaticIP = %q, want 192.168.100.50/24", updated.Spec.NatStaticIP)
+	if updated.Spec.Networks[0].Gateway != "10.0.0.1" {
+		t.Errorf("Gateway = %q, want 10.0.0.1", updated.Spec.Networks[0].Gateway)
 	}
 }
 
-func TestUpdateVM_IP_InvalidCIDR(t *testing.T) {
+func TestUpdateVM_NetworkIP_OutOfRange(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
 
-	mockMgr.SeedVM(&types.VM{ID: "vm-ip2", Name: "addr", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-nonet", Name: "no-nets", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
 
-	patch := types.VMUpdateSpec{NatStaticIP: "not-an-ip"}
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-ip2", jsonBody(t, patch))
+	patch := types.VMUpdateSpec{
+		NetworkIPs: []types.NetworkIPUpdate{{Index: 0, StaticIP: "10.0.0.5/24"}},
+	}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-nonet", jsonBody(t, patch))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 
 	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 for invalid CIDR", resp.StatusCode)
+		t.Errorf("status = %d, want 500 for out-of-range index", resp.StatusCode)
 	}
 }
 

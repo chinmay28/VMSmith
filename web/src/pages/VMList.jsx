@@ -25,7 +25,7 @@ export default function VMList() {
         title="Machines"
         subtitle={`${vmList?.length || 0} total`}
         actions={
-          <button className="btn-primary" onClick={() => setShowCreate(true)}>
+          <button data-testid="btn-new-vm" className="btn-primary" onClick={() => setShowCreate(true)}>
             <Plus size={15} /> New Machine
           </button>
         }
@@ -82,7 +82,7 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
   const isMenuOpen = actionMenu === vm.id;
 
   return (
-    <div className="card-hover flex items-center gap-4 px-4 py-3 group" onClick={onNavigate}>
+    <div data-testid={`vm-card-${vm.name}`} className="card-hover flex items-center gap-4 px-4 py-3 group" onClick={onNavigate}>
       {/* Icon */}
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
         vm.state === 'running' ? 'bg-emerald-900/40 border border-emerald-700/30' : 'bg-steel-800/60 border border-steel-700/30'
@@ -205,6 +205,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
             Basic
           </button>
           <button
+            data-testid="tab-advanced"
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'advanced'
                 ? 'border-blue-500 text-blue-400'
@@ -229,39 +230,41 @@ function CreateVMModal({ open, onClose, onCreated }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Name</label>
-                  <input className="input" placeholder="my-server" value={form.name} onChange={update('name')} autoFocus />
+                  <input data-testid="input-vm-name" className="input" placeholder="my-server" value={form.name} onChange={update('name')} autoFocus />
                 </div>
                 <div>
                   <label className="label">Base Image</label>
-                  {noImages ? (
-                    <div className="input flex items-center text-steel-500 text-xs">
-                      No images available — upload one in the Images section first.
-                    </div>
-                  ) : (
-                    <select className="input" value={form.image} onChange={update('image')}>
-                      <option value="">Select an image…</option>
-                      {(imageList || []).map(img => (
-                        <option key={img.id} value={img.path}>
-                          {img.name}{humanSize(img.size_bytes)}
-                        </option>
-                      ))}
-                    </select>
+                  {noImages && (
+                    <p className="text-xs text-steel-500 mb-1">No images yet — upload one in the Images section first.</p>
                   )}
+                  <input
+                    data-testid="input-vm-image"
+                    className="input"
+                    list="image-datalist"
+                    placeholder="image name or path"
+                    value={form.image}
+                    onChange={update('image')}
+                  />
+                  <datalist id="image-datalist">
+                    {(imageList || []).map(img => (
+                      <option key={img.id} value={img.path}>{img.name}{humanSize(img.size_bytes)}</option>
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="label">vCPUs</label>
-                  <input className="input" type="number" min={1} value={form.cpus} onChange={updateNum('cpus')} />
+                  <input data-testid="input-vm-cpus" className="input" type="number" min={1} value={form.cpus} onChange={updateNum('cpus')} />
                 </div>
                 <div>
                   <label className="label">RAM (MB)</label>
-                  <input className="input" type="number" min={256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} />
+                  <input data-testid="input-vm-ram" className="input" type="number" min={256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} />
                 </div>
                 <div>
                   <label className="label">Disk (GB)</label>
-                  <input className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} />
+                  <input data-testid="input-vm-disk" className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} />
                 </div>
               </div>
             </>
@@ -276,11 +279,11 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Default SSH User <span className="text-steel-500 font-normal">(blank = root)</span></label>
-                    <input className="input font-mono" placeholder="root" value={form.default_user} onChange={update('default_user')} />
+                    <input data-testid="input-vm-default-user" className="input font-mono" placeholder="root" value={form.default_user} onChange={update('default_user')} />
                   </div>
                   <div>
                     <label className="label">SSH Public Key</label>
-                    <input className="input font-mono" placeholder="ssh-rsa AAAA…" value={form.ssh_pub_key} onChange={update('ssh_pub_key')} />
+                    <input data-testid="input-vm-ssh-key" className="input font-mono" placeholder="ssh-rsa AAAA…" value={form.ssh_pub_key} onChange={update('ssh_pub_key')} />
                   </div>
                 </div>
               </div>
@@ -326,7 +329,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider">Extra Networks</h3>
-                  <button className="btn-ghost text-xs" type="button" onClick={addNetwork}>
+                  <button data-testid="btn-add-network" className="btn-ghost text-xs" type="button" onClick={addNetwork}>
                     <Plus size={12} /> Add Interface
                   </button>
                 </div>
@@ -374,6 +377,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                           {/* DHCP toggle */}
                           <label className="flex items-center gap-2 cursor-pointer select-none">
                             <input
+                              data-testid={`checkbox-net-${i}-dhcp`}
                               type="checkbox"
                               className="rounded border-steel-600 bg-steel-800 text-blue-500 focus:ring-blue-500/30"
                               checked={net.dhcp}
@@ -386,6 +390,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                               <div>
                                 <label className="label text-[10px]">Static IP (CIDR)</label>
                                 <input
+                                  data-testid={`input-net-${i}-static-ip`}
                                   className="input py-1 text-xs font-mono"
                                   placeholder="10.0.0.2/24"
                                   value={net.static_ip}
@@ -395,6 +400,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                               <div>
                                 <label className="label text-[10px]">Gateway</label>
                                 <input
+                                  data-testid={`input-net-${i}-gateway`}
                                   className="input py-1 text-xs font-mono"
                                   placeholder="10.0.0.1"
                                   value={net.gateway}
@@ -423,8 +429,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
             <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
           )}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image}>
+            <button data-testid="btn-cancel-create" className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button data-testid="btn-submit-create" className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image}>
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create
             </button>

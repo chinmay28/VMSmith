@@ -14,6 +14,11 @@ function seed() {
   const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100 });
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
+  const vm3 = createVM({
+    name: "storage-node", image: "rocky-9", cpus: 2, ram_mb: 2048, disk_gb: 50,
+    networks: [{ name: "storage", mode: "macvtap", host_interface: "eth1", static_ip: "10.0.0.5/24", gateway: "10.0.0.1", mac_address: "52:54:00:aa:bb:cc" }],
+  });
+  vm3.ip = "192.168.100.12";
   snapshots.set(vm1.id, [
     { id: `${vm1.id}/before-deploy`, vm_id: vm1.id, name: "before-deploy", created_at: new Date().toISOString() },
   ]);
@@ -80,11 +85,13 @@ const server = http.createServer(async (req, res) => {
       if (body.disk_gb < vm.spec.disk_gb) return json(res, 500, { error: "disk can only grow" });
       vm.spec.disk_gb = body.disk_gb;
     }
-    if (body.nat_static_ip) {
-      // Accept plain IP or CIDR; normalise to x.x.x.x
-      const ipStr = body.nat_static_ip.replace(/\/\d+$/, "");
-      vm.spec.nat_static_ip = `${ipStr}/24`;
-      vm.ip = ipStr;
+    if (Array.isArray(body.network_ips)) {
+      for (const nu of body.network_ips) {
+        if (nu.index >= 0 && nu.index < (vm.spec.networks || []).length) {
+          vm.spec.networks[nu.index].static_ip = nu.static_ip || "";
+          vm.spec.networks[nu.index].gateway = nu.gateway || "";
+        }
+      }
     }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);

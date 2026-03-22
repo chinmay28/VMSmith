@@ -27,9 +27,9 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <StatCard label="Total Machines" value={vmLoading ? '—' : totalCount} icon={Server} />
-        <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent />
-        <StatCard label="Images" value={imgLoading ? '—' : imageCount} icon={HardDrive} />
+        <div data-testid="stat-total"><StatCard label="Total Machines" value={vmLoading ? '—' : totalCount} icon={Server} /></div>
+        <div data-testid="stat-running"><StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent /></div>
+        <div data-testid="stat-images"><StatCard label="Images" value={imgLoading ? '—' : imageCount} icon={HardDrive} /></div>
       </div>
 
       {/* Recent machines */}
@@ -54,7 +54,7 @@ export default function Dashboard() {
             }
           />
         ) : (
-          <table className="w-full">
+          <table data-testid="dashboard-vm-table" className="w-full">
             <thead>
               <tr className="border-b border-steel-800/40">
                 <th className="table-header table-cell">Name</th>
@@ -67,6 +67,7 @@ export default function Dashboard() {
               {vmList.map(vm => (
                 <tr
                   key={vm.id}
+                  data-testid={`vm-row-${vm.name}`}
                   className="cursor-pointer hover:bg-steel-800/30 transition-colors"
                   onClick={() => navigate(`/vms/${vm.id}`)}
                 >

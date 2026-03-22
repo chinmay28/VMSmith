@@ -3,10 +3,10 @@ import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText } from 'lucide-
 import mascot from '../assets/mascot.png';
 
 const navItems = [
-  { to: '/',       icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/vms',    icon: Server,          label: 'Machines' },
-  { to: '/images', icon: HardDrive,       label: 'Images' },
-  { to: '/logs',   icon: ScrollText,      label: 'Logs' },
+  { to: '/',       icon: LayoutDashboard, label: 'Dashboard', testId: 'nav-dashboard' },
+  { to: '/vms',    icon: Server,          label: 'Machines',  testId: 'nav-vms' },
+  { to: '/images', icon: HardDrive,       label: 'Images',    testId: 'nav-images' },
+  { to: '/logs',   icon: ScrollText,      label: 'Logs',      testId: 'nav-logs' },
 ];
 
 export default function Layout({ children }) {
@@ -31,11 +31,12 @@ export default function Layout({ children }) {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {navItems.map(({ to, icon: Icon, label, testId }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
+              data-testid={testId}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ${
                   isActive
