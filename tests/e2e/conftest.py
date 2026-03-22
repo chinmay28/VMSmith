@@ -5,7 +5,7 @@ Configuration is resolved in order: pytest CLI option â†’ environment variable â
 CLI options (run ``pytest --help`` to see all):
     --rocky-image PATH       Rocky Linux qcow2 image path
     --ssh-key PATH           SSH private key
-    --ssh-user USER          SSH username (default: rocky)
+    --ssh-user USER          SSH username (default: root)
     --vmsmith-bin PATH       vmsmith binary path (default: vmsmith)
     --vmsmith-api URL        Daemon API base URL (default: http://localhost:8080)
     --host-iface NAME        Host interface for multi-NIC tests
@@ -54,8 +54,8 @@ def pytest_addoption(parser):
     )
     g.addoption(
         "--ssh-user",
-        default=os.environ.get("VMSMITH_SSH_USER", "rocky"),
-        help="SSH username for the Rocky image (env: VMSMITH_SSH_USER, default: rocky)",
+        default=os.environ.get("VMSMITH_SSH_USER", "root"),
+        help="SSH username for VM access (env: VMSMITH_SSH_USER, default: root)",
     )
     g.addoption(
         "--vmsmith-bin",

@@ -9,9 +9,9 @@ const images = new Map();
 const portForwards = new Map();
 
 function seed() {
-  const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40, default_user: "ubuntu" });
+  const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
-  const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100, default_user: "rocky" });
+  const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100 });
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
   snapshots.set(vm1.id, [
@@ -28,7 +28,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "ubuntu", networks: spec.networks || [] },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [] },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };

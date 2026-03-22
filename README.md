@@ -90,10 +90,10 @@ sudo ./bin/vmsmith vm create web01 \
   --disk 40 \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
-# With a custom default user (e.g. Rocky Linux images use "rocky")
+# With a named sudo user instead of root (disables root login)
 sudo ./bin/vmsmith vm create rocky01 \
   --image rocky-9 \
-  --default-user rocky \
+  --default-user alice \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
 # List VMs
@@ -119,16 +119,16 @@ The VM boots immediately and gets a DHCP address on the `192.168.100.0/24` NAT n
 sudo ./bin/vmsmith port add vm-1741234567890123 --host 2222 --guest 22
 
 # SSH from any machine on the network
-ssh -p 2222 ubuntu@<host-machine-ip>
+ssh -p 2222 root@<host-machine-ip>
 ```
 
 **Direct SSH (from the host only):**
 
 ```bash
-ssh ubuntu@192.168.100.10
+ssh root@192.168.100.10
 ```
 
-The default SSH user depends on the cloud image (`ubuntu` for Ubuntu, `rocky` for Rocky Linux, etc.). You can set it explicitly with `--default-user` when creating a VM, or change the global default in `config.yaml` under `defaults.ssh_user`. The SSH connection string is shown in `vm info` and the web GUI VM detail page.
+VMs use `root` by default — the SSH key you provide is injected into root's `authorized_keys`. Pass `--default-user <name>` to create a named sudo user and disable root instead. The SSH connection string is shown in `vm info` and the web GUI VM detail page.
 
 ---
 
@@ -308,7 +308,7 @@ curl -X POST http://localhost:8080/api/v1/vms \
     "ram_mb": 2048,
     "disk_gb": 20,
     "ssh_pub_key": "ssh-rsa AAAA...",
-    "default_user": "ubuntu",
+    "default_user": "",
     "networks": [
       {"host_interface": "eth1", "mode": "macvtap"}
     ]
@@ -387,7 +387,7 @@ defaults:
   cpus:     2
   ram_mb:   2048
   disk_gb:  20
-  ssh_user: ubuntu   # default SSH username (override per-VM with --default-user)
+  ssh_user: ubuntu   # retained for config compatibility; VMs use root by default (override per-VM with --default-user)
 ```
 
 ---

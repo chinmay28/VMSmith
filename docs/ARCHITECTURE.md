@@ -186,20 +186,29 @@ runcmd:
 
 **SSH user injection:**
 
-When `DefaultUser` is set (from the per-VM spec or `defaults.ssh_user` in config), `buildCloudConfig` emits a `users:` stanza to create the named user with the SSH key:
+VMs boot with **root login enabled by default**. `buildCloudConfig` always emits `disable_root: false` and writes a drop-in sshd config (`/etc/ssh/sshd_config.d/99-vmsmith-root.conf`) with `PermitRootLogin prohibit-password` to allow key-based root SSH across all distros. When an SSH key is provided with no `DefaultUser`, it is injected directly into root's `authorized_keys`:
 
 ```yaml
+disable_root: false
+users:
+  - name: root
+    ssh_authorized_keys:
+      - ssh-rsa AAAA...
+```
+
+When `DefaultUser` is set, root login is disabled and a named sudo user is created with the SSH key instead. The image's built-in default user is preserved alongside it:
+
+```yaml
+disable_root: true
 users:
   - default                    # preserves the image's built-in default user
-  - name: ubuntu
+  - name: alice
     ssh_authorized_keys:
       - ssh-rsa AAAA...
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: true
 ```
-
-When no `DefaultUser` is set, the key is added via top-level `ssh_authorized_keys:` (which goes to the image's built-in default user).
 
 **Supported Rocky Linux image variants:**
 
@@ -458,7 +467,7 @@ defaults:
   cpus:     2
   ram_mb:   2048
   disk_gb:  20
-  ssh_user: ubuntu   # default SSH username injected via cloud-init; override per-VM with default_user in VMSpec
+  ssh_user: ubuntu   # retained for config compatibility; VMs now use root by default — set default_user in VMSpec to override per-VM
 ```
 
 ---
