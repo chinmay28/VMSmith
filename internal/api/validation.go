@@ -9,14 +9,14 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
-var vmNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$`)
+var vmNameRe = regexp.MustCompile(`^(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]{0,62}[a-zA-Z0-9])$`)
 
 func validateVMSpec(spec types.VMSpec) error {
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
 		return types.NewAPIError("invalid_name", "vm name is required")
 	}
-	if len(name) > 64 || !vmNameRe.MatchString(name) {
+	if !vmNameRe.MatchString(name) {
 		return types.NewAPIError("invalid_name", "vm name must be 1-64 characters and contain only letters, numbers, and hyphens")
 	}
 	if strings.TrimSpace(spec.Image) == "" {
@@ -77,9 +77,6 @@ func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
 	if guestPort < 1 || guestPort > 65535 {
 		return types.NewAPIError("invalid_port_forward", "guest_port must be between 1 and 65535")
 	}
-	if proto == "" {
-		return nil
-	}
 	if proto != types.ProtocolTCP && proto != types.ProtocolUDP {
 		return types.NewAPIError("invalid_port_forward", "protocol must be tcp or udp")
 	}
@@ -95,7 +92,7 @@ func sanitizeManagerError(err error) error {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "not found"):
+	case strings.HasSuffix(msg, "not found"):
 		return types.NewAPIError("resource_not_found", "resource not found")
 	case strings.Contains(msg, "disk can only grow"):
 		return types.NewAPIError("disk_shrink_not_allowed", "disk can only grow")

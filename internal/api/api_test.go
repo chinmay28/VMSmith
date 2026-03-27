@@ -643,7 +643,7 @@ func TestCreateVM_ManagerError(t *testing.T) {
 	mockMgr.CreateErr = types.ErrTest
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json",
-		jsonBody(t, types.VMSpec{Name: "fail"}))
+		jsonBody(t, types.VMSpec{Name: "fail", Image: "ubuntu-22.04"}))
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)

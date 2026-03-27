@@ -25,6 +25,9 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Protocol == "" {
+		req.Protocol = types.ProtocolTCP
+	}
 	if err := validatePortForward(req.HostPort, req.GuestPort, req.Protocol); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return

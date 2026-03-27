@@ -23,7 +23,7 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, errorResponse{Error: msg, Message: msg})
+	writeJSON(w, status, errorResponse{Error: msg})
 }
 
 func writeAPIError(w http.ResponseWriter, status int, err error) {
