@@ -507,6 +507,10 @@ make dev-web
 # Open http://localhost:3000
 ```
 
+Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For scriptable API workflows, see the bash and Python examples in [examples/](examples/README.md).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
 
 ---
