@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-03-22
-> **Status:** Draft — pending review and prioritization
+> **Last updated:** 2026-03-27
+> **Status:** Draft — active work started on Phase 1.1 CI and Phase 1.2 / 1.3 validation and error-handling improvements
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -19,10 +19,10 @@ There are currently no automated checks. This is the single highest-impact impro
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 1.1.1 | Create GitHub Actions workflow for Go build + unit tests on every PR | S | Matrix: Ubuntu 22.04, Go 1.22+. Must set `CGO_ENABLED=1` and install `libvirt-dev` |
-| 1.1.2 | Add `golangci-lint` step to CI | S | Config already exists; just wire into workflow |
+| 1.1.1 | Create GitHub Actions workflow for Go build + unit tests on every PR | S | **Done** — `.github/workflows/ci.yml` runs `make build-go` and `make test-unit` on Ubuntu 22.04 with Go 1.22 + `libvirt-dev` |
+| 1.1.2 | Add `golangci-lint` step to CI | S | Not started |
 | 1.1.3 | Add frontend build + Playwright mock tests to CI | M | `make web-install && make test-web`. Needs Node 18+ and Chromium |
-| 1.1.4 | Add API integration test step (`make test-integration`) | S | No external deps, runs with `httptest` + MockManager |
+| 1.1.4 | Add API integration test step (`make test-integration`) | S | **Done** — included in `.github/workflows/ci.yml` backend job |
 | 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | Use `make dist` target; attach as GitHub Release asset |
 | 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | GitHub repo settings |
 
