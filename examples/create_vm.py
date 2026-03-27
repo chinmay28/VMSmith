@@ -30,7 +30,7 @@ def wait_for_ip(api_base: str, vm_id: str, timeout: int, interval: float) -> dic
     last_vm = {}
     while time.time() < deadline:
         last_vm = request_json("GET", f"{api_base}/vms/{urllib.parse.quote(vm_id)}")
-        if last_vm.get("ip_address"):
+        if last_vm.get("ip"):
             return last_vm
         time.sleep(interval)
     return last_vm
@@ -66,9 +66,9 @@ def main() -> int:
         vm_id = created["id"]
         print(f"Created VM: {vm_id}")
 
-        vm = created if created.get("ip_address") else wait_for_ip(args.api, vm_id, args.wait_timeout, args.wait_interval)
+        vm = created if created.get("ip") else wait_for_ip(args.api, vm_id, args.wait_timeout, args.wait_interval)
         print(json.dumps(vm, indent=2, sort_keys=True))
-        if not vm.get("ip_address"):
+        if not vm.get("ip"):
             print("warning: VM was created but no IP was observed before timeout", file=sys.stderr)
             return 2
         return 0

@@ -12,6 +12,8 @@ GUEST_PORT="${VMSMITH_GUEST_PORT:-22}"
 PROTOCOL="${VMSMITH_PROTOCOL:-tcp}"
 SSH_PUB_KEY="${VMSMITH_SSH_PUB_KEY:-}"
 
+export VM_NAME IMAGE CPUS RAM_MB DISK_GB HOST_PORT GUEST_PORT PROTOCOL SSH_PUB_KEY
+
 if [[ -z "$SSH_PUB_KEY" ]]; then
   echo "error: set VMSMITH_SSH_PUB_KEY to a public key string" >&2
   exit 1
@@ -39,7 +41,7 @@ create_response=$(curl -fsS \
   "$API_BASE/vms")
 
 vm_id=$(printf '%s' "$create_response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-vm_ip=$(printf '%s' "$create_response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ip_address", ""))')
+vm_ip=$(printf '%s' "$create_response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ip", ""))')
 
 echo "Created VM: $vm_id"
 if [[ -n "$vm_ip" ]]; then

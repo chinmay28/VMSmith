@@ -11,7 +11,7 @@ These examples show small, reusable VMSmith automation flows without requiring a
 
 - The VMSmith daemon is reachable at `http://localhost:8080` unless overridden
 - `curl` is available for the shell example
-- Python 3.9+ is available for the Python example
+- Python 3.9+ is available for the Python example and for the inline JSON helpers used by the shell example
 - You already uploaded or imported a qcow2 image and know its image name
 
 ## Quick start
