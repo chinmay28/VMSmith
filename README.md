@@ -499,18 +499,22 @@ The NAT network is created automatically on first `vm create` or daemon start. I
 ## Development
 
 ```bash
-# Terminal 1: Go backend with live reload
+# Run backend + frontend together
+make dev
+
+# Or run them separately
+# Terminal 1: Go backend on :8080
 make dev-api
 
-# Terminal 2: React frontend with hot reload (proxies /api → :8080)
+# Terminal 2: React frontend on :3000 (proxies /api → :8080)
 make dev-web
-# Open http://localhost:3000
 ```
+
+`make dev` starts both processes together and cleans them up on Ctrl-C.
 
 Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 For scriptable API workflows, see the bash and Python examples in [examples/](examples/README.md).
-
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
 
 ---
