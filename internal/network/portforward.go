@@ -11,12 +11,15 @@ import (
 
 // PortForwarder manages iptables-based NAT port forwarding rules.
 type PortForwarder struct {
-	store *store.Store
+	store       *store.Store
+	applyRuleFn func(action string, hostPort, guestPort int, guestIP, proto string) error
 }
 
 // NewPortForwarder creates a new port forwarder.
 func NewPortForwarder(store *store.Store) *PortForwarder {
-	return &PortForwarder{store: store}
+	pf := &PortForwarder{store: store}
+	pf.applyRuleFn = pf.applyRule
+	return pf
 }
 
 // Add creates a new port forwarding rule: host_port -> guest_ip:guest_port.
@@ -25,8 +28,18 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 		proto = types.ProtocolTCP
 	}
 
+	existing, err := pf.store.ListPortForwards("")
+	if err != nil {
+		return nil, fmt.Errorf("listing existing port forwards: %w", err)
+	}
+	for _, fwd := range existing {
+		if fwd.HostPort == hostPort && fwd.Protocol == proto {
+			return nil, types.NewAPIError("port_forward_conflict", fmt.Sprintf("host port %d/%s is already forwarded", hostPort, proto))
+		}
+	}
+
 	// Apply the iptables rule
-	if err := pf.applyRule("add", hostPort, guestPort, guestIP, string(proto)); err != nil {
+	if err := pf.applyRuleFn("add", hostPort, guestPort, guestIP, string(proto)); err != nil {
 		return nil, err
 	}
 
@@ -41,7 +54,7 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 
 	if err := pf.store.PutPortForward(rule); err != nil {
 		// Try to roll back the iptables rule
-		pf.applyRule("remove", hostPort, guestPort, guestIP, string(proto))
+		pf.applyRuleFn("remove", hostPort, guestPort, guestIP, string(proto))
 		return nil, fmt.Errorf("persisting port forward: %w", err)
 	}
 
@@ -57,7 +70,7 @@ func (pf *PortForwarder) Remove(id string) error {
 
 	for _, fwd := range forwards {
 		if fwd.ID == id {
-			if err := pf.applyRule("remove", fwd.HostPort, fwd.GuestPort, fwd.GuestIP, string(fwd.Protocol)); err != nil {
+			if err := pf.applyRuleFn("remove", fwd.HostPort, fwd.GuestPort, fwd.GuestIP, string(fwd.Protocol)); err != nil {
 				return err
 			}
 			return pf.store.DeletePortForward(id)
@@ -75,7 +88,7 @@ func (pf *PortForwarder) RestoreAll() error {
 	}
 
 	for _, fwd := range forwards {
-		if err := pf.applyRule("add", fwd.HostPort, fwd.GuestPort, fwd.GuestIP, string(fwd.Protocol)); err != nil {
+		if err := pf.applyRuleFn("add", fwd.HostPort, fwd.GuestPort, fwd.GuestIP, string(fwd.Protocol)); err != nil {
 			fmt.Printf("warning: failed to restore port forward %s: %v\n", fwd.ID, err)
 		}
 	}

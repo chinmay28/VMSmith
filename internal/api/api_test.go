@@ -70,6 +70,19 @@ func decodeJSON(t *testing.T, resp *http.Response, v any) {
 	}
 }
 
+func assertAPIErrorCode(t *testing.T, resp *http.Response, want string) errorResponse {
+	t.Helper()
+	var errResp errorResponse
+	decodeJSON(t, resp, &errResp)
+	if errResp.Code != want {
+		t.Fatalf("error code = %q, want %q", errResp.Code, want)
+	}
+	if errResp.Message == "" && errResp.Error == "" {
+		t.Fatal("expected non-empty error message")
+	}
+	return errResp
+}
+
 // ============================================================
 // VM endpoint tests
 // ============================================================
@@ -117,6 +130,40 @@ func TestCreateVM_BadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+}
+
+func TestCreateVM_InvalidName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "bad name!",
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
+func TestCreateVM_InvalidSpecBounds(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "valid-name",
+		Image: "ubuntu",
+		CPUs:  0,
+		RAMMB: 64,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
 func TestListVMs_Empty(t *testing.T) {
@@ -326,9 +373,10 @@ func TestUpdateVM_DiskShrinkRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 for disk shrink attempt", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for disk shrink attempt", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "disk_shrink_not_allowed")
 }
 
 func TestUpdateVM_NotFound(t *testing.T) {
@@ -340,9 +388,10 @@ func TestUpdateVM_NotFound(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 for not found", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for not found", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestUpdateVM_BadJSON(t *testing.T) {
@@ -419,9 +468,10 @@ func TestUpdateVM_IP_InvalidCIDR(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 for invalid CIDR", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for invalid CIDR", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
 // ============================================================
@@ -593,15 +643,13 @@ func TestCreateVM_ManagerError(t *testing.T) {
 	mockMgr.CreateErr = types.ErrTest
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json",
-		jsonBody(t, types.VMSpec{Name: "fail"}))
+		jsonBody(t, types.VMSpec{Name: "fail", Image: "ubuntu-22.04"}))
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 
-	var errResp errorResponse
-	decodeJSON(t, resp, &errResp)
-
+	errResp := assertAPIErrorCode(t, resp, "internal_error")
 	if errResp.Error == "" {
 		t.Error("error message should not be empty")
 	}
@@ -978,6 +1026,52 @@ func TestAddPort_VMNotFound(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestAddPort_InvalidPortRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p2", IP: "192.168.100.10"})
+	body := jsonBody(t, addPortRequest{HostPort: 70000, GuestPort: 22, Protocol: "tcp"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p2/ports", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_port_forward")
+}
+
+func TestAddPort_InvalidProtocol(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p3", IP: "192.168.100.10"})
+	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: "icmp"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p3/ports", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_port_forward")
+}
+
+func TestAddPort_PortForwardConflict(t *testing.T) {
+	ts, mockMgr, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p4", IP: "192.168.100.20"})
+	if err := s.PutPortForward(&types.PortForward{
+		ID: "pf-existing", VMID: "other-vm", HostPort: 2222, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+	}); err != nil {
+		t.Fatalf("seed port forward: %v", err)
+	}
+
+	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 2222, Protocol: types.ProtocolTCP})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p4/ports", "application/json", body)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "port_forward_conflict")
 }
 
 func TestListPorts_Empty(t *testing.T) {
