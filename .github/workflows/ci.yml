@@ -38,6 +38,12 @@ jobs:
       - name: Create stub frontend dist for embed
         run: mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --timeout=5m ./...
+
       - name: Build backend
         run: make build-go
 
