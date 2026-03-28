@@ -254,11 +254,11 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
 
-	if got := rows[1]; strings.Join(got, "|") != "vm-1|alpha|running|192.168.100.10|2|2048" {
-		t.Fatalf("first row = %v", got)
+	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048$`).MatchString(strings.TrimSpace(out)) {
+		t.Fatalf("expected vm-1 row in output, got %q", out)
 	}
-	if got := rows[2]; strings.Join(got, "|") != "vm-2|beta|stopped|4|4096" {
-		t.Fatalf("second row = %v", got)
+	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096$`).MatchString(strings.TrimSpace(out)) {
+		t.Fatalf("expected vm-2 row in output, got %q", out)
 	}
 }
 
