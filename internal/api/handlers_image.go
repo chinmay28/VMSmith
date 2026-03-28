@@ -91,6 +91,10 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "reading upload: "+err.Error())
 		return
 	}
+	if err := validateUploadedImage(header.Filename, data); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	img, err := s.storageMgr.ImportImage(name, data)
 	if err != nil {

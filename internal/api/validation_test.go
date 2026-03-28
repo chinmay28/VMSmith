@@ -239,6 +239,29 @@ func TestValidatePortForward(t *testing.T) {
 	}
 }
 
+func TestValidateUploadedImage(t *testing.T) {
+	tests := []struct {
+		name        string
+		filename    string
+		data        []byte
+		wantCode    string
+		wantMessage string
+	}{
+		{name: "valid qcow2 upload", filename: "ubuntu.qcow2", data: []byte("qcow2-data")},
+		{name: "filename required", filename: "   ", data: []byte("qcow2-data"), wantCode: "invalid_image", wantMessage: "uploaded filename is required"},
+		{name: "extension must be qcow2", filename: "ubuntu.iso", data: []byte("iso-data"), wantCode: "invalid_image", wantMessage: "uploaded file must have a .qcow2 extension"},
+		{name: "extension check is case insensitive", filename: "ubuntu.QCOW2", data: []byte("qcow2-data")},
+		{name: "empty upload rejected", filename: "empty.qcow2", data: nil, wantCode: "invalid_image", wantMessage: "uploaded image file cannot be empty"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateUploadedImage(tt.filename, tt.data)
+			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
+		})
+	}
+}
+
 func TestSanitizeManagerError(t *testing.T) {
 	tests := []struct {
 		name        string
