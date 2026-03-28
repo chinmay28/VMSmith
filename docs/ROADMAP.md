@@ -294,7 +294,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 |---|------|--------|-------|
 | 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | |
 | 6.3.2 | Write networking deep-dive (NAT vs macvtap vs bridge, when to use each, troubleshooting) | M | |
-| 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | |
+| 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | **Done** — added `examples/` with bash and Python API automation examples for common create/wait/port-forward flows |
 | 6.3.4 | Create short video/GIF demos for README | S | |
 
 ---
