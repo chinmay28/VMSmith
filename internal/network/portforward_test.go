@@ -62,8 +62,45 @@ func TestPortForwarder_List_WithData(t *testing.T) {
 	}
 }
 
+func TestPortForwarder_Add_DuplicateHostPortProtocolRejected(t *testing.T) {
+	pf, s := newTestPortForwarder(t)
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	}
+
+	existing := &types.PortForward{
+		ID: "pf-existing", VMID: "vm-a", HostPort: 2222, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+	}
+	if err := s.PutPortForward(existing); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := pf.Add("vm-b", 2222, 2222, "192.168.100.20", types.ProtocolTCP)
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "port_forward_conflict" {
+		t.Fatalf("error code = %q, want port_forward_conflict", apiErr.Code)
+	}
+
+	ports, err := pf.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 stored port forward after rejection, got %d", len(ports))
+	}
+}
+
 func TestPortForwarder_RestoreAll_Empty(t *testing.T) {
 	pf, _ := newTestPortForwarder(t)
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	}
 
 	// With no stored rules, RestoreAll should succeed without error.
 	if err := pf.RestoreAll(); err != nil {

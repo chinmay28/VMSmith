@@ -1055,6 +1055,25 @@ func TestAddPort_InvalidProtocol(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_port_forward")
 }
 
+func TestAddPort_PortForwardConflict(t *testing.T) {
+	ts, mockMgr, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p4", IP: "192.168.100.20"})
+	if err := s.PutPortForward(&types.PortForward{
+		ID: "pf-existing", VMID: "other-vm", HostPort: 2222, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+	}); err != nil {
+		t.Fatalf("seed port forward: %v", err)
+	}
+
+	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 2222, Protocol: types.ProtocolTCP})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p4/ports", "application/json", body)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "port_forward_conflict")
+}
+
 func TestListPorts_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
