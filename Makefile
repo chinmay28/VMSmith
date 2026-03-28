@@ -5,7 +5,7 @@ LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
 .PHONY: build install clean purge test lint fmt deps web web-install test-web-deps \
-       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps
+       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -119,6 +119,16 @@ dist: web
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/vmsmith
 
 # --- Development workflow ---
+# Default local dev entrypoint: run backend + frontend together.
+# Ctrl-C stops both child processes.
+ifneq (,$(findstring n,$(MAKEFLAGS)))
+dev:
+	@echo "$(MAKE) dev-api & $(MAKE) dev-web"
+else
+dev:
+	@bash -c 'trap "kill 0" EXIT INT TERM; $(MAKE) dev-api & $(MAKE) dev-web & wait'
+endif
+
 # Terminal 1: make dev-api   (Go daemon on :8080)
 # Terminal 2: make dev-web   (Vite on :3000 with proxy to :8080)
 dev-api: build-go
