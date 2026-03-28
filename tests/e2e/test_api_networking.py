@@ -274,6 +274,52 @@ class TestAPIPortForward:
         # Remove second
         api_delete(f"/vms/{vm_id}/ports/{pf2_id}")
 
+    def test_port_forward_duplicate_host_port_protocol_conflict(
+        self, rocky_image, ssh_pubkey, api_vm_cleanup, api_port_cleanup
+    ):
+        """Duplicate host_port+protocol should return a 409 conflict."""
+        spec = {
+            "name": "e2e-api-pf-collision",
+            "image": rocky_image,
+            "cpus": 2,
+            "ram_mb": 2048,
+            "disk_gb": 20,
+            "ssh_pub_key": ssh_pubkey,
+        }
+        resp = api_post("/vms", json=spec)
+        assert resp.status_code == 201
+
+        vm_id = resp.json()["id"]
+        api_vm_cleanup.append(vm_id)
+
+        wait_for_vm_ip(vm_id, source="api")
+
+        host_port = self._find_free_port()
+
+        first = api_post(f"/vms/{vm_id}/ports", json={
+            "host_port": host_port,
+            "guest_port": 22,
+            "protocol": "tcp",
+        })
+        assert first.status_code == 201, f"Initial port forward failed: {first.text}"
+
+        pf_id = first.json()["id"]
+        api_port_cleanup.append((vm_id, pf_id))
+
+        duplicate = api_post(f"/vms/{vm_id}/ports", json={
+            "host_port": host_port,
+            "guest_port": 2222,
+            "protocol": "tcp",
+        })
+        assert duplicate.status_code == 409, (
+            "Expected duplicate host_port+protocol request to fail, "
+            f"got {duplicate.status_code}: {duplicate.text}"
+        )
+
+        err = duplicate.json()
+        assert err.get("code") == "port_forward_conflict"
+        assert "already forwarded" in err.get("message", "") or "already forwarded" in err.get("error", "")
+
     @staticmethod
     def _find_free_port() -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
