@@ -41,17 +41,14 @@ make build
 # Faster backend-only iteration
 make build-go
 
-# Run backend + frontend together
-make dev
-
-# Or in separate terminals
+# Current split-terminal workflow on main
 make dev-api
 make dev-web
 ```
 
 - `make dev-api` starts the daemon on `:8080`
 - `make dev-web` starts the Vite frontend on `:3000` and proxies `/api` to `:8080`
-- `make dev` runs both and stops them together on Ctrl-C
+- If a future `make dev` helper target is added, it should run both and stop them together on Ctrl-C
 
 ## Testing before opening a PR
 
