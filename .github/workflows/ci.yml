@@ -55,3 +55,34 @@ jobs:
 
       - name: Run API integration tests
         run: make test-integration
+
+  frontend:
+    name: Frontend build and mock GUI tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install root test dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix web ci
+
+      - name: Build frontend bundle
+        run: make web
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mock GUI tests
+        run: make test-web
