@@ -7,10 +7,13 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 type errorResponse struct {
-	Error string `json:"error"`
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -21,6 +24,22 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
+}
+
+func writeAPIError(w http.ResponseWriter, status int, err error) {
+	if err == nil {
+		writeError(w, status, http.StatusText(status))
+		return
+	}
+	if apiErr, ok := err.(*types.APIError); ok {
+		writeJSON(w, status, errorResponse{
+			Error:   apiErr.Message,
+			Code:    apiErr.Code,
+			Message: apiErr.Message,
+		})
+		return
+	}
+	writeError(w, status, err.Error())
 }
 
 // responseRecorder wraps http.ResponseWriter to capture status code and body size.

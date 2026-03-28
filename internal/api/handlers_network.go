@@ -25,10 +25,18 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Protocol == "" {
+		req.Protocol = types.ProtocolTCP
+	}
+	if err := validatePortForward(req.HostPort, req.GuestPort, req.Protocol); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	// Get VM to find its IP
 	vm, err := s.vmManager.Get(r.Context(), vmID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "VM not found")
+		writeAPIError(w, http.StatusNotFound, sanitizeManagerError(err))
 		return
 	}
 
@@ -39,7 +47,7 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 
 	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeAPIError(w, http.StatusInternalServerError, sanitizeManagerError(err))
 		return
 	}
 
