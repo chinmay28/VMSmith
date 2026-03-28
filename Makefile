@@ -121,12 +121,13 @@ dist: web
 # --- Development workflow ---
 # Default local dev entrypoint: run backend + frontend together.
 # Ctrl-C stops both child processes.
+ifneq (,$(findstring n,$(MAKEFLAGS)))
 dev:
-	@if echo '$(MAKEFLAGS)' | grep -q -- 'n'; then \
-		echo "$(MAKE) dev-api & $(MAKE) dev-web"; \
-	else \
-		bash -lc 'trap "kill 0" EXIT INT TERM; $(MAKE) dev-api & $(MAKE) dev-web & wait'; \
-	fi
+	@echo "$(MAKE) dev-api & $(MAKE) dev-web"
+else
+dev:
+	@bash -c 'trap "kill 0" EXIT INT TERM; $(MAKE) dev-api & $(MAKE) dev-web & wait'
+endif
 
 # Terminal 1: make dev-api   (Go daemon on :8080)
 # Terminal 2: make dev-web   (Vite on :3000 with proxy to :8080)
