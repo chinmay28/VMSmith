@@ -47,6 +47,10 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 
 	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol)
 	if err != nil {
+		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "port_forward_conflict" {
+			writeAPIError(w, http.StatusConflict, apiErr)
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, sanitizeManagerError(err))
 		return
 	}
