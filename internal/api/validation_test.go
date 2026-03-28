@@ -8,11 +8,274 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
-func assertAPIError(t *testing.T, err error, wantCode string) {
+func TestValidateVMSpec(t *testing.T) {
+	tests := []struct {
+		name        string
+		spec        types.VMSpec
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name: "valid minimal spec",
+			spec: types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: 20},
+		},
+		{
+			name:        "missing name after trim",
+			spec:        types.VMSpec{Name: "   ", Image: "ubuntu"},
+			wantCode:    "invalid_name",
+			wantMessage: "vm name is required",
+		},
+		{
+			name:        "name with spaces and punctuation",
+			spec:        types.VMSpec{Name: "bad name!", Image: "ubuntu"},
+			wantCode:    "invalid_name",
+			wantMessage: "vm name must be 1-64 characters and contain only letters, numbers, and hyphens",
+		},
+		{
+			name:        "name cannot start with hyphen",
+			spec:        types.VMSpec{Name: "-badname", Image: "ubuntu"},
+			wantCode:    "invalid_name",
+			wantMessage: "vm name must be 1-64 characters and contain only letters, numbers, and hyphens",
+		},
+		{
+			name:        "name cannot end with hyphen",
+			spec:        types.VMSpec{Name: "badname-", Image: "ubuntu"},
+			wantCode:    "invalid_name",
+			wantMessage: "vm name must be 1-64 characters and contain only letters, numbers, and hyphens",
+		},
+		{
+			name:        "name over max length",
+			spec:        types.VMSpec{Name: strings.Repeat("a", 65), Image: "ubuntu"},
+			wantCode:    "invalid_name",
+			wantMessage: "vm name must be 1-64 characters and contain only letters, numbers, and hyphens",
+		},
+		{
+			name:        "missing image after trim",
+			spec:        types.VMSpec{Name: "valid-name", Image: "   "},
+			wantCode:    "invalid_image",
+			wantMessage: "image is required",
+		},
+		{
+			name:        "cpu below minimum",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", CPUs: -1},
+			wantCode:    "invalid_spec",
+			wantMessage: "cpus must be between 1 and 128",
+		},
+		{
+			name:        "cpu above maximum",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", CPUs: 129},
+			wantCode:    "invalid_spec",
+			wantMessage: "cpus must be between 1 and 128",
+		},
+		{
+			name:        "ram below minimum",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", RAMMB: 127},
+			wantCode:    "invalid_spec",
+			wantMessage: "ram_mb must be between 128 and 1048576",
+		},
+		{
+			name:        "ram above maximum",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", RAMMB: 1024*1024 + 1},
+			wantCode:    "invalid_spec",
+			wantMessage: "ram_mb must be between 128 and 1048576",
+		},
+		{
+			name:        "disk explicit invalid negative",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", DiskGB: -1},
+			wantCode:    "invalid_spec",
+			wantMessage: "disk_gb must be between 1 and 10240",
+		},
+		{
+			name:        "disk above maximum",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", DiskGB: 10241},
+			wantCode:    "invalid_spec",
+			wantMessage: "disk_gb must be between 1 and 10240",
+		},
+		{
+			name:        "invalid nat cidr",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", NatStaticIP: "not-a-cidr"},
+			wantCode:    "invalid_spec",
+			wantMessage: "nat_static_ip must be valid CIDR notation, e.g. 192.168.100.50/24",
+		},
+		{
+			name:        "invalid nat gateway",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", NatGateway: "not-an-ip"},
+			wantCode:    "invalid_spec",
+			wantMessage: "nat_gateway must be a valid IP address",
+		},
+		{
+			name: "valid nat settings",
+			spec: types.VMSpec{Name: "valid-name", Image: "ubuntu", NatStaticIP: "192.168.100.50/24", NatGateway: "192.168.100.1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateVMSpec(tt.spec)
+			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
+		})
+	}
+}
+
+func TestValidateVMUpdateSpec(t *testing.T) {
+	tests := []struct {
+		name        string
+		patch       types.VMUpdateSpec
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:  "empty patch allowed",
+			patch: types.VMUpdateSpec{},
+		},
+		{
+			name:        "cpu below minimum",
+			patch:       types.VMUpdateSpec{CPUs: -1},
+			wantCode:    "invalid_spec",
+			wantMessage: "cpus must be between 1 and 128",
+		},
+		{
+			name:        "cpu above maximum",
+			patch:       types.VMUpdateSpec{CPUs: 129},
+			wantCode:    "invalid_spec",
+			wantMessage: "cpus must be between 1 and 128",
+		},
+		{
+			name:        "ram below minimum",
+			patch:       types.VMUpdateSpec{RAMMB: 127},
+			wantCode:    "invalid_spec",
+			wantMessage: "ram_mb must be between 128 and 1048576",
+		},
+		{
+			name:        "ram above maximum",
+			patch:       types.VMUpdateSpec{RAMMB: 1024*1024 + 1},
+			wantCode:    "invalid_spec",
+			wantMessage: "ram_mb must be between 128 and 1048576",
+		},
+		{
+			name:        "disk below minimum",
+			patch:       types.VMUpdateSpec{DiskGB: -1},
+			wantCode:    "invalid_spec",
+			wantMessage: "disk_gb must be between 1 and 10240",
+		},
+		{
+			name:        "disk above maximum",
+			patch:       types.VMUpdateSpec{DiskGB: 10241},
+			wantCode:    "invalid_spec",
+			wantMessage: "disk_gb must be between 1 and 10240",
+		},
+		{
+			name:        "invalid nat cidr",
+			patch:       types.VMUpdateSpec{NatStaticIP: "not-a-cidr"},
+			wantCode:    "invalid_spec",
+			wantMessage: "nat_static_ip must be valid CIDR notation, e.g. 192.168.100.50/24",
+		},
+		{
+			name:        "invalid nat gateway",
+			patch:       types.VMUpdateSpec{NatGateway: "not-an-ip"},
+			wantCode:    "invalid_spec",
+			wantMessage: "nat_gateway must be a valid IP address",
+		},
+		{
+			name:  "valid nat settings",
+			patch: types.VMUpdateSpec{NatStaticIP: "192.168.100.60/24", NatGateway: "192.168.100.1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateVMUpdateSpec(tt.patch)
+			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
+		})
+	}
+}
+
+func TestValidatePortForward(t *testing.T) {
+	tests := []struct {
+		name        string
+		hostPort    int
+		guestPort   int
+		proto       types.Protocol
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:      "valid tcp",
+			hostPort:  2222,
+			guestPort: 22,
+			proto:     types.ProtocolTCP,
+		},
+		{
+			name:        "host port below minimum",
+			hostPort:    0,
+			guestPort:   22,
+			proto:       types.ProtocolTCP,
+			wantCode:    "invalid_port_forward",
+			wantMessage: "host_port must be between 1 and 65535",
+		},
+		{
+			name:        "guest port above maximum",
+			hostPort:    2222,
+			guestPort:   65536,
+			proto:       types.ProtocolTCP,
+			wantCode:    "invalid_port_forward",
+			wantMessage: "guest_port must be between 1 and 65535",
+		},
+		{
+			name:        "invalid protocol",
+			hostPort:    2222,
+			guestPort:   22,
+			proto:       types.Protocol("icmp"),
+			wantCode:    "invalid_port_forward",
+			wantMessage: "protocol must be tcp or udp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePortForward(tt.hostPort, tt.guestPort, tt.proto)
+			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
+		})
+	}
+}
+
+func TestSanitizeManagerError(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantCode    string
+		wantMessage string
+	}{
+		{name: "nil error", err: nil},
+		{name: "existing api error", err: types.NewAPIError("invalid_name", "vm name is required"), wantCode: "invalid_name", wantMessage: "vm name is required"},
+		{name: "resource not found", err: errors.New("vm not found"), wantCode: "resource_not_found", wantMessage: "resource not found"},
+		{name: "disk shrink rejected", err: errors.New("disk can only grow"), wantCode: "disk_shrink_not_allowed", wantMessage: "disk can only grow"},
+		{name: "invalid nat ip", err: errors.New("invalid nat_static_ip in update"), wantCode: "invalid_spec", wantMessage: "nat_static_ip must be valid CIDR notation, e.g. 192.168.100.50/24"},
+		{name: "generic internal error", err: errors.New("libvirt exploded with details"), wantCode: "internal_error", wantMessage: "operation failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := sanitizeManagerError(tt.err)
+			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
+		})
+	}
+}
+
+func assertAPIError(t *testing.T, err error, wantCode, wantMessage string) {
 	t.Helper()
+
+	if wantCode == "" {
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		return
+	}
+
 	if err == nil {
 		t.Fatalf("expected API error %q, got nil", wantCode)
 	}
+
 	var apiErr *types.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected APIError, got %T: %v", err, err)
@@ -20,176 +283,7 @@ func assertAPIError(t *testing.T, err error, wantCode string) {
 	if apiErr.Code != wantCode {
 		t.Fatalf("error code = %q, want %q", apiErr.Code, wantCode)
 	}
-	if strings.TrimSpace(apiErr.Message) == "" {
-		t.Fatal("expected non-empty error message")
-	}
-}
-
-func TestValidateVMSpec(t *testing.T) {
-	tests := []struct {
-		name     string
-		spec     types.VMSpec
-		wantCode string
-	}{
-		{
-			name: "valid minimal spec",
-			spec: types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: 20},
-		},
-		{
-			name:     "missing name",
-			spec:     types.VMSpec{Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048},
-			wantCode: "invalid_name",
-		},
-		{
-			name:     "blank name after trim",
-			spec:     types.VMSpec{Name: "   ", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048},
-			wantCode: "invalid_name",
-		},
-		{
-			name:     "name with spaces",
-			spec:     types.VMSpec{Name: "bad name", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048},
-			wantCode: "invalid_name",
-		},
-		{
-			name:     "name too long",
-			spec:     types.VMSpec{Name: strings.Repeat("a", 65), Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048},
-			wantCode: "invalid_name",
-		},
-		{
-			name:     "missing image",
-			spec:     types.VMSpec{Name: "web-01", CPUs: 2, RAMMB: 2048},
-			wantCode: "invalid_image",
-		},
-		{
-			name:     "cpus below minimum",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: -1, RAMMB: 2048},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "cpus above maximum",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 129, RAMMB: 2048},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "ram below minimum",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 127},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "ram above maximum",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 1024*1024 + 1},
-			wantCode: "invalid_spec",
-		},
-		{
-			name: "disk omitted is allowed",
-			spec: types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: 0},
-		},
-		{
-			name:     "disk invalid negative",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: -1},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "disk above maximum",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: 10241},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "invalid nat static ip",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, NatStaticIP: "192.168.1.10"},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "invalid nat gateway",
-			spec:     types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, NatGateway: "not-an-ip"},
-			wantCode: "invalid_spec",
-		},
-		{
-			name: "valid nat fields",
-			spec: types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, NatStaticIP: "192.168.1.10/24", NatGateway: "192.168.1.1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateVMSpec(tt.spec)
-			if tt.wantCode == "" {
-				if err != nil {
-					t.Fatalf("validateVMSpec() error = %v, want nil", err)
-				}
-				return
-			}
-			assertAPIError(t, err, tt.wantCode)
-		})
-	}
-}
-
-func TestValidateVMUpdateSpec(t *testing.T) {
-	tests := []struct {
-		name     string
-		patch    types.VMUpdateSpec
-		wantCode string
-	}{
-		{
-			name:  "valid empty patch",
-			patch: types.VMUpdateSpec{},
-		},
-		{
-			name:     "cpus below minimum",
-			patch:    types.VMUpdateSpec{CPUs: -1},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "cpus above maximum",
-			patch:    types.VMUpdateSpec{CPUs: 129},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "ram below minimum",
-			patch:    types.VMUpdateSpec{RAMMB: 127},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "ram above maximum",
-			patch:    types.VMUpdateSpec{RAMMB: 1024*1024 + 1},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "disk below minimum",
-			patch:    types.VMUpdateSpec{DiskGB: -1},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "disk above maximum",
-			patch:    types.VMUpdateSpec{DiskGB: 10241},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "invalid nat static ip",
-			patch:    types.VMUpdateSpec{NatStaticIP: "10.0.0.5"},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:     "invalid nat gateway",
-			patch:    types.VMUpdateSpec{NatGateway: "bad-ip"},
-			wantCode: "invalid_spec",
-		},
-		{
-			name:  "valid nat fields",
-			patch: types.VMUpdateSpec{NatStaticIP: "10.0.0.5/24", NatGateway: "10.0.0.1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateVMUpdateSpec(tt.patch)
-			if tt.wantCode == "" {
-				if err != nil {
-					t.Fatalf("validateVMUpdateSpec() error = %v, want nil", err)
-				}
-				return
-			}
-			assertAPIError(t, err, tt.wantCode)
-		})
+	if apiErr.Message != wantMessage {
+		t.Fatalf("error message = %q, want %q", apiErr.Message, wantMessage)
 	}
 }
