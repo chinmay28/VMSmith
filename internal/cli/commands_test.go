@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,25 @@ func runCLI(args ...string) (string, error) {
 		err = rootCmd.Execute()
 	})
 	return out, err
+}
+
+	var tableCellSplitRe = regexp.MustCompile(`\s{2,}`)
+
+func tableRows(t *testing.T, out string) [][]string {
+	t.Helper()
+
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		t.Fatal("expected table output, got empty string")
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	rows := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		cells := tableCellSplitRe.Split(strings.TrimSpace(line), -1)
+		rows = append(rows, cells)
+	}
+	return rows
 }
 
 // withMockVM sets vmManagerOverride to a MockManager and returns the mock + cleanup.
@@ -215,18 +235,30 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
 
-	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
-	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
 
 	out, err := runCLI("vm", "list")
 	if err != nil {
 		t.Fatalf("vm list: %v", err)
 	}
-	if !strings.Contains(out, "alpha") {
-		t.Errorf("expected 'alpha' in output, got: %q", out)
+
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
 	}
-	if !strings.Contains(out, "beta") {
-		t.Errorf("expected 'beta' in output, got: %q", out)
+
+	headers := rows[0]
+	wantHeaders := []string{"ID", "NAME", "STATE", "IP", "CPUS", "RAM (MB)"}
+	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
+		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
+	}
+
+	if got := rows[1]; strings.Join(got, "|") != "vm-1|alpha|running|192.168.100.10|2|2048" {
+		t.Fatalf("first row = %v", got)
+	}
+	if got := rows[2]; strings.Join(got, "|") != "vm-2|beta|stopped|4|4096" {
+		t.Fatalf("second row = %v", got)
 	}
 }
 
@@ -503,7 +535,7 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	defer cleanup()
 
 	// Seed directly into the store (bypassing qemu-img)
-	now := time.Now()
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
 	s.PutImage(&types.Image{
 		ID:        "img-1",
 		Name:      "golden-image",
@@ -525,15 +557,23 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("image list: %v", err)
 	}
-	if !strings.Contains(out, "golden-image") {
-		t.Errorf("expected 'golden-image' in output, got: %q", out)
+
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
 	}
-	if !strings.Contains(out, "backup-image") {
-		t.Errorf("expected 'backup-image' in output, got: %q", out)
+
+	headers := rows[0]
+	wantHeaders := []string{"ID", "NAME", "SIZE", "FORMAT", "CREATED"}
+	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
+		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
-	// Check human-readable size formatting
-	if !strings.Contains(out, "GB") || !strings.Contains(out, "MB") {
-		t.Errorf("expected human-readable sizes, got: %q", out)
+
+	if got := rows[1]; strings.Join(got, "|") != "img-1|golden-image|1.0 GB|qcow2|2026-03-28 08:30:00" {
+		t.Fatalf("first row = %v", got)
+	}
+	if got := rows[2]; strings.Join(got, "|") != "img-2|backup-image|512.0 MB|qcow2|2026-03-28 08:30:00" {
+		t.Fatalf("second row = %v", got)
 	}
 }
 
