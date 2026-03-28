@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -79,6 +80,20 @@ func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
 	}
 	if proto != types.ProtocolTCP && proto != types.ProtocolUDP {
 		return types.NewAPIError("invalid_port_forward", "protocol must be tcp or udp")
+	}
+	return nil
+}
+
+func validateUploadedImage(filename string, data []byte) error {
+	trimmedName := strings.TrimSpace(filename)
+	if trimmedName == "" {
+		return types.NewAPIError("invalid_image", "uploaded filename is required")
+	}
+	if strings.ToLower(filepath.Ext(trimmedName)) != ".qcow2" {
+		return types.NewAPIError("invalid_image", "uploaded file must have a .qcow2 extension")
+	}
+	if len(data) == 0 {
+		return types.NewAPIError("invalid_image", "uploaded image file cannot be empty")
 	}
 	return nil
 }

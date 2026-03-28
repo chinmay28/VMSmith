@@ -1150,6 +1150,56 @@ func TestUploadImage_MissingFile(t *testing.T) {
 	}
 }
 
+func TestUploadImage_EmptyFile(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if _, err := mw.CreateFormFile("file", "empty.qcow2"); err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_image")
+}
+
+func TestUploadImage_InvalidExtension(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ubuntu-22.04.iso")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("fake iso content")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_image")
+}
+
 func TestUploadImage_Success(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
