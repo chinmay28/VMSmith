@@ -10,6 +10,8 @@ jobs:
   backend:
     name: Backend build and tests
     runs-on: ubuntu-22.04
+    env:
+      CGO_ENABLED: 1
     strategy:
       fail-fast: false
       matrix:
@@ -33,8 +35,14 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      - name: Create stub frontend dist for embed
+        run: mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep
+
       - name: Build backend
         run: make build-go
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Run unit tests
         run: make test-unit
