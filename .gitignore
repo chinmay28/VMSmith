@@ -7,7 +7,6 @@
 
 # Root-level node_modules (Playwright E2E deps)
 /node_modules/
-/package-lock.json
 
 # Go
 *.test
