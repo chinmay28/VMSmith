@@ -17,6 +17,8 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 
 ## Quick Start
 
+Want a disposable containerized setup for local testing instead of a host install? See [docs/CONTAINER.md](docs/CONTAINER.md).
+
 ### 1. Install dependencies
 
 ```bash
