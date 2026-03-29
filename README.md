@@ -370,6 +370,8 @@ curl -X POST http://localhost:8080/api/v1/vms/<id>/ports \
 
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
 
+Production deployment guidance: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+
 ---
 
 ## CLI Reference
@@ -515,7 +517,7 @@ make dev-web
 Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 For scriptable API workflows, see the bash and Python examples in [examples/](examples/README.md).
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for a production-oriented systemd + reverse-proxy deployment guide.
 
 ---
 
