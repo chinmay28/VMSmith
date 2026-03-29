@@ -1411,6 +1411,54 @@ func TestUploadImage_RequestBodyTooLarge(t *testing.T) {
 	}
 }
 
+func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.MaxConcurrentCreates = 1
+	})
+	defer cleanup()
+
+	mockMgr.CreateDelay = 200 * time.Millisecond
+	firstDone := make(chan *http.Response, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+			Name:  "first-create",
+			Image: "ubuntu",
+			CPUs:  2,
+			RAMMB: 2048,
+		}))
+		firstDone <- resp
+		firstErr <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "second-create",
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+	if err != nil {
+		t.Fatalf("second POST /vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "create_limit_reached")
+
+	firstResp := <-firstDone
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first POST /vms: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("first create status = %d, want 201", firstResp.StatusCode)
+	}
+}
+
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
