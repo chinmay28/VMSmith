@@ -5,7 +5,7 @@ LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
 .PHONY: build install clean purge test lint fmt deps web web-install test-web-deps \
-       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev
+       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -25,6 +25,10 @@ go.sum: go.mod
 install: build
 	sudo cp $(BUILD_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
 	@echo "Installed $(BINARY) to /usr/local/bin/"
+
+install-githooks:
+	git config core.hooksPath .githooks
+	@echo "Installed git hooks from .githooks/"
 
 clean:
 	rm -rf $(BUILD_DIR)

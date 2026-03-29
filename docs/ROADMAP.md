@@ -275,7 +275,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 6.1.1 | Add `make dev` target that runs both `dev-api` and `dev-web` in parallel (e.g., via `goreman` or `concurrently`) | S | **Done** — `make dev` now launches both targets in parallel and cleans up both child processes on Ctrl-C |
-| 6.1.2 | Add pre-commit hook: `make fmt && make lint` | S | |
+| 6.1.2 | Add pre-commit hook: `make fmt && make lint` | S | **Done** — versioned `.githooks/pre-commit` hook added with `make install-githooks` helper and contributor docs |
 | 6.1.3 | Add `CONTRIBUTING.md` with setup instructions, PR conventions, test requirements | S | **Done** — `CONTRIBUTING.md` added with setup, workflow, testing, and PR guidance |
 | 6.1.4 | Add `.editorconfig` for consistent formatting across editors | S | **Done** — root `.editorconfig` defines Go/Makefile tab rules and 2-space defaults for docs/web assets |
 
