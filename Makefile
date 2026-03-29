@@ -5,7 +5,7 @@ LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
 .PHONY: build install install-service clean purge test lint fmt deps web web-install \
-       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks
+       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -127,6 +127,9 @@ deps-rocky:
 dist: web
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/vmsmith
+
+docker-build:
+	docker build -t vmsmith:dev .
 
 # --- Development workflow ---
 # Default local dev entrypoint: run backend + frontend together.
