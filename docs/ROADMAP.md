@@ -132,7 +132,7 @@ Required for any non-localhost deployment.
 | 3.2.1 | Add `daemon.tls.cert_file` and `daemon.tls.key_file` config fields | S | |
 | 3.2.2 | Switch `http.ListenAndServe` to `http.ListenAndServeTLS` when TLS configured | S | |
 | 3.2.3 | Add `daemon.tls.auto_cert` option for Let's Encrypt via `autocert` package | M | Only practical if daemon has a public FQDN |
-| 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | |
+| 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers reverse proxy deployment with both nginx and Caddy, TLS, and firewall guidance |
 
 ### 3.3 Systemd Integration
 
@@ -292,7 +292,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | |
+| 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers systemd, TLS via reverse proxy, firewall rules, logging, backups, and upgrade guidance |
 | 6.3.2 | Write networking deep-dive (NAT vs macvtap vs bridge, when to use each, troubleshooting) | M | ✅ Done — added `docs/NETWORKING.md` covering mode selection, tradeoffs, examples, and troubleshooting |
 | 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | ✅ Done — added `examples/` with bash and Python API automation examples for common create/wait/port-forward flows |
 | 6.3.4 | Create short video/GIF demos for README | S | |
