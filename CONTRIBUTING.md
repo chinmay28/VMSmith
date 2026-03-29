@@ -30,6 +30,7 @@ git clone <your-fork-or-repo-url>
 cd VMSmith
 make deps
 make web-install
+make install-githooks
 ```
 
 Common development loops:
@@ -52,6 +53,9 @@ make dev-web
 - `make dev` starts both processes and stops them together on Ctrl-C
 - `make dev-api` starts the daemon on `:8080`
 - `make dev-web` starts the Vite frontend on `:3000` and proxies `/api` to `:8080`
+- `make install-githooks` enables the versioned `.githooks/pre-commit` hook for this clone
+
+The pre-commit hook runs `make fmt && make lint` before each commit so simple formatting and lint issues are caught locally.
 
 ## Testing before opening a PR
 

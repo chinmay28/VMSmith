@@ -502,6 +502,9 @@ The NAT network is created automatically on first `vm create` or daemon start. I
 # Run backend + frontend together
 make dev
 
+# Enable the repo's versioned pre-commit hook
+make install-githooks
+
 # Or run them separately
 # Terminal 1: Go backend on :8080
 make dev-api
@@ -510,7 +513,7 @@ make dev-api
 make dev-web
 ```
 
-`make dev` starts both processes together and cleans them up on Ctrl-C.
+`make dev` starts both processes together and cleans them up on Ctrl-C. `make install-githooks` configures Git to use the repository's `.githooks/pre-commit` hook, which runs `make fmt && make lint` before each commit.
 
 Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
