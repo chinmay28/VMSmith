@@ -81,6 +81,11 @@ defaults:
   disk_gb: 100
 network:
   name: "custom-net"
+quotas:
+  max_vms: 4
+  max_total_cpus: 16
+  max_total_ram_mb: 32768
+  max_total_disk_gb: 500
 `
 	os.WriteFile(cfgPath, []byte(content), 0644)
 
@@ -118,6 +123,18 @@ network:
 	}
 	if cfg.Network.Name != "custom-net" {
 		t.Errorf("Network.Name = %q, want custom-net", cfg.Network.Name)
+	}
+	if cfg.Quotas.MaxVMs != 4 {
+		t.Errorf("Quotas.MaxVMs = %d, want 4", cfg.Quotas.MaxVMs)
+	}
+	if cfg.Quotas.MaxTotalCPUs != 16 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 16", cfg.Quotas.MaxTotalCPUs)
+	}
+	if cfg.Quotas.MaxTotalRAMMB != 32768 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 32768", cfg.Quotas.MaxTotalRAMMB)
+	}
+	if cfg.Quotas.MaxTotalDiskGB != 500 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 500", cfg.Quotas.MaxTotalDiskGB)
 	}
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {

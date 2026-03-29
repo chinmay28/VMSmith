@@ -391,12 +391,14 @@ func newVMManager() (vm.Manager, func(), error) {
 		return nil, nil, fmt.Errorf("connecting to libvirt: %w", err)
 	}
 
+	quotaMgr := vm.WithQuotas(mgr, cfg.Quotas)
+
 	cleanup := func() {
 		mgr.Close()
 		s.Close()
 	}
 
-	return mgr, cleanup, nil
+	return quotaMgr, cleanup, nil
 }
 
 // parseNetworkFlags parses --network flag values into NetworkAttachment structs.

@@ -17,6 +17,7 @@ type Server struct {
 	vmManager           vm.Manager
 	storageMgr          *storage.Manager
 	portFwd             *network.PortForwarder
+	quotas              config.QuotasConfig
 	maxRequestBodyBytes int64
 	maxUploadBodyBytes  int64
 }
@@ -35,6 +36,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		vmManager:           vmMgr,
 		storageMgr:          storageMgr,
 		portFwd:             portFwd,
+		quotas:              cfg.Quotas,
 		maxRequestBodyBytes: cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:  cfg.Daemon.MaxUploadBodyBytes,
 	}
@@ -99,6 +101,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 		// Host network discovery
 		r.Get("/host/interfaces", s.ListHostInterfaces)
+
+		// Quotas / allocation overview
+		r.Get("/quotas/usage", s.GetQuotaUsage)
 	})
 
 	// Serve embedded Web GUI if handler provided
