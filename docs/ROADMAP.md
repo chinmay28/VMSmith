@@ -23,7 +23,7 @@ There are currently no automated checks. This is the single highest-impact impro
 | 1.1.2 | Add `golangci-lint` step to CI | S | **Done** — `.github/workflows/ci.yml` runs `golangci-lint-action` (currently scoped to `govet`) in CI |
 | 1.1.3 | Add frontend build + Playwright mock tests to CI | M | `make web-install && make test-web`. Needs Node 18+ and Chromium |
 | 1.1.4 | Add API integration test step (`make test-integration`) | S | **Done** — included in `.github/workflows/ci.yml` backend job |
-| 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | Use `make dist` target; attach as GitHub Release asset |
+| 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | **Done** — `.github/workflows/release.yml` builds the frontend + `make dist` on `v*` tags and publishes `bin/vmsmith-linux-amd64` via GitHub Releases |
 | 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | GitHub repo settings |
 
 ### 1.2 Input Validation & Error Handling
