@@ -21,6 +21,10 @@ type createImageRequest struct {
 func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	var req createImageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -72,8 +76,11 @@ var availableStorageBytes = func(path string) (uint64, error) {
 // UploadImage handles POST /api/v1/images/upload (multipart form: file + name)
 
 func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
-	// Limit upload to 50 GB
-	if err := r.ParseMultipartForm(50 << 30); err != nil {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to parse form: "+err.Error())
 		return
 	}

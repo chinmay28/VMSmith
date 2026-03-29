@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/vm"
@@ -12,27 +13,38 @@ import (
 
 // Server holds the API dependencies and serves HTTP.
 type Server struct {
-	router     chi.Router
-	vmManager  vm.Manager
-	storageMgr *storage.Manager
-	portFwd    *network.PortForwarder
+	router              chi.Router
+	vmManager           vm.Manager
+	storageMgr          *storage.Manager
+	portFwd             *network.PortForwarder
+	maxRequestBodyBytes int64
+	maxUploadBodyBytes  int64
 }
 
-// NewServer creates a new API server with an optional static file handler.
-// Pass nil for webHandler to serve API-only (e.g., in tests).
+// NewServer creates a new API server with default body-size limits.
 func NewServer(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder) *Server {
-	return NewServerWithWeb(vmMgr, storageMgr, portFwd, nil)
+	return NewServerWithConfig(vmMgr, storageMgr, portFwd, config.DefaultConfig(), nil)
+}
+
+// NewServerWithConfig creates a new API server using the provided config.
+func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, cfg *config.Config, webHandler http.Handler) *Server {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	s := &Server{
+		vmManager:           vmMgr,
+		storageMgr:          storageMgr,
+		portFwd:             portFwd,
+		maxRequestBodyBytes: cfg.Daemon.MaxRequestBodyBytes,
+		maxUploadBodyBytes:  cfg.Daemon.MaxUploadBodyBytes,
+	}
+	s.setupRoutes(webHandler)
+	return s
 }
 
 // NewServerWithWeb creates a new API server with an embedded web GUI handler.
 func NewServerWithWeb(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, webHandler http.Handler) *Server {
-	s := &Server{
-		vmManager:  vmMgr,
-		storageMgr: storageMgr,
-		portFwd:    portFwd,
-	}
-	s.setupRoutes(webHandler)
-	return s
+	return NewServerWithConfig(vmMgr, storageMgr, portFwd, config.DefaultConfig(), webHandler)
 }
 
 func (s *Server) setupRoutes(webHandler http.Handler) {
@@ -50,18 +62,18 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 		// VM endpoints
 		r.Route("/vms", func(r chi.Router) {
-			r.Post("/", s.CreateVM)
+			r.Post("/", s.withRequestBodyLimit(s.CreateVM))
 			r.Get("/", s.ListVMs)
 			r.Route("/{vmID}", func(r chi.Router) {
 				r.Get("/", s.GetVM)
-				r.Patch("/", s.UpdateVM)
+				r.Patch("/", s.withRequestBodyLimit(s.UpdateVM))
 				r.Delete("/", s.DeleteVM)
 				r.Post("/start", s.StartVM)
 				r.Post("/stop", s.StopVM)
 
 				// Snapshots
 				r.Route("/snapshots", func(r chi.Router) {
-					r.Post("/", s.CreateSnapshot)
+					r.Post("/", s.withRequestBodyLimit(s.CreateSnapshot))
 					r.Get("/", s.ListSnapshots)
 					r.Post("/{snapName}/restore", s.RestoreSnapshot)
 					r.Delete("/{snapName}", s.DeleteSnapshot)
@@ -70,7 +82,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				// Port forwards
 				r.Route("/ports", func(r chi.Router) {
 					r.Get("/", s.ListPorts)
-					r.Post("/", s.AddPort)
+					r.Post("/", s.withRequestBodyLimit(s.AddPort))
 					r.Delete("/{portID}", s.RemovePort)
 				})
 			})
@@ -79,8 +91,8 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 		// Image endpoints
 		r.Route("/images", func(r chi.Router) {
 			r.Get("/", s.ListImages)
-			r.Post("/", s.CreateImage)
-			r.Post("/upload", s.UploadImage)
+			r.Post("/", s.withRequestBodyLimit(s.CreateImage))
+			r.Post("/upload", s.withUploadBodyLimit(s.UploadImage))
 			r.Delete("/{imageID}", s.DeleteImage)
 			r.Get("/{imageID}/download", s.DownloadImage)
 		})
