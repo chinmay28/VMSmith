@@ -403,6 +403,8 @@ vmsmith port list   <vm-id>
 vmsmith net interfaces [--all]
 
 vmsmith daemon start [--port 8080] [--config ~/.vmsmith/config.yaml]
+vmsmith daemon stop
+vmsmith daemon status
 ```
 
 ---
