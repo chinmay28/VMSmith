@@ -1,12 +1,13 @@
 import { useNavigate } from 'react-router-dom';
-import { Server, HardDrive, Activity, Plus } from 'lucide-react';
-import { vms, images as imagesApi } from '../api/client';
+import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'lucide-react';
+import { vms, images as imagesApi, quotas as quotasApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
 
 export default function Dashboard() {
   const { data: vmList, loading: vmLoading, error: vmError } = useFetch(() => vms.list(), [], 5000);
   const { data: imageList, loading: imgLoading } = useFetch(() => imagesApi.list(), [], 10000);
+  const { data: quotaUsage, loading: quotaLoading } = useFetch(() => quotasApi.usage(), [], 5000);
   const navigate = useNavigate();
 
   const runningCount = (vmList || []).filter(v => v.state === 'running').length;
@@ -30,6 +31,13 @@ export default function Dashboard() {
         <StatCard label="Total Machines" value={vmLoading ? '—' : totalCount} icon={Server} />
         <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent />
         <StatCard label="Images" value={imgLoading ? '—' : imageCount} icon={HardDrive} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+        <QuotaCard label="Machines allocated" resource={quotaUsage?.vms} unit="VMs" icon={Server} loading={quotaLoading} />
+        <QuotaCard label="vCPUs allocated" resource={quotaUsage?.cpus} unit="vCPU" icon={Cpu} loading={quotaLoading} />
+        <QuotaCard label="RAM allocated" resource={quotaUsage?.ram_mb} unit="MB" icon={MemoryStick} loading={quotaLoading} />
+        <QuotaCard label="Disk allocated" resource={quotaUsage?.disk_gb} unit="GB" icon={Database} loading={quotaLoading} />
       </div>
 
       {/* Recent machines */}
@@ -86,6 +94,29 @@ export default function Dashboard() {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+
+function QuotaCard({ label, resource, unit, icon: Icon, loading }) {
+  if (loading) {
+    return <StatCard label={label} value="—" icon={Icon} />;
+  }
+
+  const used = resource?.used ?? 0;
+  const limit = resource?.limit ?? 0;
+  const value = limit > 0 ? `${used}/${limit}` : `${used}`;
+  const subtitle = limit > 0 ? `${used} of ${limit} ${unit}` : `${used} ${unit} allocated`;
+
+  return (
+    <div className="card-hover px-4 py-3.5">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
+        {Icon && <Icon size={14} className="text-steel-600" />}
+      </div>
+      <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
+      <p className="text-xs text-steel-500 mt-1">{subtitle}</p>
     </div>
   );
 }
