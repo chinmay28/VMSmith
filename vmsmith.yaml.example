@@ -10,6 +10,7 @@ daemon:
     key_file: ""
   max_request_body_bytes: 52428800      # 50 MiB for JSON/form API requests
   max_upload_body_bytes: 53687091200    # 50 GiB for image upload requests
+  max_concurrent_creates: 2             # return HTTP 429 when too many VM creates are already in flight
 
 libvirt:
   uri: "qemu:///system"       # Use qemu:///session for rootless operation
