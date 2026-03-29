@@ -417,6 +417,8 @@ daemon:
   tls:
     cert_file: ""   # optional; set both cert_file + key_file to serve HTTPS
     key_file: ""
+  max_request_body_bytes: 52428800
+  max_upload_body_bytes: 53687091200
 
 libvirt:
   uri: "qemu:///system"

@@ -15,6 +15,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.LogFile == "" {
 		t.Error("Daemon.LogFile should have a default value")
 	}
+	if cfg.Daemon.MaxRequestBodyBytes != 50<<20 {
+		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want %d", cfg.Daemon.MaxRequestBodyBytes, 50<<20)
+	}
+	if cfg.Daemon.MaxUploadBodyBytes != 50<<30 {
+		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want %d", cfg.Daemon.MaxUploadBodyBytes, 50<<30)
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -67,6 +73,8 @@ daemon:
   tls:
     cert_file: "/etc/vmsmith/tls/server.crt"
     key_file: "/etc/vmsmith/tls/server.key"
+  max_request_body_bytes: 1048576
+  max_upload_body_bytes: 2147483648
 defaults:
   cpus: 8
   ram_mb: 16384
@@ -95,6 +103,12 @@ network:
 	}
 	if !cfg.Daemon.TLSConfigured() {
 		t.Error("Daemon.TLSConfigured() = false, want true")
+	}
+	if cfg.Daemon.MaxRequestBodyBytes != 1048576 {
+		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want 1048576", cfg.Daemon.MaxRequestBodyBytes)
+	}
+	if cfg.Daemon.MaxUploadBodyBytes != 2147483648 {
+		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want 2147483648", cfg.Daemon.MaxUploadBodyBytes)
 	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)

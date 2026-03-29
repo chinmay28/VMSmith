@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
@@ -121,6 +123,34 @@ func requestLogger(next http.Handler) http.Handler {
 type nopCloser struct{ *bytes.Reader }
 
 func (nopCloser) Close() error { return nil }
+
+func (s *Server) withRequestBodyLimit(next http.HandlerFunc) http.HandlerFunc {
+	return s.withBodyLimit(s.maxRequestBodyBytes, next)
+}
+
+func (s *Server) withUploadBodyLimit(next http.HandlerFunc) http.HandlerFunc {
+	return s.withBodyLimit(s.maxUploadBodyBytes, next)
+}
+
+func (s *Server) withBodyLimit(limit int64, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if limit > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next(w, r)
+	}
+}
+
+func isRequestTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "http: request body too large")
+}
 
 func itoa(n int) string {
 	if n == 0 {

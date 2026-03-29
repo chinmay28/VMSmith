@@ -152,7 +152,7 @@ Prevent abuse and resource exhaustion.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | Use `golang.org/x/time/rate` |
-| 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | |
+| 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | **Done** — added `daemon.max_request_body_bytes` and `daemon.max_upload_body_bytes`, applied request-size middleware, and covered 413 behavior in API tests |
 | 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | Semaphore in handler or manager |
 
 ### 3.5 Resource Quotas

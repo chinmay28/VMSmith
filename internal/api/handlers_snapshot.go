@@ -17,6 +17,10 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	var req createSnapshotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

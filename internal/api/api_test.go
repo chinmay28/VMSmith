@@ -23,6 +23,11 @@ import (
 // testServer sets up a complete test API server with mock VM manager.
 func testServer(t *testing.T) (*httptest.Server, *vm.MockManager, func()) {
 	t.Helper()
+	return testServerWithConfig(t, nil)
+}
+
+func testServerWithConfig(t *testing.T, mutator func(*config.Config)) (*httptest.Server, *vm.MockManager, func()) {
+	t.Helper()
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -37,12 +42,15 @@ func testServer(t *testing.T) (*httptest.Server, *vm.MockManager, func()) {
 	cfg := config.DefaultConfig()
 	cfg.Storage.ImagesDir = imagesDir
 	cfg.Storage.DBPath = dbPath
+	if mutator != nil {
+		mutator(cfg)
+	}
 
 	mockMgr := vm.NewMockManager()
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
-	apiServer := NewServer(mockMgr, storageMgr, portFwd)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, nil)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
@@ -1292,6 +1300,53 @@ func TestUploadImage_CustomName(t *testing.T) {
 	}
 }
 
+func TestCreateVM_RequestBodyTooLarge(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.MaxRequestBodyBytes = 64
+	})
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", bytes.NewBufferString(`{"name":"this-name-is-way-too-long-for-the-test-limit","image":"ubuntu","cpus":2,"ram_mb":2048}`))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestUploadImage_RequestBodyTooLarge(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.MaxUploadBodyBytes = 128
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "tiny.qcow2")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 256)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
@@ -1327,7 +1382,7 @@ func testServerWithWeb(t *testing.T) (*httptest.Server, func()) {
 		w.Write([]byte("<!doctype html><html><body><div id=\"root\"></div></body></html>"))
 	})
 
-	apiServer := NewServerWithWeb(mockMgr, storageMgr, portFwd, webHandler)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
