@@ -4,8 +4,8 @@ BUILD_DIR := ./bin
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
-.PHONY: build install clean purge test lint fmt deps web web-install test-web-deps \
-       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks
+.PHONY: build install install-service clean purge test lint fmt deps web web-install \
+       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -29,6 +29,12 @@ install: build
 install-githooks:
 	git config core.hooksPath .githooks
 	@echo "Installed git hooks from .githooks/"
+
+install-service:
+	sudo install -D -m 0644 vmsmith.service /etc/systemd/system/vmsmith.service
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now vmsmith.service
+	@echo "Installed and enabled vmsmith.service"
 
 clean:
 	rm -rf $(BUILD_DIR)
