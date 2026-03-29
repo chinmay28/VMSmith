@@ -400,6 +400,7 @@ All endpoints are prefixed `/api/v1/`.
 | POST   | /vms                                     | Create a new VM               |
 | GET    | /vms/{id}                                | Get VM details                |
 | PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk/IP) |
+| GET    | /quotas/usage                             | Current quota allocation vs configured limits |
 | POST   | /vms/{id}/start                          | Start a stopped VM            |
 | POST   | /vms/{id}/stop                           | Stop a running VM             |
 | DELETE | /vms/{id}                                | Delete a VM                   |

@@ -65,6 +65,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		return nil, fmt.Errorf("connecting to libvirt: %w", err)
 	}
 	logger.Info("daemon", "connected to libvirt", "uri", cfg.Libvirt.URI)
+	vmMgr = vm.WithQuotas(vmMgr, cfg.Quotas)
 
 	// Set up the NAT network.
 	conn, err := libvirt.NewConnect(cfg.Libvirt.URI)

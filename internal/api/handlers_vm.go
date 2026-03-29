@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -35,6 +36,8 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 				status = http.StatusNotFound
 			case "invalid_name", "invalid_image", "invalid_spec", "disk_shrink_not_allowed":
 				status = http.StatusBadRequest
+			case "quota_exceeded":
+				status = http.StatusTooManyRequests
 			}
 		}
 		writeAPIError(w, status, err)
@@ -72,6 +75,8 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 				status = http.StatusNotFound
 			case "invalid_spec", "disk_shrink_not_allowed":
 				status = http.StatusBadRequest
+			case "quota_exceeded":
+				status = http.StatusTooManyRequests
 			}
 		}
 		writeAPIError(w, status, err)
@@ -144,4 +149,15 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+
+// GetQuotaUsage handles GET /api/v1/quotas/usage
+func (s *Server) GetQuotaUsage(w http.ResponseWriter, r *http.Request) {
+	vms, err := s.vmManager.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, vm.CalculateQuotaUsage(vms, s.quotas))
 }

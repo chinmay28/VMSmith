@@ -30,3 +30,9 @@ defaults:
   ram_mb: 2048
   disk_gb: 20
   ssh_user: ubuntu   # retained for config compatibility; VMs use root by default — set default_user per-VM via CLI/API/GUI to create a named sudo user instead
+
+quotas:
+  max_vms: 0              # 0 = unlimited
+  max_total_cpus: 0       # aggregate vCPU cap across all VMs
+  max_total_ram_mb: 0     # aggregate RAM cap across all VMs
+  max_total_disk_gb: 0    # aggregate disk cap across all VMs
