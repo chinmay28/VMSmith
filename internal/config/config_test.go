@@ -21,6 +21,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.MaxUploadBodyBytes != 50<<30 {
 		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want %d", cfg.Daemon.MaxUploadBodyBytes, 50<<30)
 	}
+	if cfg.Daemon.MaxConcurrentCreates != 2 {
+		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 2", cfg.Daemon.MaxConcurrentCreates)
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -75,6 +78,7 @@ daemon:
     key_file: "/etc/vmsmith/tls/server.key"
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
+  max_concurrent_creates: 1
 defaults:
   cpus: 8
   ram_mb: 16384
@@ -109,6 +113,9 @@ network:
 	}
 	if cfg.Daemon.MaxUploadBodyBytes != 2147483648 {
 		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want 2147483648", cfg.Daemon.MaxUploadBodyBytes)
+	}
+	if cfg.Daemon.MaxConcurrentCreates != 1 {
+		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 1", cfg.Daemon.MaxConcurrentCreates)
 	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)

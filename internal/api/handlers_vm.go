@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -23,6 +24,15 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := validateVMSpec(spec); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
+	}
+
+	release, ok := s.acquireCreateSlot()
+	if !ok {
+		writeAPIError(w, http.StatusTooManyRequests, types.NewAPIError("create_limit_reached", "too many VM create operations in progress; retry once an existing create finishes"))
+		return
+	}
+	if release != nil {
+		defer release()
 	}
 
 	vm, err := s.vmManager.Create(r.Context(), spec)
@@ -144,4 +154,20 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (s *Server) acquireCreateSlot() (func(), bool) {
+	if s.createTokens == nil {
+		return nil, true
+	}
+
+	select {
+	case <-s.createTokens:
+		return func() {
+			s.createTokens <- struct{}{}
+		}, true
+	default:
+		logger.Warn("api", "rejecting VM create due to concurrent create limit", "limit", itoa(s.maxConcurrentCreates))
+		return nil, false
+	}
 }
