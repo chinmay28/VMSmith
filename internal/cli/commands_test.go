@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,17 @@ func withTestPortForwarder(t *testing.T) (*store.Store, *network.PortForwarder, 
 // ============================================================
 // VM command tests
 // ============================================================
+
+func writeTestConfig(t *testing.T, pidFile string) string {
+	t.Helper()
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	content := "daemon:\n  pid_file: \"" + pidFile + "\"\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return cfgPath
+}
 
 func TestCLI_VMCreate(t *testing.T) {
 	mock, cleanup := withMockVM(t)
@@ -859,5 +871,40 @@ func TestCLI_VMLifecycle(t *testing.T) {
 	}
 	if mock.VMCount() != 0 {
 		t.Error("expected VM to be gone after delete")
+	}
+}
+
+func TestCLI_DaemonStatus_Running(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "vmsmith.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	oldCfgFile := cfgFile
+	cfgFile = writeTestConfig(t, pidFile)
+	defer func() { cfgFile = oldCfgFile }()
+
+	out, err := runCLI("daemon", "status", "--config", cfgFile)
+	if err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+	if !strings.Contains(out, "vmSmith daemon is running (PID "+strconv.Itoa(os.Getpid())+")") {
+		t.Fatalf("expected running output, got %q", out)
+	}
+}
+
+func TestCLI_DaemonStatus_NotRunning(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "missing.pid")
+
+	oldCfgFile := cfgFile
+	cfgFile = writeTestConfig(t, pidFile)
+	defer func() { cfgFile = oldCfgFile }()
+
+	out, err := runCLI("daemon", "status", "--config", cfgFile)
+	if err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+	if !strings.Contains(out, "vmSmith daemon is not running") {
+		t.Fatalf("expected not-running output, got %q", out)
 	}
 }
