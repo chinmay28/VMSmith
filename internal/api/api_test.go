@@ -1200,6 +1200,38 @@ func TestUploadImage_InvalidExtension(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_image")
 }
 
+
+func TestUploadImage_NotEnoughDiskSpace(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	original := availableStorageBytes
+	availableStorageBytes = func(string) (uint64, error) { return 3, nil }
+	defer func() { availableStorageBytes = original }()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ubuntu-22.04.qcow2")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("fake qcow2 content")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInsufficientStorage {
+		t.Fatalf("status = %d, want 507", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "insufficient_storage")
+}
+
 func TestUploadImage_Success(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

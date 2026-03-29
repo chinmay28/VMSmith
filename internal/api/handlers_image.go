@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 type createImageRequest struct {
@@ -58,7 +61,16 @@ func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+var availableStorageBytes = func(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Bavail * uint64(stat.Bsize), nil
+}
+
 // UploadImage handles POST /api/v1/images/upload (multipart form: file + name)
+
 func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 	// Limit upload to 50 GB
 	if err := r.ParseMultipartForm(50 << 30); err != nil {
@@ -93,6 +105,16 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateUploadedImage(header.Filename, data); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	freeBytes, err := availableStorageBytes(filepath.Dir(s.storageMgr.ImagePath(name)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "checking available storage: "+err.Error())
+		return
+	}
+	if uint64(len(data)) > freeBytes {
+		writeAPIError(w, http.StatusInsufficientStorage, types.NewAPIError("insufficient_storage", "not enough free disk space for uploaded image"))
 		return
 	}
 

@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
 > **Last updated:** 2026-03-28
-> **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, and contributor/developer workflow docs
+> **Status:** Draft — active work started on Phase 1.1 CI, with Phase 1.2 / 1.3 validation, upload hardening, and error-handling improvements plus contributor/developer workflow docs
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -35,7 +35,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
 | 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | Add to VMSpec validation, also enforce in VMUpdateSpec |
 | 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | Check before calling store or iptables |
-| 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | Return 400 for bad uploads, 507 for insufficient space |
+| 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | **Done** — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
 | 1.2.6 | Return 400 (not 500) for all client input errors; reserve 500 for internal failures | M | Audit all handlers; most need `http.StatusBadRequest` paths |
 | 1.2.7 | Sanitize error messages: strip libvirt internal details from user-facing responses | S | Wrap libvirt errors with user-friendly messages in lifecycle.go |
@@ -47,7 +47,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | Table-driven tests in `internal/api/` or `pkg/types/` |
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
 | 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
-| 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | Use `httptest` with multipart form data |
+| 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | **Done** — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | Capture stdout in cli_test.go |
 
 ---
