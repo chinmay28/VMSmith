@@ -32,7 +32,12 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	// Get the VM to find its disk path
 	vm, err := s.vmManager.Get(r.Context(), req.VMID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "VM not found: "+err.Error())
+		apiErr := sanitizeManagerError(err)
+		status := http.StatusInternalServerError
+		if isAPIErrorCode(apiErr, "resource_not_found") {
+			status = http.StatusNotFound
+		}
+		writeAPIError(w, status, apiErr)
 		return
 	}
 
@@ -59,7 +64,12 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "imageID")
 	if err := s.storageMgr.DeleteImage(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		status := http.StatusInternalServerError
+		if isAPIErrorCode(apiErr, "resource_not_found") {
+			status = http.StatusNotFound
+		}
+		writeAPIError(w, status, apiErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
