@@ -67,7 +67,7 @@ func runCLI(args ...string) (string, error) {
 	return out, err
 }
 
-	var tableCellSplitRe = regexp.MustCompile(`\s{2,}`)
+var tableCellSplitRe = regexp.MustCompile(`\s{2,}`)
 
 func tableRows(t *testing.T, out string) [][]string {
 	t.Helper()
