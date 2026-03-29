@@ -370,6 +370,8 @@ curl -X POST http://localhost:8080/api/v1/vms/<id>/ports \
 
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
 
+Production deployment guide: [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
+
 ---
 
 ## CLI Reference
