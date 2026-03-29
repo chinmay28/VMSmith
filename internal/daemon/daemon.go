@@ -33,6 +33,15 @@ type Daemon struct {
 	server     *http.Server
 }
 
+var (
+	listenAndServe = func(s *http.Server) error {
+		return s.ListenAndServe()
+	}
+	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
+		return s.ListenAndServeTLS(certFile, keyFile)
+	}
+)
+
 // New creates and initializes a new daemon.
 func New(cfg *config.Config) (*Daemon, error) {
 	// Initialise structured logger.
@@ -111,9 +120,9 @@ func (d *Daemon) Run() error {
 	// Start server in goroutine.
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen)
+		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen, "tls", strconv.FormatBool(d.cfg.Daemon.TLSConfigured()))
 		fmt.Printf("vmSmith daemon listening on %s\n", d.cfg.Daemon.Listen)
-		if err := d.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := d.serve(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 		close(errCh)
@@ -191,6 +200,13 @@ func Status(pidFile string) (bool, int) {
 	}
 
 	return true, pid
+}
+
+func (d *Daemon) serve() error {
+	if d.cfg.Daemon.TLSConfigured() {
+		return listenAndServeTLS(d.server, d.cfg.Daemon.TLS.CertFile, d.cfg.Daemon.TLS.KeyFile)
+	}
+	return listenAndServe(d.server)
 }
 
 func writePIDFile(path string) error {

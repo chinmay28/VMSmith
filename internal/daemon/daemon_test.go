@@ -1,0 +1,78 @@
+package daemon
+
+import (
+	"crypto/tls"
+	"net/http"
+	"testing"
+
+	"github.com/vmsmith/vmsmith/internal/config"
+)
+
+func TestServeUsesHTTPWithoutTLS(t *testing.T) {
+	called := false
+	d := &Daemon{
+		cfg: &config.Config{},
+		server: &http.Server{},
+	}
+	d.server = &http.Server{}
+
+	orig := listenAndServe
+	origTLS := listenAndServeTLS
+	listenAndServe = func(s *http.Server) error {
+		called = true
+		return http.ErrServerClosed
+	}
+	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
+		t.Fatalf("ListenAndServeTLS called unexpectedly with cert=%q key=%q", certFile, keyFile)
+		return nil
+	}
+	defer func() {
+		listenAndServe = orig
+		listenAndServeTLS = origTLS
+	}()
+
+	if err := d.serve(); err != http.ErrServerClosed {
+		t.Fatalf("serve() error = %v, want %v", err, http.ErrServerClosed)
+	}
+	if !called {
+		t.Fatal("ListenAndServe was not called")
+	}
+}
+
+func TestServeUsesHTTPSWhenTLSConfigured(t *testing.T) {
+	var gotCert, gotKey string
+	d := &Daemon{
+		cfg: &config.Config{
+			Daemon: config.DaemonConfig{
+				TLS: config.TLSConfig{
+					CertFile: "/etc/vmsmith/server.crt",
+					KeyFile:  "/etc/vmsmith/server.key",
+				},
+			},
+		},
+		server: &http.Server{TLSConfig: &tls.Config{}},
+	}
+
+	orig := listenAndServe
+	origTLS := listenAndServeTLS
+	listenAndServe = func(s *http.Server) error {
+		t.Fatal("ListenAndServe called unexpectedly")
+		return nil
+	}
+	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
+		gotCert = certFile
+		gotKey = keyFile
+		return http.ErrServerClosed
+	}
+	defer func() {
+		listenAndServe = orig
+		listenAndServeTLS = origTLS
+	}()
+
+	if err := d.serve(); err != http.ErrServerClosed {
+		t.Fatalf("serve() error = %v, want %v", err, http.ErrServerClosed)
+	}
+	if gotCert != "/etc/vmsmith/server.crt" || gotKey != "/etc/vmsmith/server.key" {
+		t.Fatalf("ListenAndServeTLS called with cert=%q key=%q", gotCert, gotKey)
+	}
+}

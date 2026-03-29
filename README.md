@@ -414,6 +414,9 @@ Copy `vmsmith.yaml.example` to `~/.vmsmith/config.yaml`:
 ```yaml
 daemon:
   listen: "0.0.0.0:8080"
+  tls:
+    cert_file: ""   # optional; set both cert_file + key_file to serve HTTPS
+    key_file: ""
 
 libvirt:
   uri: "qemu:///system"
