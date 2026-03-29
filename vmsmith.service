@@ -1,0 +1,17 @@
+[Unit]
+Description=vmSmith daemon
+Wants=libvirtd.service
+After=network-online.target libvirtd.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=HOME=/root
+ExecStart=/usr/local/bin/vmsmith --config /etc/vmsmith/config.yaml daemon start
+ExecStop=/usr/local/bin/vmsmith --config /etc/vmsmith/config.yaml daemon stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

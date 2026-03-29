@@ -17,6 +17,8 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 
 ## Quick Start
 
+Want a disposable containerized setup for local testing instead of a host install? See [docs/CONTAINER.md](docs/CONTAINER.md).
+
 ### 1. Install dependencies
 
 ```bash
@@ -370,6 +372,8 @@ curl -X POST http://localhost:8080/api/v1/vms/<id>/ports \
 
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
 
+Production deployment guide: [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
+
 ---
 
 ## CLI Reference
@@ -403,6 +407,8 @@ vmsmith port list   <vm-id>
 vmsmith net interfaces [--all]
 
 vmsmith daemon start [--port 8080] [--config ~/.vmsmith/config.yaml]
+vmsmith daemon stop
+vmsmith daemon status
 ```
 
 ---
@@ -414,6 +420,11 @@ Copy `vmsmith.yaml.example` to `~/.vmsmith/config.yaml`:
 ```yaml
 daemon:
   listen: "0.0.0.0:8080"
+  tls:
+    cert_file: ""   # optional; set both cert_file + key_file to serve HTTPS
+    key_file: ""
+  max_request_body_bytes: 52428800
+  max_upload_body_bytes: 53687091200
 
 libvirt:
   uri: "qemu:///system"
@@ -499,14 +510,25 @@ The NAT network is created automatically on first `vm create` or daemon start. I
 ## Development
 
 ```bash
-# Terminal 1: Go backend with live reload
+# Run backend + frontend together
+make dev
+
+# Enable the repo's versioned pre-commit hook
+make install-githooks
+
+# Or run them separately
+# Terminal 1: Go backend on :8080
 make dev-api
 
-# Terminal 2: React frontend with hot reload (proxies /api → :8080)
+# Terminal 2: React frontend on :3000 (proxies /api → :8080)
 make dev-web
-# Open http://localhost:3000
 ```
 
+`make dev` starts both processes together and cleans them up on Ctrl-C. `make install-githooks` configures Git to use the repository's `.githooks/pre-commit` hook, which runs `make fmt && make lint` before each commit.
+
+Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For scriptable API workflows, see the bash and Python examples in [examples/](examples/README.md).
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
 
 ---

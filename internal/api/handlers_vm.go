@@ -12,6 +12,10 @@ import (
 func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	var spec types.VMSpec
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
@@ -46,6 +50,10 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "vmID")
 	var patch types.VMUpdateSpec
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}

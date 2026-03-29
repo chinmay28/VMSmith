@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend build and tests
+    runs-on: ubuntu-22.04
+    env:
+      CGO_ENABLED: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version:
+          - '1.22'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Install backend build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libvirt-dev
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Create stub frontend dist for embed
+        run: mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --timeout=5m ./...
+
+      - name: Build backend
+        run: make build-go
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run unit tests
+        run: make test-unit
+
+      - name: Run API integration tests
+        run: make test-integration
+
+  frontend:
+    name: Frontend build and mock GUI tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install root test dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix web ci
+
+      - name: Build frontend bundle
+        run: make web
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mock GUI tests
+        run: make test-web

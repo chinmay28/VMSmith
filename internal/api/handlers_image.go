@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 type createImageRequest struct {
@@ -18,6 +21,10 @@ type createImageRequest struct {
 func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	var req createImageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -25,7 +32,12 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	// Get the VM to find its disk path
 	vm, err := s.vmManager.Get(r.Context(), req.VMID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "VM not found: "+err.Error())
+		apiErr := sanitizeManagerError(err)
+		status := http.StatusInternalServerError
+		if isAPIErrorCode(apiErr, "resource_not_found") {
+			status = http.StatusNotFound
+		}
+		writeAPIError(w, status, apiErr)
 		return
 	}
 
@@ -52,16 +64,33 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "imageID")
 	if err := s.storageMgr.DeleteImage(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		status := http.StatusInternalServerError
+		if isAPIErrorCode(apiErr, "resource_not_found") {
+			status = http.StatusNotFound
+		}
+		writeAPIError(w, status, apiErr)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+var availableStorageBytes = func(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Bavail * uint64(stat.Bsize), nil
+}
+
 // UploadImage handles POST /api/v1/images/upload (multipart form: file + name)
+
 func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
-	// Limit upload to 50 GB
-	if err := r.ParseMultipartForm(50 << 30); err != nil {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to parse form: "+err.Error())
 		return
 	}
@@ -93,6 +122,16 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateUploadedImage(header.Filename, data); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	freeBytes, err := availableStorageBytes(filepath.Dir(s.storageMgr.ImagePath(name)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "checking available storage: "+err.Error())
+		return
+	}
+	if uint64(len(data)) > freeBytes {
+		writeAPIError(w, http.StatusInsufficientStorage, types.NewAPIError("insufficient_storage", "not enough free disk space for uploaded image"))
 		return
 	}
 

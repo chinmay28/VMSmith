@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+printf '%s\n' 'pre-commit: running make fmt && make lint'
+make fmt
+make lint

@@ -1,0 +1,11 @@
+.git
+.gitignore
+bin
+node_modules
+web/node_modules
+internal/web/dist
+playwright-report
+coverage
+*.log
+.tmp
+tmp

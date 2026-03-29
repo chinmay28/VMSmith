@@ -23,6 +23,11 @@ import (
 // testServer sets up a complete test API server with mock VM manager.
 func testServer(t *testing.T) (*httptest.Server, *vm.MockManager, func()) {
 	t.Helper()
+	return testServerWithConfig(t, nil)
+}
+
+func testServerWithConfig(t *testing.T, mutator func(*config.Config)) (*httptest.Server, *vm.MockManager, func()) {
+	t.Helper()
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -37,12 +42,15 @@ func testServer(t *testing.T) (*httptest.Server, *vm.MockManager, func()) {
 	cfg := config.DefaultConfig()
 	cfg.Storage.ImagesDir = imagesDir
 	cfg.Storage.DBPath = dbPath
+	if mutator != nil {
+		mutator(cfg)
+	}
 
 	mockMgr := vm.NewMockManager()
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
-	apiServer := NewServer(mockMgr, storageMgr, portFwd)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, nil)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
@@ -878,9 +886,24 @@ func TestListSnapshots_VMNotFound(t *testing.T) {
 	defer cleanup()
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms/nonexistent/snapshots")
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestRestoreSnapshot_SnapshotNotFound(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-r"})
+	mockMgr.CreateSnapshot(nil, "vm-r", "good-state")
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-r/snapshots/missing/restore", "application/json", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestRestoreSnapshot_Error(t *testing.T) {
@@ -894,6 +917,7 @@ func TestRestoreSnapshot_Error(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "internal_error")
 }
 
 func TestDeleteSnapshot_VMNotFound(t *testing.T) {
@@ -902,9 +926,25 @@ func TestDeleteSnapshot_VMNotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/nonexistent/snapshots/snap", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestDeleteSnapshot_SnapshotNotFound(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-ds"})
+	mockMgr.CreateSnapshot(nil, "vm-ds", "existing")
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-ds/snapshots/missing", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 // ============================================================
@@ -931,7 +971,9 @@ func TestCreateImage_VMNotFound(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
+
 
 func TestCreateImage_StorageError(t *testing.T) {
 	// VM exists but disk path is invalid — qemu-img convert will fail → 500.
@@ -953,9 +995,10 @@ func TestDeleteImage_NotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/images/nonexistent", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (image not in store)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (image not in store)", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestDownloadImage_NotFound(t *testing.T) {
@@ -1029,30 +1072,58 @@ func TestAddPort_VMNotFound(t *testing.T) {
 	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
-func TestAddPort_InvalidPortRange(t *testing.T) {
-	ts, mockMgr, cleanup := testServer(t)
-	defer cleanup()
-
-	mockMgr.SeedVM(&types.VM{ID: "vm-p2", IP: "192.168.100.10"})
-	body := jsonBody(t, addPortRequest{HostPort: 70000, GuestPort: 22, Protocol: "tcp"})
-	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p2/ports", "application/json", body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
+func TestAddPort_InvalidValidationInputs(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        addPortRequest
+		wantMessage string
+	}{
+		{
+			name:        "host port below minimum",
+			body:        addPortRequest{HostPort: 0, GuestPort: 22, Protocol: types.ProtocolTCP},
+			wantMessage: "host_port must be between 1 and 65535",
+		},
+		{
+			name:        "host port above maximum",
+			body:        addPortRequest{HostPort: 70000, GuestPort: 22, Protocol: types.ProtocolTCP},
+			wantMessage: "host_port must be between 1 and 65535",
+		},
+		{
+			name:        "guest port below minimum",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 0, Protocol: types.ProtocolTCP},
+			wantMessage: "guest_port must be between 1 and 65535",
+		},
+		{
+			name:        "guest port above maximum",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 70000, Protocol: types.ProtocolTCP},
+			wantMessage: "guest_port must be between 1 and 65535",
+		},
+		{
+			name:        "invalid protocol",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: "icmp"},
+			wantMessage: "protocol must be tcp or udp",
+		},
 	}
-	assertAPIErrorCode(t, resp, "invalid_port_forward")
-}
 
-func TestAddPort_InvalidProtocol(t *testing.T) {
-	ts, mockMgr, cleanup := testServer(t)
-	defer cleanup()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, mockMgr, cleanup := testServer(t)
+			defer cleanup()
 
-	mockMgr.SeedVM(&types.VM{ID: "vm-p3", IP: "192.168.100.10"})
-	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: "icmp"})
-	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p3/ports", "application/json", body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
+			mockMgr.SeedVM(&types.VM{ID: "vm-p2", IP: "192.168.100.10"})
+			resp, err := http.Post(ts.URL+"/api/v1/vms/vm-p2/ports", "application/json", jsonBody(t, tt.body))
+			if err != nil {
+				t.Fatalf("POST /ports: %v", err)
+			}
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			errResp := assertAPIErrorCode(t, resp, "invalid_port_forward")
+			if errResp.Message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", errResp.Message, tt.wantMessage)
+			}
+		})
 	}
-	assertAPIErrorCode(t, resp, "invalid_port_forward")
 }
 
 func TestAddPort_PortForwardConflict(t *testing.T) {
@@ -1122,9 +1193,10 @@ func TestRemovePort_NotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-x/ports/nonexistent", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (port not found)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (port not found)", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 // ============================================================
@@ -1200,6 +1272,38 @@ func TestUploadImage_InvalidExtension(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_image")
 }
 
+
+func TestUploadImage_NotEnoughDiskSpace(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	original := availableStorageBytes
+	availableStorageBytes = func(string) (uint64, error) { return 3, nil }
+	defer func() { availableStorageBytes = original }()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ubuntu-22.04.qcow2")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("fake qcow2 content")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInsufficientStorage {
+		t.Fatalf("status = %d, want 507", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "insufficient_storage")
+}
+
 func TestUploadImage_Success(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -1260,6 +1364,53 @@ func TestUploadImage_CustomName(t *testing.T) {
 	}
 }
 
+func TestCreateVM_RequestBodyTooLarge(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.MaxRequestBodyBytes = 64
+	})
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", bytes.NewBufferString(`{"name":"this-name-is-way-too-long-for-the-test-limit","image":"ubuntu","cpus":2,"ram_mb":2048}`))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestUploadImage_RequestBodyTooLarge(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.MaxUploadBodyBytes = 128
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "tiny.qcow2")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 256)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
@@ -1295,7 +1446,7 @@ func testServerWithWeb(t *testing.T) (*httptest.Server, func()) {
 		w.Write([]byte("<!doctype html><html><body><div id=\"root\"></div></body></html>"))
 	})
 
-	apiServer := NewServerWithWeb(mockMgr, storageMgr, portFwd, webHandler)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {

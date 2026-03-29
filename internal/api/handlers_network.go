@@ -21,6 +21,10 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 
 	var req addPortRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -76,7 +80,12 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 	portID := chi.URLParam(r, "portID")
 
 	if err := s.portFwd.Remove(portID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		status := http.StatusInternalServerError
+		if isAPIErrorCode(apiErr, "resource_not_found") {
+			status = http.StatusNotFound
+		}
+		writeAPIError(w, status, apiErr)
 		return
 	}
 

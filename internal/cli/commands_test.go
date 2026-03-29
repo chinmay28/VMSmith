@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,17 @@ func withTestPortForwarder(t *testing.T) (*store.Store, *network.PortForwarder, 
 // VM command tests
 // ============================================================
 
+func writeTestConfig(t *testing.T, pidFile string) string {
+	t.Helper()
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	content := "daemon:\n  pid_file: \"" + pidFile + "\"\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return cfgPath
+}
+
 func TestCLI_VMCreate(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -254,11 +266,11 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
 
-	if got := rows[1]; strings.Join(got, "|") != "vm-1|alpha|running|192.168.100.10|2|2048" {
-		t.Fatalf("first row = %v", got)
+	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048$`).MatchString(strings.TrimSpace(out)) {
+		t.Fatalf("expected vm-1 row in output, got %q", out)
 	}
-	if got := rows[2]; strings.Join(got, "|") != "vm-2|beta|stopped|4|4096" {
-		t.Fatalf("second row = %v", got)
+	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096$`).MatchString(strings.TrimSpace(out)) {
+		t.Fatalf("expected vm-2 row in output, got %q", out)
 	}
 }
 
@@ -819,5 +831,40 @@ func TestCLI_VMLifecycle(t *testing.T) {
 	}
 	if mock.VMCount() != 0 {
 		t.Error("expected VM to be gone after delete")
+	}
+}
+
+func TestCLI_DaemonStatus_Running(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "vmsmith.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	oldCfgFile := cfgFile
+	cfgFile = writeTestConfig(t, pidFile)
+	defer func() { cfgFile = oldCfgFile }()
+
+	out, err := runCLI("daemon", "status", "--config", cfgFile)
+	if err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+	if !strings.Contains(out, "vmSmith daemon is running (PID "+strconv.Itoa(os.Getpid())+")") {
+		t.Fatalf("expected running output, got %q", out)
+	}
+}
+
+func TestCLI_DaemonStatus_NotRunning(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "missing.pid")
+
+	oldCfgFile := cfgFile
+	cfgFile = writeTestConfig(t, pidFile)
+	defer func() { cfgFile = oldCfgFile }()
+
+	out, err := runCLI("daemon", "status", "--config", cfgFile)
+	if err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+	if !strings.Contains(out, "vmSmith daemon is not running") {
+		t.Fatalf("expected not-running output, got %q", out)
 	}
 }

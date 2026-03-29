@@ -17,9 +17,21 @@ type Config struct {
 }
 
 type DaemonConfig struct {
-	Listen  string `yaml:"listen"`
-	PIDFile string `yaml:"pid_file"`
-	LogFile string `yaml:"log_file"`
+	Listen              string    `yaml:"listen"`
+	PIDFile             string    `yaml:"pid_file"`
+	LogFile             string    `yaml:"log_file"`
+	TLS                 TLSConfig `yaml:"tls"`
+	MaxRequestBodyBytes int64     `yaml:"max_request_body_bytes"`
+	MaxUploadBodyBytes  int64     `yaml:"max_upload_body_bytes"`
+}
+
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+}
+
+func (d DaemonConfig) TLSConfigured() bool {
+	return d.TLS.CertFile != "" && d.TLS.KeyFile != ""
 }
 
 type LibvirtConfig struct {
@@ -56,9 +68,11 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Daemon: DaemonConfig{
-			Listen:  "0.0.0.0:8080",
-			PIDFile: "/var/run/vmsmith.pid",
-			LogFile: filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
+			Listen:              "0.0.0.0:8080",
+			PIDFile:             "/var/run/vmsmith.pid",
+			LogFile:             filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
+			MaxRequestBodyBytes: 50 << 20,
+			MaxUploadBodyBytes:  50 << 30,
 		},
 		Libvirt: LibvirtConfig{
 			URI: "qemu:///system",

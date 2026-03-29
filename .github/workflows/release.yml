@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release asset
+    runs-on: ubuntu-22.04
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install backend build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libvirt-dev
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Build frontend
+        run: make web-install && make web
+
+      - name: Build release binary
+        run: make dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/vmsmith-linux-amd64
+          generate_release_notes: true

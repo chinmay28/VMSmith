@@ -15,6 +15,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.LogFile == "" {
 		t.Error("Daemon.LogFile should have a default value")
 	}
+	if cfg.Daemon.MaxRequestBodyBytes != 50<<20 {
+		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want %d", cfg.Daemon.MaxRequestBodyBytes, 50<<20)
+	}
+	if cfg.Daemon.MaxUploadBodyBytes != 50<<30 {
+		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want %d", cfg.Daemon.MaxUploadBodyBytes, 50<<30)
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -64,6 +70,11 @@ func TestLoadFromFile(t *testing.T) {
 daemon:
   listen: "127.0.0.1:9090"
   log_file: "/var/log/vmsmith.log"
+  tls:
+    cert_file: "/etc/vmsmith/tls/server.crt"
+    key_file: "/etc/vmsmith/tls/server.key"
+  max_request_body_bytes: 1048576
+  max_upload_body_bytes: 2147483648
 defaults:
   cpus: 8
   ram_mb: 16384
@@ -83,6 +94,21 @@ network:
 	}
 	if cfg.Daemon.LogFile != "/var/log/vmsmith.log" {
 		t.Errorf("Daemon.LogFile = %q, want /var/log/vmsmith.log", cfg.Daemon.LogFile)
+	}
+	if cfg.Daemon.TLS.CertFile != "/etc/vmsmith/tls/server.crt" {
+		t.Errorf("Daemon.TLS.CertFile = %q, want /etc/vmsmith/tls/server.crt", cfg.Daemon.TLS.CertFile)
+	}
+	if cfg.Daemon.TLS.KeyFile != "/etc/vmsmith/tls/server.key" {
+		t.Errorf("Daemon.TLS.KeyFile = %q, want /etc/vmsmith/tls/server.key", cfg.Daemon.TLS.KeyFile)
+	}
+	if !cfg.Daemon.TLSConfigured() {
+		t.Error("Daemon.TLSConfigured() = false, want true")
+	}
+	if cfg.Daemon.MaxRequestBodyBytes != 1048576 {
+		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want 1048576", cfg.Daemon.MaxRequestBodyBytes)
+	}
+	if cfg.Daemon.MaxUploadBodyBytes != 2147483648 {
+		t.Errorf("Daemon.MaxUploadBodyBytes = %d, want 2147483648", cfg.Daemon.MaxUploadBodyBytes)
 	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)
@@ -107,6 +133,27 @@ func TestLoadInvalidYAML(t *testing.T) {
 	_, err := Load(cfgPath)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestTLSConfiguredRequiresBothFiles(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  DaemonConfig
+		want bool
+	}{
+		{name: "missing both", cfg: DaemonConfig{}, want: false},
+		{name: "missing key", cfg: DaemonConfig{TLS: TLSConfig{CertFile: "/tmp/cert.pem"}}, want: false},
+		{name: "missing cert", cfg: DaemonConfig{TLS: TLSConfig{KeyFile: "/tmp/key.pem"}}, want: false},
+		{name: "both set", cfg: DaemonConfig{TLS: TLSConfig{CertFile: "/tmp/cert.pem", KeyFile: "/tmp/key.pem"}}, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.TLSConfigured(); got != tc.want {
+				t.Fatalf("TLSConfigured() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

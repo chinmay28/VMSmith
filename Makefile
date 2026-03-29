@@ -4,8 +4,8 @@ BUILD_DIR := ./bin
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
-.PHONY: build install clean purge test lint fmt deps web web-install test-web-deps \
-       test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps
+.PHONY: build install install-service clean purge test lint fmt deps web web-install \
+       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -25,6 +25,16 @@ go.sum: go.mod
 install: build
 	sudo cp $(BUILD_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
 	@echo "Installed $(BINARY) to /usr/local/bin/"
+
+install-githooks:
+	git config core.hooksPath .githooks
+	@echo "Installed git hooks from .githooks/"
+
+install-service:
+	sudo install -D -m 0644 vmsmith.service /etc/systemd/system/vmsmith.service
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now vmsmith.service
+	@echo "Installed and enabled vmsmith.service"
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -118,7 +128,20 @@ dist: web
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/vmsmith
 
+docker-build:
+	docker build -t vmsmith:dev .
+
 # --- Development workflow ---
+# Default local dev entrypoint: run backend + frontend together.
+# Ctrl-C stops both child processes.
+ifneq (,$(findstring n,$(MAKEFLAGS)))
+dev:
+	@echo "$(MAKE) dev-api & $(MAKE) dev-web"
+else
+dev:
+	@bash -c 'trap "kill 0" EXIT INT TERM; $(MAKE) dev-api & $(MAKE) dev-web & wait'
+endif
+
 # Terminal 1: make dev-api   (Go daemon on :8080)
 # Terminal 2: make dev-web   (Vite on :3000 with proxy to :8080)
 dev-api: build-go
