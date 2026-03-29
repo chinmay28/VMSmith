@@ -1037,30 +1037,58 @@ func TestAddPort_VMNotFound(t *testing.T) {
 	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
-func TestAddPort_InvalidPortRange(t *testing.T) {
-	ts, mockMgr, cleanup := testServer(t)
-	defer cleanup()
-
-	mockMgr.SeedVM(&types.VM{ID: "vm-p2", IP: "192.168.100.10"})
-	body := jsonBody(t, addPortRequest{HostPort: 70000, GuestPort: 22, Protocol: "tcp"})
-	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p2/ports", "application/json", body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
+func TestAddPort_InvalidValidationInputs(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        addPortRequest
+		wantMessage string
+	}{
+		{
+			name:        "host port below minimum",
+			body:        addPortRequest{HostPort: 0, GuestPort: 22, Protocol: types.ProtocolTCP},
+			wantMessage: "host_port must be between 1 and 65535",
+		},
+		{
+			name:        "host port above maximum",
+			body:        addPortRequest{HostPort: 70000, GuestPort: 22, Protocol: types.ProtocolTCP},
+			wantMessage: "host_port must be between 1 and 65535",
+		},
+		{
+			name:        "guest port below minimum",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 0, Protocol: types.ProtocolTCP},
+			wantMessage: "guest_port must be between 1 and 65535",
+		},
+		{
+			name:        "guest port above maximum",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 70000, Protocol: types.ProtocolTCP},
+			wantMessage: "guest_port must be between 1 and 65535",
+		},
+		{
+			name:        "invalid protocol",
+			body:        addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: "icmp"},
+			wantMessage: "protocol must be tcp or udp",
+		},
 	}
-	assertAPIErrorCode(t, resp, "invalid_port_forward")
-}
 
-func TestAddPort_InvalidProtocol(t *testing.T) {
-	ts, mockMgr, cleanup := testServer(t)
-	defer cleanup()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, mockMgr, cleanup := testServer(t)
+			defer cleanup()
 
-	mockMgr.SeedVM(&types.VM{ID: "vm-p3", IP: "192.168.100.10"})
-	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: "icmp"})
-	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-p3/ports", "application/json", body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
+			mockMgr.SeedVM(&types.VM{ID: "vm-p2", IP: "192.168.100.10"})
+			resp, err := http.Post(ts.URL+"/api/v1/vms/vm-p2/ports", "application/json", jsonBody(t, tt.body))
+			if err != nil {
+				t.Fatalf("POST /ports: %v", err)
+			}
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			errResp := assertAPIErrorCode(t, resp, "invalid_port_forward")
+			if errResp.Message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", errResp.Message, tt.wantMessage)
+			}
+		})
 	}
-	assertAPIErrorCode(t, resp, "invalid_port_forward")
 }
 
 func TestAddPort_PortForwardConflict(t *testing.T) {
