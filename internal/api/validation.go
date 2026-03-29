@@ -98,6 +98,11 @@ func validateUploadedImage(filename string, data []byte) error {
 	return nil
 }
 
+func isAPIErrorCode(err error, code string) bool {
+	apiErr, ok := err.(*types.APIError)
+	return ok && apiErr.Code == code
+}
+
 func sanitizeManagerError(err error) error {
 	if err == nil {
 		return nil

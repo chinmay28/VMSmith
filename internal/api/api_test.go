@@ -886,9 +886,24 @@ func TestListSnapshots_VMNotFound(t *testing.T) {
 	defer cleanup()
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms/nonexistent/snapshots")
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestRestoreSnapshot_SnapshotNotFound(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-r"})
+	mockMgr.CreateSnapshot(nil, "vm-r", "good-state")
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-r/snapshots/missing/restore", "application/json", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestRestoreSnapshot_Error(t *testing.T) {
@@ -902,6 +917,7 @@ func TestRestoreSnapshot_Error(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "internal_error")
 }
 
 func TestDeleteSnapshot_VMNotFound(t *testing.T) {
@@ -910,9 +926,25 @@ func TestDeleteSnapshot_VMNotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/nonexistent/snapshots/snap", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestDeleteSnapshot_SnapshotNotFound(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-ds"})
+	mockMgr.CreateSnapshot(nil, "vm-ds", "existing")
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-ds/snapshots/missing", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 // ============================================================
@@ -939,7 +971,9 @@ func TestCreateImage_VMNotFound(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
+
 
 func TestCreateImage_StorageError(t *testing.T) {
 	// VM exists but disk path is invalid — qemu-img convert will fail → 500.
@@ -961,9 +995,10 @@ func TestDeleteImage_NotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/images/nonexistent", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (image not in store)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (image not in store)", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestDownloadImage_NotFound(t *testing.T) {
@@ -1158,9 +1193,10 @@ func TestRemovePort_NotFound(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-x/ports/nonexistent", nil)
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (port not found)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (port not found)", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 // ============================================================
