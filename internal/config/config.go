@@ -115,6 +115,7 @@ func DefaultConfig() *Config {
 			DiskGB:  20,
 			SSHUser: "ubuntu",
 		},
+		Quotas: QuotasConfig{},
 	}
 }
 

@@ -60,6 +60,7 @@ vmsmith/
 │   ├── vm/
 │   │   ├── manager.go           # VMManager interface definition
 │   │   ├── lifecycle.go         # LibvirtManager: Create/Start/Stop/Delete/Get/List + snapshots
+│   │   ├── quota_manager.go     # Optional quota enforcement wrapper + usage aggregation
 │   │   ├── domain.go            # libvirt XML generation, multi-network, cloud-init ISO
 │   │   └── mock_manager.go      # In-memory mock VMManager for tests
 │   └── web/
@@ -70,6 +71,7 @@ vmsmith/
 │   ├── snapshot.go              # Snapshot type
 │   ├── image.go                 # Image type
 │   ├── network.go               # NetworkAttachment, PortForward, HostInterface
+│   ├── quota.go                 # Quota usage response types
 │   └── errors.go                # Typed API errors
 ├── web/                         # React source (separate npm project)
 │   ├── src/api/client.js        # REST API client (vms, snapshots, images, ports, host, logs)
@@ -147,6 +149,8 @@ All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go
 
 The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, `Description`, `Tags`, `NatStaticIP`, and `NatGateway`; zero/empty values are treated as "no change" (except `Tags`, where a provided slice replaces the current tag set). The `LibvirtManager` implementation stops the VM if running, then applies each changed field: metadata is persisted in bbolt, IP change updates the DHCP host reservation and regenerates the cloud-init ISO with a new instance-id (forces cloud-init re-run on restart), CPU/RAM change redefines the domain XML (preserving the existing UUID), disk growth calls `qemu-img resize` (shrink is rejected). The VM is then restarted.
 
+Quota enforcement is implemented as a wrapper (`vm.WithQuotas`) around any `vm.Manager`. It checks configured aggregate caps before create/update by summing current allocations from `List()`/`Get()`, so the daemon and direct CLI both share the same quota rules.
+
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
 ### Structured Logging
@@ -176,6 +180,7 @@ Never call libvirt directly from handlers — always go through the `Manager` in
 - The router is defined in `internal/api/router.go`
 - Handlers receive a `vm.Manager`, `*store.BoltStore`, and config via dependency injection (not globals)
 - Error responses use typed errors from `pkg/types/errors.go`
+- `GET /api/v1/quotas/usage` returns current allocations and configured quota caps for dashboard/ops visibility
 - The static web GUI is served from the same port — the router handles both `/api/v1/*` and the SPA fallback
 
 ### bbolt Data Model

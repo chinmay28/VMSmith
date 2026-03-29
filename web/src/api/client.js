@@ -86,6 +86,11 @@ export const host = {
   interfaces: () => request('/host/interfaces'),
 };
 
+// --- Quotas ---
+export const quotas = {
+  usage: () => request('/quotas/usage'),
+};
+
 // --- Logs ---
 export const logs = {
   list: ({ level = 'debug', limit = 200, since = '', source = '' } = {}) => {
@@ -96,4 +101,4 @@ export const logs = {
   },
 };
 
-export default { vms, snapshots, images, ports, host, logs };
+export default { vms, snapshots, images, ports, host, quotas, logs };
