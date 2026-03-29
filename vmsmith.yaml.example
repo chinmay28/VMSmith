@@ -5,6 +5,9 @@ daemon:
   listen: "0.0.0.0:8080"
   pid_file: "/var/run/vmsmith.pid"
   log_file: "~/.vmsmith/vmsmith.log"   # structured log output; leave empty to disable file logging
+  tls:
+    cert_file: ""                      # optional; when both cert_file + key_file are set, daemon serves HTTPS
+    key_file: ""
 
 libvirt:
   uri: "qemu:///system"       # Use qemu:///session for rootless operation

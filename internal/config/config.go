@@ -17,9 +17,19 @@ type Config struct {
 }
 
 type DaemonConfig struct {
-	Listen  string `yaml:"listen"`
-	PIDFile string `yaml:"pid_file"`
-	LogFile string `yaml:"log_file"`
+	Listen  string    `yaml:"listen"`
+	PIDFile string    `yaml:"pid_file"`
+	LogFile string    `yaml:"log_file"`
+	TLS     TLSConfig `yaml:"tls"`
+}
+
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+}
+
+func (d DaemonConfig) TLSConfigured() bool {
+	return d.TLS.CertFile != "" && d.TLS.KeyFile != ""
 }
 
 type LibvirtConfig struct {
