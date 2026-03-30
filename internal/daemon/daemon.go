@@ -58,7 +58,8 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 	logger.Info("daemon", "store opened", "path", cfg.Storage.DBPath)
 
-	vmMgr, err := vm.NewLibvirtManager(cfg, s)
+	var vmMgr vm.Manager
+	vmMgr, err = vm.NewLibvirtManager(cfg, s)
 	if err != nil {
 		s.Close()
 		logger.Error("daemon", "connecting to libvirt failed", "error", err.Error())
