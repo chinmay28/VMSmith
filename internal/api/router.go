@@ -13,12 +13,14 @@ import (
 
 // Server holds the API dependencies and serves HTTP.
 type Server struct {
-	router              chi.Router
-	vmManager           vm.Manager
-	storageMgr          *storage.Manager
-	portFwd             *network.PortForwarder
-	maxRequestBodyBytes int64
-	maxUploadBodyBytes  int64
+	router               chi.Router
+	vmManager            vm.Manager
+	storageMgr           *storage.Manager
+	portFwd              *network.PortForwarder
+	maxRequestBodyBytes  int64
+	maxUploadBodyBytes   int64
+	maxConcurrentCreates int
+	createTokens         chan struct{}
 }
 
 // NewServer creates a new API server with default body-size limits.
@@ -32,11 +34,18 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		cfg = config.DefaultConfig()
 	}
 	s := &Server{
-		vmManager:           vmMgr,
-		storageMgr:          storageMgr,
-		portFwd:             portFwd,
-		maxRequestBodyBytes: cfg.Daemon.MaxRequestBodyBytes,
-		maxUploadBodyBytes:  cfg.Daemon.MaxUploadBodyBytes,
+		vmManager:            vmMgr,
+		storageMgr:           storageMgr,
+		portFwd:              portFwd,
+		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
+		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
+		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
+	}
+	if s.maxConcurrentCreates > 0 {
+		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
+		for i := 0; i < s.maxConcurrentCreates; i++ {
+			s.createTokens <- struct{}{}
+		}
 	}
 	s.setupRoutes(webHandler)
 	return s

@@ -342,6 +342,7 @@ Key config fields:
 - `daemon.listen` — HTTP listen address (default `0.0.0.0:8080`)
 - `daemon.log_file` — structured log output path (default `~/.vmsmith/vmsmith.log`); leave empty to disable file logging
 - `daemon.tls.cert_file` / `daemon.tls.key_file` — when both are set, the daemon serves HTTPS via `ListenAndServeTLS`
+- `daemon.max_concurrent_creates` — maximum number of simultaneous `POST /api/v1/vms` operations; extra create requests fail fast with HTTP 429 / `create_limit_reached`
 - `libvirt.uri` — libvirt connection URI (use `qemu:///session` for rootless)
 - `storage.images_dir` — must be world-readable (libvirt-qemu user reads VM disks)
 - `storage.base_dir` — VM disk overlays (must also be world-readable)

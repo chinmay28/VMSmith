@@ -27,6 +27,7 @@ type MockManager struct {
 	ListErr            error
 	CreateSnapshotErr  error
 	RestoreSnapshotErr error
+	CreateDelay        time.Duration
 }
 
 // NewMockManager creates a new mock VM manager.
@@ -40,6 +41,9 @@ func NewMockManager() *MockManager {
 func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM, error) {
 	if m.CreateErr != nil {
 		return nil, m.CreateErr
+	}
+	if m.CreateDelay > 0 {
+		time.Sleep(m.CreateDelay)
 	}
 
 	m.mu.Lock()
