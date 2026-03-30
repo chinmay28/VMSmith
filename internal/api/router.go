@@ -51,6 +51,8 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
+	vmMgr = vm.WithQuotas(vmMgr, cfg.Quotas)
+
 	s := &Server{
 		vmManager:            vmMgr,
 		storageMgr:           storageMgr,
