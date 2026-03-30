@@ -68,7 +68,7 @@ func runCLI(args ...string) (string, error) {
 	return out, err
 }
 
-	var tableCellSplitRe = regexp.MustCompile(`\s{2,}`)
+var tableCellSplitRe = regexp.MustCompile(`\s{2,}`)
 
 func tableRows(t *testing.T, out string) [][]string {
 	t.Helper()
@@ -468,11 +468,31 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot list: %v", err)
 	}
-	if !strings.Contains(out, "snap-a") {
-		t.Errorf("expected 'snap-a' in output, got: %q", out)
+
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
 	}
-	if !strings.Contains(out, "snap-b") {
-		t.Errorf("expected 'snap-b' in output, got: %q", out)
+
+	headers := rows[0]
+	wantHeaders := []string{"NAME", "CREATED"}
+	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
+		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
+	}
+
+	if got := rows[1][0]; got != "snap-a" {
+		t.Fatalf("first snapshot name = %q, want snap-a", got)
+	}
+	if got := rows[2][0]; got != "snap-b" {
+		t.Fatalf("second snapshot name = %q, want snap-b", got)
+	}
+	for i, row := range rows[1:] {
+		if len(row) != 2 {
+			t.Fatalf("snapshot row %d = %v, want 2 columns", i+1, row)
+		}
+		if _, err := time.Parse("2006-01-02 15:04:05", row[1]); err != nil {
+			t.Fatalf("snapshot row %d created timestamp = %q: %v", i+1, row[1], err)
+		}
 	}
 }
 
@@ -662,16 +682,36 @@ func TestCLI_PortList_WithForwards(t *testing.T) {
 		GuestIP:   "192.168.100.10",
 		Protocol:  types.ProtocolTCP,
 	})
+	s.PutPortForward(&types.PortForward{
+		ID:        "pf-2",
+		VMID:      "vm-x",
+		HostPort:  8443,
+		GuestPort: 443,
+		GuestIP:   "192.168.100.10",
+		Protocol:  types.ProtocolUDP,
+	})
 
 	out, err := runCLI("port", "list", "vm-x")
 	if err != nil {
 		t.Fatalf("port list: %v", err)
 	}
-	if !strings.Contains(out, "2222") {
-		t.Errorf("expected host port 2222 in output, got: %q", out)
+
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
 	}
-	if !strings.Contains(out, "192.168.100.10") {
-		t.Errorf("expected guest IP in output, got: %q", out)
+
+	headers := rows[0]
+	wantHeaders := []string{"ID", "HOST PORT", "GUEST", "PROTOCOL"}
+	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
+		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
+	}
+
+	if got := strings.Join(rows[1], "|"); got != "pf-1|2222|192.168.100.10:22|tcp" {
+		t.Fatalf("first row = %v", rows[1])
+	}
+	if got := strings.Join(rows[2], "|"); got != "pf-2|8443|192.168.100.10:443|udp" {
+		t.Fatalf("second row = %v", rows[2])
 	}
 }
 

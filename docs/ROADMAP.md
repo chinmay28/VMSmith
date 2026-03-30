@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-03-28
-> **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, and contributor/developer workflow docs
+> **Last updated:** 2026-03-29
+> **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, contributor/developer workflow docs, and container/distribution packaging
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -19,11 +19,11 @@ There are currently no automated checks. This is the single highest-impact impro
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 1.1.1 | Create GitHub Actions workflow for Go build + unit tests on every PR | S | **Done** — `.github/workflows/ci.yml` runs `make build-go` and `make test-unit` on Ubuntu 22.04 with Go 1.22 + `libvirt-dev` |
-| 1.1.2 | Add `golangci-lint` step to CI | S | **Done** — `.github/workflows/ci.yml` runs `golangci-lint-action` (currently scoped to `govet`) in CI |
+| 1.1.1 | Create GitHub Actions workflow for Go build + unit tests on every PR | S | ✅ Done — `.github/workflows/ci.yml` runs `make build-go` and `make test-unit` on Ubuntu 22.04 with Go 1.22 + `libvirt-dev` |
+| 1.1.2 | Add `golangci-lint` step to CI | S | ✅ Done — `.github/workflows/ci.yml` runs `golangci-lint-action` (currently scoped to `govet`) in CI |
 | 1.1.3 | Add frontend build + Playwright mock tests to CI | M | `make web-install && make test-web`. Needs Node 18+ and Chromium |
-| 1.1.4 | Add API integration test step (`make test-integration`) | S | **Done** — included in `.github/workflows/ci.yml` backend job |
-| 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | Use `make dist` target; attach as GitHub Release asset |
+| 1.1.4 | Add API integration test step (`make test-integration`) | S | ✅ Done — included in `.github/workflows/ci.yml` backend job |
+| 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | ✅ Done — `.github/workflows/release.yml` builds the frontend + `make dist` on `v*` tags and publishes `bin/vmsmith-linux-amd64` via GitHub Releases |
 | 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | GitHub repo settings |
 
 ### 1.2 Input Validation & Error Handling
@@ -35,7 +35,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
 | 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | Add to VMSpec validation, also enforce in VMUpdateSpec |
 | 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | Check before calling store or iptables |
-| 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | Return 400 for bad uploads, 507 for insufficient space |
+| 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | ✅ Done — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
 | 1.2.6 | Return 400 (not 500) for all client input errors; reserve 500 for internal failures | M | Audit all handlers; most need `http.StatusBadRequest` paths |
 | 1.2.7 | Sanitize error messages: strip libvirt internal details from user-facing responses | S | Wrap libvirt errors with user-friendly messages in lifecycle.go |
@@ -47,7 +47,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | Table-driven tests in `internal/api/` or `pkg/types/` |
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
 | 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
-| 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | Use `httptest` with multipart form data |
+| 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | Capture stdout in cli_test.go |
 
 ---
@@ -132,7 +132,7 @@ Required for any non-localhost deployment.
 | 3.2.1 | Add `daemon.tls.cert_file` and `daemon.tls.key_file` config fields | S | |
 | 3.2.2 | Switch `http.ListenAndServe` to `http.ListenAndServeTLS` when TLS configured | S | |
 | 3.2.3 | Add `daemon.tls.auto_cert` option for Let's Encrypt via `autocert` package | M | Only practical if daemon has a public FQDN |
-| 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | |
+| 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers reverse proxy deployment with both nginx and Caddy, TLS, and firewall guidance |
 
 ### 3.3 Systemd Integration
 
@@ -141,8 +141,8 @@ Make VMSmith a proper system service.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 3.3.1 | Create `vmsmith.service` systemd unit file | S | After=libvirtd.service, Wants=libvirtd.service |
-| 3.3.2 | Add `make install-service` target to copy unit file and enable service | S | |
-| 3.3.3 | Add `vmsmith daemon status` command (check if daemon is running) | S | **Done** — `vmsmith daemon status` reports whether the daemon PID file points to a live process |
+| 3.3.2 | Add `make install-service` target to copy unit file and enable service | S | ✅ Done — `make install-service` now installs `vmsmith.service` into `/etc/systemd/system`, reloads systemd, and enables/starts the unit |
+| 3.3.3 | Add `vmsmith daemon status` command (check if daemon is running) | S | ✅ Done — `internal/cli/daemon.go` implements `vmsmith daemon status`, and the command is documented in `README.md` |
 | 3.3.4 | Implement graceful shutdown: drain in-flight requests, close libvirt connection cleanly | M | Signal handling exists but could be more graceful |
 
 ### 3.4 API Rate Limiting & Request Size Limits
@@ -152,7 +152,7 @@ Prevent abuse and resource exhaustion.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | Use `golang.org/x/time/rate` |
-| 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | |
+| 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | ✅ Done — added `daemon.max_request_body_bytes` and `daemon.max_upload_body_bytes`, applied request-size middleware, and covered 413 behavior in API tests |
 | 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | Semaphore in handler or manager |
 
 ### 3.5 Resource Quotas
@@ -274,10 +274,10 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 6.1.1 | Add `make dev` target that runs both `dev-api` and `dev-web` in parallel (e.g., via `goreman` or `concurrently`) | S | **Done** — `make dev` now launches both targets in parallel and cleans up both child processes on Ctrl-C |
-| 6.1.2 | Add pre-commit hook: `make fmt && make lint` | S | |
-| 6.1.3 | Add `CONTRIBUTING.md` with setup instructions, PR conventions, test requirements | S | **Done** — `CONTRIBUTING.md` added with setup, workflow, testing, and PR guidance |
-| 6.1.4 | Add `.editorconfig` for consistent formatting across editors | S | **Done** — root `.editorconfig` defines Go/Makefile tab rules and 2-space defaults for docs/web assets |
+| 6.1.1 | Add `make dev` target that runs both `dev-api` and `dev-web` in parallel (e.g., via `goreman` or `concurrently`) | S | ✅ Done — `make dev` now launches both targets in parallel and cleans up both child processes on Ctrl-C |
+| 6.1.2 | Add pre-commit hook: `make fmt && make lint` | S | ✅ Done — versioned `.githooks/pre-commit` hook added with `make install-githooks` helper and contributor docs |
+| 6.1.3 | Add `CONTRIBUTING.md` with setup instructions, PR conventions, test requirements | S | ✅ Done — `CONTRIBUTING.md` added with setup, workflow, testing, and PR guidance |
+| 6.1.4 | Add `.editorconfig` for consistent formatting across editors | S | ✅ Done — root `.editorconfig` defines Go/Makefile tab rules and 2-space defaults for docs/web assets |
 
 ### 6.2 Packaging & Distribution
 
@@ -285,16 +285,16 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 |---|------|--------|-------|
 | 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | Include systemd unit, default config, man page |
 | 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | |
-| 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | Useful for testing, less so for production |
+| 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
 | 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | Download binary + install to `/usr/local/bin` |
 
 ### 6.3 Documentation Expansion
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | |
-| 6.3.2 | Write networking deep-dive (NAT vs macvtap vs bridge, when to use each, troubleshooting) | M | |
-| 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | **Done** — added `examples/` with bash and Python API automation examples for common create/wait/port-forward flows |
+| 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers systemd, TLS via reverse proxy, firewall rules, logging, backups, and upgrade guidance |
+| 6.3.2 | Write networking deep-dive (NAT vs macvtap vs bridge, when to use each, troubleshooting) | M | ✅ Done — added `docs/NETWORKING.md` covering mode selection, tradeoffs, examples, and troubleshooting |
+| 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | ✅ Done — added `examples/` with bash and Python API automation examples for common create/wait/port-forward flows |
 | 6.3.4 | Create short video/GIF demos for README | S | |
 
 ---
