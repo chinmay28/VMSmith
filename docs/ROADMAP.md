@@ -129,8 +129,8 @@ Required for any non-localhost deployment.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.2.1 | Add `daemon.tls.cert_file` and `daemon.tls.key_file` config fields | S | |
-| 3.2.2 | Switch `http.ListenAndServe` to `http.ListenAndServeTLS` when TLS configured | S | |
+| 3.2.1 | Add `daemon.tls.cert_file` and `daemon.tls.key_file` config fields | S | ✅ Done — `internal/config/config.go` defines `daemon.tls.cert_file` / `key_file`, and `internal/config/config_test.go` covers loading them from YAML |
+| 3.2.2 | Switch `http.ListenAndServe` to `http.ListenAndServeTLS` when TLS configured | S | ✅ Done — `internal/daemon/daemon.go` switches to `ListenAndServeTLS` when both TLS files are configured, with daemon tests covering both HTTP and HTTPS paths |
 | 3.2.3 | Add `daemon.tls.auto_cert` option for Let's Encrypt via `autocert` package | M | Only practical if daemon has a public FQDN |
 | 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers reverse proxy deployment with both nginx and Caddy, TLS, and firewall guidance |
 
@@ -153,7 +153,7 @@ Prevent abuse and resource exhaustion.
 |---|------|--------|-------|
 | 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | Use `golang.org/x/time/rate` |
 | 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | ✅ Done — added `daemon.max_request_body_bytes` and `daemon.max_upload_body_bytes`, applied request-size middleware, and covered 413 behavior in API tests |
-| 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | Semaphore in handler or manager |
+| 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | ✅ Done — `daemon.max_concurrent_creates` bounds simultaneous `POST /api/v1/vms` operations and returns HTTP 429 `create_limit_reached` when the queue is full |
 
 ### 3.5 Resource Quotas
 

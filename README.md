@@ -333,6 +333,8 @@ GUI: VM Image Management
 
 The daemon exposes a full REST API at `/api/v1/`. Example:
 
+When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up.
+
 ```bash
 # Start daemon
 sudo ./bin/vmsmith daemon start --port 8080
@@ -425,6 +427,7 @@ daemon:
     key_file: ""
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
+  max_concurrent_creates: 2   # return HTTP 429 when the create queue is full
 
 libvirt:
   uri: "qemu:///system"
