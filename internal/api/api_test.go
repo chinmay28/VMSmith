@@ -1541,6 +1541,68 @@ func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
 	}
 }
 
+func TestListVMs_RateLimitExceeded(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.RateLimitPerSecond = 1
+		cfg.Daemon.RateLimitBurst = 1
+	})
+	defer cleanup()
+
+	client := &http.Client{}
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+		if err != nil {
+			t.Fatalf("new request %d: %v", i+1, err)
+		}
+		req.Header.Set("X-Forwarded-For", "198.51.100.10")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /vms %d: %v", i+1, err)
+		}
+		if i == 0 {
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("first status = %d, want 200", resp.StatusCode)
+			}
+			resp.Body.Close()
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("second status = %d, want 429", resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "rate_limit_exceeded")
+		if resp.Header.Get("Retry-After") != "1" {
+			t.Fatalf("Retry-After = %q, want 1", resp.Header.Get("Retry-After"))
+		}
+	}
+}
+
+func TestListVMs_RateLimitIsPerClientIP(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.RateLimitPerSecond = 1
+		cfg.Daemon.RateLimitBurst = 1
+	})
+	defer cleanup()
+
+	client := &http.Client{}
+	ips := []string{"198.51.100.11", "198.51.100.12"}
+	for _, ip := range ips {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+		if err != nil {
+			t.Fatalf("new request for %s: %v", ip, err)
+		}
+		req.Header.Set("X-Forwarded-For", ip)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /vms for %s: %v", ip, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status for %s = %d, want 200", ip, resp.StatusCode)
+		}
+	}
+}
+
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
 // ============================================================

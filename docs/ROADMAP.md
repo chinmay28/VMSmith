@@ -151,7 +151,7 @@ Prevent abuse and resource exhaustion.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | Use `golang.org/x/time/rate` |
+| 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | ✅ Done — `/api/v1/*` now uses configurable per-client token buckets via `daemon.rate_limit_per_second` / `daemon.rate_limit_burst`, returning HTTP 429 `rate_limit_exceeded` plus `Retry-After` |
 | 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | ✅ Done — added `daemon.max_request_body_bytes` and `daemon.max_upload_body_bytes`, applied request-size middleware, and covered 413 behavior in API tests |
 | 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | ✅ Done — `daemon.max_concurrent_creates` bounds simultaneous `POST /api/v1/vms` operations and returns HTTP 429 `create_limit_reached` when the queue is full |
 
