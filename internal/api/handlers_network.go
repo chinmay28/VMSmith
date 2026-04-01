@@ -97,9 +97,3 @@ func (s *Server) ListHostInterfaces(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, ifaces)
 }
- err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, ifaces)
-}
