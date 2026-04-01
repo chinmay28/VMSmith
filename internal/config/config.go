@@ -14,6 +14,7 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	Network  NetworkConfig  `yaml:"network"`
 	Defaults DefaultsConfig `yaml:"defaults"`
+	Quotas   QuotasConfig   `yaml:"quotas"`
 }
 
 type DaemonConfig struct {
@@ -63,6 +64,13 @@ type DefaultsConfig struct {
 	RAMMB   int    `yaml:"ram_mb"`
 	DiskGB  int    `yaml:"disk_gb"`
 	SSHUser string `yaml:"ssh_user"`
+}
+
+type QuotasConfig struct {
+	MaxVMs         int `yaml:"max_vms"`
+	MaxTotalCPUs   int `yaml:"max_total_cpus"`
+	MaxTotalRAMMB  int `yaml:"max_total_ram_mb"`
+	MaxTotalDiskGB int `yaml:"max_total_disk_gb"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.

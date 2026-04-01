@@ -42,6 +42,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Network.Name != "vmsmith-net" {
 		t.Errorf("Network.Name = %q, want vmsmith-net", cfg.Network.Name)
 	}
+	if cfg.Quotas.MaxVMs != 0 {
+		t.Errorf("Quotas.MaxVMs = %d, want 0", cfg.Quotas.MaxVMs)
+	}
+	if cfg.Quotas.MaxTotalCPUs != 0 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 0", cfg.Quotas.MaxTotalCPUs)
+	}
+	if cfg.Quotas.MaxTotalRAMMB != 0 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 0", cfg.Quotas.MaxTotalRAMMB)
+	}
+	if cfg.Quotas.MaxTotalDiskGB != 0 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 0", cfg.Quotas.MaxTotalDiskGB)
+	}
 }
 
 func TestLoadNoFile(t *testing.T) {
@@ -85,6 +97,11 @@ defaults:
   disk_gb: 100
 network:
   name: "custom-net"
+quotas:
+  max_vms: 25
+  max_total_cpus: 96
+  max_total_ram_mb: 196608
+  max_total_disk_gb: 4096
 `
 	os.WriteFile(cfgPath, []byte(content), 0644)
 
@@ -125,6 +142,18 @@ network:
 	}
 	if cfg.Network.Name != "custom-net" {
 		t.Errorf("Network.Name = %q, want custom-net", cfg.Network.Name)
+	}
+	if cfg.Quotas.MaxVMs != 25 {
+		t.Errorf("Quotas.MaxVMs = %d, want 25", cfg.Quotas.MaxVMs)
+	}
+	if cfg.Quotas.MaxTotalCPUs != 96 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 96", cfg.Quotas.MaxTotalCPUs)
+	}
+	if cfg.Quotas.MaxTotalRAMMB != 196608 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 196608", cfg.Quotas.MaxTotalRAMMB)
+	}
+	if cfg.Quotas.MaxTotalDiskGB != 4096 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 4096", cfg.Quotas.MaxTotalDiskGB)
 	}
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {
