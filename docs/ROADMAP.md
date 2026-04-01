@@ -48,7 +48,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
 | 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
 | 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
-| 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | Capture stdout in cli_test.go |
+| 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | ✅ Done — `internal/cli/commands_test.go` captures stdout and verifies table headers/rows for both `vm list` and `image list` |
 
 ---
 
@@ -307,7 +307,7 @@ For maximum impact, work through these in roughly this order:
 |----------|------|-----------|-----|
 | **P0** | CI/CD | 1.1.1 – 1.1.5 | Prevents regressions, enables confident development |
 | **P0** | Validation | 1.2.1 – 1.2.6 | Users hit confusing 500 errors on bad input today |
-| **P1** | Tests | 1.3.1 – 1.3.4 | Lock in validation work with tests |
+| **P1** | Tests | 1.3.1 – 1.3.5 | Lock in validation work with tests |
 | **P1** | VM Cloning | 2.1.1 – 2.1.7 | Most-requested missing feature |
 | **P1** | Tags | 2.2.1 – 2.2.6 | Essential for organizing VMs at any scale |
 | **P2** | Auth | 3.1.1 – 3.1.4 | Blocks network-exposed deployments |
