@@ -174,6 +174,56 @@ func TestCreateVM_InvalidSpecBounds(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_MissingName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
+func TestCreateVM_MissingImage(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "valid-name",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_image")
+}
+
+func TestCreateVM_InvalidNatGateway(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:       "valid-name",
+		Image:      "ubuntu",
+		CPUs:       2,
+		RAMMB:      2048,
+		NatGateway: "not-an-ip",
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -478,6 +528,40 @@ func TestUpdateVM_IP_InvalidCIDR(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid CIDR", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestUpdateVM_InvalidSpecBounds(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bounds", Name: "bounded", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{CPUs: 129}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bounds", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestUpdateVM_InvalidNatGateway(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-gateway", Name: "gateway", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{NatGateway: "bad-gateway"}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-gateway", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
@@ -974,7 +1058,6 @@ func TestCreateImage_VMNotFound(t *testing.T) {
 	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
-
 func TestCreateImage_StorageError(t *testing.T) {
 	// VM exists but disk path is invalid — qemu-img convert will fail → 500.
 	ts, mockMgr, cleanup := testServer(t)
@@ -1272,7 +1355,6 @@ func TestUploadImage_InvalidExtension(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_image")
 }
 
-
 func TestUploadImage_NotEnoughDiskSpace(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -1458,7 +1540,6 @@ func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
 		t.Fatalf("first create status = %d, want 201", firstResp.StatusCode)
 	}
 }
-
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
