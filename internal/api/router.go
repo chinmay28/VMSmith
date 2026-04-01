@@ -20,6 +20,7 @@ type Server struct {
 	maxRequestBodyBytes  int64
 	maxUploadBodyBytes   int64
 	maxConcurrentCreates int
+	authConfig           config.AuthConfig
 	createTokens         chan struct{}
 }
 
@@ -40,6 +41,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
+		authConfig:           cfg.Daemon.Auth,
 	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
@@ -65,6 +67,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.SetHeader("Content-Type", "application/json"))
+		r.Use(apiKeyAuth(s.authConfig))
 
 		// Log viewer endpoint
 		r.Get("/logs", s.GetLogs)

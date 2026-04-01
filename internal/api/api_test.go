@@ -1808,3 +1808,127 @@ func TestGetLogs_MaxLimitCapped(t *testing.T) {
 func init() {
 	_ = time.Second // ensure time is used
 }
+
+func TestAPIAuthDisabledAllowsRequestsWithoutToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = false
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestAPIAuthEnabledRejectsMissingBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "unauthorized")
+}
+
+func TestAPIAuthEnabledRejectsInvalidBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer wrong-key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "unauthorized")
+}
+
+func TestAPIAuthEnabledAllowsValidBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+	cfg.Daemon.Auth.Enabled = true
+	cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
+	ts := httptest.NewServer(apiServer)
+	defer ts.Close()
+	defer s.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}

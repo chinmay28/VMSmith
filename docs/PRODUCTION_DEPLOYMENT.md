@@ -32,7 +32,7 @@ Why this layout is preferable today:
 - you can add auth, IP allowlists, rate limiting, and access logging at the proxy layer
 - certificate rotation and HTTPS redirects are simpler
 
-> **Important:** VMSmith currently has no built-in authentication layer. If you expose it beyond localhost, protect it with network-level controls (VPN, Tailscale, WireGuard, SSH tunnel, private subnet, IP allowlist, or similar). Reverse proxy TLS protects transport, but it does **not** by itself provide access control.
+> **Important:** If you expose VMSmith beyond localhost, enable `daemon.auth` and keep the daemon behind network-level controls (VPN, Tailscale, WireGuard, SSH tunnel, private subnet, IP allowlist, or similar). Reverse proxy TLS protects transport, but it does **not** by itself provide access control.
 
 ---
 

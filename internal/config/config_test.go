@@ -183,3 +183,33 @@ func TestEnsureDirs(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadAuthConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `
+daemon:
+  auth:
+    enabled: true
+    api_keys:
+      - "alpha"
+      - "beta"
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !cfg.Daemon.Auth.Enabled {
+		t.Fatal("Daemon.Auth.Enabled = false, want true")
+	}
+	if len(cfg.Daemon.Auth.APIKeys) != 2 {
+		t.Fatalf("len(Daemon.Auth.APIKeys) = %d, want 2", len(cfg.Daemon.Auth.APIKeys))
+	}
+	if cfg.Daemon.Auth.APIKeys[0] != "alpha" || cfg.Daemon.Auth.APIKeys[1] != "beta" {
+		t.Fatalf("Daemon.Auth.APIKeys = %#v, want [alpha beta]", cfg.Daemon.Auth.APIKeys)
+	}
+}
