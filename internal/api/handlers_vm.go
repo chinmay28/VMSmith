@@ -38,16 +38,7 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	vm, err := s.vmManager.Create(r.Context(), spec)
 	if err != nil {
 		err = sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if apiErr, ok := err.(*types.APIError); ok {
-			switch apiErr.Code {
-			case "resource_not_found":
-				status = http.StatusNotFound
-			case "invalid_name", "invalid_image", "invalid_spec", "disk_shrink_not_allowed":
-				status = http.StatusBadRequest
-			}
-		}
-		writeAPIError(w, status, err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
 
@@ -75,16 +66,7 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	vm, err := s.vmManager.Update(r.Context(), id, patch)
 	if err != nil {
 		err = sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if apiErr, ok := err.(*types.APIError); ok {
-			switch apiErr.Code {
-			case "resource_not_found":
-				status = http.StatusNotFound
-			case "invalid_spec", "disk_shrink_not_allowed":
-				status = http.StatusBadRequest
-			}
-		}
-		writeAPIError(w, status, err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, vm)
@@ -116,11 +98,7 @@ func (s *Server) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "vmID")
 	if err := s.vmManager.Delete(r.Context(), id); err != nil {
 		err = sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "resource_not_found" {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -131,11 +109,7 @@ func (s *Server) StartVM(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "vmID")
 	if err := s.vmManager.Start(r.Context(), id); err != nil {
 		err = sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "resource_not_found" {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
@@ -146,11 +120,7 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "vmID")
 	if err := s.vmManager.Stop(r.Context(), id); err != nil {
 		err = sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "resource_not_found" {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
