@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-03-29
+> **Last updated:** 2026-03-30
 > **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, contributor/developer workflow docs, and container/distribution packaging
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -21,7 +21,7 @@ There are currently no automated checks. This is the single highest-impact impro
 |---|------|--------|-------|
 | 1.1.1 | Create GitHub Actions workflow for Go build + unit tests on every PR | S | ✅ Done — `.github/workflows/ci.yml` runs `make build-go` and `make test-unit` on Ubuntu 22.04 with Go 1.22 + `libvirt-dev` |
 | 1.1.2 | Add `golangci-lint` step to CI | S | ✅ Done — `.github/workflows/ci.yml` runs `golangci-lint-action` (currently scoped to `govet`) in CI |
-| 1.1.3 | Add frontend build + Playwright mock tests to CI | M | `make web-install && make test-web`. Needs Node 18+ and Chromium |
+| 1.1.3 | Add frontend build + Playwright mock tests to CI | M | ✅ Done — `.github/workflows/ci.yml` runs a dedicated frontend job that installs Node dependencies, builds the frontend bundle, installs Chromium via Playwright, and runs `make test-web` |
 | 1.1.4 | Add API integration test step (`make test-integration`) | S | ✅ Done — included in `.github/workflows/ci.yml` backend job |
 | 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | ✅ Done — `.github/workflows/release.yml` builds the frontend + `make dist` on `v*` tags and publishes `bin/vmsmith-linux-amd64` via GitHub Releases |
 | 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | GitHub repo settings |
@@ -140,7 +140,7 @@ Make VMSmith a proper system service.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.3.1 | Create `vmsmith.service` systemd unit file | S | After=libvirtd.service, Wants=libvirtd.service |
+| 3.3.1 | Create `vmsmith.service` systemd unit file | S | ✅ Done — `vmsmith.service` is committed at the repo root with `Wants=libvirtd.service` and `After=network-online.target libvirtd.service` |
 | 3.3.2 | Add `make install-service` target to copy unit file and enable service | S | ✅ Done — `make install-service` now installs `vmsmith.service` into `/etc/systemd/system`, reloads systemd, and enables/starts the unit |
 | 3.3.3 | Add `vmsmith daemon status` command (check if daemon is running) | S | ✅ Done — `internal/cli/daemon.go` implements `vmsmith daemon status`, and the command is documented in `README.md` |
 | 3.3.4 | Implement graceful shutdown: drain in-flight requests, close libvirt connection cleanly | M | Signal handling exists but could be more graceful |
