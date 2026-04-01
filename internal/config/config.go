@@ -17,13 +17,19 @@ type Config struct {
 }
 
 type DaemonConfig struct {
-	Listen               string    `yaml:"listen"`
-	PIDFile              string    `yaml:"pid_file"`
-	LogFile              string    `yaml:"log_file"`
-	TLS                  TLSConfig `yaml:"tls"`
-	MaxRequestBodyBytes  int64     `yaml:"max_request_body_bytes"`
-	MaxUploadBodyBytes   int64     `yaml:"max_upload_body_bytes"`
-	MaxConcurrentCreates int       `yaml:"max_concurrent_creates"`
+	Listen               string     `yaml:"listen"`
+	PIDFile              string     `yaml:"pid_file"`
+	LogFile              string     `yaml:"log_file"`
+	TLS                  TLSConfig  `yaml:"tls"`
+	Auth                 AuthConfig `yaml:"auth"`
+	MaxRequestBodyBytes  int64      `yaml:"max_request_body_bytes"`
+	MaxUploadBodyBytes   int64      `yaml:"max_upload_body_bytes"`
+	MaxConcurrentCreates int        `yaml:"max_concurrent_creates"`
+}
+
+type AuthConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	APIKeys []string `yaml:"api_keys"`
 }
 
 type TLSConfig struct {

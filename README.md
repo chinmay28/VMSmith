@@ -331,7 +331,9 @@ GUI: VM Image Management
 
 ## REST API
 
-The daemon exposes a full REST API at `/api/v1/`. Example:
+The daemon exposes a full REST API at `/api/v1/`. When `daemon.auth.enabled` is set, clients must send `Authorization: Bearer <key>` on API requests.
+
+Example:
 
 When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up.
 
@@ -339,7 +341,7 @@ When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP
 # Start daemon
 sudo ./bin/vmsmith daemon start --port 8080
 
-# List VMs
+# List VMs (add Authorization header when daemon.auth.enabled=true)
 curl http://localhost:8080/api/v1/vms
 
 # Create a VM

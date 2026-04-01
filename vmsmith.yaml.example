@@ -8,6 +8,9 @@ daemon:
   tls:
     cert_file: ""                      # optional; when both cert_file + key_file are set, daemon serves HTTPS
     key_file: ""
+  auth:
+    enabled: false                      # when true, API requests must send Authorization: Bearer <key>
+    api_keys: []                        # one or more shared secrets for API clients
   max_request_body_bytes: 52428800      # 50 MiB for JSON/form API requests
   max_upload_body_bytes: 53687091200    # 50 GiB for image upload requests
   max_concurrent_creates: 2             # return HTTP 429 when too many VM creates are already in flight
