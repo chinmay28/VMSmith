@@ -63,14 +63,16 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	}
 
 	vm := &types.VM{
-		ID:        id,
-		Name:      spec.Name,
-		Spec:      spec,
-		State:     types.VMStateRunning,
-		IP:        "192.168.100.10",
-		DiskPath:  fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          id,
+		Name:        spec.Name,
+		Description: spec.Description,
+		Tags:        append([]string(nil), spec.Tags...),
+		Spec:        spec,
+		State:       types.VMStateRunning,
+		IP:          "192.168.100.10",
+		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	m.vms[id] = vm
@@ -101,6 +103,14 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 			return nil, fmt.Errorf("disk can only grow: requested %d GB is less than current %d GB", patch.DiskGB, vm.Spec.DiskGB)
 		}
 		vm.Spec.DiskGB = patch.DiskGB
+	}
+	if patch.Description != "" {
+		vm.Description = patch.Description
+		vm.Spec.Description = patch.Description
+	}
+	if patch.Tags != nil {
+		vm.Tags = append([]string(nil), patch.Tags...)
+		vm.Spec.Tags = append([]string(nil), patch.Tags...)
 	}
 	if patch.NatStaticIP != "" {
 		parsedIP, _, err := net.ParseCIDR(patch.NatStaticIP)

@@ -76,6 +76,8 @@ export default function VMDetail() {
         <InfoCard label="Image" value={vm.spec.image} mono />
         <InfoCard label="Resources" value={`${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB RAM · ${vm.spec.disk_gb} GB disk`} />
         <InfoCard label="Created" value={new Date(vm.created_at).toLocaleString()} />
+        <InfoCard label="Description" value={vm.description || '—'} />
+        <InfoCard label="Tags" value={vm.tags?.length ? vm.tags.map(tag => `#${tag}`).join(' · ') : '—'} mono />
         {(() => {
           const sshUser = vm.spec.default_user || 'root';
           return (
@@ -175,6 +177,8 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [cpus, setCpus] = useState('');
   const [ramMb, setRamMb] = useState('');
   const [diskGb, setDiskGb] = useState('');
+  const [description, setDescription] = useState('');
+  const [tags, setTags] = useState('');
   const [natIP, setNatIP] = useState('');
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
 
@@ -186,6 +190,8 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
       setCpus(String(vm.spec.cpus));
       setRamMb(String(vm.spec.ram_mb));
       setDiskGb(String(vm.spec.disk_gb));
+      setDescription(vm.description || '');
+      setTags((vm.tags || []).join(', '));
       setNatIP(currentIP);
     }
   }, [open, vm]);
@@ -198,6 +204,9 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     if (newCpus !== vm.spec.cpus)    patch.cpus    = newCpus;
     if (newRam  !== vm.spec.ram_mb)  patch.ram_mb  = newRam;
     if (newDisk !== vm.spec.disk_gb) patch.disk_gb = newDisk;
+    if (description.trim() !== (vm.description || '')) patch.description = description.trim();
+    const nextTags = tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (nextTags.join(',') !== (vm.tags || []).join(',')) patch.tags = nextTags;
 
     // Normalise the IP: accept bare IP and append /24 for the API
     const trimmedIP = natIP.trim();
@@ -261,6 +270,17 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
               onChange={e => setDiskGb(e.target.value)}
             />
             <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.disk_gb} · grow only</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Description</label>
+            <input className="input" type="text" placeholder="What this VM is for" value={description} onChange={e => setDescription(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Tags</label>
+            <input className="input font-mono" type="text" placeholder="prod,web" value={tags} onChange={e => setTags(e.target.value)} />
           </div>
         </div>
 

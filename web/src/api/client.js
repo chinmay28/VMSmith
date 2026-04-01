@@ -17,7 +17,7 @@ async function request(path, options = {}) {
 
 // --- VMs ---
 export const vms = {
-  list:    ()           => request('/vms'),
+  list:    (tag = '')   => request(tag ? `/vms?tag=${encodeURIComponent(tag)}` : '/vms'),
   get:     (id)         => request(`/vms/${id}`),
   create:  (spec)       => request('/vms', { method: 'POST', body: JSON.stringify(spec) }),
   update:  (id, patch)  => request(`/vms/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),

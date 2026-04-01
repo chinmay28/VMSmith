@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -40,6 +41,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if spec.NatGateway != "" && net.ParseIP(spec.NatGateway) == nil {
 		return types.NewAPIError("invalid_spec", "nat_gateway must be a valid IP address")
 	}
+	if _, err := normalizeTags(spec.Tags); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -61,7 +65,38 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	if patch.NatGateway != "" && net.ParseIP(patch.NatGateway) == nil {
 		return types.NewAPIError("invalid_spec", "nat_gateway must be a valid IP address")
 	}
+	if _, err := normalizeTags(patch.Tags); err != nil {
+		return err
+	}
 	return nil
+}
+
+func normalizeTags(tags []string) ([]string, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(strings.ToLower(tag))
+		if trimmed == "" {
+			return nil, types.NewAPIError("invalid_spec", "tags cannot contain empty values")
+		}
+		if len(trimmed) > 32 {
+			return nil, types.NewAPIError("invalid_spec", "tags must be 1-32 characters")
+		}
+		if !regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]*$`).MatchString(trimmed) {
+			return nil, types.NewAPIError("invalid_spec", "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens")
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
 }
 
 func validateCIDR(value, field string) error {

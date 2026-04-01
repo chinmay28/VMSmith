@@ -76,12 +76,12 @@ No way to organize or annotate VMs. Tags enable filtering, grouping, and automat
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 2.2.1 | Add `Tags []string` and `Description string` fields to `types.VM` | S | JSON tags with `omitempty` |
-| 2.2.2 | Accept tags/description in `POST /vms` and `PATCH /vms/{id}` | S | |
-| 2.2.3 | Add `--tag` flag (repeatable) and `--description` to `vmsmith vm create` and `vmsmith vm edit` | S | |
-| 2.2.4 | Add `GET /vms?tag=<tag>` filter support | M | Filter in handler or bbolt iteration |
-| 2.2.5 | Show tags as badges in VMList and VMDetail frontend pages | S | |
-| 2.2.6 | Add `vmsmith vm list --tag <tag>` CLI filter | S | |
+| 2.2.1 | Add `Tags []string` and `Description string` fields to `types.VM` | S | ✅ Done — added top-level VM metadata plus mirrored create/update payload support in `pkg/types/vm.go` |
+| 2.2.2 | Accept tags/description in `POST /vms` and `PATCH /vms/{id}` | S | ✅ Done — API accepts, trims, normalizes, and persists metadata on create/update |
+| 2.2.3 | Add `--tag` flag (repeatable) and `--description` to `vmsmith vm create` and `vmsmith vm edit` | S | ✅ Done — CLI create/edit now support tags + description |
+| 2.2.4 | Add `GET /vms?tag=<tag>` filter support | M | ✅ Done — list handler supports case-insensitive tag filtering |
+| 2.2.5 | Show tags as badges in VMList and VMDetail frontend pages | S | ✅ Done — VM list/detail now render description + tag badges, and the list page supports quick tag filtering |
+| 2.2.6 | Add `vmsmith vm list --tag <tag>` CLI filter | S | ✅ Done — CLI list supports tag filtering and shows tags in the table |
 
 ### 2.3 Bulk Operations
 

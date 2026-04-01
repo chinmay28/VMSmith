@@ -195,14 +195,16 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	}
 
 	vm := &types.VM{
-		ID:        id,
-		Name:      spec.Name,
-		Spec:      spec,
-		State:     types.VMStateRunning,
-		NatMAC:    natMAC,
-		DiskPath:  diskPath,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          id,
+		Name:        spec.Name,
+		Description: spec.Description,
+		Tags:        append([]string(nil), spec.Tags...),
+		Spec:        spec,
+		State:       types.VMStateRunning,
+		NatMAC:      natMAC,
+		DiskPath:    diskPath,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Persist to store
@@ -318,6 +320,15 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	wasRunning := state == libvirt.DOMAIN_RUNNING
 
 	// Resolve new values (zero means no change).
+	newDescription := storedVM.Description
+	if patch.Description != "" {
+		newDescription = patch.Description
+	}
+	newTags := append([]string(nil), storedVM.Tags...)
+	if patch.Tags != nil {
+		newTags = append([]string(nil), patch.Tags...)
+	}
+
 	newCPUs := storedVM.Spec.CPUs
 	if patch.CPUs > 0 {
 		newCPUs = patch.CPUs
@@ -355,7 +366,7 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && !ipChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged {
 		return storedVM, nil
 	}
 
@@ -434,6 +445,10 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 
 	// Persist updated spec.
+	storedVM.Description = newDescription
+	storedVM.Tags = append([]string(nil), newTags...)
+	storedVM.Spec.Description = newDescription
+	storedVM.Spec.Tags = append([]string(nil), newTags...)
 	storedVM.Spec.CPUs = newCPUs
 	storedVM.Spec.RAMMB = newRAMMB
 	storedVM.Spec.DiskGB = newDiskGB

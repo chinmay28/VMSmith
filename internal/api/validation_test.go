@@ -107,6 +107,16 @@ func TestValidateVMSpec(t *testing.T) {
 			name: "valid nat settings",
 			spec: types.VMSpec{Name: "valid-name", Image: "ubuntu", NatStaticIP: "192.168.100.50/24", NatGateway: "192.168.100.1"},
 		},
+		{
+			name: "valid tags",
+			spec: types.VMSpec{Name: "valid-name", Image: "ubuntu", Tags: []string{"prod", "web-1"}},
+		},
+		{
+			name:        "invalid empty tag",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", Tags: []string{"prod", "  "}},
+			wantCode:    "invalid_spec",
+			wantMessage: "tags cannot contain empty values",
+		},
 	}
 
 	for _, tt := range tests {

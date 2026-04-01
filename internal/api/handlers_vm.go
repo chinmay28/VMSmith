@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/internal/logger"
@@ -24,6 +25,13 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := validateVMSpec(spec); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
+	}
+	if tags, err := normalizeTags(spec.Tags); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		spec.Tags = tags
+		spec.Description = strings.TrimSpace(spec.Description)
 	}
 
 	release, ok := s.acquireCreateSlot()
@@ -62,6 +70,13 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	if tags, err := normalizeTags(patch.Tags); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	} else if patch.Tags != nil {
+		patch.Tags = tags
+	}
+	patch.Description = strings.TrimSpace(patch.Description)
 
 	vm, err := s.vmManager.Update(r.Context(), id, patch)
 	if err != nil {
@@ -79,6 +94,21 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	tagFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("tag")))
+	if tagFilter != "" {
+		filtered := make([]*types.VM, 0, len(vms))
+		for _, vm := range vms {
+			for _, tag := range vm.Tags {
+				if strings.EqualFold(tag, tagFilter) {
+					filtered = append(filtered, vm)
+					break
+				}
+			}
+		}
+		vms = filtered
+	}
+
 	writeJSON(w, http.StatusOK, vms)
 }
 

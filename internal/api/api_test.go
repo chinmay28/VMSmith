@@ -224,6 +224,51 @@ func TestCreateVM_InvalidNatGateway(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_WithTagsAndDescription(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:        "tagged-vm",
+		Image:       "ubuntu",
+		CPUs:        2,
+		RAMMB:       2048,
+		Description: "  Production API node  ",
+		Tags:        []string{"Prod", " api ", "prod"},
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Description != "Production API node" {
+		t.Fatalf("description = %q", created.Description)
+	}
+	if strings.Join(created.Tags, ",") != "api,prod" {
+		t.Fatalf("tags = %v", created.Tags)
+	}
+}
+
+func TestListVMs_FilterByTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?tag=prod")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
