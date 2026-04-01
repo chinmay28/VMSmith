@@ -14,6 +14,7 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	Network  NetworkConfig  `yaml:"network"`
 	Defaults DefaultsConfig `yaml:"defaults"`
+	Quotas   QuotasConfig   `yaml:"quotas"`
 }
 
 type DaemonConfig struct {
@@ -59,6 +60,13 @@ type DefaultsConfig struct {
 	SSHUser string `yaml:"ssh_user"`
 }
 
+type QuotasConfig struct {
+	MaxVMs         int `yaml:"max_vms"`
+	MaxTotalCPUs   int `yaml:"max_total_cpus"`
+	MaxTotalRAMMB  int `yaml:"max_total_ram_mb"`
+	MaxTotalDiskGB int `yaml:"max_total_disk_gb"`
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 // Storage paths are placed under /var/lib/vmsmith/ so that the libvirt-qemu
 // system user can access them without requiring home-directory traversal.
@@ -96,6 +104,12 @@ func DefaultConfig() *Config {
 			RAMMB:   2048,
 			DiskGB:  20,
 			SSHUser: "ubuntu",
+		},
+		Quotas: QuotasConfig{
+			MaxVMs:         0,
+			MaxTotalCPUs:   0,
+			MaxTotalRAMMB:  0,
+			MaxTotalDiskGB: 0,
 		},
 	}
 }

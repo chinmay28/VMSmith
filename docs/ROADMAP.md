@@ -161,7 +161,7 @@ Prevent VMs from consuming all host resources.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.5.1 | Add `quotas.max_vms`, `quotas.max_total_cpus`, `quotas.max_total_ram_mb`, `quotas.max_total_disk_gb` config fields | S | |
+| 3.5.1 | Add `quotas.max_vms`, `quotas.max_total_cpus`, `quotas.max_total_ram_mb`, `quotas.max_total_disk_gb` config fields | S | ✅ Done — `internal/config/config.go` now defines the quota fields with default zero/unlimited values, and `internal/config/config_test.go` covers loading them from YAML |
 | 3.5.2 | Check quotas before VM create and VM update; return 429 or 403 if exceeded | M | Sum current allocations from bbolt |
 | 3.5.3 | Show quota usage in dashboard (e.g., "12/32 CPUs allocated") | S | |
 
