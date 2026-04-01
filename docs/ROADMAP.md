@@ -140,7 +140,7 @@ Make VMSmith a proper system service.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.3.1 | Create `vmsmith.service` systemd unit file | S | ✅ Done — `vmsmith.service` is committed at the repo root with `Wants=libvirtd.service` and `After=network-online.target libvirtd.service` |
+| 3.3.1 | Create `vmsmith.service` systemd unit file | S | ✅ Done — `vmsmith.service` is committed at the repo root with `network-online.target` + `libvirtd.service` ordering, runtime directory settings, and installable defaults for `/etc/vmsmith/config.yaml` |
 | 3.3.2 | Add `make install-service` target to copy unit file and enable service | S | ✅ Done — `make install-service` now installs `vmsmith.service` into `/etc/systemd/system`, reloads systemd, and enables/starts the unit |
 | 3.3.3 | Add `vmsmith daemon status` command (check if daemon is running) | S | ✅ Done — `internal/cli/daemon.go` implements `vmsmith daemon status`, and the command is documented in `README.md` |
 | 3.3.4 | Implement graceful shutdown: drain in-flight requests, close libvirt connection cleanly | M | Signal handling exists but could be more graceful |
