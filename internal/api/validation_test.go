@@ -274,6 +274,13 @@ func TestSanitizeManagerError(t *testing.T) {
 		{name: "resource not found", err: errors.New("vm not found"), wantCode: "resource_not_found", wantMessage: "resource not found"},
 		{name: "disk shrink rejected", err: errors.New("disk can only grow"), wantCode: "disk_shrink_not_allowed", wantMessage: "disk can only grow"},
 		{name: "invalid nat ip", err: errors.New("invalid nat_static_ip in update"), wantCode: "invalid_spec", wantMessage: "nat_static_ip must be valid CIDR notation, e.g. 192.168.100.50/24"},
+		{name: "libvirt connection error is sanitized", err: errors.New("connecting to libvirt (qemu:///system): authentication failed: details"), wantCode: "service_unavailable", wantMessage: "vm backend is unavailable"},
+		{name: "network setup error is sanitized", err: errors.New("ensuring NAT network: defining network: libvirt secret details"), wantCode: "network_unavailable", wantMessage: "vm network is unavailable"},
+		{name: "disk tooling error is sanitized", err: errors.New("resizing disk: qemu-img resize failed with backend details"), wantCode: "storage_error", wantMessage: "vm disk operation failed"},
+		{name: "cloud-init tooling error is sanitized", err: errors.New("creating cloud-init ISO: genisoimage: missing binary on host"), wantCode: "config_generation_failed", wantMessage: "vm configuration generation failed"},
+		{name: "domain definition error is sanitized", err: errors.New("defining domain: libvirt error: XML error details"), wantCode: "vm_definition_failed", wantMessage: "vm definition failed"},
+		{name: "vm state change error is sanitized", err: errors.New("starting domain: libvirt error: permission denied"), wantCode: "vm_state_change_failed", wantMessage: "vm state change failed"},
+		{name: "snapshot error is sanitized", err: errors.New("creating snapshot: libvirt error: snapshot backend details"), wantCode: "snapshot_operation_failed", wantMessage: "snapshot operation failed"},
 		{name: "generic internal error", err: errors.New("libvirt exploded with details"), wantCode: "internal_error", wantMessage: "operation failed"},
 	}
 

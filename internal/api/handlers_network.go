@@ -81,11 +81,7 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.portFwd.Remove(portID); err != nil {
 		apiErr := sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if isAPIErrorCode(apiErr, "resource_not_found") {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, apiErr)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -96,6 +92,12 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListHostInterfaces(w http.ResponseWriter, r *http.Request) {
 	ifaces, err := network.DiscoverInterfaces()
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, ifaces)
+}
+ err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
