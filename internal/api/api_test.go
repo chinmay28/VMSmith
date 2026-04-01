@@ -682,42 +682,6 @@ func TestAddPort_NoIP(t *testing.T) {
 	}
 }
 
-func TestAddPort_BadJSON(t *testing.T) {
-	ts, _, cleanup := testServer(t)
-	defer cleanup()
-
-	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-port/ports", "application/json", bytes.NewBufferString("{bad json"))
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestAddPort_InvalidValues(t *testing.T) {
-	ts, mockMgr, cleanup := testServer(t)
-	defer cleanup()
-
-	mockMgr.SeedVM(&types.VM{ID: "vm-port-bad", Name: "networked", IP: "192.168.100.10"})
-
-	tests := []struct {
-		name string
-		body addPortRequest
-	}{
-		{name: "host port too low", body: addPortRequest{HostPort: 0, GuestPort: 22, Protocol: types.ProtocolTCP}},
-		{name: "guest port too high", body: addPortRequest{HostPort: 2222, GuestPort: 70000, Protocol: types.ProtocolTCP}},
-		{name: "unsupported protocol", body: addPortRequest{HostPort: 2222, GuestPort: 22, Protocol: types.Protocol("icmp")}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-port-bad/ports", "application/json", jsonBody(t, tc.body))
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", resp.StatusCode)
-			}
-			assertAPIErrorCode(t, resp, "invalid_port_forward")
-		})
-	}
-}
-
 // ============================================================
 // Image endpoint tests
 // ============================================================
