@@ -344,6 +344,10 @@ sudo ./bin/vmsmith daemon start --port 8080
 # List VMs (add Authorization header when daemon.auth.enabled=true)
 curl http://localhost:8080/api/v1/vms
 
+# Filter VMs by tag or state
+curl http://localhost:8080/api/v1/vms?tag=prod
+curl http://localhost:8080/api/v1/vms?status=running
+
 # Create a VM
 curl -X POST http://localhost:8080/api/v1/vms \
   -H 'Content-Type: application/json' \
