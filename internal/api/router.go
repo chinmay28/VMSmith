@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,6 +24,20 @@ type Server struct {
 	maxConcurrentCreates int
 	authConfig           config.AuthConfig
 	createTokens         chan struct{}
+	rateLimiter          *ipRateLimiter
+}
+
+type ipRateLimiter struct {
+	mu      sync.Mutex
+	clients map[string]*tokenBucket
+	rate    float64
+	burst   int
+	now     func() time.Time
+}
+
+type tokenBucket struct {
+	tokens float64
+	last   time.Time
 }
 
 // NewServer creates a new API server with default body-size limits.
@@ -42,6 +58,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
 		authConfig:           cfg.Daemon.Auth,
+		rateLimiter:          newIPRateLimiter(cfg.Daemon.RateLimitPerSecond, cfg.Daemon.RateLimitBurst),
 	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
@@ -66,6 +83,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	r.Use(middleware.Recoverer)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.rateLimitMiddleware)
 		r.Use(middleware.SetHeader("Content-Type", "application/json"))
 		r.Use(apiKeyAuth(s.authConfig))
 

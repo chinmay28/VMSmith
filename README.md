@@ -335,7 +335,7 @@ The daemon exposes a full REST API at `/api/v1/`. When `daemon.auth.enabled` is 
 
 Example:
 
-When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up.
+When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up. Separately, `daemon.rate_limit_per_second` and `daemon.rate_limit_burst` apply a per-client token bucket across `/api/v1/*`, returning HTTP 429 `rate_limit_exceeded` plus `Retry-After` when a caller gets too aggressive.
 
 ```bash
 # Start daemon
@@ -430,6 +430,8 @@ daemon:
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
   max_concurrent_creates: 2   # return HTTP 429 when the create queue is full
+  rate_limit_per_second: 10   # token refill rate for each client IP
+  rate_limit_burst: 20        # burst capacity before HTTP 429 rate_limit_exceeded
 
 libvirt:
   uri: "qemu:///system"
