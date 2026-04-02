@@ -50,6 +50,9 @@ func resetAllFlags(cmd *cobra.Command) {
 			f.Changed = false
 		})
 	}
+			f.Changed = false
+		})
+	}
 
 	reset(cmd.Flags())
 	reset(cmd.PersistentFlags())
