@@ -450,6 +450,12 @@ defaults:
   ram_mb:   2048
   disk_gb:  20
   ssh_user: ubuntu   # retained for config compatibility; VMs use root by default (override per-VM with --default-user)
+
+quotas:
+  max_vms: 0              # 0 disables the limit
+  max_total_cpus: 0       # total configured vCPUs across all VMs
+  max_total_ram_mb: 0     # total configured RAM across all VMs
+  max_total_disk_gb: 0    # total configured disk across all VMs
 ```
 
 ---

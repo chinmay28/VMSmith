@@ -116,6 +116,12 @@ defaults:
   ram_mb: 2048
   disk_gb: 20
   ssh_user: ubuntu
+
+quotas:
+  max_vms: 0
+  max_total_cpus: 0
+  max_total_ram_mb: 0
+  max_total_disk_gb: 0
 ```
 
 Create the log directory:
