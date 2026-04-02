@@ -331,7 +331,7 @@ GUI: VM Image Management
 
 ## REST API
 
-The daemon exposes a full REST API at `/api/v1/`. When `daemon.auth.enabled` is set, clients must send `Authorization: Bearer <key>` on API requests.
+The daemon exposes a full REST API at `/api/v1/`. When `daemon.auth.enabled` is set, clients must send `Authorization: Bearer <key>` on API requests, and the embedded web UI will prompt for an API key before loading dashboard data.
 
 Example:
 

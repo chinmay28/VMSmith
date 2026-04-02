@@ -1,18 +1,74 @@
 const BASE = '/api/v1';
+const API_KEY_STORAGE_KEY = 'vmsmith.apiKey';
+
+let apiKey = typeof window !== 'undefined'
+  ? window.localStorage.getItem(API_KEY_STORAGE_KEY) || ''
+  : '';
+
+export function getAPIKey() {
+  return apiKey;
+}
+
+export function setAPIKey(nextKey) {
+  apiKey = (nextKey || '').trim();
+  if (typeof window !== 'undefined') {
+    if (apiKey) {
+      window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+    } else {
+      window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+    }
+  }
+}
+
+export class APIError extends Error {
+  constructor(message, { status = 0, code = '', payload = null } = {}) {
+    super(message);
+    this.name = 'APIError';
+    this.status = status;
+    this.code = code;
+    this.payload = payload;
+  }
+}
+
+function buildHeaders(headers = {}, isFormData = false) {
+  const nextHeaders = isFormData ? { ...headers } : { 'Content-Type': 'application/json', ...headers };
+  if (apiKey) {
+    nextHeaders.Authorization = `Bearer ${apiKey}`;
+  }
+  return nextHeaders;
+}
 
 async function request(path, options = {}) {
   const url = `${BASE}${path}`;
   const isFormData = options.body instanceof FormData;
   const res = await fetch(url, {
-    headers: isFormData ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers: buildHeaders(options.headers, isFormData),
   });
 
   if (res.status === 204) return null;
 
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+  if (!res.ok) {
+    throw new APIError(data.message || data.error || `Request failed: ${res.status}`, {
+      status: res.status,
+      code: data.code || '',
+      payload: data,
+    });
+  }
   return data;
+}
+
+export async function checkAuth() {
+  try {
+    await request('/vms');
+    return { ok: true, requiresAuth: false };
+  } catch (err) {
+    if (err instanceof APIError && err.status === 401) {
+      return { ok: false, requiresAuth: true, error: err.message };
+    }
+    throw err;
+  }
 }
 
 // --- VMs ---
@@ -74,4 +130,4 @@ export const logs = {
   },
 };
 
-export default { vms, snapshots, images, ports, host, logs };
+export default { vms, snapshots, images, ports, host, logs, checkAuth, getAPIKey, setAPIKey };

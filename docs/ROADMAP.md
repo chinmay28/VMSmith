@@ -120,7 +120,7 @@ The API is completely open. This blocks any multi-user or network-exposed deploy
 | 3.1.1 | Add API key authentication middleware (check `Authorization: Bearer <key>` header) | M | ✅ Done — API routes now enforce `Authorization: Bearer <key>` when `daemon.auth.enabled` is true |
 | 3.1.2 | Add `daemon.auth.enabled` and `daemon.auth.api_keys` config fields | S | ✅ Done — config loader, example config, and tests cover `daemon.auth.enabled` / `daemon.auth.api_keys` |
 | 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | |
-| 3.1.4 | Add login screen to frontend when auth is enabled | M | Store token in localStorage |
+| 3.1.4 | Add login screen to frontend when auth is enabled | M | ✅ Done — React app now prompts for an API key on 401, stores it in `localStorage`, and retries API requests with `Authorization: Bearer <key>` |
 | 3.1.5 | (Future) Role-based access: `admin` (full), `operator` (start/stop/list), `viewer` (read-only) | L | Optional follow-up; start with single-role API keys |
 
 ### 3.2 TLS / HTTPS Support

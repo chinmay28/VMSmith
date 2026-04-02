@@ -177,6 +177,7 @@ Never call libvirt directly from handlers — always go through the `Manager` in
 - Handlers receive a `vm.Manager`, `*store.BoltStore`, and config via dependency injection (not globals)
 - Error responses use typed errors from `pkg/types/errors.go`
 - The static web GUI is served from the same port — the router handles both `/api/v1/*` and the SPA fallback
+- When `daemon.auth.enabled` is true, API routes require `Authorization: Bearer <key>` and the React frontend now prompts for an API key, persists it in `localStorage`, and sends it on subsequent requests
 
 ### bbolt Data Model
 
