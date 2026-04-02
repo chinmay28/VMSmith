@@ -121,7 +121,13 @@ var vmListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
+		limit, offset, err := normalizeLimitOffset(limit, offset)
+		if err != nil {
+			return err
+		}
 		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -149,6 +155,7 @@ var vmListCmd = &cobra.Command{
 			vms = filtered
 		}
 
+		vms = paginateSlice(vms, limit, offset)
 		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -395,6 +402,8 @@ Examples:
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
+	vmListCmd.Flags().Int("limit", 0, "maximum number of VMs to show (0 = no limit)")
+	vmListCmd.Flags().Int("offset", 0, "number of VMs to skip before printing results")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)

@@ -388,7 +388,7 @@ Key config fields:
 All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 
 ```
-GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported)
+GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
@@ -399,7 +399,7 @@ GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
-GET    /images                         List images
+GET    /images                         List images; CLI also supports local `--limit` / `--offset` pagination on `vmsmith image list`
 POST   /images                         Create image from VM
 POST   /images/upload                  Upload qcow2 file (multipart)
 DELETE /images/{id}                    Delete image
