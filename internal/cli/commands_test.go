@@ -299,6 +299,39 @@ func TestCLI_VMList_FilterByTag(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_FilterByStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+
+	out, err := runCLI("vm", "list", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"prod"}, State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Tags: []string{"dev"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--tag", "prod", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --tag --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
 func TestCLI_VMStart(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

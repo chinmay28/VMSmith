@@ -121,7 +121,9 @@ var vmListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
+		statusFilter, _ := cmd.Flags().GetString("status")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
+		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -136,15 +138,25 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" {
+		if tagFilter != "" || statusFilter != "" {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
-				for _, tag := range v.Tags {
-					if strings.EqualFold(tag, tagFilter) {
-						filtered = append(filtered, v)
-						break
+				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
+					continue
+				}
+				if tagFilter != "" {
+					matchedTag := false
+					for _, tag := range v.Tags {
+						if strings.EqualFold(tag, tagFilter) {
+							matchedTag = true
+							break
+						}
+					}
+					if !matchedTag {
+						continue
 					}
 				}
+				filtered = append(filtered, v)
 			}
 			vms = filtered
 		}
@@ -395,6 +407,7 @@ Examples:
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
+	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)
