@@ -134,7 +134,7 @@ var imagePullCmd = &cobra.Command{
 		defer cleanup()
 
 		fmt.Printf("Pulling image from %s...\n", src)
-		if err := mgr.Pull(src); err != nil {
+		if err := mgr.Pull(src, apiKey); err != nil {
 			logger.Error("cli", "image pull failed", "source", src, "error", err.Error())
 			return err
 		}

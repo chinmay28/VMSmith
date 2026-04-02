@@ -295,6 +295,9 @@ sudo ./bin/vmsmith image pull user@other-host/ubuntu-configured
 
 # Download via HTTP (when daemon is running on the remote)
 sudo ./bin/vmsmith image pull http://other-host:8080/api/v1/images/<id>/download
+
+# If remote daemon auth is enabled, pass the API key to send Authorization: Bearer <key>
+sudo ./bin/vmsmith --api-key "$VMSMITH_API_KEY" image pull http://other-host:8080/api/v1/images/<id>/download
 ```
 
 ---
