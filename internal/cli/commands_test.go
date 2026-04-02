@@ -183,6 +183,9 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 		"--cpus", "4",
 		"--ram", "8192",
 		"--disk", "50",
+		"--description", "Production web server",
+		"--tag", "Prod",
+		"--tag", "web",
 		"--ssh-key", "ssh-ed25519 AAAA test",
 		"--default-user", "rocky",
 	)
@@ -205,6 +208,12 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 	}
 	if vms[0].Spec.DefaultUser != "rocky" {
 		t.Errorf("DefaultUser = %q, want rocky", vms[0].Spec.DefaultUser)
+	}
+	if vms[0].Description != "Production web server" {
+		t.Errorf("Description = %q", vms[0].Description)
+	}
+	if strings.Join(vms[0].Tags, ",") != "prod,web" {
+		t.Errorf("Tags = %v", vms[0].Tags)
 	}
 }
 
@@ -247,8 +256,8 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
 
-	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
-	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}, State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
 
 	out, err := runCLI("vm", "list")
 	if err != nil {
@@ -261,16 +270,32 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"ID", "NAME", "STATE", "IP", "CPUS", "RAM (MB)"}
+	wantHeaders := []string{"ID", "NAME", "STATE", "IP", "CPUS", "RAM (MB)", "TAGS"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
 
-	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048$`).MatchString(strings.TrimSpace(out)) {
+	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048\s+prod,web$`).MatchString(strings.TrimSpace(out)) {
 		t.Fatalf("expected vm-1 row in output, got %q", out)
 	}
-	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096$`).MatchString(strings.TrimSpace(out)) {
+	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096\s+dev$`).MatchString(strings.TrimSpace(out)) {
 		t.Fatalf("expected vm-2 row in output, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+
+	out, err := runCLI("vm", "list", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm list --tag: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
 	}
 }
 

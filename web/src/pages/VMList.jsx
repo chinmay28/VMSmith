@@ -9,8 +9,10 @@ export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
   const [actionMenu, setActionMenu] = useState(null);
-  const { data: vmList, loading, error, refresh } = useFetch(() => vms.list(), [], 5000);
+  const [tagFilter, setTagFilter] = useState('');
+  const { data: vmList, loading, error, refresh } = useFetch(() => vms.list(tagFilter), [tagFilter], 5000);
   const navigate = useNavigate();
+  const allTags = [...new Set((vmList || []).flatMap(vm => vm.tags || []))].sort();
 
   useEffect(() => {
     if (searchParams.get('create') === '1') {
@@ -32,6 +34,17 @@ export default function VMList() {
       />
 
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`} onClick={() => setTagFilter('')}>All</button>
+          {allTags.map(tag => (
+            <button key={tag} className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`} onClick={() => setTagFilter(tag)}>
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading && !vmList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
@@ -100,6 +113,14 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
           {vm.spec.cpus} vCPU · {vm.spec.ram_mb} MB · {vm.spec.disk_gb} GB
           {vm.ip && <> · {vm.ip}</>}
         </p>
+        {vm.description && <p className="text-xs text-steel-400 mt-1 truncate">{vm.description}</p>}
+        {vm.tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {vm.tags.map(tag => (
+              <span key={tag} className="badge bg-blue-500/10 text-blue-300 border-blue-500/20">#{tag}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick actions */}
@@ -133,7 +154,7 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -157,6 +178,9 @@ function CreateVMModal({ open, onClose, onCreated }) {
 
   const handleSubmit = async () => {
     const spec = { ...form };
+    spec.tags = form.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (!spec.description) delete spec.description;
+    if (spec.tags.length === 0) delete spec.tags;
     if (!spec.nat_static_ip) delete spec.nat_static_ip;
     if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (networks.length > 0) {
@@ -184,7 +208,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
 
   const advancedCount = [
-    form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
+    form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
     networks.length > 0 ? 'x' : ''
   ].filter(Boolean).length;
 
@@ -262,6 +286,17 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 <div>
                   <label className="label">Disk (GB)</label>
                   <input className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Description</label>
+                  <input className="input" placeholder="What this VM is for" value={form.description} onChange={update('description')} />
+                </div>
+                <div>
+                  <label className="label">Tags</label>
+                  <input className="input font-mono" placeholder="prod,web,customer-a" value={form.tags} onChange={update('tags')} />
                 </div>
               </div>
             </>
