@@ -299,6 +299,36 @@ func TestCLI_VMList_FilterByTag(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_LimitAndOffset(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, CreatedAt: time.Date(2026, time.April, 1, 8, 0, 0, 0, time.UTC), Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateRunning, CreatedAt: time.Date(2026, time.April, 1, 9, 0, 0, 0, time.UTC), Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, CreatedAt: time.Date(2026, time.April, 1, 10, 0, 0, 0, time.UTC), Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("vm list with pagination: %v", err)
+	}
+
+	if strings.Contains(out, "alpha") || strings.Contains(out, "gamma") || !strings.Contains(out, "beta") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativePagination(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	if _, err := runCLI("vm", "list", "--limit", "-1"); err == nil {
+		t.Fatal("expected error for negative --limit")
+	}
+	if _, err := runCLI("vm", "list", "--offset", "-1"); err == nil {
+		t.Fatal("expected error for negative --offset")
+	}
+}
+
 func TestCLI_VMStart(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -631,6 +661,36 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	}
 	if got := rows[2]; strings.Join(got, "|") != "img-2|backup-image|512.0 MB|qcow2|2026-03-28 08:30:00" {
 		t.Fatalf("second row = %v", got)
+	}
+}
+
+func TestCLI_ImageList_LimitAndOffset(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.April, 2, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "golden-image", Path: "/tmp/golden-image.qcow2", SizeBytes: 1073741824, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "backup-image", Path: "/tmp/backup-image.qcow2", SizeBytes: 536870912, Format: "qcow2", CreatedAt: now.Add(time.Hour)})
+	s.PutImage(&types.Image{ID: "img-3", Name: "archive-image", Path: "/tmp/archive-image.qcow2", SizeBytes: 268435456, Format: "qcow2", CreatedAt: now.Add(2 * time.Hour)})
+
+	out, err := runCLI("image", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("image list with pagination: %v", err)
+	}
+	if strings.Contains(out, "golden-image") || strings.Contains(out, "archive-image") || !strings.Contains(out, "backup-image") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_ImageList_RejectsNegativePagination(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("image", "list", "--limit", "-1"); err == nil {
+		t.Fatal("expected error for negative --limit")
+	}
+	if _, err := runCLI("image", "list", "--offset", "-1"); err == nil {
+		t.Fatal("expected error for negative --offset")
 	}
 }
 
