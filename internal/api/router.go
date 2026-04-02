@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -9,6 +11,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"golang.org/x/time/rate"
 )
 
 // Server holds the API dependencies and serves HTTP.
@@ -21,6 +24,15 @@ type Server struct {
 	maxUploadBodyBytes   int64
 	maxConcurrentCreates int
 	createTokens         chan struct{}
+	rateLimitRPS         float64
+	rateLimitBurst       int
+	rateLimitersMu       sync.Mutex
+	rateLimiters         map[string]*ipRateLimiter
+}
+
+type ipRateLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 // NewServer creates a new API server with default body-size limits.
@@ -40,6 +52,9 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
+		rateLimitRPS:         cfg.Daemon.RateLimitRPS,
+		rateLimitBurst:       cfg.Daemon.RateLimitBurst,
+		rateLimiters:         make(map[string]*ipRateLimiter),
 	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
@@ -62,6 +77,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	// Middleware
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(middleware.Recoverer)
+	r.Use(s.rateLimitMiddleware)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.SetHeader("Content-Type", "application/json"))

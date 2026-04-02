@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -150,6 +151,55 @@ func isRequestTooLarge(err error) bool {
 		return true
 	}
 	return strings.Contains(err.Error(), "http: request body too large")
+}
+
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	if s == nil || s.rateLimitRPS <= 0 || s.rateLimitBurst <= 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		limiter := s.getRateLimiter(ip)
+		if !limiter.Allow() {
+			writeAPIError(w, http.StatusTooManyRequests, types.NewAPIError("rate_limit_exceeded", "too many requests"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) getRateLimiter(ip string) *rate.Limiter {
+	now := time.Now()
+	s.rateLimitersMu.Lock()
+	defer s.rateLimitersMu.Unlock()
+
+	for key, entry := range s.rateLimiters {
+		if now.Sub(entry.lastSeen) > 10*time.Minute {
+			delete(s.rateLimiters, key)
+		}
+	}
+
+	if entry, ok := s.rateLimiters[ip]; ok {
+		entry.lastSeen = now
+		return entry.limiter
+	}
+
+	limiter := rate.NewLimiter(rate.Limit(s.rateLimitRPS), s.rateLimitBurst)
+	s.rateLimiters[ip] = &ipRateLimiter{limiter: limiter, lastSeen: now}
+	return limiter
+}
+
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return "unknown"
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		return host
+	}
+	if r.RemoteAddr != "" {
+		return r.RemoteAddr
+	}
+	return "unknown"
 }
 
 func itoa(n int) string {

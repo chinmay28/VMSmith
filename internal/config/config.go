@@ -24,6 +24,8 @@ type DaemonConfig struct {
 	MaxRequestBodyBytes  int64     `yaml:"max_request_body_bytes"`
 	MaxUploadBodyBytes   int64     `yaml:"max_upload_body_bytes"`
 	MaxConcurrentCreates int       `yaml:"max_concurrent_creates"`
+	RateLimitRPS         float64   `yaml:"rate_limit_rps"`
+	RateLimitBurst       int       `yaml:"rate_limit_burst"`
 }
 
 type TLSConfig struct {
@@ -75,6 +77,8 @@ func DefaultConfig() *Config {
 			MaxRequestBodyBytes:  50 << 20,
 			MaxUploadBodyBytes:   50 << 30,
 			MaxConcurrentCreates: 2,
+			RateLimitRPS:         10,
+			RateLimitBurst:       20,
 		},
 		Libvirt: LibvirtConfig{
 			URI: "qemu:///system",

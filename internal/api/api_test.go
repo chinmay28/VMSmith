@@ -1459,6 +1459,56 @@ func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_PerIP(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer s.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+	cfg.Daemon.RateLimitRPS = 1000
+	cfg.Daemon.RateLimitBurst = 2
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, nil)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/vms", nil)
+		req.RemoteAddr = "198.51.100.10:12345"
+		resp := httptest.NewRecorder()
+		apiServer.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("warmup status = %d, want 200", resp.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/vms", nil)
+	req.RemoteAddr = "198.51.100.10:12345"
+	resp := httptest.NewRecorder()
+	apiServer.ServeHTTP(resp, req)
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.Code)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Code != "rate_limit_exceeded" {
+		t.Fatalf("error code = %q, want rate_limit_exceeded", errResp.Code)
+	}
+}
+
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)

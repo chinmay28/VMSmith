@@ -177,6 +177,7 @@ Never call libvirt directly from handlers — always go through the `Manager` in
 - Handlers receive a `vm.Manager`, `*store.BoltStore`, and config via dependency injection (not globals)
 - Error responses use typed errors from `pkg/types/errors.go`
 - The static web GUI is served from the same port — the router handles both `/api/v1/*` and the SPA fallback
+- Optional per-IP rate limiting is wired in `internal/api/router.go` via `rateLimitMiddleware`; tune it with `daemon.rate_limit_rps` and `daemon.rate_limit_burst` (set either to `0` to disable)
 
 ### bbolt Data Model
 

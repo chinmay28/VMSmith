@@ -24,6 +24,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.MaxConcurrentCreates != 2 {
 		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 2", cfg.Daemon.MaxConcurrentCreates)
 	}
+	if cfg.Daemon.RateLimitRPS != 10 {
+		t.Errorf("Daemon.RateLimitRPS = %v, want 10", cfg.Daemon.RateLimitRPS)
+	}
+	if cfg.Daemon.RateLimitBurst != 20 {
+		t.Errorf("Daemon.RateLimitBurst = %d, want 20", cfg.Daemon.RateLimitBurst)
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -79,6 +85,8 @@ daemon:
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
   max_concurrent_creates: 1
+  rate_limit_rps: 5
+  rate_limit_burst: 7
 defaults:
   cpus: 8
   ram_mb: 16384
@@ -116,6 +124,12 @@ network:
 	}
 	if cfg.Daemon.MaxConcurrentCreates != 1 {
 		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 1", cfg.Daemon.MaxConcurrentCreates)
+	}
+	if cfg.Daemon.RateLimitRPS != 5 {
+		t.Errorf("Daemon.RateLimitRPS = %v, want 5", cfg.Daemon.RateLimitRPS)
+	}
+	if cfg.Daemon.RateLimitBurst != 7 {
+		t.Errorf("Daemon.RateLimitBurst = %d, want 7", cfg.Daemon.RateLimitBurst)
 	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)
