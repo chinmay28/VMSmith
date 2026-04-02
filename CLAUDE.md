@@ -455,3 +455,5 @@ Frontend dependencies (in `web/package.json`):
 - `lucide-react` — icon library
 - `tailwindcss` — utility CSS
 - `vite` — build tool and dev server
+
+The frontend API client lives in `web/src/api/client.js`. It automatically adds `Authorization: Bearer <key>` when an API key is present in `localStorage` (`vmsmith.apiKey`). When the daemon returns HTTP 401, the UI flips into an auth-gate screen (`web/src/components/AuthGate.jsx`) so the user can enter or replace the API key without a full page reload.
