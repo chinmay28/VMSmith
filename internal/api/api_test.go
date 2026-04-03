@@ -281,10 +281,10 @@ func TestCreateVM_DuplicateName(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-existing", Name: "Existing-VM", State: types.VMStateRunning})
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
-		Name:  " existing-vm ",
-		Image: "ubuntu",
-		CPUs:  2,
-		RAMMB: 2048,
+		Name:   " existing-vm ",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
 		DiskGB: 20,
 	}))
 
@@ -292,6 +292,62 @@ func TestCreateVM_DuplicateName(t *testing.T) {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
+func TestCreateVM_InvalidDiskBounds(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "valid-name",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
+		DiskGB: 10241,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+	if errResp.Message != "disk_gb must be between 1 and 10240" {
+		t.Fatalf("message = %q", errResp.Message)
+	}
+}
+
+func TestCreateVM_InvalidTags(t *testing.T) {
+	tests := []struct {
+		name        string
+		tags        []string
+		wantMessage string
+	}{
+		{name: "empty tag", tags: []string{"prod", "   "}, wantMessage: "tags cannot contain empty values"},
+		{name: "tag too long", tags: []string{"abcdefghijklmnopqrstuvwxyz1234567"}, wantMessage: "tags must be 1-32 characters"},
+		{name: "invalid characters", tags: []string{"invalid tag!"}, wantMessage: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _, cleanup := testServer(t)
+			defer cleanup()
+
+			resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+				Name:  "valid-name",
+				Image: "ubuntu",
+				CPUs:  2,
+				RAMMB: 2048,
+				Tags:  tt.tags,
+			}))
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+			if errResp.Message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", errResp.Message, tt.wantMessage)
+			}
+		})
+	}
 }
 
 func TestCreateVM_WithTagsAndDescription(t *testing.T) {
@@ -965,6 +1021,60 @@ func TestUpdateVM_InvalidNatGateway(t *testing.T) {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestUpdateVM_InvalidDiskBounds(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-disk-bounds", Name: "bounded", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{DiskGB: 10241}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-disk-bounds", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+	if errResp.Message != "disk_gb must be between 1 and 10240" {
+		t.Fatalf("message = %q", errResp.Message)
+	}
+}
+
+func TestUpdateVM_InvalidTags(t *testing.T) {
+	tests := []struct {
+		name        string
+		tags        []string
+		wantMessage string
+	}{
+		{name: "empty tag", tags: []string{"prod", "   "}, wantMessage: "tags cannot contain empty values"},
+		{name: "tag too long", tags: []string{"abcdefghijklmnopqrstuvwxyz1234567"}, wantMessage: "tags must be 1-32 characters"},
+		{name: "invalid characters", tags: []string{"invalid tag!"}, wantMessage: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, mockMgr, cleanup := testServer(t)
+			defer cleanup()
+
+			mockMgr.SeedVM(&types.VM{ID: "vm-tags", Name: "tagged", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+			patch := types.VMUpdateSpec{Tags: tt.tags}
+			req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-tags", jsonBody(t, patch))
+			req.Header.Set("Content-Type", "application/json")
+			resp, _ := http.DefaultClient.Do(req)
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+			if errResp.Message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", errResp.Message, tt.wantMessage)
+			}
+		})
+	}
 }
 
 // ============================================================
@@ -1814,6 +1924,37 @@ func TestUploadImage_MissingFile(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUploadImage_MissingName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("fake qcow2 content")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST upload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var errResp errorResponse
+	decodeJSON(t, resp, &errResp)
+	if errResp.Error != "image name is required" {
+		t.Fatalf("error = %q", errResp.Error)
 	}
 }
 
