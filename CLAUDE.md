@@ -399,7 +399,7 @@ GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
-GET    /images                         List images
+GET    /images                         List images (`?page=<n>&per_page=<n>`; returns `X-Total-Count`)
 POST   /images                         Create image from VM
 POST   /images/upload                  Upload qcow2 file (multipart)
 DELETE /images/{id}                    Delete image
@@ -455,3 +455,4 @@ Frontend dependencies (in `web/package.json`):
 - `lucide-react` — icon library
 - `tailwindcss` — utility CSS
 - `vite` — build tool and dev server
+e` — build tool and dev server

@@ -250,7 +250,7 @@ Current list endpoints return all records. This won't scale beyond ~1000 VMs.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | Return `X-Total-Count` header |
+| 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | ✅ Done — list/log endpoints now accept `page` + `per_page` (with `limit` kept as an alias on logs) and return `X-Total-Count` for the full matching result set |
 | 5.4.2 | Add `?status=running&sort=created_at&order=desc` filtering to `GET /vms` | M | ✅ Done — `GET /api/v1/vms` now supports case-insensitive `status=<state>` filtering and composes with the existing `tag=<tag>` filter |
 | 5.4.3 | Update frontend tables to support server-side pagination | M | |
 | 5.4.4 | Add `--limit` and `--offset` flags to CLI list commands | S | |

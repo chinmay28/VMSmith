@@ -53,6 +53,12 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	total := len(imgs)
+	pagination := parsePagination(r)
+	imgs = paginateSlice(imgs, pagination.Page, pagination.PerPage)
+	setTotalCountHeader(w, total)
+
 	writeJSON(w, http.StatusOK, imgs)
 }
 
@@ -76,7 +82,6 @@ var availableStorageBytes = func(path string) (uint64, error) {
 }
 
 // UploadImage handles POST /api/v1/images/upload (multipart form: file + name)
-
 func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		if isRequestTooLarge(err) {
