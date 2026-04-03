@@ -372,6 +372,62 @@ func TestCLI_VMStart_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_VMStart_All(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateRunning})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateStopped, Tags: []string{"prod"}})
+
+	out, err := runCLI("vm", "start", "--all")
+	if err != nil {
+		t.Fatalf("vm start --all: %v", err)
+	}
+	if !strings.Contains(out, "Started 2 VM(s): vm-1, vm-3") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+
+	for _, id := range []string{"vm-1", "vm-3"} {
+		got, _ := mock.Get(nil, id)
+		if got.State != types.VMStateRunning {
+			t.Fatalf("%s state = %q, want running", id, got.State)
+		}
+	}
+}
+
+func TestCLI_VMStart_AllWithTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped, Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Tags: []string{"dev"}})
+
+	out, err := runCLI("vm", "start", "--all", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm start --all --tag: %v", err)
+	}
+	if !strings.Contains(out, "Started 1 VM(s): vm-1") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if got, _ := mock.Get(nil, "vm-1"); got.State != types.VMStateRunning {
+		t.Fatalf("vm-1 state = %q, want running", got.State)
+	}
+	if got, _ := mock.Get(nil, "vm-2"); got.State != types.VMStateStopped {
+		t.Fatalf("vm-2 state = %q, want stopped", got.State)
+	}
+}
+
+func TestCLI_VMStart_AllRejectsID(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "start", "vm-1", "--all")
+	if err == nil || !strings.Contains(err.Error(), "cannot specify a VM id when using --all") {
+		t.Fatalf("expected --all/id validation error, got %v", err)
+	}
+}
+
 func TestCLI_VMStop(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -399,6 +455,44 @@ func TestCLI_VMStop_NotFound(t *testing.T) {
 	_, err := runCLI("vm", "stop", "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_VMStop_AllWithTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateRunning, Tags: []string{"dev"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateStopped, Tags: []string{"prod"}})
+
+	out, err := runCLI("vm", "stop", "--all", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm stop --all --tag: %v", err)
+	}
+	if !strings.Contains(out, "Stopped 1 VM(s): vm-1") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if got, _ := mock.Get(nil, "vm-1"); got.State != types.VMStateStopped {
+		t.Fatalf("vm-1 state = %q, want stopped", got.State)
+	}
+	if got, _ := mock.Get(nil, "vm-2"); got.State != types.VMStateRunning {
+		t.Fatalf("vm-2 state = %q, want running", got.State)
+	}
+}
+
+func TestCLI_VMStop_AllNoMatches(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped, Tags: []string{"prod"}})
+
+	out, err := runCLI("vm", "stop", "--all", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm stop --all no matches: %v", err)
+	}
+	if !strings.Contains(out, "No stoppable VMs matched tag \"prod\"") {
+		t.Fatalf("unexpected output: %q", out)
 	}
 }
 
