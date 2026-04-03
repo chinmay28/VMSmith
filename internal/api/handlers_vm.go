@@ -10,6 +10,35 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
+var supportedBulkVMActions = map[string]func(*Server, *http.Request, string) error{
+	"start": func(s *Server, r *http.Request, id string) error {
+		return s.vmManager.Start(r.Context(), id)
+	},
+	"stop": func(s *Server, r *http.Request, id string) error {
+		return s.vmManager.Stop(r.Context(), id)
+	},
+	"delete": func(s *Server, r *http.Request, id string) error {
+		return s.vmManager.Delete(r.Context(), id)
+	},
+}
+
+type bulkVMActionRequest struct {
+	Action string   `json:"action"`
+	IDs    []string `json:"ids"`
+}
+
+type bulkVMActionResult struct {
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkVMActionResponse struct {
+	Action  string               `json:"action"`
+	Results []bulkVMActionResult `json:"results"`
+}
+
 // CreateVM handles POST /api/v1/vms
 func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	var spec types.VMSpec
@@ -165,6 +194,61 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+// BulkVMAction handles POST /api/v1/vms/bulk.
+func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
+	var req bulkVMActionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	req.Action = strings.TrimSpace(strings.ToLower(req.Action))
+	actionFn, ok := supportedBulkVMActions[req.Action]
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_action", "action must be one of: start, stop, delete"))
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request", "ids must contain at least one VM ID"))
+		return
+	}
+
+	results := make([]bulkVMActionResult, 0, len(req.IDs))
+	for _, rawID := range req.IDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			results = append(results, bulkVMActionResult{
+				ID:      rawID,
+				Success: false,
+				Code:    "invalid_vm_id",
+				Message: "vm id cannot be empty",
+			})
+			continue
+		}
+
+		if err := actionFn(s, r, id); err != nil {
+			err = sanitizeManagerError(err)
+			result := bulkVMActionResult{ID: id, Success: false}
+			if apiErr, ok := err.(*types.APIError); ok {
+				result.Code = apiErr.Code
+				result.Message = apiErr.Message
+			} else {
+				result.Message = err.Error()
+			}
+			results = append(results, result)
+			continue
+		}
+
+		results = append(results, bulkVMActionResult{ID: id, Success: true})
+	}
+
+	writeJSON(w, http.StatusOK, bulkVMActionResponse{Action: req.Action, Results: results})
 }
 
 func (s *Server) acquireCreateSlot() (func(), bool) {

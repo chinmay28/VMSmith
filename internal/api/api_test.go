@@ -462,6 +462,118 @@ func TestStopVM(t *testing.T) {
 	}
 }
 
+func TestBulkVMAction_Start(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped})
+
+	body := jsonBody(t, map[string]any{
+		"action": "start",
+		"ids":    []string{"vm-1", "vm-2"},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got bulkVMActionResponse
+	decodeJSON(t, resp, &got)
+	if got.Action != "start" {
+		t.Fatalf("action = %q, want start", got.Action)
+	}
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(got.Results))
+	}
+	for _, result := range got.Results {
+		if !result.Success {
+			t.Fatalf("result for %s unsuccessful: %+v", result.ID, result)
+		}
+		vm, err := mockMgr.Get(nil, result.ID)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", result.ID, err)
+		}
+		if vm.State != types.VMStateRunning {
+			t.Fatalf("vm %s state = %q, want running", result.ID, vm.State)
+		}
+	}
+}
+
+func TestBulkVMAction_PartialFailure(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning})
+
+	body := jsonBody(t, map[string]any{
+		"action": "stop",
+		"ids":    []string{"vm-1", "missing", "  "},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got bulkVMActionResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 3 {
+		t.Fatalf("results = %d, want 3", len(got.Results))
+	}
+	if !got.Results[0].Success {
+		t.Fatalf("first result = %+v, want success", got.Results[0])
+	}
+	if got.Results[1].Success || got.Results[1].Code != "resource_not_found" {
+		t.Fatalf("second result = %+v, want resource_not_found failure", got.Results[1])
+	}
+	if got.Results[2].Success || got.Results[2].Code != "invalid_vm_id" {
+		t.Fatalf("third result = %+v, want invalid_vm_id failure", got.Results[2])
+	}
+}
+
+func TestBulkVMAction_InvalidRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantState int
+	}{
+		{name: "bad json", body: "{", wantCode: "", wantState: http.StatusBadRequest},
+		{name: "invalid action", body: `{"action":"reboot","ids":["vm-1"]}`, wantCode: "invalid_bulk_action", wantState: http.StatusBadRequest},
+		{name: "missing ids", body: `{"action":"start","ids":[]}`, wantCode: "invalid_bulk_request", wantState: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _, cleanup := testServer(t)
+			defer cleanup()
+
+			resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", bytes.NewBufferString(tt.body))
+			if err != nil {
+				t.Fatalf("POST /vms/bulk: %v", err)
+			}
+			if resp.StatusCode != tt.wantState {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantState)
+			}
+			if tt.wantCode != "" {
+				assertAPIErrorCode(t, resp, tt.wantCode)
+				return
+			}
+			var errResp errorResponse
+			decodeJSON(t, resp, &errResp)
+			if !strings.Contains(errResp.Error, "invalid request body") {
+				t.Fatalf("error = %q, want invalid request body", errResp.Error)
+			}
+		})
+	}
+}
+
 // ============================================================
 // Update VM endpoint tests
 // ============================================================
