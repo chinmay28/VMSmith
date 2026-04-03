@@ -396,7 +396,7 @@ All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
-POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
+POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks; VM names must be unique, 1-64 chars, alphanumeric/hyphen)
 GET    /vms/{id}                       Get VM
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM

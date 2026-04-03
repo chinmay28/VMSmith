@@ -20,6 +20,10 @@ func TestValidateVMSpec(t *testing.T) {
 			spec: types.VMSpec{Name: "web-01", Image: "ubuntu-22.04", CPUs: 2, RAMMB: 2048, DiskGB: 20},
 		},
 		{
+			name: "create may omit resource values to use defaults",
+			spec: types.VMSpec{Name: "valid-name", Image: "ubuntu", CPUs: 0, RAMMB: 0, DiskGB: 0},
+		},
+		{
 			name:        "missing name after trim",
 			spec:        types.VMSpec{Name: "   ", Image: "ubuntu"},
 			wantCode:    "invalid_name",
@@ -198,6 +202,14 @@ func TestValidateVMUpdateSpec(t *testing.T) {
 			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
 		})
 	}
+}
+
+func TestValidateUniqueVMName(t *testing.T) {
+	err := validateUniqueVMName("web-01", []*types.VM{{Name: "db-01"}, {Name: " WEB-01 "}})
+	assertAPIError(t, err, "invalid_name", "vm name \"web-01\" already exists")
+
+	err = validateUniqueVMName("worker-01", []*types.VM{{Name: "db-01"}, nil})
+	assertAPIError(t, err, "", "")
 }
 
 func TestValidatePortForward(t *testing.T) {

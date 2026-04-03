@@ -32,9 +32,9 @@ Several API inputs currently pass through to libvirt without validation, produci
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
-| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | ✅ Done — `internal/api/validation.go` now enforces CPU/RAM/disk bounds for both `VMSpec` and `VMUpdateSpec`, with table-driven coverage in `internal/api/validation_test.go` |
-| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | ✅ Done — `internal/api/validation.go` rejects out-of-range ports and non-`tcp`/`udp` protocols before any store, manager, or iptables work; covered by `internal/api/validation_test.go` and `internal/api/api_test.go` |
+| 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | ✅ Done — API create validation trims names, enforces the 1-64 char alphanumeric/hyphen rule, and rejects duplicate VM names with HTTP 400 `invalid_name` before calling the manager |
+| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | ✅ Done — create/update validation enforces CPUs 1-128, RAM 128MB-1TB, and Disk 1GB-10TB when values are provided, while still allowing omitted create-time values to fall back to configured defaults |
+| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | ✅ Done — `internal/api/validation.go` rejects out-of-range ports and non-`tcp`/`udp` protocols before any store or iptables work; covered by `internal/api/validation_test.go` and `internal/api/api_test.go` |
 | 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | ✅ Done — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
 | 1.2.6 | Return 400 (not 500) for all client input errors; reserve 500 for internal failures | M | Audit all handlers; most need `http.StatusBadRequest` paths |
