@@ -120,6 +120,11 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		vms = filtered
 	}
 
+	total := len(vms)
+	pagination := parsePagination(r)
+	vms = paginateSlice(vms, pagination.Page, pagination.PerPage)
+	setTotalCountHeader(w, total)
+
 	writeJSON(w, http.StatusOK, vms)
 }
 

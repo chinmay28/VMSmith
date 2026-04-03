@@ -24,14 +24,14 @@ func validateVMSpec(spec types.VMSpec) error {
 	if strings.TrimSpace(spec.Image) == "" {
 		return types.NewAPIError("invalid_image", "image is required")
 	}
-	if spec.CPUs != 0 && (spec.CPUs < 1 || spec.CPUs > 128) {
-		return types.NewAPIError("invalid_spec", "cpus must be between 1 and 128")
+	if err := validateOptionalVMResourceValue(spec.CPUs, 1, 128, "cpus"); err != nil {
+		return err
 	}
-	if spec.RAMMB != 0 && (spec.RAMMB < 128 || spec.RAMMB > 1024*1024) {
-		return types.NewAPIError("invalid_spec", "ram_mb must be between 128 and 1048576")
+	if err := validateOptionalVMResourceValue(spec.RAMMB, 128, 1024*1024, "ram_mb"); err != nil {
+		return err
 	}
-	if spec.DiskGB != 0 && (spec.DiskGB < 1 || spec.DiskGB > 1024*10) {
-		return types.NewAPIError("invalid_spec", "disk_gb must be between 1 and 10240")
+	if err := validateOptionalVMResourceValue(spec.DiskGB, 1, 1024*10, "disk_gb"); err != nil {
+		return err
 	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
@@ -48,14 +48,14 @@ func validateVMSpec(spec types.VMSpec) error {
 }
 
 func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
-	if patch.CPUs != 0 && (patch.CPUs < 1 || patch.CPUs > 128) {
-		return types.NewAPIError("invalid_spec", "cpus must be between 1 and 128")
+	if err := validateOptionalVMResourceValue(patch.CPUs, 1, 128, "cpus"); err != nil {
+		return err
 	}
-	if patch.RAMMB != 0 && (patch.RAMMB < 128 || patch.RAMMB > 1024*1024) {
-		return types.NewAPIError("invalid_spec", "ram_mb must be between 128 and 1048576")
+	if err := validateOptionalVMResourceValue(patch.RAMMB, 128, 1024*1024, "ram_mb"); err != nil {
+		return err
 	}
-	if patch.DiskGB != 0 && (patch.DiskGB < 1 || patch.DiskGB > 1024*10) {
-		return types.NewAPIError("invalid_spec", "disk_gb must be between 1 and 10240")
+	if err := validateOptionalVMResourceValue(patch.DiskGB, 1, 1024*10, "disk_gb"); err != nil {
+		return err
 	}
 	if patch.NatStaticIP != "" {
 		if err := validateCIDR(patch.NatStaticIP, "nat_static_ip"); err != nil {
@@ -67,6 +67,32 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	}
 	if _, err := normalizeTags(patch.Tags); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateVMResourceValue(value, min, max int, field string) error {
+	if value < min || value > max {
+		return types.NewAPIError("invalid_spec", fmt.Sprintf("%s must be between %d and %d", field, min, max))
+	}
+	return nil
+}
+
+func validateOptionalVMResourceValue(value, min, max int, field string) error {
+	if value == 0 {
+		return nil
+	}
+	return validateVMResourceValue(value, min, max, field)
+}
+
+func validateUniqueVMName(name string, vms []*types.VM) error {
+	for _, vm := range vms {
+		if vm == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(vm.Name), name) {
+			return types.NewAPIError("invalid_name", fmt.Sprintf("vm name %q already exists", name))
+		}
 	}
 	return nil
 }
