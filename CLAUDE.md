@@ -37,9 +37,9 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete (list supports --tag/--offset/--limit)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|delete
-│   │   ├── image.go             # vmsmith image list|create|delete|push|pull
+│   │   ├── image.go             # vmsmith image list|create|delete|push|pull (list supports --offset/--limit)
 │   │   ├── net.go               # vmsmith net interfaces
 │   │   ├── network.go           # vmsmith port add|remove|list
 │   │   └── daemon.go            # vmsmith daemon start
@@ -94,7 +94,8 @@ vmsmith/
 │   └── playwright.config.js     # Playwright config for live daemon
 ├── scripts/
 │   ├── install-deps-ubuntu.sh
-│   └── install-deps-rocky.sh
+│   ├── install-deps-rocky.sh
+│   └── install.sh               # Release installer for curl|sh installs to /usr/local/bin
 ├── docs/ARCHITECTURE.md         # Detailed architecture reference
 ├── Makefile
 └── vmsmith.yaml.example         # Reference configuration
@@ -129,6 +130,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make lint` | golangci-lint |
 | `make fmt` | gofmt |
 | `make install` | Build + install to `/usr/local/bin/vmsmith` |
+| `sh scripts/install.sh` | Download the latest GitHub release binary and install it to `/usr/local/bin/vmsmith` |
 | `make clean` | Remove `./bin/`, `internal/web/dist/`, `web/node_modules/` |
 | `make purge` | Remove all VMSmith runtime resources (VMs, network, images, DB, log) — requires root; supports `PURGE_ARGS="--dry-run"` |
 | `make dist` | Cross-compile linux/amd64 release binary |

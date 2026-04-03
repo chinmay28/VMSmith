@@ -253,7 +253,7 @@ Current list endpoints return all records. This won't scale beyond ~1000 VMs.
 | 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | Return `X-Total-Count` header |
 | 5.4.2 | Add `?status=running&sort=created_at&order=desc` filtering to `GET /vms` | M | ✅ Done — `GET /api/v1/vms` now supports case-insensitive `status=<state>` filtering and composes with the existing `tag=<tag>` filter |
 | 5.4.3 | Update frontend tables to support server-side pagination | M | |
-| 5.4.4 | Add `--limit` and `--offset` flags to CLI list commands | S | |
+| 5.4.4 | Add `--limit` and `--offset` flags to CLI list commands | S | ✅ Done — `vmsmith vm list` and `vmsmith image list` now support `--offset`/`--limit`, with CLI tests covering pagination and invalid negative values |
 
 ### 5.5 Multi-Host Management (Future Vision)
 
@@ -286,7 +286,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | Include systemd unit, default config, man page |
 | 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | |
 | 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
-| 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | Download binary + install to `/usr/local/bin` |
+| 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | ✅ Done — added `scripts/install.sh` to download the published Linux amd64 release asset and install it to `/usr/local/bin/vmsmith`, plus README/production docs and a local smoke test |
 
 ### 6.3 Documentation Expansion
 
