@@ -17,6 +17,15 @@ type Manager struct {
 	cfg  *config.Config
 }
 
+// Close releases the underlying libvirt connection.
+func (m *Manager) Close() error {
+	if m == nil || m.conn == nil {
+		return nil
+	}
+	_, err := m.conn.Close()
+	return err
+}
+
 // NewManager creates a new network manager.
 func NewManager(conn *libvirt.Connect, cfg *config.Config) *Manager {
 	return &Manager{conn: conn, cfg: cfg}
