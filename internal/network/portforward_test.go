@@ -62,6 +62,38 @@ func TestPortForwarder_List_WithData(t *testing.T) {
 	}
 }
 
+func TestPortForwarder_Add_InvalidInputRejectedBeforeStoreOrIptables(t *testing.T) {
+	pf, s := newTestPortForwarder(t)
+	applyCalled := false
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		applyCalled = true
+		return nil
+	}
+
+	_, err := pf.Add("vm-a", 0, 22, "192.168.100.10", types.ProtocolTCP)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "invalid_port_forward" {
+		t.Fatalf("error code = %q, want invalid_port_forward", apiErr.Code)
+	}
+	if applyCalled {
+		t.Fatal("expected iptables rule application to be skipped for invalid input")
+	}
+
+	ports, err := s.ListPortForwards("")
+	if err != nil {
+		t.Fatalf("ListPortForwards: %v", err)
+	}
+	if len(ports) != 0 {
+		t.Fatalf("expected no stored port forwards after validation failure, got %d", len(ports))
+	}
+}
+
 func TestPortForwarder_Add_DuplicateHostPortProtocolRejected(t *testing.T) {
 	pf, s := newTestPortForwarder(t)
 	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {

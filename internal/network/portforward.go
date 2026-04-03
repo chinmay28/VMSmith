@@ -27,6 +27,9 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 	if proto == "" {
 		proto = types.ProtocolTCP
 	}
+	if err := types.ValidatePortForward(hostPort, guestPort, proto); err != nil {
+		return nil, err
+	}
 
 	existing, err := pf.store.ListPortForwards("")
 	if err != nil {

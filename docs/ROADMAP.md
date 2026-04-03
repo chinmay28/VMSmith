@@ -34,7 +34,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 |---|------|--------|-------|
 | 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
 | 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | Add to VMSpec validation, also enforce in VMUpdateSpec |
-| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | Check before calling store or iptables |
+| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | ✅ Done — shared port-forward validation now rejects invalid host/guest port ranges and non-tcp/udp protocols before VM manager/store/iptables layers are touched |
 | 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | ✅ Done — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
 | 1.2.6 | Return 400 (not 500) for all client input errors; reserve 500 for internal failures | M | Audit all handlers; most need `http.StatusBadRequest` paths |
