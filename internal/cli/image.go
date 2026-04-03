@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 var imageCmd = &cobra.Command{
@@ -23,6 +25,14 @@ var imageListCmd = &cobra.Command{
 	Short:   "List available images",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		if limit < 0 {
+			return fmt.Errorf("--limit must be >= 0")
+		}
+		if offset < 0 {
+			return fmt.Errorf("--offset must be >= 0")
+		}
 		logger.Info("cli", "image list")
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
@@ -36,6 +46,10 @@ var imageListCmd = &cobra.Command{
 			logger.Error("cli", "image list failed", "error", err.Error())
 			return err
 		}
+		sort.SliceStable(imgs, func(i, j int) bool {
+			return imgs[i].CreatedAt.Before(imgs[j].CreatedAt)
+		})
+		imgs = paginateImages(imgs, offset, limit)
 		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -171,6 +185,8 @@ var imageDeleteCmd = &cobra.Command{
 func init() {
 	imageCreateCmd.Flags().String("name", "", "image name (required)")
 	imageCreateCmd.MarkFlagRequired("name")
+	imageListCmd.Flags().Int("limit", 0, "maximum number of images to show (0 = no limit)")
+	imageListCmd.Flags().Int("offset", 0, "number of matching images to skip before listing")
 
 	imageCmd.AddCommand(imageListCmd)
 	imageCmd.AddCommand(imageCreateCmd)
@@ -202,6 +218,19 @@ func newStorageManager() (*storage.Manager, func(), error) {
 
 	mgr := storage.NewManager(cfg, s)
 	return mgr, func() { s.Close() }, nil
+}
+
+func paginateImages(imgs []*types.Image, offset, limit int) []*types.Image {
+	if offset >= len(imgs) {
+		return []*types.Image{}
+	}
+	if offset > 0 {
+		imgs = imgs[offset:]
+	}
+	if limit > 0 && limit < len(imgs) {
+		imgs = imgs[:limit]
+	}
+	return imgs
 }
 
 func humanSize(bytes int64) string {

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,8 +31,16 @@ type Daemon struct {
 	storageMgr *storage.Manager
 	netManager *network.Manager
 	portFwd    *network.PortForwarder
+	apiServer  *api.Server
 	server     *http.Server
 }
+
+var (
+	closeVMManager   = func(m vm.Manager) error { return m.Close() }
+	closeNetworkMgr  = func(m *network.Manager) error { return m.Close() }
+	closeStore       = func(s *store.Store) error { return s.Close() }
+	closeLogger      = func() { logger.Close() }
+)
 
 var (
 	listenAndServe = func(s *http.Server) error {
@@ -97,7 +106,8 @@ func New(cfg *config.Config) (*Daemon, error) {
 		vmManager:  vmMgr,
 		storageMgr: storageMgr,
 		netManager: netMgr,
-		portFwd:    portFwd,
+		portFwd:   portFwd,
+		apiServer: apiServer,
 		server: &http.Server{
 			Addr:    cfg.Daemon.Listen,
 			Handler: apiServer,
@@ -142,15 +152,29 @@ func (d *Daemon) Run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if d.apiServer != nil {
+		d.apiServer.BeginShutdown()
+	}
+
 	if err := d.server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("daemon", "graceful shutdown error", "error", err.Error())
+		_ = d.closeResources()
 		return fmt.Errorf("shutdown: %w", err)
 	}
 
-	d.vmManager.Close()
-	d.store.Close()
+	if d.apiServer != nil {
+		if err := d.apiServer.WaitForDrain(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			logger.Error("daemon", "waiting for in-flight requests failed", "error", err.Error())
+		}
+	}
+
+	if err := d.closeResources(); err != nil {
+		logger.Error("daemon", "resource cleanup error", "error", err.Error())
+		return err
+	}
+
 	logger.Info("daemon", "daemon stopped cleanly")
-	logger.Close()
+	closeLogger()
 
 	fmt.Println("Daemon stopped")
 	return nil
@@ -207,6 +231,26 @@ func (d *Daemon) serve() error {
 		return listenAndServeTLS(d.server, d.cfg.Daemon.TLS.CertFile, d.cfg.Daemon.TLS.KeyFile)
 	}
 	return listenAndServe(d.server)
+}
+
+func (d *Daemon) closeResources() error {
+	var errs []error
+	if d.vmManager != nil {
+		if err := closeVMManager(d.vmManager); err != nil {
+			errs = append(errs, fmt.Errorf("closing VM manager: %w", err))
+		}
+	}
+	if d.netManager != nil {
+		if err := closeNetworkMgr(d.netManager); err != nil {
+			errs = append(errs, fmt.Errorf("closing network manager: %w", err))
+		}
+	}
+	if d.store != nil {
+		if err := closeStore(d.store); err != nil {
+			errs = append(errs, fmt.Errorf("closing store: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func writePIDFile(path string) error {

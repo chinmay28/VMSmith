@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -122,6 +123,14 @@ var vmListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		if limit < 0 {
+			return fmt.Errorf("--limit must be >= 0")
+		}
+		if offset < 0 {
+			return fmt.Errorf("--offset must be >= 0")
+		}
 		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -148,6 +157,11 @@ var vmListCmd = &cobra.Command{
 			}
 			vms = filtered
 		}
+
+		sort.SliceStable(vms, func(i, j int) bool {
+			return vms[i].CreatedAt.Before(vms[j].CreatedAt)
+		})
+		vms = paginateVMs(vms, offset, limit)
 
 		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
 
@@ -395,6 +409,8 @@ Examples:
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
+	vmListCmd.Flags().Int("limit", 0, "maximum number of VMs to show (0 = no limit)")
+	vmListCmd.Flags().Int("offset", 0, "number of matching VMs to skip before listing")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)
@@ -468,6 +484,19 @@ func normalizeTagsForCLI(tags []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func paginateVMs(vms []*types.VM, offset, limit int) []*types.VM {
+	if offset >= len(vms) {
+		return []*types.VM{}
+	}
+	if offset > 0 {
+		vms = vms[offset:]
+	}
+	if limit > 0 && limit < len(vms) {
+		vms = vms[:limit]
+	}
+	return vms
 }
 
 func parseNetworkFlags(flags []string) ([]types.NetworkAttachment, error) {

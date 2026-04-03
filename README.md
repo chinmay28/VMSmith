@@ -100,6 +100,9 @@ sudo ./bin/vmsmith vm create rocky01 \
 
 # List VMs
 sudo ./bin/vmsmith vm list
+
+# Page through large VM inventories
+sudo ./bin/vmsmith vm list --offset 20 --limit 10
 ```
 
 Output:
@@ -277,6 +280,9 @@ sudo ./bin/vmsmith image create <vm-id> --name ubuntu-configured
 
 # List images
 sudo ./bin/vmsmith image list
+
+# Page through large image libraries
+sudo ./bin/vmsmith image list --offset 10 --limit 10
 
 # Delete an image
 sudo ./bin/vmsmith image delete ubuntu-configured
