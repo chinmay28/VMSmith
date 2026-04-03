@@ -165,48 +165,22 @@ var vmListCmd = &cobra.Command{
 var vmStartCmd = &cobra.Command{
 	Use:   "start <id>",
 	Short: "Start a stopped VM",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm start", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm start: failed to init VM manager", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Start(context.Background(), id); err != nil {
-			logger.Error("cli", "vm start failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm started", "id", id)
-		fmt.Printf("VM %s started\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "start", types.VMStateStopped, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Start(ctx, id)
+		})
 	},
 }
 
 var vmStopCmd = &cobra.Command{
 	Use:   "stop <id>",
 	Short: "Stop a running VM",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm stop", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm stop: failed to init VM manager", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Stop(context.Background(), id); err != nil {
-			logger.Error("cli", "vm stop failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm stopped", "id", id)
-		fmt.Printf("VM %s stopped\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "stop", types.VMStateRunning, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Stop(ctx, id)
+		})
 	},
 }
 
@@ -395,6 +369,10 @@ Examples:
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
+	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
+	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")
+	vmStopCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)
@@ -528,4 +506,100 @@ func parseNetworkFlags(flags []string) ([]types.NetworkAttachment, error) {
 	}
 
 	return result, nil
+}
+
+func validateBulkVMActionArgs(cmd *cobra.Command, args []string) error {
+	all, _ := cmd.Flags().GetBool("all")
+	if all {
+		if len(args) != 0 {
+			return fmt.Errorf("cannot specify a VM id when using --all")
+		}
+		return nil
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("accepts 1 arg(s), received %d", len(args))
+	}
+	return nil
+}
+
+func runBulkVMAction(cmd *cobra.Command, args []string, verb string, requiredState types.VMState, action func(context.Context, vm.Manager, string) error) error {
+	all, _ := cmd.Flags().GetBool("all")
+	tagFilter, _ := cmd.Flags().GetString("tag")
+	tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
+
+	logger.Info("cli", "vm "+verb, "all", fmt.Sprintf("%t", all), "tag", tagFilter)
+	mgr, cleanup, err := newVMManager()
+	if err != nil {
+		logger.Error("cli", "vm "+verb+": failed to init VM manager", "error", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	if !all {
+		id := args[0]
+		if err := action(ctx, mgr, id); err != nil {
+			logger.Error("cli", "vm "+verb+" failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", verb, "id", id)
+		fmt.Printf("VM %s %sed\n", id, verb)
+		return nil
+	}
+
+	vms, err := mgr.List(ctx)
+	if err != nil {
+		logger.Error("cli", "vm "+verb+": list failed", "error", err.Error())
+		return err
+	}
+
+	matched := make([]*types.VM, 0, len(vms))
+	for _, candidate := range vms {
+		if tagFilter != "" {
+			matchedTag := false
+			for _, tag := range candidate.Tags {
+				if strings.EqualFold(tag, tagFilter) {
+					matchedTag = true
+					break
+				}
+			}
+			if !matchedTag {
+				continue
+			}
+		}
+		if candidate.State != requiredState {
+			continue
+		}
+		matched = append(matched, candidate)
+	}
+
+	adjective := verb + "able"
+	if verb == "stop" {
+		adjective = "stoppable"
+	}
+	if len(matched) == 0 {
+		if tagFilter != "" {
+			fmt.Printf("No %s VMs matched tag %q\n", adjective, tagFilter)
+		} else {
+			fmt.Printf("No %s VMs found\n", adjective)
+		}
+		return nil
+	}
+
+	completed := make([]string, 0, len(matched))
+	for _, machine := range matched {
+		if err := action(ctx, mgr, machine.ID); err != nil {
+			logger.Error("cli", "vm bulk "+verb+" failed", "id", machine.ID, "error", err.Error())
+			return fmt.Errorf("%s VM %s: %w", verb, machine.ID, err)
+		}
+		completed = append(completed, machine.ID)
+	}
+
+	logger.Info("cli", "vm bulk action complete", "action", verb, "count", fmt.Sprintf("%d", len(completed)))
+	label := map[string]string{"start": "Started", "stop": "Stopped"}[verb]
+	if label == "" {
+		label = strings.ToUpper(verb[:1]) + verb[1:] + "ed"
+	}
+	fmt.Printf("%s %d VM(s): %s\n", label, len(completed), strings.Join(completed, ", "))
+	return nil
 }

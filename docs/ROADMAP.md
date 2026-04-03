@@ -90,7 +90,7 @@ Operating on VMs one-at-a-time is tedious when managing many.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 2.3.1 | Add `POST /api/v1/vms/bulk` endpoint: `{ "action": "start|stop|delete", "ids": [...] }` | M | Return per-VM success/failure results |
-| 2.3.2 | Add `vmsmith vm start --all`, `vmsmith vm stop --all`, with `--tag` filter | M | |
+| 2.3.2 | Add `vmsmith vm start --all`, `vmsmith vm stop --all`, with `--tag` filter | M | ✅ Done — CLI `vm start` / `vm stop` now accept `--all` with optional `--tag`, skip VMs already in the wrong state, and document/test the bulk lifecycle flow |
 | 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | |
 
 ### 2.4 VM Templates

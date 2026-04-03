@@ -143,6 +143,10 @@ sudo ./bin/vmsmith vm stop web01
 # Start it again
 sudo ./bin/vmsmith vm start web01
 
+# Stop or start groups of VMs
+sudo ./bin/vmsmith vm stop --all --tag prod
+sudo ./bin/vmsmith vm start --all
+
 # Delete permanently (removes disk and metadata)
 sudo ./bin/vmsmith vm delete web01
 ```
@@ -392,9 +396,9 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
-vmsmith vm list
-vmsmith vm start  <id>
-vmsmith vm stop   <id>
+vmsmith vm list                             [--tag <tag>]
+vmsmith vm start  <id>                      | --all [--tag <tag>]
+vmsmith vm stop   <id>                      | --all [--tag <tag>]
 vmsmith vm delete <id>
 
 vmsmith snapshot create  <vm-id> --name <name>

@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete (including bulk `start|stop --all [--tag]` helpers)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
