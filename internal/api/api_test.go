@@ -224,6 +224,26 @@ func TestCreateVM_InvalidNatGateway(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_DuplicateName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-existing", Name: "Existing-VM", State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  " existing-vm ",
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+		DiskGB: 20,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
 func TestCreateVM_WithTagsAndDescription(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -366,6 +386,38 @@ func TestListVMs_WithData(t *testing.T) {
 
 	if len(vms) != 2 {
 		t.Errorf("expected 2 VMs, got %d", len(vms))
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+func TestListVMs_Pagination(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?page=2&per_page=1")
+	if err != nil {
+		t.Fatalf("GET /vms?page=2&per_page=1: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("X-Total-Count = %q, want 3", got)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected 1 VM on page 2, got %d", len(vms))
+	}
+	if vms[0].Name != "beta" {
+		t.Fatalf("page 2 VM = %q, want beta", vms[0].Name)
 	}
 }
 
@@ -808,6 +860,60 @@ func TestListImages_Empty(t *testing.T) {
 
 	if len(imgs) != 0 {
 		t.Errorf("expected 0 images, got %d", len(imgs))
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestListImages_Pagination(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		part, err := mw.CreateFormFile("file", name+".qcow2")
+		if err != nil {
+			t.Fatalf("CreateFormFile: %v", err)
+		}
+		if _, err := part.Write([]byte("not-a-real-qcow2")); err != nil {
+			t.Fatalf("Write upload body: %v", err)
+		}
+		if err := mw.WriteField("name", name); err != nil {
+			t.Fatalf("WriteField: %v", err)
+		}
+		if err := mw.Close(); err != nil {
+			t.Fatalf("Close multipart writer: %v", err)
+		}
+
+		resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
+		if err != nil {
+			t.Fatalf("POST /images/upload: %v", err)
+		}
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("upload status = %d, want 201", resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/images?page=2&per_page=1")
+	if err != nil {
+		t.Fatalf("GET /images?page=2&per_page=1: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("X-Total-Count = %q, want 3", got)
+	}
+
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image on page 2, got %d", len(imgs))
+	}
+	if imgs[0].Name != "beta" {
+		t.Fatalf("page 2 image = %q, want beta", imgs[0].Name)
 	}
 }
 
@@ -1870,8 +1976,14 @@ func TestGetLogs_LimitParam(t *testing.T) {
 	var result logsResponse
 	decodeJSON(t, resp, &result)
 
-	if result.Total > 5 {
-		t.Errorf("with limit=5, Total = %d, want <= 5", result.Total)
+	if len(result.Entries) > 5 {
+		t.Errorf("with limit=5, entries = %d, want <= 5", len(result.Entries))
+	}
+	if result.Total < len(result.Entries) {
+		t.Errorf("Total = %d, want >= returned entries %d", result.Total, len(result.Entries))
+	}
+	if got := resp.Header.Get("X-Total-Count"); got == "" {
+		t.Fatal("X-Total-Count header missing")
 	}
 }
 
@@ -1969,8 +2081,35 @@ func TestGetLogs_MaxLimitCapped(t *testing.T) {
 	var result logsResponse
 	decodeJSON(t, resp, &result)
 
-	if result.Total > 2000 {
-		t.Errorf("Total = %d exceeds maximum cap of 2000", result.Total)
+	if len(result.Entries) > 2000 {
+		t.Errorf("returned entries = %d exceeds maximum cap of 2000", len(result.Entries))
+	}
+}
+
+func TestGetLogs_Pagination(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		http.Get(ts.URL + "/api/v1/vms")
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?page=2&per_page=2&level=debug")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Entries) != 2 {
+		t.Fatalf("expected 2 log entries on page 2, got %d", len(result.Entries))
+	}
+	if result.Total < 6 {
+		t.Fatalf("Total = %d, want at least 6", result.Total)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got == "" {
+		t.Fatal("X-Total-Count header missing")
 	}
 }
 
