@@ -846,12 +846,46 @@ func TestListSnapshots(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
 
 	var snaps []*types.Snapshot
 	decodeJSON(t, resp, &snaps)
 
 	if len(snaps) != 2 {
 		t.Errorf("expected 2 snapshots, got %d", len(snaps))
+	}
+}
+
+func TestListSnapshots_Pagination(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-s", Name: "host"})
+	mockMgr.CreateSnapshot(nil, "vm-s", "snap1")
+	mockMgr.CreateSnapshot(nil, "vm-s", "snap2")
+	mockMgr.CreateSnapshot(nil, "vm-s", "snap3")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-s/snapshots?page=2&per_page=1")
+	if err != nil {
+		t.Fatalf("GET /vms/vm-s/snapshots?page=2&per_page=1: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("X-Total-Count = %q, want 3", got)
+	}
+
+	var snaps []*types.Snapshot
+	decodeJSON(t, resp, &snaps)
+
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	if snaps[0].Name != "snap2" {
+		t.Fatalf("snapshot page 2 = %q, want snap2", snaps[0].Name)
 	}
 }
 

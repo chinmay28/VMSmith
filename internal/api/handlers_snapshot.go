@@ -50,6 +50,11 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	total := len(snaps)
+	pagination := parsePagination(r)
+	snaps = paginateSlice(snaps, pagination.Page, pagination.PerPage)
+	setTotalCountHeader(w, total)
+
 	writeJSON(w, http.StatusOK, snaps)
 }
 

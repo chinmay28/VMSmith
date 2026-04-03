@@ -410,7 +410,7 @@ GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
-GET    /images                         List images; CLI also supports local `--limit` / `--offset` pagination on `vmsmith image list`
+GET    /images                         List images (`?page=<n>&per_page=<n>`; returns `X-Total-Count`); CLI also supports local `--limit` / `--offset` pagination on `vmsmith image list`
 POST   /images                         Create image from VM
 POST   /images/upload                  Upload qcow2 file (multipart)
 DELETE /images/{id}                    Delete image
