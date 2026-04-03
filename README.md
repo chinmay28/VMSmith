@@ -19,7 +19,23 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 
 Want a disposable containerized setup for local testing instead of a host install? See [docs/CONTAINER.md](docs/CONTAINER.md).
 
-### 1. Install dependencies
+### 1. Install the latest release binary
+
+For Linux x86_64 hosts, you can install the latest published release directly to `/usr/local/bin/vmsmith`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/install.sh | sh
+```
+
+Pin a specific Git tag by setting `VERSION` before piping to `sh`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/install.sh | VERSION=v1.0.0 sh
+```
+
+If you want to build from source instead, follow the steps below.
+
+### 2. Install dependencies
 
 ```bash
 # Ubuntu / Debian
@@ -35,14 +51,14 @@ Reload your PATH if Go was freshly installed:
 source /etc/profile.d/go.sh
 ```
 
-### 2. Build
+### 3. Build
 
 ```bash
 make deps     # download Go modules
 make build    # build frontend + backend → single binary at ./bin/vmsmith
 ```
 
-### 3. Start the daemon
+### 4. Start the daemon
 
 ```bash
 sudo ./bin/vmsmith daemon start --port 8080

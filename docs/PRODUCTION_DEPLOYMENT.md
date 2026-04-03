@@ -59,7 +59,15 @@ The resulting binary is:
 ./bin/vmsmith
 ```
 
-For the rest of this guide, we assume you install it to `/usr/local/bin/vmsmith`:
+For the rest of this guide, we assume you install it to `/usr/local/bin/vmsmith`.
+
+If you are deploying a published release on Linux x86_64, you can install it directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/install.sh | sh
+```
+
+If you built from source locally, install the binary with:
 
 ```bash
 sudo install -m 0755 ./bin/vmsmith /usr/local/bin/vmsmith
