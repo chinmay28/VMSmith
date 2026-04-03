@@ -32,8 +32,8 @@ Several API inputs currently pass through to libvirt without validation, produci
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
-| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | Add to VMSpec validation, also enforce in VMUpdateSpec |
+| 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | ✅ Done — API create validation trims names, enforces the 1-64 char alphanumeric/hyphen rule, and rejects duplicate VM names with HTTP 400 `invalid_name` before calling the manager |
+| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | ✅ Done — create/update validation enforces CPUs 1-128, RAM 128MB-1TB, and Disk 1GB-10TB when values are provided, while still allowing omitted create-time values to fall back to configured defaults |
 | 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | Check before calling store or iptables |
 | 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | ✅ Done — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
@@ -250,7 +250,7 @@ Current list endpoints return all records. This won't scale beyond ~1000 VMs.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | Return `X-Total-Count` header |
+| 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | ✅ Done — list/log endpoints now accept `page` + `per_page` (with `limit` kept as an alias on logs) and return `X-Total-Count` for the full matching result set |
 | 5.4.2 | Add `?status=running&sort=created_at&order=desc` filtering to `GET /vms` | M | ✅ Done — `GET /api/v1/vms` now supports case-insensitive `status=<state>` filtering and composes with the existing `tag=<tag>` filter |
 | 5.4.3 | Update frontend tables to support server-side pagination | M | |
 | 5.4.4 | Add `--limit` and `--offset` flags to CLI list commands | S | |

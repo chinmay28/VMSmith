@@ -30,8 +30,19 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	} else {
+		spec.Name = strings.TrimSpace(spec.Name)
 		spec.Tags = tags
 		spec.Description = strings.TrimSpace(spec.Description)
+	}
+
+	existingVMs, err := s.vmManager.List(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, sanitizeManagerError(err))
+		return
+	}
+	if err := validateUniqueVMName(spec.Name, existingVMs); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
 	}
 
 	release, ok := s.acquireCreateSlot()
@@ -119,6 +130,11 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		}
 		vms = filtered
 	}
+
+	total := len(vms)
+	pagination := parsePagination(r)
+	vms = paginateSlice(vms, pagination.Page, pagination.PerPage)
+	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, vms)
 }

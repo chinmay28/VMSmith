@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
@@ -17,10 +16,12 @@ type logsResponse struct {
 //
 // Query parameters:
 //
-//	level  – minimum level to return: debug | info | warn | error  (default: info)
-//	limit  – max entries to return (default: 200, max: 2000)
-//	since  – RFC3339 timestamp; only return entries after this time
-//	source – filter by source: cli | api | daemon (empty = all)
+//	level     – minimum level to return: debug | info | warn | error (default: debug)
+//	page      – 1-indexed page number (default: 1)
+//	per_page  – page size (default: 200, max: 2000)
+//	limit     – alias for per_page
+//	since     – RFC3339 timestamp; only return entries after this time
+//	source    – filter by source: cli | api | daemon (empty = all)
 func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -29,26 +30,15 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		level = "debug"
 	}
 
-	limit := 200
-	if l := q.Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			if n > 2000 {
-				n = 2000
-			}
-			limit = n
-		}
-	}
-
 	var since time.Time
-	if s := q.Get("since"); s != "" {
-		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-			since = t
+	if raw := q.Get("since"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			since = parsed
 		}
 	}
 
-	entries := logger.Get().Entries(level, since, limit)
+	entries := logger.Get().Entries(level, since, 0)
 
-	// Optional source filter (applied after ring-buffer retrieval).
 	if src := q.Get("source"); src != "" {
 		filtered := entries[:0]
 		for _, e := range entries {
@@ -59,8 +49,13 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		entries = filtered
 	}
 
+	total := len(entries)
+	pagination := parsePagination(r)
+	entries = paginateSlice(entries, pagination.Page, pagination.PerPage)
+	setTotalCountHeader(w, total)
+
 	writeJSON(w, http.StatusOK, logsResponse{
 		Entries: entries,
-		Total:   len(entries),
+		Total:   total,
 	})
 }
