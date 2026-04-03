@@ -43,7 +43,11 @@ func captureOutput(f func()) string {
 func resetAllFlags(cmd *cobra.Command) {
 	reset := func(fs *pflag.FlagSet) {
 		fs.VisitAll(func(f *pflag.Flag) {
-			_ = f.Value.Set(f.DefValue)
+			if f.DefValue == "[]" {
+				_ = f.Value.Set("")
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
 			f.Changed = false
 		})
 	}
@@ -806,6 +810,33 @@ func TestCLI_PortAdd_VMNotFound(t *testing.T) {
 	_, err := runCLI("port", "add", "nonexistent", "--host", "8080", "--guest", "80")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_PortAdd_InvalidInputRejectedBeforeVMLookup(t *testing.T) {
+	calledVMManager := false
+	vmManagerOverride = func() (vm.Manager, func(), error) {
+		calledVMManager = true
+		return vm.NewMockManager(), func() {}, nil
+	}
+	defer func() { vmManagerOverride = nil }()
+
+	_, _, pfCleanup := withTestPortForwarder(t)
+	defer pfCleanup()
+
+	_, err := runCLI("port", "add", "vm-any", "--host", "0", "--guest", "22")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "invalid_port_forward" {
+		t.Fatalf("error code = %q, want invalid_port_forward", apiErr.Code)
+	}
+	if calledVMManager {
+		t.Fatal("expected VM manager initialization to be skipped for invalid input")
 	}
 }
 
