@@ -29,7 +29,7 @@ vmsmith/
 ├── internal/
 │   ├── api/
 │   │   ├── router.go            # Chi router with middleware wiring
-│   │   ├── handlers_vm.go       # VM CRUD and lifecycle endpoints
+│   │   ├── handlers_vm.go       # VM CRUD, lifecycle, and bulk action endpoints
 │   │   ├── handlers_snapshot.go # Snapshot endpoints
 │   │   ├── handlers_image.go    # Image upload/download/list/delete
 │   │   ├── handlers_network.go  # Port forward + host interface endpoints
