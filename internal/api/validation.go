@@ -107,16 +107,7 @@ func validateCIDR(value, field string) error {
 }
 
 func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
-	if hostPort < 1 || hostPort > 65535 {
-		return types.NewAPIError("invalid_port_forward", "host_port must be between 1 and 65535")
-	}
-	if guestPort < 1 || guestPort > 65535 {
-		return types.NewAPIError("invalid_port_forward", "guest_port must be between 1 and 65535")
-	}
-	if proto != types.ProtocolTCP && proto != types.ProtocolUDP {
-		return types.NewAPIError("invalid_port_forward", "protocol must be tcp or udp")
-	}
-	return nil
+	return types.ValidatePortForward(hostPort, guestPort, proto)
 }
 
 func validateUploadedImage(filename string, data []byte) error {
