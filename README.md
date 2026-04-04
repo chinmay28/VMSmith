@@ -42,6 +42,27 @@ make deps     # download Go modules
 make build    # build frontend + backend → single binary at ./bin/vmsmith
 ```
 
+### 2b. Build a Debian package
+
+On Debian/Ubuntu hosts you can also build an installable `.deb` package that bundles the release binary, example config, and systemd unit:
+
+```bash
+make deb
+# package written to ./bin/packages/vmsmith_<version>_amd64.deb
+```
+
+Install it with:
+
+```bash
+sudo dpkg -i ./bin/packages/vmsmith_*.deb
+sudo systemctl enable --now vmsmith
+```
+
+The package installs:
+- `/usr/local/bin/vmsmith`
+- `/etc/vmsmith/config.yaml`
+- `/lib/systemd/system/vmsmith.service`
+
 ### 3. Start the daemon
 
 ```bash

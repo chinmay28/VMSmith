@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-03-30
+> **Last updated:** 2026-04-04
 > **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, contributor/developer workflow docs, and container/distribution packaging
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -283,7 +283,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | Include systemd unit, default config, man page |
+| 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | ✅ Done — `make deb` now stages the release binary, `/etc/vmsmith/config.yaml`, and `vmsmith.service` into `bin/packages/*.deb` via `scripts/build-deb.sh` |
 | 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | |
 | 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
 | 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | Download binary + install to `/usr/local/bin` |
