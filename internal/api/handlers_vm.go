@@ -188,20 +188,6 @@ func (s *Server) acquireCreateSlot() (func(), bool) {
 func (s *Server) GetQuotaUsage(w http.ResponseWriter, r *http.Request) {
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, vm.CalculateQuotaUsage(vms, s.quotas))
-}
-er.Warn("api", "rejecting VM create due to concurrent create limit", "limit", itoa(s.maxConcurrentCreates))
-		return nil, false
-	}
-}
-
-// GetQuotaUsage handles GET /api/v1/quotas/usage
-func (s *Server) GetQuotaUsage(w http.ResponseWriter, r *http.Request) {
-	vms, err := s.vmManager.List(r.Context())
-	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, sanitizeManagerError(err))
 		return
 	}
