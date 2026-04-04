@@ -42,6 +42,23 @@ make deps     # download Go modules
 make build    # build frontend + backend → single binary at ./bin/vmsmith
 ```
 
+### 2b. Build an RPM package (Rocky / RHEL / Fedora)
+
+For release packaging, first produce the Linux amd64 binary and then wrap it with `rpmbuild`:
+
+```bash
+make dist     # builds ./bin/vmsmith-linux-amd64
+make rpm      # writes RPMs to ./bin/packages/
+```
+
+The RPM currently installs:
+
+- `/usr/local/bin/vmsmith`
+- `/usr/lib/systemd/system/vmsmith.service`
+- `/etc/vmsmith/config.yaml` (from `vmsmith.yaml.example`, marked `%config(noreplace)`)
+
+`make rpm` requires the `rpmbuild` tool (`rpm-build` package). If you already have a release binary, you can also run `scripts/build-rpm.sh` directly.
+
 ### 3. Start the daemon
 
 ```bash
