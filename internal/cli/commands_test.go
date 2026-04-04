@@ -38,12 +38,18 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
-// resetAllFlags resets the Changed state on every flag in the command tree so
-// that required-flag validation works correctly across multiple Execute() calls
-// in the same test process (cobra never resets pflag.Flag.Changed on its own).
+// resetAllFlags resets flag values and Changed state across the whole command
+// tree so repeated Execute() calls in tests don't leak prior flag values.
 func resetAllFlags(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
-	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+	reset := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		})
+	}
+
+	reset(cmd.Flags())
+	reset(cmd.PersistentFlags())
 	for _, sub := range cmd.Commands() {
 		resetAllFlags(sub)
 	}
@@ -295,6 +301,39 @@ func TestCLI_VMList_FilterByTag(t *testing.T) {
 		t.Fatalf("vm list --tag: %v", err)
 	}
 	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+
+	out, err := runCLI("vm", "list", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"prod"}, State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Tags: []string{"dev"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--tag", "prod", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --tag --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
 		t.Fatalf("unexpected filtered output: %q", out)
 	}
 }

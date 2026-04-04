@@ -395,7 +395,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
-vmsmith vm list
+vmsmith vm list             [--tag <tag>] [--status <state>]
 vmsmith vm start  <id>
 vmsmith vm stop   <id>
 vmsmith vm delete <id>
