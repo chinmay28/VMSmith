@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-03-30
+> **Last updated:** 2026-04-04
 > **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, contributor/developer workflow docs, and container/distribution packaging
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -46,7 +46,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 |---|------|--------|-------|
 | 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | Table-driven tests in `internal/api/` or `pkg/types/` |
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
-| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
+| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | ✅ Done — `internal/api/api_test.go` covers duplicate `host_port`+`protocol` conflicts via `MockManager` + `httptest`; collision handling is enforced by `internal/network/portforward.go` |
 | 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | ✅ Done — `internal/cli/commands_test.go` captures stdout and verifies table headers/rows for both `vm list` and `image list` |
 
@@ -283,7 +283,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | Include systemd unit, default config, man page |
+| 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | ✅ Done — `make deb` now stages the release binary, `/etc/vmsmith/config.yaml`, and `vmsmith.service` into `bin/packages/*.deb` via `scripts/build-deb.sh` |
 | 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | |
 | 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
 | 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | Download binary + install to `/usr/local/bin` |

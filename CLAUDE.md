@@ -93,6 +93,7 @@ vmsmith/
 │   ├── gui-e2e.spec.js          # Playwright E2E against live daemon
 │   └── playwright.config.js     # Playwright config for live daemon
 ├── scripts/
+│   ├── build-deb.sh            # Build a Debian package from the release binary + service/config assets
 │   ├── install-deps-ubuntu.sh
 │   └── install-deps-rocky.sh
 ├── docs/ARCHITECTURE.md         # Detailed architecture reference
@@ -132,6 +133,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make clean` | Remove `./bin/`, `internal/web/dist/`, `web/node_modules/` |
 | `make purge` | Remove all VMSmith runtime resources (VMs, network, images, DB, log) — requires root; supports `PURGE_ARGS="--dry-run"` |
 | `make dist` | Cross-compile linux/amd64 release binary |
+| `make deb` | Build a Debian package at `bin/packages/*.deb` from the release binary, config, and systemd unit |
 | `make dev-api` | Build Go backend and start daemon on :8080 |
 | `make dev-web` | Start Vite dev server on :3000 (proxies /api → :8080) |
 
