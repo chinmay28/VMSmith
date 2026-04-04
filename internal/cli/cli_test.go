@@ -161,3 +161,13 @@ func TestHumanSize(t *testing.T) {
 		}
 	}
 }
+
+func TestRootPersistentAPIKeyFlag(t *testing.T) {
+	flag := rootCmd.PersistentFlags().Lookup("api-key")
+	if flag == nil {
+		t.Fatal("expected --api-key persistent flag to be registered")
+	}
+	if flag.Value.String() != "" {
+		t.Fatalf("default api-key = %q, want empty", flag.Value.String())
+	}
+}

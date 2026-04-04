@@ -7,6 +7,7 @@ import (
 )
 
 var cfgFile string
+var apiKey string
 
 var rootCmd = &cobra.Command{
 	Use:   "vmsmith",
@@ -37,6 +38,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.vmsmith/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for authenticated remote daemon HTTP requests")
 
 	rootCmd.AddCommand(vmCmd)
 	rootCmd.AddCommand(snapshotCmd)

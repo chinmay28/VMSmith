@@ -119,7 +119,7 @@ The API is completely open. This blocks any multi-user or network-exposed deploy
 |---|------|--------|-------|
 | 3.1.1 | Add API key authentication middleware (check `Authorization: Bearer <key>` header) | M | ✅ Done — API routes now enforce `Authorization: Bearer <key>` when `daemon.auth.enabled` is true |
 | 3.1.2 | Add `daemon.auth.enabled` and `daemon.auth.api_keys` config fields | S | ✅ Done — config loader, example config, and tests cover `daemon.auth.enabled` / `daemon.auth.api_keys` |
-| 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | |
+| 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | ✅ Done — CLI now exposes a persistent `--api-key` flag that adds `Authorization: Bearer <key>` for HTTP-based remote daemon operations such as `image pull http://...` |
 | 3.1.4 | Add login screen to frontend when auth is enabled | M | ✅ Done — the embedded web UI now prompts for an API key after a 401, stores it in `localStorage`, and retries authenticated API calls without a full reload |
 | 3.1.5 | (Future) Role-based access: `admin` (full), `operator` (start/stop/list), `viewer` (read-only) | L | Optional follow-up; start with single-role API keys |
 

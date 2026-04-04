@@ -35,9 +35,9 @@ func (m *Manager) Push(imageName, target string) error {
 // source can be:
 //   - user@host/image-name  (SCP)
 //   - http[s]://host/path   (HTTP)
-func (m *Manager) Pull(source string) error {
+func (m *Manager) Pull(source, apiKey string) error {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		return m.pullHTTP(source)
+		return m.pullHTTP(source, apiKey)
 	}
 	return m.pullSCP(source)
 }
@@ -64,8 +64,16 @@ func (m *Manager) pullSCP(source string) error {
 	return nil
 }
 
-func (m *Manager) pullHTTP(url string) error {
-	resp, err := http.Get(url)
+func (m *Manager) pullHTTP(url, apiKey string) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("http pull: %w", err)
+	}
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http pull: %w", err)
 	}
