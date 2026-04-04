@@ -36,12 +36,22 @@ type AuthConfig struct {
 }
 
 type TLSConfig struct {
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
+	CertFile         string `yaml:"cert_file"`
+	KeyFile          string `yaml:"key_file"`
+	AutoCert         string `yaml:"auto_cert"`
+	AutoCertCacheDir string `yaml:"auto_cert_cache_dir"`
 }
 
 func (d DaemonConfig) TLSConfigured() bool {
 	return d.TLS.CertFile != "" && d.TLS.KeyFile != ""
+}
+
+func (d DaemonConfig) AutoCertConfigured() bool {
+	return d.TLS.AutoCert != ""
+}
+
+func (d DaemonConfig) TLSEnabled() bool {
+	return d.TLSConfigured() || d.AutoCertConfigured()
 }
 
 type LibvirtConfig struct {
@@ -88,6 +98,9 @@ func DefaultConfig() *Config {
 			Listen:               "0.0.0.0:8080",
 			PIDFile:              "/var/run/vmsmith.pid",
 			LogFile:              filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
+			TLS: TLSConfig{
+				AutoCertCacheDir: filepath.Join(homeDir, ".vmsmith", "autocert"),
+			},
 			MaxRequestBodyBytes:  50 << 20,
 			MaxUploadBodyBytes:   50 << 30,
 			MaxConcurrentCreates: 2,
@@ -156,6 +169,9 @@ func Load(path string) (*Config, error) {
 // EnsureDirs creates all required directories.
 func (c *Config) EnsureDirs() error {
 	dirs := []string{c.Storage.ImagesDir, c.Storage.BaseDir}
+	if c.Daemon.AutoCertConfigured() && c.Daemon.TLS.AutoCertCacheDir != "" {
+		dirs = append(dirs, c.Daemon.TLS.AutoCertCacheDir)
+	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return err

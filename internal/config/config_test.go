@@ -94,6 +94,8 @@ daemon:
   tls:
     cert_file: "/etc/vmsmith/tls/server.crt"
     key_file: "/etc/vmsmith/tls/server.key"
+    auto_cert: "vmsmith.example.com"
+    auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
   max_concurrent_creates: 1
@@ -129,6 +131,12 @@ quotas:
 	}
 	if cfg.Daemon.TLS.KeyFile != "/etc/vmsmith/tls/server.key" {
 		t.Errorf("Daemon.TLS.KeyFile = %q, want /etc/vmsmith/tls/server.key", cfg.Daemon.TLS.KeyFile)
+	}
+	if cfg.Daemon.TLS.AutoCert != "vmsmith.example.com" {
+		t.Errorf("Daemon.TLS.AutoCert = %q, want vmsmith.example.com", cfg.Daemon.TLS.AutoCert)
+	}
+	if cfg.Daemon.TLS.AutoCertCacheDir != "/var/lib/vmsmith/autocert" {
+		t.Errorf("Daemon.TLS.AutoCertCacheDir = %q, want /var/lib/vmsmith/autocert", cfg.Daemon.TLS.AutoCertCacheDir)
 	}
 	if !cfg.Daemon.TLSConfigured() {
 		t.Error("Daemon.TLSConfigured() = false, want true")
@@ -207,6 +215,32 @@ func TestTLSConfiguredRequiresBothFiles(t *testing.T) {
 	}
 }
 
+func TestAutoCertConfiguredRequiresHostname(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  DaemonConfig
+		want bool
+	}{
+		{name: "empty", cfg: DaemonConfig{}, want: false},
+		{name: "set", cfg: DaemonConfig{TLS: TLSConfig{AutoCert: "vmsmith.example.com"}}, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.AutoCertConfigured(); got != tc.want {
+				t.Fatalf("AutoCertConfigured() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultConfigSetsAutoCertCacheDir(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Daemon.TLS.AutoCertCacheDir == "" {
+		t.Fatal("Daemon.TLS.AutoCertCacheDir should have a default value")
+	}
+}
+
 func TestEnsureDirs(t *testing.T) {
 	dir := t.TempDir()
 	cfg := DefaultConfig()
@@ -218,6 +252,28 @@ func TestEnsureDirs(t *testing.T) {
 	}
 
 	for _, d := range []string{cfg.Storage.ImagesDir, cfg.Storage.BaseDir} {
+		info, err := os.Stat(d)
+		if err != nil {
+			t.Errorf("directory %q not created: %v", d, err)
+		} else if !info.IsDir() {
+			t.Errorf("%q is not a directory", d)
+		}
+	}
+}
+
+func TestEnsureDirsCreatesAutoCertCacheDirWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	cfg := DefaultConfig()
+	cfg.Storage.ImagesDir = filepath.Join(dir, "images")
+	cfg.Storage.BaseDir = filepath.Join(dir, "vms")
+	cfg.Daemon.TLS.AutoCert = "vmsmith.example.com"
+	cfg.Daemon.TLS.AutoCertCacheDir = filepath.Join(dir, "autocert")
+
+	if err := cfg.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	for _, d := range []string{cfg.Storage.ImagesDir, cfg.Storage.BaseDir, cfg.Daemon.TLS.AutoCertCacheDir} {
 		info, err := os.Stat(d)
 		if err != nil {
 			t.Errorf("directory %q not created: %v", d, err)
