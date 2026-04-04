@@ -46,7 +46,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 |---|------|--------|-------|
 | 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | Table-driven tests in `internal/api/` or `pkg/types/` |
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
-| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
+| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | ✅ Done — `internal/api/api_test.go` covers duplicate `host_port`+`protocol` conflicts via `MockManager` + `httptest`; collision handling is enforced by `internal/network/portforward.go` |
 | 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | ✅ Done — `internal/cli/commands_test.go` captures stdout and verifies table headers/rows for both `vm list` and `image list` |
 
