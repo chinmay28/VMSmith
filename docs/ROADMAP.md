@@ -162,8 +162,8 @@ Prevent VMs from consuming all host resources.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 3.5.1 | Add `quotas.max_vms`, `quotas.max_total_cpus`, `quotas.max_total_ram_mb`, `quotas.max_total_disk_gb` config fields | S | ✅ Done — added `QuotasConfig` to `internal/config/config.go`, covered defaults/YAML loading in `internal/config/config_test.go`, and documented the new config block in README + deployment docs |
-| 3.5.2 | Check quotas before VM create and VM update; return 429 or 403 if exceeded | M | Sum current allocations from bbolt |
-| 3.5.3 | Show quota usage in dashboard (e.g., "12/32 CPUs allocated") | S | |
+| 3.5.2 | Check quotas before VM create and VM update; return 429 or 403 if exceeded | M | ✅ Done — quota wrapper sums current allocations from `List()`/`Get()` and returns HTTP 429 `quota_exceeded` |
+| 3.5.3 | Show quota usage in dashboard (e.g., "12/32 CPUs allocated") | S | ✅ Done — dashboard now polls `GET /api/v1/quotas/usage` and shows current allocation vs limit |
 
 ---
 
