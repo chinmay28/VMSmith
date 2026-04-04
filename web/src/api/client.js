@@ -1,17 +1,39 @@
+import { clearAuthToken, getAuthToken, requireAuth } from '../auth.js';
+
 const BASE = '/api/v1';
 
 async function request(path, options = {}) {
   const url = `${BASE}${path}`;
   const isFormData = options.body instanceof FormData;
+  const token = getAuthToken();
+  const headers = {
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  };
+
   const res = await fetch(url, {
-    headers: isFormData ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers,
   });
 
   if (res.status === 204) return null;
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (res.status === 401) {
+    const message = data?.error || (token ? 'Invalid API key' : 'API key required');
+    if (token) clearAuthToken();
+    requireAuth(message);
+    throw new Error(message);
+  }
+
+  if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
   return data;
 }
 
