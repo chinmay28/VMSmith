@@ -8,6 +8,8 @@ daemon:
   tls:
     cert_file: ""                      # optional; when both cert_file + key_file are set, daemon serves HTTPS
     key_file: ""
+    auto_cert: ""                      # optional public FQDN for automatic Let's Encrypt certificates on port 443
+    auto_cert_cache_dir: "~/.vmsmith/autocert"
   auth:
     enabled: false                      # when true, API requests must send Authorization: Bearer <key>
     api_keys: []                        # one or more shared secrets for API clients

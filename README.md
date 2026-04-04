@@ -432,8 +432,10 @@ Copy `vmsmith.yaml.example` to `~/.vmsmith/config.yaml`:
 daemon:
   listen: "0.0.0.0:8080"
   tls:
-    cert_file: ""   # optional; set both cert_file + key_file to serve HTTPS
+    cert_file: ""            # optional; set both cert_file + key_file to serve HTTPS
     key_file: ""
+    auto_cert: ""           # optional public FQDN for automatic Let's Encrypt certificates
+    auto_cert_cache_dir: "~/.vmsmith/autocert"
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
   max_concurrent_creates: 2   # return HTTP 429 when the create queue is full
@@ -466,6 +468,14 @@ quotas:
   max_total_ram_mb: 0     # total configured RAM across all VMs
   max_total_disk_gb: 0    # total configured disk across all VMs
 ```
+
+`daemon.tls.auto_cert` uses Go's `autocert` package to obtain and renew a Let's Encrypt certificate for exactly one hostname. It only works when:
+
+- `daemon.listen` is reachable on TCP 443 from the public internet
+- `daemon.tls.auto_cert` is set to the public FQDN clients will use
+- that hostname already resolves to this machine
+
+Certificates are cached under `daemon.tls.auto_cert_cache_dir` (default `~/.vmsmith/autocert`). Manual `cert_file` / `key_file` still take precedence if both are set.
 
 ---
 
