@@ -284,7 +284,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 6.2.1 | Create DEB package build (for Ubuntu/Debian) | M | Include systemd unit, default config, man page |
-| 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | |
+| 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | ✅ Done — added `make rpm` + `scripts/build-rpm.sh` to produce an RPM that packages the linux/amd64 release binary, systemd unit, and default config for Rocky/RHEL/Fedora installs |
 | 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
 | 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | Download binary + install to `/usr/local/bin` |
 
