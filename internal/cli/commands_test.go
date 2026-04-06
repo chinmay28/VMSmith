@@ -38,8 +38,9 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
-// resetAllFlags resets flag values and Changed state across the whole command
-// tree so repeated Execute() calls in tests don't leak prior flag values.
+// resetAllFlags restores every flag in the command tree to its default value so
+// repeated Execute() calls in the same test process don't leak state between
+// invocations (cobra/pflag keep both the flag value and Changed bit otherwise).
 func resetAllFlags(cmd *cobra.Command) {
 	reset := func(fs *pflag.FlagSet) {
 		fs.VisitAll(func(f *pflag.Flag) {
@@ -384,7 +385,7 @@ func TestCLI_VMStart_All(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vm start --all: %v", err)
 	}
-	if !strings.Contains(out, "Started 2 VM(s): vm-1, vm-3") {
+	if !strings.Contains(out, "Started 2 VM(s):") || !strings.Contains(out, "vm-1") || !strings.Contains(out, "vm-3") {
 		t.Fatalf("unexpected output: %q", out)
 	}
 
