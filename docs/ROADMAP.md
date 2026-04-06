@@ -91,7 +91,7 @@ Operating on VMs one-at-a-time is tedious when managing many.
 |---|------|--------|-------|
 | 2.3.1 | Add `POST /api/v1/vms/bulk` endpoint: `{ "action": "start|stop|delete", "ids": [...] }` | M | ✅ Done — `POST /api/v1/vms/bulk` now performs start/stop/delete across multiple VM IDs and returns per-VM success/failure results, including typed error codes for missing/invalid entries |
 | 2.3.2 | Add `vmsmith vm start --all`, `vmsmith vm stop --all`, with `--tag` filter | M | |
-| 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | |
+| 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | ✅ Done — VMList now supports per-row selection, select-all for the current filtered view, and a bulk action bar that fans out start/stop/delete over existing per-VM endpoints with selection-aware skip messaging |
 
 ### 2.4 VM Templates
 

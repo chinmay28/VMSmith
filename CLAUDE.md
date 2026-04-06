@@ -75,7 +75,7 @@ vmsmith/
 │   ├── src/api/client.js        # REST API client (vms, snapshots, images, ports, host, logs)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList also supports bulk-select start/stop/delete UI using existing per-VM endpoints)
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs (mock server)
