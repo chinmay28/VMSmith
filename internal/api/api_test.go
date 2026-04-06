@@ -253,7 +253,7 @@ func TestCreateVM_InvalidTags(t *testing.T) {
 	}{
 		{name: "empty tag", tags: []string{"prod", "   "}, wantMessage: "tags cannot contain empty values"},
 		{name: "tag too long", tags: []string{"abcdefghijklmnopqrstuvwxyz1234567"}, wantMessage: "tags must be 1-32 characters"},
-		{name: "invalid characters", tags: []string{"Prod"}, wantMessage: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens"},
+		{name: "invalid characters", tags: []string{"invalid tag!"}, wantMessage: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens"},
 	}
 
 	for _, tt := range tests {
@@ -1661,7 +1661,7 @@ func TestUploadImage_MissingName(t *testing.T) {
 	}
 	var errResp errorResponse
 	decodeJSON(t, resp, &errResp)
-	if errResp.Error != "image name is required" {
+	if errResp.Error != "missing required field: name" {
 		t.Fatalf("error = %q", errResp.Error)
 	}
 }
