@@ -38,12 +38,20 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
-// resetAllFlags resets the Changed state on every flag in the command tree so
-// that required-flag validation works correctly across multiple Execute() calls
-// in the same test process (cobra never resets pflag.Flag.Changed on its own).
+// resetAllFlags restores the default value and Changed state on every flag in
+// the command tree so repeated Execute() calls in tests don't leak flag values
+// between invocations.
 func resetAllFlags(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
-	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+	reset := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			f.Changed = false
+			_ = fs.Set(f.Name, f.DefValue)
+			f.Changed = false
+		})
+	}
+
+	reset(cmd.Flags())
+	reset(cmd.PersistentFlags())
 	for _, sub := range cmd.Commands() {
 		resetAllFlags(sub)
 	}
