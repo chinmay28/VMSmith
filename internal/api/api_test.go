@@ -1661,7 +1661,7 @@ func TestUploadImage_MissingName(t *testing.T) {
 	}
 	var errResp errorResponse
 	decodeJSON(t, resp, &errResp)
-	if errResp.Error != "missing required field: name" {
+	if errResp.Error != "image name is required" {
 		t.Fatalf("error = %q", errResp.Error)
 	}
 }
