@@ -466,6 +466,73 @@ func TestCLI_VMInfo_NotFound(t *testing.T) {
 }
 
 // ============================================================
+// VM edit command tests
+// ============================================================
+
+func TestCLI_VMEdit(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-edit1",
+		Name: "edit-me",
+		Spec: types.VMSpec{Name: "edit-me", CPUs: 2, RAMMB: 2048, DiskGB: 20},
+	})
+
+	out, err := runCLI("vm", "edit", "vm-edit1", "--cpus", "4")
+	if err != nil {
+		t.Fatalf("vm edit: %v", err)
+	}
+	if !strings.Contains(out, "VM updated") {
+		t.Errorf("expected 'VM updated' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "CPUs:  4") {
+		t.Errorf("expected CPUs: 4 in output, got: %s", out)
+	}
+}
+
+func TestCLI_VMEdit_NoFlags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-nf", Name: "noflag"})
+
+	_, err := runCLI("vm", "edit", "vm-nf")
+	if err == nil {
+		t.Fatal("expected error when no flags provided")
+	}
+}
+
+func TestCLI_VMEdit_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "edit", "vm-nonexistent", "--cpus", "2")
+	if err == nil {
+		t.Fatal("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_VMEdit_RAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-ram",
+		Name: "ramtest",
+		Spec: types.VMSpec{Name: "ramtest", CPUs: 1, RAMMB: 1024, DiskGB: 10},
+	})
+
+	out, err := runCLI("vm", "edit", "vm-ram", "--ram", "4096")
+	if err != nil {
+		t.Fatalf("vm edit --ram: %v", err)
+	}
+	if !strings.Contains(out, "RAM:   4096 MB") {
+		t.Errorf("expected RAM: 4096 MB in output, got: %s", out)
+	}
+}
+
+// ============================================================
 // Snapshot command tests
 // ============================================================
 
