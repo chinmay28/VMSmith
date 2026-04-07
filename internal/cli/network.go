@@ -33,6 +33,10 @@ var portAddCmd = &cobra.Command{
 			"guest_port", fmt.Sprintf("%d", guestPort),
 			"proto", proto)
 
+		if err := types.ValidatePortForward(hostPort, guestPort, types.Protocol(proto)); err != nil {
+			return err
+		}
+
 		vmMgr, vmCleanup, err := newVMManager()
 		if err != nil {
 			logger.Error("cli", "port add: failed to init VM manager", "error", err.Error())
