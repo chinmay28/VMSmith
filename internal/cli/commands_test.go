@@ -42,14 +42,12 @@ func captureOutput(f func()) string {
 func resetAllFlags(cmd *cobra.Command) {
 	reset := func(fs *pflag.FlagSet) {
 		fs.VisitAll(func(f *pflag.Flag) {
-			if f.DefValue == "[]" {
+			switch f.Value.Type() {
+			case "stringSlice", "stringArray":
 				_ = f.Value.Set("")
-			} else {
-				_ = f.Value.Set(f.DefValue)
+			default:
+				_ = fs.Set(f.Name, f.DefValue)
 			}
-			f.Changed = false
-		})
-	}
 			f.Changed = false
 		})
 	}
