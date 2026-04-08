@@ -110,6 +110,23 @@ func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
 	return types.ValidatePortForward(hostPort, guestPort, proto)
 }
 
+func validateCreateSnapshotRequest(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return types.NewAPIError("invalid_name", "snapshot name is required")
+	}
+	return nil
+}
+
+func validateCreateImageRequest(vmID, name string) error {
+	if strings.TrimSpace(vmID) == "" {
+		return types.NewAPIError("invalid_spec", "vm_id is required")
+	}
+	if strings.TrimSpace(name) == "" {
+		return types.NewAPIError("invalid_image", "image name is required")
+	}
+	return nil
+}
+
 func validateUploadedImage(filename string, data []byte) error {
 	trimmedName := strings.TrimSpace(filename)
 	if trimmedName == "" {

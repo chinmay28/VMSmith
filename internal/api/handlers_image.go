@@ -28,6 +28,10 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if err := validateCreateImageRequest(req.VMID, req.Name); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	// Get the VM to find its disk path
 	vm, err := s.vmManager.Get(r.Context(), req.VMID)
