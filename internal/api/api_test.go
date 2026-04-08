@@ -1641,14 +1641,16 @@ func TestUploadImage_MissingName(t *testing.T) {
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	fw, err := mw.CreateFormFile("file", "")
+	fw, err := mw.CreateFormFile("file", "test-image.qcow2")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
 	if _, err := fw.Write([]byte("fake qcow2 content")); err != nil {
 		t.Fatalf("write form file: %v", err)
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
 
 	resp, err := http.Post(ts.URL+"/api/v1/images/upload", mw.FormDataContentType(), &buf)
 	if err != nil {
