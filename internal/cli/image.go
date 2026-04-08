@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -42,6 +43,12 @@ var imageListCmd = &cobra.Command{
 			logger.Error("cli", "image list failed", "error", err.Error())
 			return err
 		}
+		sort.SliceStable(imgs, func(i, j int) bool {
+			if !imgs[i].CreatedAt.Equal(imgs[j].CreatedAt) {
+				return imgs[i].CreatedAt.Before(imgs[j].CreatedAt)
+			}
+			return imgs[i].ID < imgs[j].ID
+		})
 		imgs = paginateSlice(imgs, limit, offset)
 		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
 
