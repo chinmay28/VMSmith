@@ -278,6 +278,9 @@ sudo ./bin/vmsmith image create <vm-id> --name ubuntu-configured
 # List images
 sudo ./bin/vmsmith image list
 
+# Show the next 10 images after the first 20
+sudo ./bin/vmsmith image list --offset 20 --limit 10
+
 # Delete an image
 sudo ./bin/vmsmith image delete ubuntu-configured
 ```
@@ -395,7 +398,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
-vmsmith vm list             [--tag <tag>] [--status <state>]
+vmsmith vm list             [--tag <tag>] [--status <state>] [--offset N] [--limit N]
 vmsmith vm start  <id>
 vmsmith vm stop   <id>
 vmsmith vm delete <id>
@@ -405,7 +408,7 @@ vmsmith snapshot restore <vm-id> --name <name>
 vmsmith snapshot list    <vm-id>
 vmsmith snapshot delete  <vm-id> --name <name>
 
-vmsmith image list
+vmsmith image list          [--offset N] [--limit N]
 vmsmith image create <vm-id> --name <name>
 vmsmith image delete <name>
 vmsmith image push   <name> <user@host>
@@ -559,6 +562,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
 - QEMU/KVM with hardware virtualization (`/dev/kvm` must exist)
 - libvirt (`libvirtd` running)
 - Go 1.22+ and Node.js 22+ (for building from source)
+
+## License
+
+MIT
+and Node.js 22+ (for building from source)
 
 ## License
 

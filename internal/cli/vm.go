@@ -122,8 +122,14 @@ var vmListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
+		offset, _ := cmd.Flags().GetInt("offset")
+		limit, _ := cmd.Flags().GetInt("limit")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
+		offset, limit, err := normalizeOffsetLimit(offset, limit)
+		if err != nil {
+			return err
+		}
 		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -161,7 +167,9 @@ var vmListCmd = &cobra.Command{
 			vms = filtered
 		}
 
-		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
+		vms = paginateSlice(vms, offset, limit)
+
+		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)), "offset", fmt.Sprintf("%d", offset), "limit", fmt.Sprintf("%d", limit))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tSTATE\tIP\tCPUS\tRAM (MB)\tTAGS")
@@ -408,6 +416,8 @@ Examples:
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
+	vmListCmd.Flags().Int("offset", 0, "skip the first N VMs after filtering")
+	vmListCmd.Flags().Int("limit", 0, "show at most N VMs after filtering (0 = all)")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)

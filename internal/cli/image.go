@@ -23,6 +23,13 @@ var imageListCmd = &cobra.Command{
 	Short:   "List available images",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		offset, _ := cmd.Flags().GetInt("offset")
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, limit, err := normalizeOffsetLimit(offset, limit)
+		if err != nil {
+			return err
+		}
+
 		logger.Info("cli", "image list")
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
@@ -36,7 +43,8 @@ var imageListCmd = &cobra.Command{
 			logger.Error("cli", "image list failed", "error", err.Error())
 			return err
 		}
-		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
+		imgs = paginateSlice(imgs, offset, limit)
+		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)), "offset", fmt.Sprintf("%d", offset), "limit", fmt.Sprintf("%d", limit))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tSIZE\tFORMAT\tCREATED")
@@ -171,6 +179,8 @@ var imageDeleteCmd = &cobra.Command{
 func init() {
 	imageCreateCmd.Flags().String("name", "", "image name (required)")
 	imageCreateCmd.MarkFlagRequired("name")
+	imageListCmd.Flags().Int("offset", 0, "skip the first N images")
+	imageListCmd.Flags().Int("limit", 0, "show at most N images (0 = all)")
 
 	imageCmd.AddCommand(imageListCmd)
 	imageCmd.AddCommand(imageCreateCmd)

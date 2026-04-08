@@ -342,6 +342,33 @@ func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_LimitAndOffset(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 3, RAMMB: 3072}})
+
+	out, err := runCLI("vm", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("vm list --offset --limit: %v", err)
+	}
+	if strings.Contains(out, "alpha") || !strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeOffset(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--offset", "-1")
+	if err == nil || !strings.Contains(err.Error(), "--offset must be >= 0") {
+		t.Fatalf("expected negative offset error, got %v", err)
+	}
+}
+
 func TestCLI_VMStart(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -674,6 +701,41 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	}
 	if got := rows[2]; strings.Join(got, "|") != "img-2|backup-image|512.0 MB|qcow2|2026-03-28 08:30:00" {
 		t.Fatalf("second row = %v", got)
+	}
+}
+
+func TestCLI_ImageList_LimitAndOffset(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	for i, name := range []string{"golden-image", "backup-image", "dev-image"} {
+		s.PutImage(&types.Image{
+			ID:        "img-" + strconv.Itoa(i+1),
+			Name:      name,
+			Path:      "/tmp/" + name + ".qcow2",
+			SizeBytes: 1073741824,
+			Format:    "qcow2",
+			CreatedAt: now,
+		})
+	}
+
+	out, err := runCLI("image", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("image list --offset --limit: %v", err)
+	}
+	if strings.Contains(out, "golden-image") || !strings.Contains(out, "backup-image") || strings.Contains(out, "dev-image") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_ImageList_RejectsNegativeLimit(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--limit", "-1")
+	if err == nil || !strings.Contains(err.Error(), "--limit must be >= 0") {
+		t.Fatalf("expected negative limit error, got %v", err)
 	}
 }
 
