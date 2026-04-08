@@ -2,6 +2,15 @@ import { clearAuthToken, getAuthToken, requireAuth } from '../auth.js';
 
 const BASE = '/api/v1';
 
+function parseJSONSafe(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 async function request(path, options = {}) {
   const url = `${BASE}${path}`;
   const isFormData = options.body instanceof FormData;
@@ -56,16 +65,52 @@ export const snapshots = {
   delete:  (vmId, snapName)  => request(`/vms/${vmId}/snapshots/${snapName}`, { method: 'DELETE' }),
 };
 
+function uploadImageWithProgress(file, name, onProgress) {
+  const token = getAuthToken();
+  const fd = new FormData();
+  fd.append('file', file);
+  if (name) fd.append('name', name);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/images/upload`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable) return;
+      onProgress({
+        loaded: event.loaded,
+        total: event.total,
+        percent: Math.min(100, Math.round((event.loaded / event.total) * 100)),
+      });
+    };
+
+    xhr.onload = () => {
+      const data = parseJSONSafe(xhr.responseText);
+      if (xhr.status === 401) {
+        const message = data?.error || (token ? 'Invalid API key' : 'API key required');
+        if (token) clearAuthToken();
+        requireAuth(message);
+        reject(new Error(message));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(data?.error || `Request failed: ${xhr.status}`));
+        return;
+      }
+      resolve(data);
+    };
+
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.send(fd);
+  });
+}
+
 // --- Images ---
 export const images = {
   list:     ()            => request('/images'),
   create:   (vmId, name)  => request('/images', { method: 'POST', body: JSON.stringify({ vm_id: vmId, name }) }),
-  upload:   (file, name)  => {
-    const fd = new FormData();
-    fd.append('file', file);
-    if (name) fd.append('name', name);
-    return request('/images/upload', { method: 'POST', body: fd });
-  },
+  upload:   (file, name, onProgress) => uploadImageWithProgress(file, name, onProgress),
   delete:   (id)          => request(`/images/${id}`, { method: 'DELETE' }),
   downloadUrl: (id)       => `${BASE}/images/${id}/download`,
 };
