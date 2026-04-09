@@ -120,7 +120,8 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 

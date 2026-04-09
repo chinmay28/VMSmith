@@ -43,7 +43,8 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 
 	img, err := s.storageMgr.CreateImage(vm.DiskPath, req.Name, vm.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -54,7 +55,8 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 	imgs, err := s.storageMgr.ListImages()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 	writeJSON(w, http.StatusOK, imgs)
@@ -107,7 +109,7 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if name == "" {
-		writeError(w, http.StatusBadRequest, "image name is required")
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_image", "image name is required"))
 		return
 	}
 
@@ -133,7 +135,8 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 
 	img, err := s.storageMgr.ImportImage(name, data)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -145,7 +148,8 @@ func (s *Server) DownloadImage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "imageID")
 	img, err := s.storageMgr.GetImage(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusNotFound), apiErr)
 		return
 	}
 
