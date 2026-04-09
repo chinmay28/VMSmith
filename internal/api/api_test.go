@@ -1171,6 +1171,27 @@ func TestCreateSnapshot_BadJSON(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshot_MissingName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x"})
+
+	for _, body := range []map[string]string{{}, {"name": "   "}} {
+		resp, err := http.Post(ts.URL+"/api/v1/vms/vm-x/snapshots", "application/json", jsonBody(t, body))
+		if err != nil {
+			t.Fatalf("POST snapshot: %v", err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", resp.StatusCode)
+		}
+		errResp := assertAPIErrorCode(t, resp, "invalid_name")
+		if errResp.Message != "snapshot name is required" {
+			t.Fatalf("message = %q, want snapshot name is required", errResp.Message)
+		}
+	}
+}
+
 func TestCreateSnapshot_Error(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -1263,6 +1284,39 @@ func TestCreateImage_BadJSON(t *testing.T) {
 		bytes.NewBufferString("{bad"))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestCreateImage_MissingFields(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	tests := []struct {
+		name        string
+		body        createImageRequest
+		wantCode    string
+		wantMessage string
+	}{
+		{name: "missing vm id", body: createImageRequest{Name: "img"}, wantCode: "invalid_spec", wantMessage: "vm_id is required"},
+		{name: "blank vm id", body: createImageRequest{VMID: "   ", Name: "img"}, wantCode: "invalid_spec", wantMessage: "vm_id is required"},
+		{name: "missing image name", body: createImageRequest{VMID: "vm-img"}, wantCode: "invalid_image", wantMessage: "image name is required"},
+		{name: "blank image name", body: createImageRequest{VMID: "vm-img", Name: "   "}, wantCode: "invalid_image", wantMessage: "image name is required"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Post(ts.URL+"/api/v1/images", "application/json", jsonBody(t, tt.body))
+			if err != nil {
+				t.Fatalf("POST /api/v1/images: %v", err)
+			}
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			errResp := assertAPIErrorCode(t, resp, tt.wantCode)
+			if errResp.Message != tt.wantMessage {
+				t.Fatalf("message = %q, want %q", errResp.Message, tt.wantMessage)
+			}
+		})
 	}
 }
 

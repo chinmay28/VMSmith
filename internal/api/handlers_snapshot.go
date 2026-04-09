@@ -24,6 +24,10 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if err := validateCreateSnapshotRequest(req.Name); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	snap, err := s.vmManager.CreateSnapshot(r.Context(), vmID, req.Name)
 	if err != nil {
