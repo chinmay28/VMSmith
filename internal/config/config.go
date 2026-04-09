@@ -14,16 +14,25 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	Network  NetworkConfig  `yaml:"network"`
 	Defaults DefaultsConfig `yaml:"defaults"`
+	Quotas   QuotasConfig   `yaml:"quotas"`
 }
 
 type DaemonConfig struct {
-	Listen               string    `yaml:"listen"`
-	PIDFile              string    `yaml:"pid_file"`
-	LogFile              string    `yaml:"log_file"`
-	TLS                  TLSConfig `yaml:"tls"`
-	MaxRequestBodyBytes  int64     `yaml:"max_request_body_bytes"`
-	MaxUploadBodyBytes   int64     `yaml:"max_upload_body_bytes"`
-	MaxConcurrentCreates int       `yaml:"max_concurrent_creates"`
+	Listen               string     `yaml:"listen"`
+	PIDFile              string     `yaml:"pid_file"`
+	LogFile              string     `yaml:"log_file"`
+	TLS                  TLSConfig  `yaml:"tls"`
+	Auth                 AuthConfig `yaml:"auth"`
+	MaxRequestBodyBytes  int64      `yaml:"max_request_body_bytes"`
+	MaxUploadBodyBytes   int64      `yaml:"max_upload_body_bytes"`
+	MaxConcurrentCreates int        `yaml:"max_concurrent_creates"`
+	RateLimitPerSecond   float64    `yaml:"rate_limit_per_second"`
+	RateLimitBurst       int        `yaml:"rate_limit_burst"`
+}
+
+type AuthConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	APIKeys []string `yaml:"api_keys"`
 }
 
 type TLSConfig struct {
@@ -59,6 +68,13 @@ type DefaultsConfig struct {
 	SSHUser string `yaml:"ssh_user"`
 }
 
+type QuotasConfig struct {
+	MaxVMs         int `yaml:"max_vms"`
+	MaxTotalCPUs   int `yaml:"max_total_cpus"`
+	MaxTotalRAMMB  int `yaml:"max_total_ram_mb"`
+	MaxTotalDiskGB int `yaml:"max_total_disk_gb"`
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 // Storage paths are placed under /var/lib/vmsmith/ so that the libvirt-qemu
 // system user can access them without requiring home-directory traversal.
@@ -75,6 +91,8 @@ func DefaultConfig() *Config {
 			MaxRequestBodyBytes:  50 << 20,
 			MaxUploadBodyBytes:   50 << 30,
 			MaxConcurrentCreates: 2,
+			RateLimitPerSecond:   10,
+			RateLimitBurst:       20,
 		},
 		Libvirt: LibvirtConfig{
 			URI: "qemu:///system",

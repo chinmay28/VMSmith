@@ -29,7 +29,7 @@ vmsmith/
 ├── internal/
 │   ├── api/
 │   │   ├── router.go            # Chi router with middleware wiring
-│   │   ├── handlers_vm.go       # VM CRUD and lifecycle endpoints
+│   │   ├── handlers_vm.go       # VM CRUD, lifecycle, and bulk action endpoints
 │   │   ├── handlers_snapshot.go # Snapshot endpoints
 │   │   ├── handlers_image.go    # Image upload/download/list/delete
 │   │   ├── handlers_network.go  # Port forward + host interface endpoints
@@ -75,7 +75,7 @@ vmsmith/
 │   ├── src/api/client.js        # REST API client (vms, snapshots, images, ports, host, logs)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList also supports bulk-select start/stop/delete UI using existing per-VM endpoints)
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs (mock server)
@@ -145,7 +145,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 
 All VM operations go through the `vm.Manager` interface (`internal/vm/manager.go`). The production implementation is `LibvirtManager` (`internal/vm/lifecycle.go`). Tests use `MockManager` (`internal/vm/mock_manager.go`), an in-memory implementation with error injection.
 
-The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, `NatStaticIP`, and `NatGateway`; zero/empty values are treated as "no change". The `LibvirtManager` implementation stops the VM if running, then applies each changed field: IP change updates the DHCP host reservation and regenerates the cloud-init ISO with a new instance-id (forces cloud-init re-run on restart), CPU/RAM change redefines the domain XML (preserving the existing UUID), disk growth calls `qemu-img resize` (shrink is rejected). The VM is then restarted.
+The interface includes a `Update(ctx, id, VMUpdateSpec) (*VM, error)` method. `VMUpdateSpec` carries `CPUs`, `RAMMB`, `DiskGB`, `Description`, `Tags`, `NatStaticIP`, and `NatGateway`; zero/empty values are treated as "no change" (except `Tags`, where a provided slice replaces the current tag set). The `LibvirtManager` implementation stops the VM if running, then applies each changed field: metadata is persisted in bbolt, IP change updates the DHCP host reservation and regenerates the cloud-init ISO with a new instance-id (forces cloud-init re-run on restart), CPU/RAM change redefines the domain XML (preserving the existing UUID), disk growth calls `qemu-img resize` (shrink is rejected). The VM is then restarted.
 
 Never call libvirt directly from handlers — always go through the `Manager` interface.
 
@@ -388,7 +388,7 @@ Key config fields:
 All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
 
 ```
-GET    /vms                            List all VMs
+GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported)
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks)
 GET    /vms/{id}                       Get VM
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
@@ -455,3 +455,5 @@ Frontend dependencies (in `web/package.json`):
 - `lucide-react` — icon library
 - `tailwindcss` — utility CSS
 - `vite` — build tool and dev server
+
+The frontend API client lives in `web/src/api/client.js`. It automatically adds `Authorization: Bearer <key>` when an API key is present in `localStorage` (`vmsmith.apiKey`). When the daemon returns HTTP 401, the UI flips into an auth-gate screen (`web/src/components/AuthGate.jsx`) so the user can enter or replace the API key without a full page reload.

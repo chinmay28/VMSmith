@@ -38,12 +38,22 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
-// resetAllFlags resets the Changed state on every flag in the command tree so
-// that required-flag validation works correctly across multiple Execute() calls
-// in the same test process (cobra never resets pflag.Flag.Changed on its own).
+// resetAllFlags resets flag values and Changed state across the whole command
+// tree so repeated Execute() calls in tests don't leak prior flag values.
 func resetAllFlags(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
-	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+	reset := func(fs *pflag.FlagSet) {
+		fs.VisitAll(func(f *pflag.Flag) {
+			if f.DefValue == "[]" {
+				_ = f.Value.Set("")
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
+			f.Changed = false
+		})
+	}
+
+	reset(cmd.Flags())
+	reset(cmd.PersistentFlags())
 	for _, sub := range cmd.Commands() {
 		resetAllFlags(sub)
 	}
@@ -183,6 +193,9 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 		"--cpus", "4",
 		"--ram", "8192",
 		"--disk", "50",
+		"--description", "Production web server",
+		"--tag", "Prod",
+		"--tag", "web",
 		"--ssh-key", "ssh-ed25519 AAAA test",
 		"--default-user", "rocky",
 	)
@@ -205,6 +218,12 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 	}
 	if vms[0].Spec.DefaultUser != "rocky" {
 		t.Errorf("DefaultUser = %q, want rocky", vms[0].Spec.DefaultUser)
+	}
+	if vms[0].Description != "Production web server" {
+		t.Errorf("Description = %q", vms[0].Description)
+	}
+	if strings.Join(vms[0].Tags, ",") != "prod,web" {
+		t.Errorf("Tags = %v", vms[0].Tags)
 	}
 }
 
@@ -247,8 +266,8 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
 
-	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
-	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}, State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
 
 	out, err := runCLI("vm", "list")
 	if err != nil {
@@ -261,16 +280,65 @@ func TestCLI_VMList_WithVMs(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"ID", "NAME", "STATE", "IP", "CPUS", "RAM (MB)"}
+	wantHeaders := []string{"ID", "NAME", "STATE", "IP", "CPUS", "RAM (MB)", "TAGS"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
 
-	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048$`).MatchString(strings.TrimSpace(out)) {
+	if !regexp.MustCompile(`(?m)^vm-1\s+alpha\s+running\s+192\.168\.100\.10\s+2\s+2048\s+prod,web$`).MatchString(strings.TrimSpace(out)) {
 		t.Fatalf("expected vm-1 row in output, got %q", out)
 	}
-	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096$`).MatchString(strings.TrimSpace(out)) {
+	if !regexp.MustCompile(`(?m)^vm-2\s+beta\s+stopped\s+4\s+4096\s+dev$`).MatchString(strings.TrimSpace(out)) {
 		t.Fatalf("expected vm-2 row in output, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+
+	out, err := runCLI("vm", "list", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm list --tag: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+
+	out, err := runCLI("vm", "list", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"prod"}, State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Tags: []string{"dev"}, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--tag", "prod", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --tag --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("unexpected filtered output: %q", out)
 	}
 }
 
@@ -394,6 +462,73 @@ func TestCLI_VMInfo_NotFound(t *testing.T) {
 	_, err := runCLI("vm", "info", "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
+	}
+}
+
+// ============================================================
+// VM edit command tests
+// ============================================================
+
+func TestCLI_VMEdit(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-edit1",
+		Name: "edit-me",
+		Spec: types.VMSpec{Name: "edit-me", CPUs: 2, RAMMB: 2048, DiskGB: 20},
+	})
+
+	out, err := runCLI("vm", "edit", "vm-edit1", "--cpus", "4")
+	if err != nil {
+		t.Fatalf("vm edit: %v", err)
+	}
+	if !strings.Contains(out, "VM updated") {
+		t.Errorf("expected 'VM updated' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "CPUs:  4") {
+		t.Errorf("expected CPUs: 4 in output, got: %s", out)
+	}
+}
+
+func TestCLI_VMEdit_NoFlags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-nf", Name: "noflag"})
+
+	_, err := runCLI("vm", "edit", "vm-nf")
+	if err == nil {
+		t.Fatal("expected error when no flags provided")
+	}
+}
+
+func TestCLI_VMEdit_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "edit", "vm-nonexistent", "--cpus", "2")
+	if err == nil {
+		t.Fatal("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_VMEdit_RAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-ram",
+		Name: "ramtest",
+		Spec: types.VMSpec{Name: "ramtest", CPUs: 1, RAMMB: 1024, DiskGB: 10},
+	})
+
+	out, err := runCLI("vm", "edit", "vm-ram", "--ram", "4096")
+	if err != nil {
+		t.Fatalf("vm edit --ram: %v", err)
+	}
+	if !strings.Contains(out, "RAM:   4096 MB") {
+		t.Errorf("expected RAM: 4096 MB in output, got: %s", out)
 	}
 }
 
@@ -742,6 +877,33 @@ func TestCLI_PortAdd_VMNotFound(t *testing.T) {
 	_, err := runCLI("port", "add", "nonexistent", "--host", "8080", "--guest", "80")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_PortAdd_InvalidInputRejectedBeforeVMLookup(t *testing.T) {
+	calledVMManager := false
+	vmManagerOverride = func() (vm.Manager, func(), error) {
+		calledVMManager = true
+		return vm.NewMockManager(), func() {}, nil
+	}
+	defer func() { vmManagerOverride = nil }()
+
+	_, _, pfCleanup := withTestPortForwarder(t)
+	defer pfCleanup()
+
+	_, err := runCLI("port", "add", "vm-any", "--host", "0", "--guest", "22")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.Code != "invalid_port_forward" {
+		t.Fatalf("error code = %q, want invalid_port_forward", apiErr.Code)
+	}
+	if calledVMManager {
+		t.Fatal("expected VM manager initialization to be skipped for invalid input")
 	}
 }
 

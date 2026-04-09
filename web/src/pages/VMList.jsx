@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare } from 'lucide-react';
 import { vms, images as imagesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner } from '../components/Shared';
@@ -9,8 +9,18 @@ export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
   const [actionMenu, setActionMenu] = useState(null);
-  const { data: vmList, loading, error, refresh } = useFetch(() => vms.list(), [], 5000);
+  const [tagFilter, setTagFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkMessage, setBulkMessage] = useState(null);
+  const { data: vmList, loading, error, refresh } = useFetch(() => vms.list(tagFilter), [tagFilter], 5000);
   const navigate = useNavigate();
+  const allTags = [...new Set((vmList || []).flatMap(vm => vm.tags || []))].sort();
+
+  const visibleVMs = vmList || [];
+  const selectedVMs = useMemo(
+    () => visibleVMs.filter(vm => selectedIds.includes(vm.id)),
+    [visibleVMs, selectedIds],
+  );
 
   useEffect(() => {
     if (searchParams.get('create') === '1') {
@@ -19,19 +29,68 @@ export default function VMList() {
     }
   }, [searchParams, setSearchParams]);
 
+  useEffect(() => {
+    setSelectedIds(prev => prev.filter(id => visibleVMs.some(vm => vm.id === id)));
+  }, [visibleVMs]);
+
+  const toggleSelected = (vmId) => {
+    setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedVMs.length === visibleVMs.length) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(visibleVMs.map(vm => vm.id));
+  };
+
+  const clearSelection = () => setSelectedIds([]);
+
   return (
     <div>
       <PageHeader
         title="Machines"
         subtitle={`${vmList?.length || 0} total`}
         actions={
-          <button className="btn-primary" onClick={() => setShowCreate(true)}>
+          <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-vm">
             <Plus size={15} /> New Machine
           </button>
         }
       />
 
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
+
+      {bulkMessage && (
+        <div className="mb-4">
+          <ErrorBanner message={bulkMessage} onRetry={() => setBulkMessage(null)} />
+        </div>
+      )}
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`} onClick={() => setTagFilter('')}>All</button>
+          {allTags.map(tag => (
+            <button key={tag} className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`} onClick={() => setTagFilter(tag)}>
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!!visibleVMs.length && (
+        <BulkActionBar
+          selectedVMs={selectedVMs}
+          totalVisible={visibleVMs.length}
+          allSelected={selectedVMs.length > 0 && selectedVMs.length === visibleVMs.length}
+          onToggleSelectAll={toggleSelectAll}
+          onClearSelection={clearSelection}
+          onDone={(message) => {
+            setBulkMessage(message);
+            refresh();
+          }}
+        />
+      )}
 
       {loading && !vmList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
@@ -45,11 +104,13 @@ export default function VMList() {
           />
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="vm-list">
           {vmList.map(vm => (
             <VMRow
               key={vm.id}
               vm={vm}
+              selected={selectedIds.includes(vm.id)}
+              onToggleSelected={() => toggleSelected(vm.id)}
               onNavigate={() => navigate(`/vms/${vm.id}`)}
               actionMenu={actionMenu}
               setActionMenu={setActionMenu}
@@ -64,7 +125,124 @@ export default function VMList() {
   );
 }
 
-function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
+function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectAll, onClearSelection, onDone }) {
+  const startMut = useMutation(vms.start);
+  const stopMut = useMutation(vms.stop);
+  const deleteMut = useMutation(vms.delete);
+
+  const runningCount = selectedVMs.filter(vm => vm.state === 'running').length;
+  const stoppedCount = selectedVMs.filter(vm => vm.state === 'stopped').length;
+  const hasSelection = selectedVMs.length > 0;
+  const mutationError = startMut.error || stopMut.error || deleteMut.error;
+  const busy = startMut.loading || stopMut.loading || deleteMut.loading;
+
+  const executeBulk = async (action) => {
+    if (!hasSelection || busy) return;
+
+    if (action === 'delete') {
+      const names = selectedVMs.map(vm => vm.name).join(', ');
+      if (!window.confirm(`Delete ${selectedVMs.length} machine(s)?\n\n${names}`)) return;
+    }
+
+    const targets = selectedVMs.filter(vm => {
+      if (action === 'start') return vm.state === 'stopped';
+      if (action === 'stop') return vm.state === 'running';
+      return true;
+    });
+
+    const skipped = selectedVMs.length - targets.length;
+    if (targets.length === 0) {
+      if (action === 'start') onDone('Nothing to start — selected machines are already running.');
+      if (action === 'stop') onDone('Nothing to stop — selected machines are already stopped.');
+      return;
+    }
+
+    let success = 0;
+    let failure = 0;
+
+    for (const vm of targets) {
+      try {
+        if (action === 'start') await startMut.execute(vm.id);
+        if (action === 'stop') await stopMut.execute(vm.id);
+        if (action === 'delete') await deleteMut.execute(vm.id);
+        success += 1;
+      } catch {
+        failure += 1;
+      }
+    }
+
+    const parts = [];
+    parts.push(`${success} ${action}${success === 1 ? '' : 's'} succeeded`);
+    if (failure > 0) parts.push(`${failure} failed`);
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    onClearSelection();
+    onDone(parts.join(' · '));
+  };
+
+  return (
+    <div className="mb-4 card border-steel-700/60 px-4 py-3" data-testid="bulk-action-bar">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-steel-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={onToggleSelectAll}
+              className="h-4 w-4 rounded border-steel-600 bg-steel-900 text-forge-500 focus:ring-forge-500/40"
+              data-testid="checkbox-select-all-vms"
+            />
+            <span className="inline-flex items-center gap-2">
+              <CheckSquare size={14} className="text-forge-400" />
+              {hasSelection ? `${selectedVMs.length} selected` : `Select all ${totalVisible}`}
+            </span>
+          </label>
+          {hasSelection && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-steel-500">
+              {runningCount > 0 && <span>{runningCount} running</span>}
+              {stoppedCount > 0 && <span>{stoppedCount} stopped</span>}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || stoppedCount === 0}
+            onClick={() => executeBulk('start')}
+            data-testid="btn-bulk-start"
+          >
+            {startMut.loading ? <Spinner size={14} /> : <Play size={14} />}
+            Start
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || runningCount === 0}
+            onClick={() => executeBulk('stop')}
+            data-testid="btn-bulk-stop"
+          >
+            {stopMut.loading ? <Spinner size={14} /> : <Square size={14} />}
+            Stop
+          </button>
+          <button
+            className="btn-danger"
+            disabled={!hasSelection || busy}
+            onClick={() => executeBulk('delete')}
+            data-testid="btn-bulk-delete"
+          >
+            {deleteMut.loading ? <Spinner size={14} /> : <Trash2 size={14} />}
+            Delete
+          </button>
+          <button className="btn-ghost" disabled={!hasSelection || busy} onClick={onClearSelection} data-testid="btn-clear-selection">
+            Clear
+          </button>
+        </div>
+      </div>
+      {mutationError && <p className="mt-3 text-sm text-red-400">Bulk action error: {mutationError}</p>}
+    </div>
+  );
+}
+
+function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActionMenu, onRefresh }) {
   const startMut = useMutation(vms.start);
   const stopMut  = useMutation(vms.stop);
   const delMut   = useMutation(vms.delete);
@@ -82,7 +260,18 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
   const isMenuOpen = actionMenu === vm.id;
 
   return (
-    <div className="card-hover flex items-center gap-4 px-4 py-3 group" onClick={onNavigate}>
+    <div className="card-hover flex items-center gap-4 px-4 py-3 group" onClick={onNavigate} data-testid={`vm-card-${vm.name}`}>
+      <div className="shrink-0" onClick={e => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelected}
+          className="h-4 w-4 rounded border-steel-600 bg-steel-900 text-forge-500 focus:ring-forge-500/40"
+          aria-label={`Select ${vm.name}`}
+          data-testid={`checkbox-select-vm-${vm.name}`}
+        />
+      </div>
+
       {/* Icon */}
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
         vm.state === 'running' ? 'bg-emerald-900/40 border border-emerald-700/30' : 'bg-steel-800/60 border border-steel-700/30'
@@ -100,6 +289,14 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
           {vm.spec.cpus} vCPU · {vm.spec.ram_mb} MB · {vm.spec.disk_gb} GB
           {vm.ip && <> · {vm.ip}</>}
         </p>
+        {vm.description && <p className="text-xs text-steel-400 mt-1 truncate">{vm.description}</p>}
+        {vm.tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {vm.tags.map(tag => (
+              <span key={tag} className="badge bg-blue-500/10 text-blue-300 border-blue-500/20">#{tag}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick actions */}
@@ -133,7 +330,7 @@ function VMRow({ vm, onNavigate, actionMenu, setActionMenu, onRefresh }) {
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -157,6 +354,9 @@ function CreateVMModal({ open, onClose, onCreated }) {
 
   const handleSubmit = async () => {
     const spec = { ...form };
+    spec.tags = form.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (!spec.description) delete spec.description;
+    if (spec.tags.length === 0) delete spec.tags;
     if (!spec.nat_static_ip) delete spec.nat_static_ip;
     if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (networks.length > 0) {
@@ -184,7 +384,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
 
   const advancedCount = [
-    form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
+    form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
     networks.length > 0 ? 'x' : ''
   ].filter(Boolean).length;
 
@@ -201,6 +401,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 : 'border-transparent text-steel-500 hover:text-steel-300'
             }`}
             onClick={() => setActiveTab('basic')}
+            data-testid="tab-basic"
           >
             Basic
           </button>
@@ -211,6 +412,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 : 'border-transparent text-steel-500 hover:text-steel-300'
             }`}
             onClick={() => setActiveTab('advanced')}
+            data-testid="tab-advanced"
           >
             Advanced
             {advancedCount > 0 && (
@@ -229,7 +431,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Name</label>
-                  <input className="input" placeholder="my-server" value={form.name} onChange={update('name')} autoFocus />
+                  <input className="input" placeholder="my-server" value={form.name} onChange={update('name')} autoFocus data-testid="input-vm-name" />
                 </div>
                 <div>
                   <label className="label">Base Image</label>
@@ -238,7 +440,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                       No images available — upload one in the Images section first.
                     </div>
                   ) : (
-                    <select className="input" value={form.image} onChange={update('image')}>
+                    <select className="input" value={form.image} onChange={update('image')} data-testid="input-vm-image">
                       <option value="">Select an image…</option>
                       {(imageList || []).map(img => (
                         <option key={img.id} value={img.path}>
@@ -253,15 +455,26 @@ function CreateVMModal({ open, onClose, onCreated }) {
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="label">vCPUs</label>
-                  <input className="input" type="number" min={1} value={form.cpus} onChange={updateNum('cpus')} />
+                  <input className="input" type="number" min={1} value={form.cpus} onChange={updateNum('cpus')} data-testid="input-vm-cpus" />
                 </div>
                 <div>
                   <label className="label">RAM (MB)</label>
-                  <input className="input" type="number" min={256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} />
+                  <input className="input" type="number" min={256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} data-testid="input-vm-ram" />
                 </div>
                 <div>
                   <label className="label">Disk (GB)</label>
-                  <input className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} />
+                  <input className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} data-testid="input-vm-disk" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Description</label>
+                  <input className="input" placeholder="What this VM is for" value={form.description} onChange={update('description')} />
+                </div>
+                <div>
+                  <label className="label">Tags</label>
+                  <input className="input font-mono" placeholder="prod,web,customer-a" value={form.tags} onChange={update('tags')} />
                 </div>
               </div>
             </>
@@ -276,11 +489,11 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Default SSH User <span className="text-steel-500 font-normal">(blank = root)</span></label>
-                    <input className="input font-mono" placeholder="root" value={form.default_user} onChange={update('default_user')} />
+                    <input className="input font-mono" placeholder="root" value={form.default_user} onChange={update('default_user')} data-testid="input-vm-default-user" />
                   </div>
                   <div>
                     <label className="label">SSH Public Key</label>
-                    <input className="input font-mono" placeholder="ssh-rsa AAAA…" value={form.ssh_pub_key} onChange={update('ssh_pub_key')} />
+                    <input className="input font-mono" placeholder="ssh-rsa AAAA…" value={form.ssh_pub_key} onChange={update('ssh_pub_key')} data-testid="input-vm-ssh-key" />
                   </div>
                 </div>
               </div>
@@ -326,7 +539,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider">Extra Networks</h3>
-                  <button className="btn-ghost text-xs" type="button" onClick={addNetwork}>
+                  <button className="btn-ghost text-xs" type="button" onClick={addNetwork} data-testid="btn-add-network">
                     <Plus size={12} /> Add Interface
                   </button>
                 </div>
@@ -378,6 +591,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                               className="rounded border-steel-600 bg-steel-800 text-blue-500 focus:ring-blue-500/30"
                               checked={net.dhcp}
                               onChange={e => updateNet(i, 'dhcp', e.target.checked)}
+                              data-testid={`checkbox-net-${i}-dhcp`}
                             />
                             <span className="text-xs text-steel-400">Use DHCP (no static IP)</span>
                           </label>
@@ -390,6 +604,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                                   placeholder="10.0.0.2/24"
                                   value={net.static_ip}
                                   onChange={e => updateNet(i, 'static_ip', e.target.value)}
+                                  data-testid={`input-net-${i}-static-ip`}
                                 />
                               </div>
                               <div>
@@ -399,6 +614,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
                                   placeholder="10.0.0.1"
                                   value={net.gateway}
                                   onChange={e => updateNet(i, 'gateway', e.target.value)}
+                                  data-testid={`input-net-${i}-gateway`}
                                 />
                               </div>
                             </div>
@@ -423,8 +639,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
             <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
           )}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image}>
+            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create">Cancel</button>
+            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create
             </button>

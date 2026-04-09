@@ -1,9 +1,6 @@
-name: CI
+name: Build and Test
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
 
 jobs:
@@ -51,10 +48,74 @@ jobs:
         run: go vet ./...
 
       - name: Run unit tests
-        run: make test-unit
+        run: |
+          go test -v -race -count=1 -coverprofile=unit-coverage.out \
+            ./internal/store/... ./internal/config/... ./internal/vm/... ./internal/cli/... ./internal/storage/... ./internal/network/... ./internal/logger/... \
+            2>&1 | tee unit-test-output.txt
 
       - name: Run API integration tests
-        run: make test-integration
+        run: |
+          go test -v -race -count=1 -coverprofile=integration-coverage.out \
+            ./internal/api/... \
+            2>&1 | tee integration-test-output.txt
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## Backend Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for label_file in "Unit Tests:unit-test-output.txt" "Integration Tests:integration-test-output.txt"; do
+            label="${label_file%%:*}"
+            file="${label_file##*:}"
+            if [ -f "$file" ]; then
+              total=$(grep -c '^--- ' "$file" || true)
+              passed=$(grep -c '^--- PASS' "$file" || true)
+              failed=$(grep -c '^--- FAIL' "$file" || true)
+              skipped=$(grep -c '^--- SKIP' "$file" || true)
+
+              if [ "$failed" -gt 0 ]; then
+                status="❌"
+              else
+                status="✅"
+              fi
+
+              echo "### ${status} ${label}" >> $GITHUB_STEP_SUMMARY
+              echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+              echo "| Total | ${total} |" >> $GITHUB_STEP_SUMMARY
+              echo "| Passed | ${passed} |" >> $GITHUB_STEP_SUMMARY
+              echo "| Failed | ${failed} |" >> $GITHUB_STEP_SUMMARY
+              echo "| Skipped | ${skipped} |" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          # Coverage summary
+          echo "### Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|----------|" >> $GITHUB_STEP_SUMMARY
+
+          for covfile in unit-coverage.out integration-coverage.out; do
+            if [ -f "$covfile" ]; then
+              go tool cover -func="$covfile" | while IFS= read -r line; do
+                if echo "$line" | grep -q 'total:'; then
+                  pkg=$(echo "$covfile" | sed 's/-coverage.out//')
+                  pct=$(echo "$line" | awk '{print $NF}')
+                  echo "| ${pkg} | ${pct} |" >> $GITHUB_STEP_SUMMARY
+                fi
+              done
+            fi
+          done
+
+          # Print failed tests if any
+          if grep -q '^--- FAIL' unit-test-output.txt integration-test-output.txt 2>/dev/null; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep '^--- FAIL' unit-test-output.txt integration-test-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
 
   frontend:
     name: Frontend build and mock GUI tests
@@ -86,3 +147,14 @@ jobs:
 
       - name: Run mock GUI tests
         run: make test-web
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## Frontend Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-results.json ]; then
+            echo "See Playwright report for details." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "See job logs for test output." >> $GITHUB_STEP_SUMMARY
+          fi

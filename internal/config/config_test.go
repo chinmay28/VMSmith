@@ -24,6 +24,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.MaxConcurrentCreates != 2 {
 		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 2", cfg.Daemon.MaxConcurrentCreates)
 	}
+	if cfg.Daemon.RateLimitPerSecond != 10 {
+		t.Errorf("Daemon.RateLimitPerSecond = %v, want 10", cfg.Daemon.RateLimitPerSecond)
+	}
+	if cfg.Daemon.RateLimitBurst != 20 {
+		t.Errorf("Daemon.RateLimitBurst = %d, want 20", cfg.Daemon.RateLimitBurst)
+	}
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI = %q, want qemu:///system", cfg.Libvirt.URI)
 	}
@@ -41,6 +47,18 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Network.Name != "vmsmith-net" {
 		t.Errorf("Network.Name = %q, want vmsmith-net", cfg.Network.Name)
+	}
+	if cfg.Quotas.MaxVMs != 0 {
+		t.Errorf("Quotas.MaxVMs = %d, want 0", cfg.Quotas.MaxVMs)
+	}
+	if cfg.Quotas.MaxTotalCPUs != 0 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 0", cfg.Quotas.MaxTotalCPUs)
+	}
+	if cfg.Quotas.MaxTotalRAMMB != 0 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 0", cfg.Quotas.MaxTotalRAMMB)
+	}
+	if cfg.Quotas.MaxTotalDiskGB != 0 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 0", cfg.Quotas.MaxTotalDiskGB)
 	}
 }
 
@@ -79,12 +97,19 @@ daemon:
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
   max_concurrent_creates: 1
+  rate_limit_per_second: 3.5
+  rate_limit_burst: 7
 defaults:
   cpus: 8
   ram_mb: 16384
   disk_gb: 100
 network:
   name: "custom-net"
+quotas:
+  max_vms: 25
+  max_total_cpus: 96
+  max_total_ram_mb: 196608
+  max_total_disk_gb: 4096
 `
 	os.WriteFile(cfgPath, []byte(content), 0644)
 
@@ -117,6 +142,12 @@ network:
 	if cfg.Daemon.MaxConcurrentCreates != 1 {
 		t.Errorf("Daemon.MaxConcurrentCreates = %d, want 1", cfg.Daemon.MaxConcurrentCreates)
 	}
+	if cfg.Daemon.RateLimitPerSecond != 3.5 {
+		t.Errorf("Daemon.RateLimitPerSecond = %v, want 3.5", cfg.Daemon.RateLimitPerSecond)
+	}
+	if cfg.Daemon.RateLimitBurst != 7 {
+		t.Errorf("Daemon.RateLimitBurst = %d, want 7", cfg.Daemon.RateLimitBurst)
+	}
 	if cfg.Defaults.CPUs != 8 {
 		t.Errorf("Defaults.CPUs = %d, want 8", cfg.Defaults.CPUs)
 	}
@@ -125,6 +156,18 @@ network:
 	}
 	if cfg.Network.Name != "custom-net" {
 		t.Errorf("Network.Name = %q, want custom-net", cfg.Network.Name)
+	}
+	if cfg.Quotas.MaxVMs != 25 {
+		t.Errorf("Quotas.MaxVMs = %d, want 25", cfg.Quotas.MaxVMs)
+	}
+	if cfg.Quotas.MaxTotalCPUs != 96 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 96", cfg.Quotas.MaxTotalCPUs)
+	}
+	if cfg.Quotas.MaxTotalRAMMB != 196608 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 196608", cfg.Quotas.MaxTotalRAMMB)
+	}
+	if cfg.Quotas.MaxTotalDiskGB != 4096 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 4096", cfg.Quotas.MaxTotalDiskGB)
 	}
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {
@@ -181,5 +224,35 @@ func TestEnsureDirs(t *testing.T) {
 		} else if !info.IsDir() {
 			t.Errorf("%q is not a directory", d)
 		}
+	}
+}
+
+func TestLoadAuthConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `
+daemon:
+  auth:
+    enabled: true
+    api_keys:
+      - "alpha"
+      - "beta"
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !cfg.Daemon.Auth.Enabled {
+		t.Fatal("Daemon.Auth.Enabled = false, want true")
+	}
+	if len(cfg.Daemon.Auth.APIKeys) != 2 {
+		t.Fatalf("len(Daemon.Auth.APIKeys) = %d, want 2", len(cfg.Daemon.Auth.APIKeys))
+	}
+	if cfg.Daemon.Auth.APIKeys[0] != "alpha" || cfg.Daemon.Auth.APIKeys[1] != "beta" {
+		t.Fatalf("Daemon.Auth.APIKeys = %#v, want [alpha beta]", cfg.Daemon.Auth.APIKeys)
 	}
 }

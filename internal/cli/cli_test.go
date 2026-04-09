@@ -161,3 +161,44 @@ func TestHumanSize(t *testing.T) {
 		}
 	}
 }
+
+// --- normalizeTagsForCLI tests ---
+
+func TestNormalizeTagsForCLI(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"nil", nil, []string{}},
+		{"empty", []string{}, []string{}},
+		{"lowercase", []string{"Web", "DB"}, []string{"web", "db"}},
+		{"trim spaces", []string{" web ", " db "}, []string{"web", "db"}},
+		{"dedup", []string{"web", "Web", "WEB"}, []string{"web"}},
+		{"skip empty", []string{"web", "", "  ", "db"}, []string{"web", "db"}},
+		{"mixed", []string{" Web ", "db", "", "DB", "cache"}, []string{"web", "db", "cache"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeTagsForCLI(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.want), got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestRootPersistentAPIKeyFlag(t *testing.T) {
+	flag := rootCmd.PersistentFlags().Lookup("api-key")
+	if flag == nil {
+		t.Fatal("expected --api-key persistent flag to be registered")
+	}
+	if flag.Value.String() != "" {
+		t.Fatalf("default api-key = %q, want empty", flag.Value.String())
+	}
+}

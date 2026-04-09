@@ -15,14 +15,16 @@ const (
 
 // VMSpec defines the desired configuration for a new VM.
 type VMSpec struct {
-	Name          string `json:"name" yaml:"name"`
-	Image         string `json:"image" yaml:"image"`
-	CPUs          int    `json:"cpus" yaml:"cpus"`
-	RAMMB         int    `json:"ram_mb" yaml:"ram_mb"`
-	DiskGB        int    `json:"disk_gb" yaml:"disk_gb"`
-	CloudInitFile string `json:"cloud_init_file,omitempty" yaml:"cloud_init_file,omitempty"`
-	SSHPubKey     string `json:"ssh_pub_key,omitempty" yaml:"ssh_pub_key,omitempty"`
-	DefaultUser   string `json:"default_user,omitempty" yaml:"default_user,omitempty"`
+	Name          string   `json:"name" yaml:"name"`
+	Image         string   `json:"image" yaml:"image"`
+	CPUs          int      `json:"cpus" yaml:"cpus"`
+	RAMMB         int      `json:"ram_mb" yaml:"ram_mb"`
+	DiskGB        int      `json:"disk_gb" yaml:"disk_gb"`
+	Description   string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Tags          []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	CloudInitFile string   `json:"cloud_init_file,omitempty" yaml:"cloud_init_file,omitempty"`
+	SSHPubKey     string   `json:"ssh_pub_key,omitempty" yaml:"ssh_pub_key,omitempty"`
+	DefaultUser   string   `json:"default_user,omitempty" yaml:"default_user,omitempty"`
 
 	// Networks defines additional network attachments beyond the default NAT.
 	// The vmsmith NAT network is always attached as the first interface.
@@ -41,9 +43,11 @@ type VMSpec struct {
 // VMUpdateSpec defines fields that can be changed on an existing VM.
 // Zero / empty values are ignored (no change). Disk can only grow, not shrink.
 type VMUpdateSpec struct {
-	CPUs   int `json:"cpus,omitempty"`
-	RAMMB  int `json:"ram_mb,omitempty"`
-	DiskGB int `json:"disk_gb,omitempty"`
+	CPUs        int      `json:"cpus,omitempty"`
+	RAMMB       int      `json:"ram_mb,omitempty"`
+	DiskGB      int      `json:"disk_gb,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 
 	// NatStaticIP reassigns the primary NAT interface IP address in CIDR
 	// notation (e.g. "192.168.100.50/24"). The DHCP host reservation is
@@ -59,13 +63,15 @@ type VMUpdateSpec struct {
 
 // VM represents a virtual machine and its current state.
 type VM struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Spec      VMSpec    `json:"spec"`
-	State     VMState   `json:"state"`
-	IP        string    `json:"ip,omitempty"`
-	NatMAC    string    `json:"nat_mac,omitempty"`
-	DiskPath  string    `json:"disk_path"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	Spec        VMSpec    `json:"spec"`
+	State       VMState   `json:"state"`
+	IP          string    `json:"ip,omitempty"`
+	NatMAC      string    `json:"nat_mac,omitempty"`
+	DiskPath    string    `json:"disk_path"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

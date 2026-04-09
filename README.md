@@ -295,6 +295,9 @@ sudo ./bin/vmsmith image pull user@other-host/ubuntu-configured
 
 # Download via HTTP (when daemon is running on the remote)
 sudo ./bin/vmsmith image pull http://other-host:8080/api/v1/images/<id>/download
+
+# If remote daemon auth is enabled, pass the API key to send Authorization: Bearer <key>
+sudo ./bin/vmsmith --api-key "$VMSMITH_API_KEY" image pull http://other-host:8080/api/v1/images/<id>/download
 ```
 
 ---
@@ -331,16 +334,22 @@ GUI: VM Image Management
 
 ## REST API
 
-The daemon exposes a full REST API at `/api/v1/`. Example:
+The daemon exposes a full REST API at `/api/v1/`. When `daemon.auth.enabled` is set, clients must send `Authorization: Bearer <key>` on API requests. The embedded web UI will prompt for an API key on the first 401 response, store it in `localStorage`, and automatically attach it to subsequent API calls.
 
-When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up.
+Example:
+
+When `daemon.max_concurrent_creates` is reached, `POST /api/v1/vms` returns HTTP 429 with error code `create_limit_reached` instead of letting unbounded VM provisioning pile up. Separately, `daemon.rate_limit_per_second` and `daemon.rate_limit_burst` apply a per-client token bucket across `/api/v1/*`, returning HTTP 429 `rate_limit_exceeded` plus `Retry-After` when a caller gets too aggressive.
 
 ```bash
 # Start daemon
 sudo ./bin/vmsmith daemon start --port 8080
 
-# List VMs
+# List VMs (add Authorization header when daemon.auth.enabled=true)
 curl http://localhost:8080/api/v1/vms
+
+# Filter VMs by tag or state
+curl http://localhost:8080/api/v1/vms?tag=prod
+curl http://localhost:8080/api/v1/vms?status=running
 
 # Create a VM
 curl -X POST http://localhost:8080/api/v1/vms \
@@ -386,7 +395,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
-vmsmith vm list
+vmsmith vm list             [--tag <tag>] [--status <state>]
 vmsmith vm start  <id>
 vmsmith vm stop   <id>
 vmsmith vm delete <id>
@@ -428,6 +437,8 @@ daemon:
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
   max_concurrent_creates: 2   # return HTTP 429 when the create queue is full
+  rate_limit_per_second: 10   # token refill rate for each client IP
+  rate_limit_burst: 20        # burst capacity before HTTP 429 rate_limit_exceeded
 
 libvirt:
   uri: "qemu:///system"
@@ -448,6 +459,12 @@ defaults:
   ram_mb:   2048
   disk_gb:  20
   ssh_user: ubuntu   # retained for config compatibility; VMs use root by default (override per-VM with --default-user)
+
+quotas:
+  max_vms: 0              # 0 disables the limit
+  max_total_cpus: 0       # total configured vCPUs across all VMs
+  max_total_ram_mb: 0     # total configured RAM across all VMs
+  max_total_disk_gb: 0    # total configured disk across all VMs
 ```
 
 ---

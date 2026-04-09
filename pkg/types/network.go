@@ -64,6 +64,19 @@ type PortForward struct {
 	Protocol  Protocol `json:"protocol"`
 }
 
+func ValidatePortForward(hostPort, guestPort int, proto Protocol) error {
+	if hostPort < 1 || hostPort > 65535 {
+		return NewAPIError("invalid_port_forward", "host_port must be between 1 and 65535")
+	}
+	if guestPort < 1 || guestPort > 65535 {
+		return NewAPIError("invalid_port_forward", "guest_port must be between 1 and 65535")
+	}
+	if proto != ProtocolTCP && proto != ProtocolUDP {
+		return NewAPIError("invalid_port_forward", "protocol must be tcp or udp")
+	}
+	return nil
+}
+
 // NetworkInfo holds network details for a VM.
 type NetworkInfo struct {
 	InternalIP   string              `json:"internal_ip"`

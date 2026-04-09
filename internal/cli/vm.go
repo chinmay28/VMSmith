@@ -34,6 +34,8 @@ var vmCreateCmd = &cobra.Command{
 		sshKey, _ := cmd.Flags().GetString("ssh-key")
 		defaultUser, _ := cmd.Flags().GetString("default-user")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
+		description, _ := cmd.Flags().GetString("description")
+		tags, _ := cmd.Flags().GetStringSlice("tag")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
@@ -62,6 +64,8 @@ var vmCreateCmd = &cobra.Command{
 			CPUs:          cpus,
 			RAMMB:         ram,
 			DiskGB:        disk,
+			Description:   strings.TrimSpace(description),
+			Tags:          normalizeTagsForCLI(tags),
 			SSHPubKey:     sshKey,
 			DefaultUser:   defaultUser,
 			CloudInitFile: cloudInit,
@@ -116,6 +120,10 @@ var vmListCmd = &cobra.Command{
 	Short:   "List all VMs",
 	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		tagFilter, _ := cmd.Flags().GetString("tag")
+		statusFilter, _ := cmd.Flags().GetString("status")
+		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
+		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		logger.Info("cli", "vm list")
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -130,13 +138,36 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
+		if tagFilter != "" || statusFilter != "" {
+			filtered := make([]*types.VM, 0, len(vms))
+			for _, v := range vms {
+				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
+					continue
+				}
+				if tagFilter != "" {
+					matchedTag := false
+					for _, tag := range v.Tags {
+						if strings.EqualFold(tag, tagFilter) {
+							matchedTag = true
+							break
+						}
+					}
+					if !matchedTag {
+						continue
+					}
+				}
+				filtered = append(filtered, v)
+			}
+			vms = filtered
+		}
+
 		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tSTATE\tIP\tCPUS\tRAM (MB)")
+		fmt.Fprintln(w, "ID\tNAME\tSTATE\tIP\tCPUS\tRAM (MB)\tTAGS")
 		for _, v := range vms {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n",
-				v.ID, v.Name, v.State, v.IP, v.Spec.CPUs, v.Spec.RAMMB)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+				v.ID, v.Name, v.State, v.IP, v.Spec.CPUs, v.Spec.RAMMB, strings.Join(v.Tags, ","))
 		}
 		w.Flush()
 		return nil
@@ -224,11 +255,13 @@ var vmEditCmd = &cobra.Command{
 		cpus, _ := cmd.Flags().GetInt("cpus")
 		ram, _ := cmd.Flags().GetInt("ram")
 		disk, _ := cmd.Flags().GetInt("disk")
+		description, _ := cmd.Flags().GetString("description")
+		tags, _ := cmd.Flags().GetStringSlice("tag")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, or --nat-ip")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, or --tag")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -245,8 +278,13 @@ var vmEditCmd = &cobra.Command{
 			CPUs:        cpus,
 			RAMMB:       ram,
 			DiskGB:      disk,
+			Description: strings.TrimSpace(description),
+			Tags:        nil,
 			NatStaticIP: natIP,
 			NatGateway:  natGW,
+		}
+		if cmd.Flags().Changed("tag") {
+			patch.Tags = normalizeTagsForCLI(tags)
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -265,6 +303,12 @@ var vmEditCmd = &cobra.Command{
 		fmt.Printf("  CPUs:  %d\n", result.Spec.CPUs)
 		fmt.Printf("  RAM:   %d MB\n", result.Spec.RAMMB)
 		fmt.Printf("  Disk:  %d GB\n", result.Spec.DiskGB)
+		if result.Description != "" {
+			fmt.Printf("  Desc:  %s\n", result.Description)
+		}
+		if len(result.Tags) > 0 {
+			fmt.Printf("  Tags:  %s\n", strings.Join(result.Tags, ", "))
+		}
 		if result.IP != "" {
 			fmt.Printf("  IP:    %s\n", result.IP)
 		}
@@ -302,6 +346,12 @@ var vmInfoCmd = &cobra.Command{
 		fmt.Printf("RAM:          %d MB\n", v.Spec.RAMMB)
 		fmt.Printf("Disk:         %d GB\n", v.Spec.DiskGB)
 		fmt.Printf("Image:        %s\n", v.Spec.Image)
+		if v.Description != "" {
+			fmt.Printf("Description:  %s\n", v.Description)
+		}
+		if len(v.Tags) > 0 {
+			fmt.Printf("Tags:         %s\n", strings.Join(v.Tags, ", "))
+		}
 		sshUser := v.Spec.DefaultUser
 		if sshUser == "" {
 			sshUser = "root"
@@ -324,6 +374,8 @@ func init() {
 	vmCreateCmd.Flags().String("ssh-key", "", "SSH public key to inject")
 	vmCreateCmd.Flags().String("default-user", "", "create a named sudo user and disable root (omit to use root by default)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
+	vmCreateCmd.Flags().String("description", "", "free-form VM description")
+	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
 	vmCreateCmd.Flags().String("nat-gw", "",
@@ -349,8 +401,13 @@ Examples:
 	vmEditCmd.Flags().Int("cpus", 0, "new vCPU count (0 = no change)")
 	vmEditCmd.Flags().Int("ram", 0, "new RAM in MB (0 = no change)")
 	vmEditCmd.Flags().Int("disk", 0, "new disk size in GB — can only grow (0 = no change)")
+	vmEditCmd.Flags().String("description", "", "new VM description")
+	vmEditCmd.Flags().StringSlice("tag", nil, "replace VM tags with the provided values (repeatable)")
 	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
+
+	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
+	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmEditCmd)
@@ -409,6 +466,23 @@ func newVMManager() (vm.Manager, func(), error) {
 //	"eth2:ip=192.168.2.100/24,gw=192.168.2.1"  → macvtap on eth2, static IP
 //	"eth3:mode=bridge,bridge=br-data"           → bridge mode
 //	"eth1:name=data-net,mac=52:54:00:aa:bb:cc"  → named, specific MAC
+func normalizeTagsForCLI(tags []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(strings.ToLower(tag))
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
 func parseNetworkFlags(flags []string) ([]types.NetworkAttachment, error) {
 	var result []types.NetworkAttachment
 

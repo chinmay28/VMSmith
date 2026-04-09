@@ -33,8 +33,8 @@ Several API inputs currently pass through to libvirt without validation, produci
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 1.2.1 | Validate VM name: non-empty, max 64 chars, alphanumeric + hyphens only, unique | M | Check in API handler before calling Manager. Return 400 with specific message |
-| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | Add to VMSpec validation, also enforce in VMUpdateSpec |
-| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | Check before calling store or iptables |
+| 1.2.2 | Validate CPU/RAM bounds: CPUs 1-128, RAM 128MB-1TB, Disk 1GB-10TB | S | ✅ Done — `internal/api/validation.go` now enforces CPU/RAM/disk bounds for both `VMSpec` and `VMUpdateSpec`, with table-driven coverage in `internal/api/validation_test.go` |
+| 1.2.3 | Validate port forward ranges: host/guest port 1-65535, protocol tcp/udp only | S | ✅ Done — `internal/api/validation.go` rejects out-of-range ports and non-`tcp`/`udp` protocols before any store, manager, or iptables work; covered by `internal/api/validation_test.go` and `internal/api/api_test.go` |
 | 1.2.4 | Validate image upload: reject empty files, enforce `.qcow2` extension, check disk space | M | ✅ Done — upload handler rejects empty/non-`.qcow2` files with `invalid_image` and returns 507 `insufficient_storage` when free disk is too low |
 | 1.2.5 | Standardize error responses: introduce error codes (`invalid_name`, `resource_not_found`, `disk_shrink_not_allowed`, etc.) | M | Extend `pkg/types/errors.go` with a `Code` field; update all handlers |
 | 1.2.6 | Return 400 (not 500) for all client input errors; reserve 500 for internal failures | M | Audit all handlers; most need `http.StatusBadRequest` paths |
@@ -44,9 +44,9 @@ Several API inputs currently pass through to libvirt without validation, produci
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | Table-driven tests in `internal/api/` or `pkg/types/` |
+| 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | ✅ Done — `internal/api/validation_test.go` covers VM name trimming/rules plus CPU/RAM/disk bound validation for create/update payloads |
 | 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
-| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | MockManager + httptest |
+| 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | ✅ Done — duplicate `host_port` + protocol conflicts are covered in `internal/network/portforward_test.go` and `internal/api/api_test.go` |
 | 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | ✅ Done — `internal/cli/commands_test.go` captures stdout and verifies table headers/rows for both `vm list` and `image list` |
 
@@ -76,12 +76,12 @@ No way to organize or annotate VMs. Tags enable filtering, grouping, and automat
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 2.2.1 | Add `Tags []string` and `Description string` fields to `types.VM` | S | JSON tags with `omitempty` |
-| 2.2.2 | Accept tags/description in `POST /vms` and `PATCH /vms/{id}` | S | |
-| 2.2.3 | Add `--tag` flag (repeatable) and `--description` to `vmsmith vm create` and `vmsmith vm edit` | S | |
-| 2.2.4 | Add `GET /vms?tag=<tag>` filter support | M | Filter in handler or bbolt iteration |
-| 2.2.5 | Show tags as badges in VMList and VMDetail frontend pages | S | |
-| 2.2.6 | Add `vmsmith vm list --tag <tag>` CLI filter | S | |
+| 2.2.1 | Add `Tags []string` and `Description string` fields to `types.VM` | S | ✅ Done — added top-level VM metadata plus mirrored create/update payload support in `pkg/types/vm.go` |
+| 2.2.2 | Accept tags/description in `POST /vms` and `PATCH /vms/{id}` | S | ✅ Done — API accepts, trims, normalizes, and persists metadata on create/update |
+| 2.2.3 | Add `--tag` flag (repeatable) and `--description` to `vmsmith vm create` and `vmsmith vm edit` | S | ✅ Done — CLI create/edit now support tags + description |
+| 2.2.4 | Add `GET /vms?tag=<tag>` filter support | M | ✅ Done — list handler supports case-insensitive tag filtering |
+| 2.2.5 | Show tags as badges in VMList and VMDetail frontend pages | S | ✅ Done — VM list/detail now render description + tag badges, and the list page supports quick tag filtering |
+| 2.2.6 | Add `vmsmith vm list --tag <tag>` CLI filter | S | ✅ Done — CLI list supports tag filtering and shows tags in the table |
 
 ### 2.3 Bulk Operations
 
@@ -89,9 +89,9 @@ Operating on VMs one-at-a-time is tedious when managing many.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 2.3.1 | Add `POST /api/v1/vms/bulk` endpoint: `{ "action": "start|stop|delete", "ids": [...] }` | M | Return per-VM success/failure results |
+| 2.3.1 | Add `POST /api/v1/vms/bulk` endpoint: `{ "action": "start|stop|delete", "ids": [...] }` | M | ✅ Done — `POST /api/v1/vms/bulk` now performs start/stop/delete across multiple VM IDs and returns per-VM success/failure results, including typed error codes for missing/invalid entries |
 | 2.3.2 | Add `vmsmith vm start --all`, `vmsmith vm stop --all`, with `--tag` filter | M | |
-| 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | |
+| 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | ✅ Done — VMList now supports per-row selection, select-all for the current filtered view, and a bulk action bar that fans out start/stop/delete over existing per-VM endpoints with selection-aware skip messaging |
 
 ### 2.4 VM Templates
 
@@ -117,10 +117,10 @@ The API is completely open. This blocks any multi-user or network-exposed deploy
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.1.1 | Add API key authentication middleware (check `Authorization: Bearer <key>` header) | M | Keys stored in config file. Bypass for localhost if configured |
-| 3.1.2 | Add `daemon.auth.enabled` and `daemon.auth.api_keys` config fields | S | |
-| 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | |
-| 3.1.4 | Add login screen to frontend when auth is enabled | M | Store token in localStorage |
+| 3.1.1 | Add API key authentication middleware (check `Authorization: Bearer <key>` header) | M | ✅ Done — API routes now enforce `Authorization: Bearer <key>` when `daemon.auth.enabled` is true |
+| 3.1.2 | Add `daemon.auth.enabled` and `daemon.auth.api_keys` config fields | S | ✅ Done — config loader, example config, and tests cover `daemon.auth.enabled` / `daemon.auth.api_keys` |
+| 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | ✅ Done — CLI now exposes a persistent `--api-key` flag that adds `Authorization: Bearer <key>` for HTTP-based remote daemon operations such as `image pull http://...` |
+| 3.1.4 | Add login screen to frontend when auth is enabled | M | ✅ Done — the embedded web UI now prompts for an API key after a 401, stores it in `localStorage`, and retries authenticated API calls without a full reload |
 | 3.1.5 | (Future) Role-based access: `admin` (full), `operator` (start/stop/list), `viewer` (read-only) | L | Optional follow-up; start with single-role API keys |
 
 ### 3.2 TLS / HTTPS Support
@@ -140,7 +140,7 @@ Make VMSmith a proper system service.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.3.1 | Create `vmsmith.service` systemd unit file | S | ✅ Done — `vmsmith.service` is committed at the repo root with `Wants=libvirtd.service` and `After=network-online.target libvirtd.service` |
+| 3.3.1 | Create `vmsmith.service` systemd unit file | S | ✅ Done — `vmsmith.service` is committed at the repo root with `network-online.target` + `libvirtd.service` ordering, runtime directory settings, and installable defaults for `/etc/vmsmith/config.yaml` |
 | 3.3.2 | Add `make install-service` target to copy unit file and enable service | S | ✅ Done — `make install-service` now installs `vmsmith.service` into `/etc/systemd/system`, reloads systemd, and enables/starts the unit |
 | 3.3.3 | Add `vmsmith daemon status` command (check if daemon is running) | S | ✅ Done — `internal/cli/daemon.go` implements `vmsmith daemon status`, and the command is documented in `README.md` |
 | 3.3.4 | Implement graceful shutdown: drain in-flight requests, close libvirt connection cleanly | M | Signal handling exists but could be more graceful |
@@ -151,7 +151,7 @@ Prevent abuse and resource exhaustion.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | Use `golang.org/x/time/rate` |
+| 3.4.1 | Add per-IP rate limiting middleware (token bucket, configurable rate) | M | ✅ Done — `/api/v1/*` now uses configurable per-client token buckets via `daemon.rate_limit_per_second` / `daemon.rate_limit_burst`, returning HTTP 429 `rate_limit_exceeded` plus `Retry-After` |
 | 3.4.2 | Add configurable max request body size (default 50MB, override for image uploads) | S | ✅ Done — added `daemon.max_request_body_bytes` and `daemon.max_upload_body_bytes`, applied request-size middleware, and covered 413 behavior in API tests |
 | 3.4.3 | Add concurrent VM creation limit (prevent fork-bombing the host) | S | ✅ Done — `daemon.max_concurrent_creates` bounds simultaneous `POST /api/v1/vms` operations and returns HTTP 429 `create_limit_reached` when the queue is full |
 
@@ -161,7 +161,7 @@ Prevent VMs from consuming all host resources.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 3.5.1 | Add `quotas.max_vms`, `quotas.max_total_cpus`, `quotas.max_total_ram_mb`, `quotas.max_total_disk_gb` config fields | S | |
+| 3.5.1 | Add `quotas.max_vms`, `quotas.max_total_cpus`, `quotas.max_total_ram_mb`, `quotas.max_total_disk_gb` config fields | S | ✅ Done — added `QuotasConfig` to `internal/config/config.go`, covered defaults/YAML loading in `internal/config/config_test.go`, and documented the new config block in README + deployment docs |
 | 3.5.2 | Check quotas before VM create and VM update; return 429 or 403 if exceeded | M | Sum current allocations from bbolt |
 | 3.5.3 | Show quota usage in dashboard (e.g., "12/32 CPUs allocated") | S | |
 
@@ -251,7 +251,7 @@ Current list endpoints return all records. This won't scale beyond ~1000 VMs.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 5.4.1 | Add `?page=&per_page=` query params to `GET /vms`, `GET /images`, `GET /logs` | M | Return `X-Total-Count` header |
-| 5.4.2 | Add `?status=running&sort=created_at&order=desc` filtering to `GET /vms` | M | |
+| 5.4.2 | Add `?status=running&sort=created_at&order=desc` filtering to `GET /vms` | M | ✅ Done — `GET /api/v1/vms` now supports case-insensitive `status=<state>` filtering and composes with the existing `tag=<tag>` filter |
 | 5.4.3 | Update frontend tables to support server-side pagination | M | |
 | 5.4.4 | Add `--limit` and `--offset` flags to CLI list commands | S | |
 

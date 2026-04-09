@@ -174,6 +174,164 @@ func TestCreateVM_InvalidSpecBounds(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_MissingName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
+func TestCreateVM_MissingImage(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "valid-name",
+		CPUs:  2,
+		RAMMB: 2048,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_image")
+}
+
+func TestCreateVM_InvalidNatGateway(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:       "valid-name",
+		Image:      "ubuntu",
+		CPUs:       2,
+		RAMMB:      2048,
+		NatGateway: "not-an-ip",
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestCreateVM_WithTagsAndDescription(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:        "tagged-vm",
+		Image:       "ubuntu",
+		CPUs:        2,
+		RAMMB:       2048,
+		Description: "  Production API node  ",
+		Tags:        []string{"Prod", " api ", "prod"},
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Description != "Production API node" {
+		t.Fatalf("description = %q", created.Description)
+	}
+	if strings.Join(created.Tags, ",") != "api,prod" {
+		t.Fatalf("tags = %v", created.Tags)
+	}
+}
+
+func TestListVMs_FilterByTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"dev"}, State: types.VMStateStopped})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?tag=prod")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 running vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if vm.State != types.VMStateRunning {
+			t.Fatalf("unexpected vm state in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterByTagAndStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"prod"}, State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Tags: []string{"dev"}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?tag=prod&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByStatus_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?status=StOpPeD")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -301,6 +459,118 @@ func TestStopVM(t *testing.T) {
 	got, _ := mockMgr.Get(nil, "vm-stop")
 	if got.State != types.VMStateStopped {
 		t.Errorf("State = %q, want stopped", got.State)
+	}
+}
+
+func TestBulkVMAction_Start(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped})
+
+	body := jsonBody(t, map[string]any{
+		"action": "start",
+		"ids":    []string{"vm-1", "vm-2"},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got bulkVMActionResponse
+	decodeJSON(t, resp, &got)
+	if got.Action != "start" {
+		t.Fatalf("action = %q, want start", got.Action)
+	}
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(got.Results))
+	}
+	for _, result := range got.Results {
+		if !result.Success {
+			t.Fatalf("result for %s unsuccessful: %+v", result.ID, result)
+		}
+		vm, err := mockMgr.Get(nil, result.ID)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", result.ID, err)
+		}
+		if vm.State != types.VMStateRunning {
+			t.Fatalf("vm %s state = %q, want running", result.ID, vm.State)
+		}
+	}
+}
+
+func TestBulkVMAction_PartialFailure(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning})
+
+	body := jsonBody(t, map[string]any{
+		"action": "stop",
+		"ids":    []string{"vm-1", "missing", "  "},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got bulkVMActionResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 3 {
+		t.Fatalf("results = %d, want 3", len(got.Results))
+	}
+	if !got.Results[0].Success {
+		t.Fatalf("first result = %+v, want success", got.Results[0])
+	}
+	if got.Results[1].Success || got.Results[1].Code != "resource_not_found" {
+		t.Fatalf("second result = %+v, want resource_not_found failure", got.Results[1])
+	}
+	if got.Results[2].Success || got.Results[2].Code != "invalid_vm_id" {
+		t.Fatalf("third result = %+v, want invalid_vm_id failure", got.Results[2])
+	}
+}
+
+func TestBulkVMAction_InvalidRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantCode  string
+		wantState int
+	}{
+		{name: "bad json", body: "{", wantCode: "", wantState: http.StatusBadRequest},
+		{name: "invalid action", body: `{"action":"reboot","ids":["vm-1"]}`, wantCode: "invalid_bulk_action", wantState: http.StatusBadRequest},
+		{name: "missing ids", body: `{"action":"start","ids":[]}`, wantCode: "invalid_bulk_request", wantState: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _, cleanup := testServer(t)
+			defer cleanup()
+
+			resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", bytes.NewBufferString(tt.body))
+			if err != nil {
+				t.Fatalf("POST /vms/bulk: %v", err)
+			}
+			if resp.StatusCode != tt.wantState {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantState)
+			}
+			if tt.wantCode != "" {
+				assertAPIErrorCode(t, resp, tt.wantCode)
+				return
+			}
+			var errResp errorResponse
+			decodeJSON(t, resp, &errResp)
+			if !strings.Contains(errResp.Error, "invalid request body") {
+				t.Fatalf("error = %q, want invalid request body", errResp.Error)
+			}
+		})
 	}
 }
 
@@ -478,6 +748,40 @@ func TestUpdateVM_IP_InvalidCIDR(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for invalid CIDR", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestUpdateVM_InvalidSpecBounds(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bounds", Name: "bounded", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{CPUs: 129}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bounds", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
+func TestUpdateVM_InvalidNatGateway(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-gateway", Name: "gateway", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{NatGateway: "bad-gateway"}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-gateway", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
@@ -974,7 +1278,6 @@ func TestCreateImage_VMNotFound(t *testing.T) {
 	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
-
 func TestCreateImage_StorageError(t *testing.T) {
 	// VM exists but disk path is invalid — qemu-img convert will fail → 500.
 	ts, mockMgr, cleanup := testServer(t)
@@ -1272,7 +1575,6 @@ func TestUploadImage_InvalidExtension(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_image")
 }
 
-
 func TestUploadImage_NotEnoughDiskSpace(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -1459,6 +1761,67 @@ func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
 	}
 }
 
+func TestListVMs_RateLimitExceeded(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.RateLimitPerSecond = 1
+		cfg.Daemon.RateLimitBurst = 1
+	})
+	defer cleanup()
+
+	client := &http.Client{}
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+		if err != nil {
+			t.Fatalf("new request %d: %v", i+1, err)
+		}
+		req.Header.Set("X-Forwarded-For", "198.51.100.10")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /vms %d: %v", i+1, err)
+		}
+		if i == 0 {
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("first status = %d, want 200", resp.StatusCode)
+			}
+			resp.Body.Close()
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("second status = %d, want 429", resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "rate_limit_exceeded")
+		if resp.Header.Get("Retry-After") != "1" {
+			t.Fatalf("Retry-After = %q, want 1", resp.Header.Get("Retry-After"))
+		}
+	}
+}
+
+func TestListVMs_RateLimitIsPerClientIP(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.RateLimitPerSecond = 1
+		cfg.Daemon.RateLimitBurst = 1
+	})
+	defer cleanup()
+
+	client := &http.Client{}
+	ips := []string{"198.51.100.11", "198.51.100.12"}
+	for _, ip := range ips {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+		if err != nil {
+			t.Fatalf("new request for %s: %v", ip, err)
+		}
+		req.Header.Set("X-Forwarded-For", ip)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /vms for %s: %v", ip, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status for %s = %d, want 200", ip, resp.StatusCode)
+		}
+	}
+}
 
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
@@ -1726,4 +2089,128 @@ func TestGetLogs_MaxLimitCapped(t *testing.T) {
 // Helpers for timeout in tests
 func init() {
 	_ = time.Second // ensure time is used
+}
+
+func TestAPIAuthDisabledAllowsRequestsWithoutToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = false
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestAPIAuthEnabledRejectsMissingBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "unauthorized")
+}
+
+func TestAPIAuthEnabledRejectsInvalidBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer wrong-key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "unauthorized")
+}
+
+func TestAPIAuthEnabledAllowsValidBearerToken(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-key")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+	cfg.Daemon.Auth.Enabled = true
+	cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
+	ts := httptest.NewServer(apiServer)
+	defer ts.Close()
+	defer s.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
 }

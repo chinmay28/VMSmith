@@ -27,7 +27,8 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	snap, err := s.vmManager.CreateSnapshot(r.Context(), vmID, req.Name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -41,11 +42,7 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	snaps, err := s.vmManager.ListSnapshots(r.Context(), vmID)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if isAPIErrorCode(apiErr, "resource_not_found") {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, apiErr)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -59,11 +56,7 @@ func (s *Server) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.vmManager.RestoreSnapshot(r.Context(), vmID, snapName); err != nil {
 		apiErr := sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if isAPIErrorCode(apiErr, "resource_not_found") {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, apiErr)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -77,11 +70,7 @@ func (s *Server) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.vmManager.DeleteSnapshot(r.Context(), vmID, snapName); err != nil {
 		apiErr := sanitizeManagerError(err)
-		status := http.StatusInternalServerError
-		if isAPIErrorCode(apiErr, "resource_not_found") {
-			status = http.StatusNotFound
-		}
-		writeAPIError(w, status, apiErr)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
