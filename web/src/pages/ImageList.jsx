@@ -119,6 +119,7 @@ function UploadImageModal({ open, onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [name, setName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ loaded: 0, total: 0, percent: 0 });
   const [error, setError] = useState('');
   const inputRef = useRef(null);
 
@@ -132,6 +133,7 @@ function UploadImageModal({ open, onClose, onUploaded }) {
 
   const handleDrop = (e) => {
     e.preventDefault();
+    if (uploading) return;
     const f = e.dataTransfer.files[0];
     if (f) handleFile(f);
   };
@@ -139,13 +141,15 @@ function UploadImageModal({ open, onClose, onUploaded }) {
   const handleSubmit = async () => {
     if (!file) return;
     setUploading(true);
+    setUploadProgress({ loaded: 0, total: file.size || 0, percent: 0 });
     setError('');
     try {
-      await imagesApi.upload(file, name.trim() || undefined);
+      await imagesApi.upload(file, name.trim() || undefined, setUploadProgress);
       onUploaded();
       onClose();
       setFile(null);
       setName('');
+      setUploadProgress({ loaded: 0, total: 0, percent: 0 });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -161,7 +165,7 @@ function UploadImageModal({ open, onClose, onUploaded }) {
           className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
             file ? 'border-forge-500/60 bg-forge-900/10' : 'border-steel-700/50 hover:border-steel-600/60'
           }`}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => !uploading && inputRef.current?.click()}
           onDrop={handleDrop}
           onDragOver={e => e.preventDefault()}
         >
@@ -171,6 +175,7 @@ function UploadImageModal({ open, onClose, onUploaded }) {
             accept=".qcow2,.img,.iso"
             className="hidden"
             onChange={e => handleFile(e.target.files[0])}
+            disabled={uploading}
           />
           <Upload size={24} className={`mx-auto mb-2 ${file ? 'text-forge-400' : 'text-steel-600'}`} />
           {file ? (
@@ -194,10 +199,31 @@ function UploadImageModal({ open, onClose, onUploaded }) {
           <p className="text-[10px] font-mono text-steel-600 mt-1">Derived from filename if left blank</p>
         </div>
 
+        {uploading && (
+          <div className="space-y-2" data-testid="image-upload-progress">
+            <div className="flex items-center justify-between text-xs font-mono text-steel-500">
+              <span>Uploading…</span>
+              <span>{uploadProgress.percent}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-steel-800/60 overflow-hidden border border-steel-700/40">
+              <div
+                className="h-full bg-forge-500 transition-all"
+                style={{ width: `${uploadProgress.percent}%` }}
+                data-testid="image-upload-progress-bar"
+              />
+            </div>
+            {uploadProgress.total > 0 && (
+              <p className="text-[10px] font-mono text-steel-600">
+                {Math.min(uploadProgress.loaded, uploadProgress.total).toLocaleString()} / {uploadProgress.total.toLocaleString()} bytes
+              </p>
+            )}
+          </div>
+        )}
+
         {error && <p className="text-sm text-red-400">Error: {error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={!file || uploading}>
             {uploading ? <Spinner size={14} /> : <Upload size={15} />}
             Upload
