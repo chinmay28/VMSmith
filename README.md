@@ -418,6 +418,9 @@ vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
 vmsmith vm list             [--tag <tag>] [--status <state>]
 vmsmith vm start  <id>      | --all [--tag <tag>]
 vmsmith vm stop   <id>      | --all [--tag <tag>]
+vmsmith vm list             [--tag <tag>] [--status <state>] [--limit N] [--offset N]
+vmsmith vm start  <id>
+vmsmith vm stop   <id>
 vmsmith vm delete <id>
 
 vmsmith snapshot create  <vm-id> --name <name>
@@ -425,7 +428,7 @@ vmsmith snapshot restore <vm-id> --name <name>
 vmsmith snapshot list    <vm-id>
 vmsmith snapshot delete  <vm-id> --name <name>
 
-vmsmith image list
+vmsmith image list         [--limit N] [--offset N]
 vmsmith image create <vm-id> --name <name>
 vmsmith image delete <name>
 vmsmith image push   <name> <user@host>

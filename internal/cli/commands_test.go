@@ -21,10 +21,8 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
-// ============================================================
-// Test helpers
-// ============================================================
-
+// =====================================================// Test helpers
+// =====================================================
 // captureOutput redirects os.Stdout during f() and returns what was written.
 func captureOutput(f func()) string {
 	r, w, _ := os.Pipe()
@@ -44,10 +42,11 @@ func captureOutput(f func()) string {
 func resetAllFlags(cmd *cobra.Command) {
 	reset := func(fs *pflag.FlagSet) {
 		fs.VisitAll(func(f *pflag.Flag) {
-			if f.DefValue == "[]" {
+			switch f.Value.Type() {
+			case "stringSlice", "stringArray":
 				_ = f.Value.Set("")
-			} else {
-				_ = f.Value.Set(f.DefValue)
+			default:
+				_ = fs.Set(f.Name, f.DefValue)
 			}
 			f.Changed = false
 		})
@@ -154,10 +153,8 @@ func withTestPortForwarder(t *testing.T) (*store.Store, *network.PortForwarder, 
 	}
 }
 
-// ============================================================
-// VM command tests
-// ============================================================
-
+// =====================================================// VM command tests
+// =====================================================
 func writeTestConfig(t *testing.T, pidFile string) string {
 	t.Helper()
 
@@ -340,6 +337,35 @@ func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
 	}
 	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
 		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_LimitAndOffset(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	base := time.Unix(1_700_000_000, 0)
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", CreatedAt: base, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", CreatedAt: base.Add(time.Second), State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", CreatedAt: base.Add(2 * time.Second), State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("vm list --offset --limit: %v", err)
+	}
+
+	if strings.Contains(out, "alpha") || strings.Contains(out, "gamma") || !strings.Contains(out, "beta") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_VMList_InvalidOffset(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--offset", "-1")
+	if err == nil || !strings.Contains(err.Error(), "--offset must be >= 0") {
+		t.Fatalf("expected invalid offset error, got %v", err)
 	}
 }
 
@@ -560,10 +586,8 @@ func TestCLI_VMInfo_NotFound(t *testing.T) {
 	}
 }
 
-// ============================================================
-// VM edit command tests
-// ============================================================
-
+// =====================================================// VM edit command tests
+// =====================================================
 func TestCLI_VMEdit(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -627,10 +651,8 @@ func TestCLI_VMEdit_RAM(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Snapshot command tests
-// ============================================================
-
+// =====================================================// Snapshot command tests
+// =====================================================
 func TestCLI_SnapshotCreate(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -775,10 +797,8 @@ func TestCLI_SnapshotDelete(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Image command tests
-// ============================================================
-
+// =====================================================// Image command tests
+// =====================================================
 func TestCLI_ImageList_Empty(t *testing.T) {
 	_, _, cleanup := withTestStorage(t)
 	defer cleanup()
@@ -839,6 +859,35 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	}
 }
 
+func TestCLI_ImageList_LimitAndOffset(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "golden-image", Path: "/tmp/golden-image.qcow2", SizeBytes: 1073741824, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "backup-image", Path: "/tmp/backup-image.qcow2", SizeBytes: 536870912, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-3", Name: "archive-image", Path: "/tmp/archive-image.qcow2", SizeBytes: 268435456, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("image list --offset --limit: %v", err)
+	}
+
+	if strings.Contains(out, "golden-image") || strings.Contains(out, "archive-image") || !strings.Contains(out, "backup-image") {
+		t.Fatalf("unexpected paginated output: %q", out)
+	}
+}
+
+func TestCLI_ImageList_InvalidLimit(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--limit", "-1")
+	if err == nil || !strings.Contains(err.Error(), "--limit must be >= 0") {
+		t.Fatalf("expected invalid limit error, got %v", err)
+	}
+}
+
 func TestCLI_ImageDelete(t *testing.T) {
 	s, _, cleanup := withTestStorage(t)
 	defer cleanup()
@@ -882,10 +931,8 @@ func TestCLI_ImageDelete_NotFound(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Port forward command tests
-// ============================================================
-
+// =====================================================// Port forward command tests
+// =====================================================
 func TestCLI_PortList_Empty(t *testing.T) {
 	_, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()
@@ -1012,10 +1059,8 @@ func TestCLI_PortRemove_NotFound(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Net command tests
-// ============================================================
-
+// =====================================================// Net command tests
+// =====================================================
 func TestCLI_NetInterfaces(t *testing.T) {
 	out, err := runCLI("net", "interfaces")
 	if err != nil {
@@ -1037,10 +1082,8 @@ func TestCLI_NetInterfaces_All(t *testing.T) {
 	}
 }
 
-// ============================================================
-// Full CLI lifecycle integration test
-// ============================================================
-
+// =====================================================// Full CLI lifecycle integration test
+// =====================================================
 func TestCLI_VMLifecycle(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
