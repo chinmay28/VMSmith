@@ -256,13 +256,3 @@ daemon:
 		t.Fatalf("Daemon.Auth.APIKeys = %#v, want [alpha beta]", cfg.Daemon.Auth.APIKeys)
 	}
 }
-bled {
-		t.Fatal("Daemon.Auth.Enabled = false, want true")
-	}
-	if len(cfg.Daemon.Auth.APIKeys) != 2 {
-		t.Fatalf("len(Daemon.Auth.APIKeys) = %d, want 2", len(cfg.Daemon.Auth.APIKeys))
-	}
-	if cfg.Daemon.Auth.APIKeys[0] != "alpha" || cfg.Daemon.Auth.APIKeys[1] != "beta" {
-		t.Fatalf("Daemon.Auth.APIKeys = %#v, want [alpha beta]", cfg.Daemon.Auth.APIKeys)
-	}
-}
