@@ -106,10 +106,10 @@ defaults:
 network:
   name: "custom-net"
 quotas:
-  max_vms: 25
-  max_total_cpus: 96
-  max_total_ram_mb: 196608
-  max_total_disk_gb: 4096
+  max_vms: 4
+  max_total_cpus: 16
+  max_total_ram_mb: 32768
+  max_total_disk_gb: 500
 `
 	os.WriteFile(cfgPath, []byte(content), 0644)
 
@@ -157,17 +157,17 @@ quotas:
 	if cfg.Network.Name != "custom-net" {
 		t.Errorf("Network.Name = %q, want custom-net", cfg.Network.Name)
 	}
-	if cfg.Quotas.MaxVMs != 25 {
-		t.Errorf("Quotas.MaxVMs = %d, want 25", cfg.Quotas.MaxVMs)
+	if cfg.Quotas.MaxVMs != 4 {
+		t.Errorf("Quotas.MaxVMs = %d, want 4", cfg.Quotas.MaxVMs)
 	}
-	if cfg.Quotas.MaxTotalCPUs != 96 {
-		t.Errorf("Quotas.MaxTotalCPUs = %d, want 96", cfg.Quotas.MaxTotalCPUs)
+	if cfg.Quotas.MaxTotalCPUs != 16 {
+		t.Errorf("Quotas.MaxTotalCPUs = %d, want 16", cfg.Quotas.MaxTotalCPUs)
 	}
-	if cfg.Quotas.MaxTotalRAMMB != 196608 {
-		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 196608", cfg.Quotas.MaxTotalRAMMB)
+	if cfg.Quotas.MaxTotalRAMMB != 32768 {
+		t.Errorf("Quotas.MaxTotalRAMMB = %d, want 32768", cfg.Quotas.MaxTotalRAMMB)
 	}
-	if cfg.Quotas.MaxTotalDiskGB != 4096 {
-		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 4096", cfg.Quotas.MaxTotalDiskGB)
+	if cfg.Quotas.MaxTotalDiskGB != 500 {
+		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 500", cfg.Quotas.MaxTotalDiskGB)
 	}
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {

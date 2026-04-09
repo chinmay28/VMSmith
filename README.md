@@ -167,6 +167,18 @@ sudo ./bin/vmsmith vm start --all
 sudo ./bin/vmsmith vm delete web01
 ```
 
+### Optional quota config
+
+```yaml
+quotas:
+  max_vms: 20
+  max_total_cpus: 64
+  max_total_ram_mb: 262144
+  max_total_disk_gb: 4000
+```
+
+When configured, VMSmith rejects create/update requests that would exceed these totals and the dashboard shows current allocation versus limit.
+
 ### Step 4b — Edit VM resources and IP
 
 Increase vCPU count, RAM, disk size, or change the primary NAT IP address. The VM is powered off automatically, the changes are applied, and it is powered back on.

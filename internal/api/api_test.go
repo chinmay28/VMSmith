@@ -1901,6 +1901,89 @@ func TestListVMs_RateLimitIsPerClientIP(t *testing.T) {
 	}
 }
 
+func TestCreateVM_QuotaExceeded(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxVMs = 1
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "quota-hit",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
+		DiskGB: 20,
+	}))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
+func TestUpdateVM_QuotaExceeded(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalCPUs = 4
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "two", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-1", jsonBody(t, types.VMUpdateSpec{CPUs: 3}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /vms/vm-1: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
+func TestGetQuotaUsage(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxVMs = 4
+		cfg.Quotas.MaxTotalCPUs = 16
+		cfg.Quotas.MaxTotalRAMMB = 32768
+		cfg.Quotas.MaxTotalDiskGB = 500
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "two", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 40}})
+
+	resp, err := http.Get(ts.URL + "/api/v1/quotas/usage")
+	if err != nil {
+		t.Fatalf("GET /quotas/usage: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var usage types.QuotaUsage
+	decodeJSON(t, resp, &usage)
+	if usage.VMs.Used != 2 || usage.VMs.Limit != 4 {
+		t.Fatalf("unexpected VM usage: %+v", usage.VMs)
+	}
+	if usage.CPUs.Used != 6 || usage.CPUs.Limit != 16 {
+		t.Fatalf("unexpected CPU usage: %+v", usage.CPUs)
+	}
+	if usage.RAMMB.Used != 6144 || usage.RAMMB.Limit != 32768 {
+		t.Fatalf("unexpected RAM usage: %+v", usage.RAMMB)
+	}
+	if usage.DiskGB.Used != 60 || usage.DiskGB.Limit != 500 {
+		t.Fatalf("unexpected disk usage: %+v", usage.DiskGB)
+	}
+}
+
 // ============================================================
 // Content-Type regression tests (web handler vs API routes)
 // ============================================================

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -266,4 +267,14 @@ func (s *Server) acquireCreateSlot() (func(), bool) {
 		logger.Warn("api", "rejecting VM create due to concurrent create limit", "limit", itoa(s.maxConcurrentCreates))
 		return nil, false
 	}
+}
+
+// GetQuotaUsage handles GET /api/v1/quotas/usage
+func (s *Server) GetQuotaUsage(w http.ResponseWriter, r *http.Request) {
+	vms, err := s.vmManager.List(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, sanitizeManagerError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, vm.CalculateQuotaUsage(vms, s.quotas))
 }
