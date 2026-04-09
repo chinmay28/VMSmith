@@ -68,7 +68,8 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 
 	ports, err := s.portFwd.List(vmID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
@@ -92,7 +93,8 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListHostInterfaces(w http.ResponseWriter, r *http.Request) {
 	ifaces, err := network.DiscoverInterfaces()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 	writeJSON(w, http.StatusOK, ifaces)

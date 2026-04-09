@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1344,6 +1345,28 @@ func TestCreateImage_StorageError(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "storage_error")
+}
+
+func TestListVMs_InternalErrorIsSanitized(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.ListErr = errors.New("connecting to libvirt (qemu:///system): permission denied")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms")
+	if err != nil {
+		t.Fatalf("GET /api/v1/vms: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "service_unavailable")
+	if errResp.Message != "vm backend is unavailable" {
+		t.Fatalf("message = %q, want vm backend is unavailable", errResp.Message)
+	}
 }
 
 func TestDeleteImage_NotFound(t *testing.T) {
@@ -1366,6 +1389,7 @@ func TestDownloadImage_NotFound(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
 func TestDownloadImage_Found(t *testing.T) {
