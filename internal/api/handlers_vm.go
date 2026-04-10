@@ -62,6 +62,18 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	} else {
 		spec.Tags = tags
 		spec.Description = strings.TrimSpace(spec.Description)
+		spec.Name = strings.TrimSpace(spec.Name)
+	}
+
+	existingVMs, err := s.vmManager.List(r.Context())
+	if err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	if err := validateUniqueVMName(spec.Name, existingVMs); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
 	}
 
 	release, ok := s.acquireCreateSlot()

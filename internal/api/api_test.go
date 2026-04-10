@@ -225,6 +225,26 @@ func TestCreateVM_InvalidNatGateway(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_DuplicateName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-existing", Name: "Existing-VM", State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  " existing-vm ",
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+		DiskGB: 20,
+	}))
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_name")
+}
+
 func TestCreateVM_WithTagsAndDescription(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
