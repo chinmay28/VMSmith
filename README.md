@@ -418,9 +418,10 @@ sudo ./bin/vmsmith daemon start --port 8080
 # List VMs (add Authorization header when daemon.auth.enabled=true)
 curl http://localhost:8080/api/v1/vms
 
-# Filter VMs by tag or state
+# Filter or paginate VMs (`X-Total-Count` reports the full matching result size)
 curl http://localhost:8080/api/v1/vms?tag=prod
 curl http://localhost:8080/api/v1/vms?status=running
+curl 'http://localhost:8080/api/v1/vms?page=2&per_page=25'
 
 # Create a VM
 curl -X POST http://localhost:8080/api/v1/vms \
