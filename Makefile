@@ -5,7 +5,7 @@ LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 WEB_DIR   := ./web
 
 .PHONY: build install install-service clean purge test lint fmt deps web web-install \
-       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm
+       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -130,6 +130,10 @@ dist: web
 
 rpm: dist
 	bash scripts/build-rpm.sh
+
+deb: dist
+	chmod +x scripts/build-deb.sh
+	VERSION=$(VERSION) BUILD_DIR=$(BUILD_DIR) scripts/build-deb.sh
 
 docker-build:
 	docker build -t vmsmith:dev .
