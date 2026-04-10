@@ -575,7 +575,11 @@ func runBulkVMAction(cmd *cobra.Command, args []string, verb string, requiredSta
 			return err
 		}
 		logger.Info("cli", "vm action complete", "action", verb, "id", id)
-		fmt.Printf("VM %s %sed\n", id, verb)
+		past := verb + "ed"
+		if verb == "stop" {
+			past = "stopped"
+		}
+		fmt.Printf("VM %s %s\n", id, past)
 		return nil
 	}
 
