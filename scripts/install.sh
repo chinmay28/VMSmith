@@ -1,15 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO="${REPO:-chinmay28/VMSmith}"
-VERSION="${VERSION:-latest}"
-BIN_NAME="vmsmith"
-BIN_DIR="${BIN_DIR:-/usr/local/bin}"
-ASSET_NAME="${ASSET_NAME:-vmsmith-linux-amd64}"
-BASE_URL="https://github.com/${REPO}/releases"
-CURL_BIN="${CURL_BIN:-curl}"
-INSTALL_BIN="${INSTALL_BIN:-install}"
-SUDO_BIN="${SUDO_BIN:-sudo}"
+REPO_OWNER="chinmay28"
+REPO_NAME="VMSmith"
+DEFAULT_BIN_DIR="/usr/local/bin"
 
 log() {
   printf '%s\n' "$*"
@@ -20,48 +14,54 @@ fail() {
   exit 1
 }
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+uname_s() {
+  if [ -n "${UNAME_S:-}" ]; then
+    printf '%s\n' "$UNAME_S"
+  else
+    uname -s
+  fi
 }
 
-OS="${UNAME_S:-$(uname -s)}"
-ARCH="${UNAME_M:-$(uname -m)}"
+uname_m() {
+  if [ -n "${UNAME_M:-}" ]; then
+    printf '%s\n' "$UNAME_M"
+  else
+    uname -m
+  fi
+}
 
-case "$OS" in
-  Linux) ;;
-  *) fail "this installer currently supports Linux only" ;;
+OS="$(uname_s)"
+ARCH_RAW="$(uname_m)"
+BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
+VERSION="${VERSION:-latest}"
+
+[ "$OS" = "Linux" ] || fail "unsupported OS: $OS (Linux only)"
+
+case "$ARCH_RAW" in
+  x86_64|amd64)
+    ARCH="amd64"
+    ;;
+  *)
+    fail "unsupported architecture: $ARCH_RAW (supported: x86_64/amd64)"
+    ;;
 esac
-
-case "$ARCH" in
-  x86_64|amd64) ;;
-  *) fail "this installer currently supports x86_64/amd64 only" ;;
-esac
-
-need_cmd "$CURL_BIN"
-need_cmd "$INSTALL_BIN"
 
 if [ "$VERSION" = "latest" ]; then
-  DOWNLOAD_URL="${BASE_URL}/latest/download/${ASSET_NAME}"
+  RELEASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/vmsmith-linux-${ARCH}"
 else
-  DOWNLOAD_URL="${BASE_URL}/download/${VERSION}/${ASSET_NAME}"
+  RELEASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/vmsmith-linux-${ARCH}"
 fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
-TMPFILE="${TMPDIR}/${BIN_NAME}"
+TMPBIN="$TMPDIR/vmsmith"
 
-log "Downloading ${BIN_NAME} from ${DOWNLOAD_URL}"
-"$CURL_BIN" -fsSL "$DOWNLOAD_URL" -o "$TMPFILE"
-chmod 0755 "$TMPFILE"
+log "Downloading ${REPO_NAME} ${VERSION} (${ARCH})..."
+curl -fsSL "$RELEASE_URL" -o "$TMPBIN"
+chmod 0755 "$TMPBIN"
 
-log "Installing ${BIN_NAME} to ${BIN_DIR}/${BIN_NAME}"
-if "$INSTALL_BIN" -m 0755 "$TMPFILE" "${BIN_DIR}/${BIN_NAME}" 2>/dev/null; then
-  :
-elif command -v "$SUDO_BIN" >/dev/null 2>&1; then
-  "$SUDO_BIN" "$INSTALL_BIN" -m 0755 "$TMPFILE" "${BIN_DIR}/${BIN_NAME}"
-else
-  fail "could not write to ${BIN_DIR}; re-run as root or install sudo"
-fi
+mkdir -p "$BIN_DIR"
+install -m 0755 "$TMPBIN" "$BIN_DIR/vmsmith"
 
-log "Installed ${BIN_DIR}/${BIN_NAME}"
-log "Run '${BIN_NAME} --help' to get started."
+log "Installed vmsmith to $BIN_DIR/vmsmith"
+log "Run 'vmsmith version' to verify the install."
