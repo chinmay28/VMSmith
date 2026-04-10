@@ -73,6 +73,28 @@ The RPM currently installs:
 - `/usr/lib/systemd/system/vmsmith.service`
 - `/etc/vmsmith/config.yaml` (from `vmsmith.yaml.example`, marked `%config(noreplace)`)
 
+### 2c. Build a Debian package
+
+On Debian/Ubuntu hosts you can also build an installable `.deb` package that bundles the release binary, example config, and systemd unit:
+
+```bash
+make deb
+# package written to ./bin/packages/vmsmith_<version>_amd64.deb
+```
+
+Install it with:
+
+```bash
+sudo dpkg -i ./bin/packages/vmsmith_*.deb
+sudo systemctl enable --now vmsmith
+```
+
+The package installs:
+
+- `/usr/local/bin/vmsmith`
+- `/etc/vmsmith/config.yaml`
+- `/lib/systemd/system/vmsmith.service`
+
 `make rpm` requires the `rpmbuild` tool (`rpm-build` package). If you already have a release binary, you can also run `scripts/build-rpm.sh` directly.
 
 ### 3. Start the daemon
