@@ -1933,7 +1933,7 @@ func TestUploadImage_MissingName(t *testing.T) {
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	fw, err := mw.CreateFormFile("file", "test-image.qcow2")
+	fw, err := mw.CreateFormFile("file", ".qcow2")
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
@@ -1953,10 +1953,9 @@ func TestUploadImage_MissingName(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	var errResp errorResponse
-	decodeJSON(t, resp, &errResp)
-	if errResp.Error != "missing required field: name" {
-		t.Fatalf("error = %q", errResp.Error)
+	errResp := assertAPIErrorCode(t, resp, "invalid_image")
+	if errResp.Message != "image name is required" {
+		t.Fatalf("message = %q, want %q", errResp.Message, "image name is required")
 	}
 }
 
