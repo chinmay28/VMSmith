@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare } from 'lucide-react';
 import { vms, images as imagesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner } from '../components/Shared';
+import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
+
+const DEFAULT_PER_PAGE = 25;
 
 export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -12,8 +14,16 @@ export default function VMList() {
   const [tagFilter, setTagFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
-  const { data: vmList, loading, error, refresh } = useFetch(() => vms.list(tagFilter), [tagFilter], 5000);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
+  const { data: vmResponse, loading, error, refresh } = useFetch(
+    () => vms.list({ tag: tagFilter, page, perPage }),
+    [tagFilter, page, perPage],
+    5000,
+  );
   const navigate = useNavigate();
+  const vmList = vmResponse?.data || [];
+  const totalVMs = vmResponse?.meta?.totalCount ?? vmList.length;
   const allTags = [...new Set((vmList || []).flatMap(vm => vm.tags || []))].sort();
 
   const visibleVMs = vmList || [];
@@ -33,6 +43,10 @@ export default function VMList() {
     setSelectedIds(prev => prev.filter(id => visibleVMs.some(vm => vm.id === id)));
   }, [visibleVMs]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [tagFilter]);
+
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
   };
@@ -51,7 +65,7 @@ export default function VMList() {
     <div>
       <PageHeader
         title="Machines"
-        subtitle={`${vmList?.length || 0} total`}
+        subtitle={`${totalVMs} total`}
         actions={
           <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-vm">
             <Plus size={15} /> New Machine
@@ -118,6 +132,20 @@ export default function VMList() {
             />
           ))}
         </div>
+      )}
+
+      {!!vmList?.length && (
+        <PaginationControls
+          page={page}
+          perPage={perPage}
+          total={totalVMs}
+          itemLabel="machines"
+          onPageChange={setPage}
+          onPerPageChange={(value) => {
+            setPerPage(value);
+            setPage(1);
+          }}
+        />
       )}
 
       <CreateVMModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={refresh} />

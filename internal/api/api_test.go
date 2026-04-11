@@ -481,6 +481,35 @@ func TestListVMs_WithData(t *testing.T) {
 	}
 }
 
+func TestListVMs_PaginationSetsTotalCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateStopped})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?page=2&per_page=1")
+	if err != nil {
+		t.Fatalf("GET /vms?page=2&per_page=1: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("X-Total-Count = %q, want 3", got)
+	}
+
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected 1 VM on paginated page, got %d", len(vms))
+	}
+	if vms[0].Name != "beta" {
+		t.Fatalf("page 2 VM = %q, want beta", vms[0].Name)
+	}
+}
+
 func TestGetVM(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

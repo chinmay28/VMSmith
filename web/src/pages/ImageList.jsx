@@ -2,12 +2,22 @@ import { useState, useRef } from 'react';
 import { HardDrive, Download, Trash2, Upload } from 'lucide-react';
 import { images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal } from '../components/Shared';
+import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+
+const DEFAULT_PER_PAGE = 25;
 
 export default function ImageList() {
   const [showUpload, setShowUpload] = useState(false);
-  const { data: imageList, loading, error, refresh } = useFetch(() => imagesApi.list(), [], 10000);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
+  const { data: imageResponse, loading, error, refresh } = useFetch(
+    () => imagesApi.list({ page, perPage }),
+    [page, perPage],
+    10000,
+  );
   const deleteMut = useMutation(imagesApi.delete);
+  const imageList = imageResponse?.data || [];
+  const totalImages = imageResponse?.meta?.totalCount ?? imageList.length;
 
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Delete image "${name}"?`)) return;
@@ -25,7 +35,7 @@ export default function ImageList() {
     <div>
       <PageHeader
         title="Images"
-        subtitle="Portable VM disk images"
+        subtitle={`${totalImages} portable VM disk image${totalImages === 1 ? '' : 's'}`}
         actions={
           <button className="btn-primary" onClick={() => setShowUpload(true)}>
             <Upload size={15} /> Upload Image
@@ -110,6 +120,20 @@ export default function ImageList() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!!imageList?.length && (
+        <PaginationControls
+          page={page}
+          perPage={perPage}
+          total={totalImages}
+          itemLabel="images"
+          onPageChange={setPage}
+          onPerPageChange={(value) => {
+            setPerPage(value);
+            setPage(1);
+          }}
+        />
       )}
     </div>
   );

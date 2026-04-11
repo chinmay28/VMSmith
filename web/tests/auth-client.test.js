@@ -28,6 +28,11 @@ function jsonResponse(status, body) {
   return {
     status,
     ok: status >= 200 && status < 300,
+    headers: {
+      get() {
+        return null;
+      },
+    },
     async json() {
       return body;
     },
