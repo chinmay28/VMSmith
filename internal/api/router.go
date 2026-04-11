@@ -23,6 +23,7 @@ type Server struct {
 	maxRequestBodyBytes  int64
 	maxUploadBodyBytes   int64
 	maxConcurrentCreates int
+	quotas               config.QuotasConfig
 	authConfig           config.AuthConfig
 	createTokens         chan struct{}
 	rateLimiter          *ipRateLimiter
@@ -61,6 +62,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
+		quotas:               cfg.Quotas,
 		authConfig:           cfg.Daemon.Auth,
 		rateLimiter:          newIPRateLimiter(cfg.Daemon.RateLimitPerSecond, cfg.Daemon.RateLimitBurst),
 	}
