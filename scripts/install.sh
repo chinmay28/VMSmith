@@ -30,6 +30,31 @@ uname_m() {
   fi
 }
 
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+}
+
+install_bin() {
+  target="$1"
+
+  if install -m 0755 "$TMPBIN" "$target" 2>/dev/null; then
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    sudo install -m 0755 "$TMPBIN" "$target"
+    return 0
+  fi
+
+  fail "could not write to ${BIN_DIR}; re-run as root or install sudo"
+}
+
+need_cmd uname
+need_cmd mktemp
+need_cmd curl
+need_cmd chmod
+need_cmd install
+
 OS="$(uname_s)"
 ARCH_RAW="$(uname_m)"
 BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
@@ -60,8 +85,15 @@ log "Downloading ${REPO_NAME} ${VERSION} (${ARCH})..."
 curl -fsSL "$RELEASE_URL" -o "$TMPBIN"
 chmod 0755 "$TMPBIN"
 
-mkdir -p "$BIN_DIR"
-install -m 0755 "$TMPBIN" "$BIN_DIR/vmsmith"
+if ! mkdir -p "$BIN_DIR" 2>/dev/null; then
+  if command -v sudo >/dev/null 2>&1; then
+    sudo mkdir -p "$BIN_DIR"
+  else
+    fail "could not create ${BIN_DIR}; re-run as root or install sudo"
+  fi
+fi
+
+install_bin "$BIN_DIR/vmsmith"
 
 log "Installed vmsmith to $BIN_DIR/vmsmith"
 log "Run 'vmsmith version' to verify the install."
