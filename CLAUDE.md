@@ -44,7 +44,7 @@ vmsmith/
 │   │   ├── network.go           # vmsmith port add|remove|list
 │   │   └── daemon.go            # vmsmith daemon start
 │   ├── config/config.go         # Config struct, DefaultConfig(), EnsureDirs()
-│   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, signal handling, logger init
+│   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, graceful shutdown orchestration, logger init
 │   ├── logger/
 │   │   └── logger.go            # Structured logger: global singleton, ring buffer, file output
 │   ├── network/
@@ -169,6 +169,7 @@ Never call libvirt directly from handlers — always go through the `Manager` in
 
 **Initialization order:**
 - Daemon: `logger.Init(cfg.Daemon.LogFile, logger.LevelInfo)` called at top of `daemon.New()`
+- Shutdown path: the API router exposes `BeginShutdown()`/`WaitForDrain(ctx)` so daemon signal handling can reject new requests with HTTP 503, wait for in-flight handlers, then close VM/network/store resources in order
 - CLI: initialized via `PersistentPreRunE` on `rootCmd` so all subcommands share one log file
 
 **HTTP request middleware** (`middleware.go`) logs every request except `GET /api/v1/logs` (to avoid self-noise). POST/PUT body snippets (up to 4096 bytes) are captured and re-injected into `r.Body`.
