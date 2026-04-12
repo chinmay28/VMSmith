@@ -541,20 +541,6 @@ func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, name s
 		return nil, err
 	}
 
-	// Enforce snapshot retention policy if configured
-	if m.cfg.Quotas.MaxSnapshotsPerVM > 0 {
-		snaps, err := m.ListSnapshots(ctx, vmID)
-		if err == nil && len(snaps) >= m.cfg.Quotas.MaxSnapshotsPerVM {
-			sort.Slice(snaps, func(i, j int) bool {
-				return snaps[i].CreatedAt.Before(snaps[j].CreatedAt)
-			})
-			toDelete := len(snaps) - m.cfg.Quotas.MaxSnapshotsPerVM + 1
-			for i := 0; i < toDelete; i++ {
-				_ = m.DeleteSnapshot(ctx, vmID, snaps[i].Name)
-			}
-		}
-	}
-
 	dom, err := m.conn.LookupDomainByName(vm.Name)
 	if err != nil {
 		return nil, fmt.Errorf("looking up domain: %w", err)
