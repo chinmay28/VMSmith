@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -538,6 +539,20 @@ func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, name s
 	vm, err := m.store.GetVM(vmID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enforce snapshot retention policy if configured
+	if m.cfg.Quotas.MaxSnapshotsPerVM > 0 {
+		snaps, err := m.ListSnapshots(ctx, vmID)
+		if err == nil && len(snaps) >= m.cfg.Quotas.MaxSnapshotsPerVM {
+			sort.Slice(snaps, func(i, j int) bool {
+				return snaps[i].CreatedAt.Before(snaps[j].CreatedAt)
+			})
+			toDelete := len(snaps) - m.cfg.Quotas.MaxSnapshotsPerVM + 1
+			for i := 0; i < toDelete; i++ {
+				_ = m.DeleteSnapshot(ctx, vmID, snaps[i].Name)
+			}
+		}
 	}
 
 	dom, err := m.conn.LookupDomainByName(vm.Name)

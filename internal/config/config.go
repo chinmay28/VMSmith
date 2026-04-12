@@ -71,8 +71,9 @@ type DefaultsConfig struct {
 type QuotasConfig struct {
 	MaxVMs         int `yaml:"max_vms"`
 	MaxTotalCPUs   int `yaml:"max_total_cpus"`
-	MaxTotalRAMMB  int `yaml:"max_total_ram_mb"`
-	MaxTotalDiskGB int `yaml:"max_total_disk_gb"`
+	MaxTotalRAMMB     int `yaml:"max_total_ram_mb"`
+	MaxTotalDiskGB    int `yaml:"max_total_disk_gb"`
+	MaxSnapshotsPerVM int `yaml:"max_snapshots_per_vm"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
