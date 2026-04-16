@@ -45,7 +45,7 @@ Several API inputs currently pass through to libvirt without validation, produci
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 1.3.1 | Add unit tests for VM name/CPU/RAM validation rules (after 1.2.1-1.2.2) | S | ✅ Done — `internal/api/validation_test.go` covers VM name trimming/rules plus CPU/RAM/disk bound validation for create/update payloads |
-| 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | Extend `api_test.go` with negative test cases |
+| 1.3.2 | Add API tests for all 400-class error paths (invalid JSON, missing fields, out-of-range values) | M | ✅ Done — `internal/api/api_test.go` now covers additional create/update validation failures for disk bounds and tags, plus upload-image missing-name handling, alongside the existing invalid JSON and missing-field cases |
 | 1.3.3 | Add port forward collision test (duplicate host:port+protocol) | S | ✅ Done — duplicate `host_port` + protocol conflicts are covered in `internal/network/portforward_test.go` and `internal/api/api_test.go` |
 | 1.3.4 | Add image upload edge-case tests: zero-byte file, oversized file, non-qcow2 file | M | ✅ Done — `internal/api/api_test.go` covers zero-byte, non-`.qcow2`, and insufficient-storage upload paths via multipart `httptest` cases |
 | 1.3.5 | Add CLI output tests: verify `vmsmith vm list` table format, `vmsmith image list` output | S | ✅ Done — `internal/cli/commands_test.go` captures stdout and verifies table headers/rows for both `vm list` and `image list` |
