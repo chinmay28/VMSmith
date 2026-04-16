@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +28,8 @@ type Server struct {
 	authConfig           config.AuthConfig
 	createTokens         chan struct{}
 	rateLimiter          *ipRateLimiter
+	inflight             sync.WaitGroup
+	shuttingDown         atomic.Bool
 }
 
 type ipRateLimiter struct {
@@ -83,6 +87,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	r := chi.NewRouter()
 
 	// Middleware
+	r.Use(s.trackInFlightRequests)
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(middleware.Recoverer)
 
@@ -150,4 +155,39 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+// BeginShutdown marks the API server as draining so new requests are rejected.
+func (s *Server) BeginShutdown() {
+	s.shuttingDown.Store(true)
+}
+
+// WaitForDrain waits until in-flight requests finish or the context expires.
+func (s *Server) WaitForDrain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.inflight.Wait()
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) trackInFlightRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.shuttingDown.Load() {
+			w.Header().Set("Connection", "close")
+			writeError(w, http.StatusServiceUnavailable, "server is shutting down")
+			return
+		}
+
+		s.inflight.Add(1)
+		defer s.inflight.Done()
+		next.ServeHTTP(w, r)
+	})
 }

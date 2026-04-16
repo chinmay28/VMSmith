@@ -2,13 +2,18 @@ package daemon
 
 import (
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/network"
+	"github.com/vmsmith/vmsmith/internal/store"
+	"github.com/vmsmith/vmsmith/internal/vm"
 )
 
 func TestServeUsesHTTPWithoutTLS(t *testing.T) {
@@ -117,5 +122,85 @@ func TestStatusReturnsFalseForInvalidPIDContents(t *testing.T) {
 	}
 	if pid != 0 {
 		t.Fatalf("Status() pid = %d, want 0", pid)
+	}
+}
+
+func TestCloseResourcesClosesAllManagedDependencies(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New(): %v", err)
+	}
+
+	d := &Daemon{
+		vmManager: vm.NewMockManager(),
+		netManager: &network.Manager{},
+		store:     db,
+	}
+
+	origCloseVMManager := closeVMManager
+	origCloseNetworkMgr := closeNetworkMgr
+	origCloseStore := closeStore
+	defer func() {
+		closeVMManager = origCloseVMManager
+		closeNetworkMgr = origCloseNetworkMgr
+		closeStore = origCloseStore
+	}()
+
+	var closed []string
+	closeVMManager = func(m vm.Manager) error {
+		closed = append(closed, "vm")
+		return nil
+	}
+	closeNetworkMgr = func(m *network.Manager) error {
+		closed = append(closed, "network")
+		return nil
+	}
+	closeStore = func(s *store.Store) error {
+		closed = append(closed, "store")
+		return nil
+	}
+
+	if err := d.closeResources(); err != nil {
+		t.Fatalf("closeResources() error = %v", err)
+	}
+	if strings.Join(closed, ",") != "vm,network,store" {
+		t.Fatalf("closed resources = %v", closed)
+	}
+}
+
+func TestCloseResourcesJoinsCleanupErrors(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New(): %v", err)
+	}
+
+	d := &Daemon{
+		vmManager: vm.NewMockManager(),
+		netManager: &network.Manager{},
+		store:     db,
+	}
+
+	origCloseVMManager := closeVMManager
+	origCloseNetworkMgr := closeNetworkMgr
+	origCloseStore := closeStore
+	defer func() {
+		closeVMManager = origCloseVMManager
+		closeNetworkMgr = origCloseNetworkMgr
+		closeStore = origCloseStore
+	}()
+
+	closeVMManager = func(m vm.Manager) error { return errors.New("vm boom") }
+	closeNetworkMgr = func(m *network.Manager) error { return nil }
+	closeStore = func(s *store.Store) error { return errors.New("store boom") }
+
+	err = d.closeResources()
+	if err == nil {
+		t.Fatal("closeResources() error = nil, want joined error")
+	}
+	if !strings.Contains(err.Error(), "closing VM manager: vm boom") {
+		t.Fatalf("joined error missing VM manager failure: %v", err)
+	}
+	if !strings.Contains(err.Error(), "closing store: store boom") {
+		t.Fatalf("joined error missing store failure: %v", err)
 	}
 }

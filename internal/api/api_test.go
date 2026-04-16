@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"mime/multipart"
@@ -90,6 +91,54 @@ func assertAPIErrorCode(t *testing.T, resp *http.Response, want string) errorRes
 		t.Fatal("expected non-empty error message")
 	}
 	return errResp
+}
+
+func TestServerRejectsNewRequestsDuringShutdownAndWaitsForDrain(t *testing.T) {
+	s := &Server{}
+	handlerStarted := make(chan struct{})
+	release := make(chan struct{})
+	handlerDone := make(chan struct{})
+
+	h := s.trackInFlightRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(handlerStarted)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+		close(handlerDone)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	go h.ServeHTTP(rec, req)
+	<-handlerStarted
+
+	waitResult := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		waitResult <- s.WaitForDrain(ctx)
+	}()
+
+	s.BeginShutdown()
+	shutdownRec := httptest.NewRecorder()
+	h.ServeHTTP(shutdownRec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if shutdownRec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("shutdown request status = %d, want %d", shutdownRec.Code, http.StatusServiceUnavailable)
+	}
+
+	select {
+	case err := <-waitResult:
+		t.Fatalf("WaitForDrain returned early: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	<-handlerDone
+	if err := <-waitResult; err != nil {
+		t.Fatalf("WaitForDrain() error = %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("in-flight request status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
 }
 
 // ============================================================
