@@ -43,12 +43,37 @@ async function request(path, options = {}) {
   }
 
   if (!res.ok) throw new Error(data?.error || `Request failed: ${res.status}`);
+
+  if (options.withMeta) {
+    return {
+      data,
+      meta: {
+        totalCount: Number.parseInt(res.headers.get('X-Total-Count') || '', 10) || 0,
+      },
+    };
+  }
+
   return data;
+}
+
+function withQuery(path, params = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 // --- VMs ---
 export const vms = {
-  list:    (tag = '')   => request(tag ? `/vms?tag=${encodeURIComponent(tag)}` : '/vms'),
+  list:    ({ tag = '', status = '', page, perPage } = {}) => request(withQuery('/vms', {
+    tag,
+    status,
+    page,
+    per_page: perPage,
+  }), { withMeta: true }),
   get:     (id)         => request(`/vms/${id}`),
   create:  (spec)       => request('/vms', { method: 'POST', body: JSON.stringify(spec) }),
   update:  (id, patch)  => request(`/vms/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -108,7 +133,7 @@ function uploadImageWithProgress(file, name, onProgress) {
 
 // --- Images ---
 export const images = {
-  list:     ()            => request('/images'),
+  list:     ({ page, perPage } = {}) => request(withQuery('/images', { page, per_page: perPage }), { withMeta: true }),
   create:   (vmId, name)  => request('/images', { method: 'POST', body: JSON.stringify({ vm_id: vmId, name }) }),
   upload:   (file, name, onProgress) => uploadImageWithProgress(file, name, onProgress),
   delete:   (id)          => request(`/images/${id}`, { method: 'DELETE' }),

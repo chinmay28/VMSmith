@@ -104,3 +104,49 @@ export function ErrorBanner({ message, onRetry }) {
     </div>
   );
 }
+
+export function PaginationControls({
+  page,
+  perPage,
+  total,
+  perPageOptions = [10, 25, 50, 100],
+  itemLabel = 'items',
+  onPageChange,
+  onPerPageChange,
+}) {
+  const safeTotal = Number.isFinite(total) ? total : 0;
+  const currentPage = Math.max(1, page || 1);
+  const currentPerPage = Math.max(1, perPage || perPageOptions[0] || 25);
+  const totalPages = Math.max(1, Math.ceil(safeTotal / currentPerPage));
+  const start = safeTotal === 0 ? 0 : (currentPage - 1) * currentPerPage + 1;
+  const end = safeTotal === 0 ? 0 : Math.min(safeTotal, currentPage * currentPerPage);
+
+  return (
+    <div className="mt-4 flex flex-col gap-3 text-sm text-steel-400 md:flex-row md:items-center md:justify-between">
+      <div>
+        Showing <span className="text-steel-200">{start}-{end}</span> of <span className="text-steel-200">{safeTotal}</span> {itemLabel}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-steel-500">Per page</span>
+          <select
+            className="input py-1 text-xs w-20"
+            value={currentPerPage}
+            onChange={(e) => onPerPageChange?.(Number(e.target.value))}
+          >
+            {perPageOptions.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn-secondary" disabled={currentPage <= 1} onClick={() => onPageChange?.(currentPage - 1)}>
+          Previous
+        </button>
+        <span className="text-xs text-steel-500">Page {currentPage} / {totalPages}</span>
+        <button className="btn-secondary" disabled={currentPage >= totalPages} onClick={() => onPageChange?.(currentPage + 1)}>
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
