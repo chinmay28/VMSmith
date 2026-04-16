@@ -22,10 +22,10 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	var req createImageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
 	if err := validateCreateImageRequest(req.VMID, req.Name); err != nil {
@@ -91,16 +91,16 @@ var availableStorageBytes = func(path string) (uint64, error) {
 func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "upload body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "upload body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "failed to parse form: "+err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_multipart_form", "failed to parse form: "+err.Error())
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing file field")
+		writeErrorCode(w, http.StatusBadRequest, "missing_file", "missing file field")
 		return
 	}
 	defer file.Close()
@@ -120,7 +120,7 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "reading upload: "+err.Error())
+		writeErrorCode(w, http.StatusInternalServerError, "upload_read_failed", "reading upload: "+err.Error())
 		return
 	}
 	if err := validateUploadedImage(header.Filename, data); err != nil {
@@ -130,7 +130,7 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 
 	freeBytes, err := availableStorageBytes(filepath.Dir(s.storageMgr.ImagePath(name)))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "checking available storage: "+err.Error())
+		writeErrorCode(w, http.StatusInternalServerError, "storage_check_failed", "checking available storage: "+err.Error())
 		return
 	}
 	if uint64(len(data)) > freeBytes {

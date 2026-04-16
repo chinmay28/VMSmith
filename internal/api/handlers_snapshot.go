@@ -18,10 +18,10 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	var req createSnapshotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
 	if err := validateCreateSnapshotRequest(req.Name); err != nil {

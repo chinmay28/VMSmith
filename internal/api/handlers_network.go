@@ -22,10 +22,10 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 	var req addPortRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
 
@@ -45,7 +45,7 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if vm.IP == "" {
-		writeError(w, http.StatusConflict, "VM does not have an IP address yet; is it running?")
+		writeErrorCode(w, http.StatusConflict, "vm_ip_unavailable", "VM does not have an IP address yet; is it running?")
 		return
 	}
 
