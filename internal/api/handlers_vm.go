@@ -76,6 +76,12 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.enforceCreateQuotas(r.Context(), spec); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+
 	release, ok := s.acquireCreateSlot()
 	if !ok {
 		writeAPIError(w, http.StatusTooManyRequests, types.NewAPIError("create_limit_reached", "too many VM create operations in progress; retry once an existing create finishes"))
@@ -119,6 +125,18 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		patch.Tags = tags
 	}
 	patch.Description = strings.TrimSpace(patch.Description)
+
+	current, err := s.vmManager.Get(r.Context(), id)
+	if err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusNotFound), err)
+		return
+	}
+	if err := s.enforceUpdateQuotas(r.Context(), current, patch); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
 
 	vm, err := s.vmManager.Update(r.Context(), id, patch)
 	if err != nil {

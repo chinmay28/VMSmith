@@ -271,6 +271,48 @@ func TestCreateVM_WithTagsAndDescription(t *testing.T) {
 	}
 }
 
+func TestCreateVM_QuotaExceeded_MaxVMs(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxVMs = 1
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}, State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:  "quota-vm",
+		Image: "ubuntu",
+		CPUs:  2,
+		RAMMB: 2048,
+		DiskGB: 20,
+	}))
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
+func TestCreateVM_QuotaExceeded_CPUs(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalCPUs = 4
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}, State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "quota-vm",
+		Image:  "ubuntu",
+		CPUs:   3,
+		RAMMB:  2048,
+		DiskGB: 20,
+	}))
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
 func TestListVMs_FilterByTag(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -676,6 +718,46 @@ func TestUpdateVM_DiskShrinkRejected(t *testing.T) {
 		t.Errorf("status = %d, want 400 for disk shrink attempt", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "disk_shrink_not_allowed")
+}
+
+func TestUpdateVM_QuotaExceeded_CPUs(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalCPUs = 4
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "base", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "target", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{CPUs: 3}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-2", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
+func TestUpdateVM_QuotaExceeded_Disk(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalDiskGB = 50
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "base", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "target", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	patch := types.VMUpdateSpec{DiskGB: 40}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-2", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
 }
 
 func TestUpdateVM_NotFound(t *testing.T) {
