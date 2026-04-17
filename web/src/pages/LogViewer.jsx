@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { RefreshCw, ChevronDown } from 'lucide-react';
 import { logs as logsApi } from '../api/client';
-import { PageHeader, Spinner, ErrorBanner } from '../components/Shared';
+import { PageHeader, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
 
 const LEVEL_ORDER = { debug: 0, info: 1, warn: 2, error: 3 };
 
@@ -22,12 +22,17 @@ const sourceBadge = (source) => {
   }
 };
 
+const DEFAULT_PER_PAGE = 100;
+
 export default function LogViewer() {
   const [entries, setEntries] = useState([]);
+  const [totalEntries, setTotalEntries] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [levelFilter, setLevelFilter] = useState('debug');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState(false);
   const bottomRef = useRef(null);
@@ -36,15 +41,17 @@ export default function LogViewer() {
   const fetchLogs = useCallback(async () => {
     if (paused) return;
     try {
-      const data = await logsApi.list({ level: levelFilter, limit: 500, source: sourceFilter });
-      setEntries(data?.entries || []);
+      const response = await logsApi.list({ level: levelFilter, page, perPage, source: sourceFilter });
+      const nextEntries = response?.data?.entries || [];
+      setEntries(nextEntries);
+      setTotalEntries(response?.meta?.totalCount ?? response?.data?.total ?? nextEntries.length);
       setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [levelFilter, sourceFilter, paused]);
+  }, [levelFilter, page, perPage, sourceFilter, paused]);
 
   // Initial load + polling every 3 seconds.
   useEffect(() => {
@@ -53,6 +60,10 @@ export default function LogViewer() {
     const id = setInterval(fetchLogs, 3000);
     return () => clearInterval(id);
   }, [fetchLogs]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [levelFilter, sourceFilter]);
 
   // Auto-scroll to bottom when new entries arrive.
   useEffect(() => {
@@ -74,7 +85,7 @@ export default function LogViewer() {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Logs"
-        subtitle={`${filtered.length} entries`}
+        subtitle={`${totalEntries} total entries`}
         actions={
           <div className="flex items-center gap-2">
             {/* Source filter */}
@@ -149,6 +160,21 @@ export default function LogViewer() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {totalEntries > 0 && (
+        <PaginationControls
+          page={page}
+          perPage={perPage}
+          total={totalEntries}
+          perPageOptions={[50, 100, 200, 500]}
+          itemLabel="log entries"
+          onPageChange={setPage}
+          onPerPageChange={(value) => {
+            setPerPage(value);
+            setPage(1);
+          }}
+        />
+      )}
 
       {/* Scroll-to-bottom hint */}
       {!autoScroll && (

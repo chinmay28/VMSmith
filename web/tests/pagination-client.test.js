@@ -85,3 +85,28 @@ test('images.list sends pagination params and returns total count metadata', asy
   assert.equal(result.meta.totalCount, 7);
   assert.equal(result.data[0].name, 'jammy');
 });
+
+test('logs.list sends pagination params and returns total count metadata', async () => {
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = url;
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get(name) {
+          return name === 'X-Total-Count' ? '13' : null;
+        },
+      },
+      async json() {
+        return { entries: [{ ts: '2026-04-17T00:00:00Z', level: 'info', source: 'api', msg: 'hello' }] };
+      },
+    };
+  };
+
+  const result = await client.logs.list({ level: 'warn', page: 3, perPage: 25, source: 'daemon' });
+
+  assert.equal(requestedUrl, '/api/v1/logs?level=warn&page=3&per_page=25&source=daemon');
+  assert.equal(result.meta.totalCount, 13);
+  assert.equal(result.data.entries[0].msg, 'hello');
+});

@@ -163,12 +163,14 @@ export const quotas = {
 
 // --- Logs ---
 export const logs = {
-  list: ({ level = 'debug', limit = 200, since = '', source = '' } = {}) => {
-    const params = new URLSearchParams({ level, limit });
-    if (since) params.set('since', since);
-    if (source) params.set('source', source);
-    return request(`/logs?${params}`);
-  },
+  list: ({ level = 'debug', page, perPage, limit, since = '', source = '' } = {}) => request(withQuery('/logs', {
+    level,
+    page,
+    per_page: perPage,
+    limit,
+    since,
+    source,
+  }), { withMeta: true }),
 };
 
 export default { vms, snapshots, images, ports, host, quotas, logs };
