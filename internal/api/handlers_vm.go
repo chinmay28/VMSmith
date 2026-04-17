@@ -45,10 +45,10 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	var spec types.VMSpec
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
 		return
 	}
 
@@ -108,10 +108,10 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	var patch types.VMUpdateSpec
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
 		return
 	}
 	if err := validateVMUpdateSpec(patch); err != nil {
@@ -238,10 +238,10 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 	var req bulkVMActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if isRequestTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
 		return
 	}
 

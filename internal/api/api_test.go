@@ -188,6 +188,7 @@ func TestCreateVM_BadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
 }
 
 func TestCreateVM_InvalidName(t *testing.T) {
@@ -921,6 +922,7 @@ func TestUpdateVM_BadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
 }
 
 func TestUpdateVM_ErrorInjection(t *testing.T) {
@@ -1494,6 +1496,7 @@ func TestCreateSnapshot_BadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
 }
 
 func TestCreateSnapshot_MissingName(t *testing.T) {
@@ -1610,6 +1613,7 @@ func TestCreateImage_BadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
 }
 
 func TestCreateImage_MissingFields(t *testing.T) {
@@ -1762,6 +1766,27 @@ func TestAddPort_BadJSON(t *testing.T) {
 		bytes.NewBufferString("{bad"))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
+}
+
+func TestAddPort_VMIPUnavailable(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p", Name: "vm-p"})
+
+	body := jsonBody(t, addPortRequest{HostPort: 2222, GuestPort: 22})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-p/ports", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /ports: %v", err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "vm_ip_unavailable")
+	if errResp.Message != "VM does not have an IP address yet; is it running?" {
+		t.Fatalf("message = %q, want VM does not have an IP address yet; is it running?", errResp.Message)
 	}
 }
 
@@ -1924,6 +1949,10 @@ func TestUploadImage_MissingFile(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "missing_file")
+	if errResp.Message != "missing file field" {
+		t.Fatalf("message = %q, want missing file field", errResp.Message)
 	}
 }
 
@@ -2115,6 +2144,7 @@ func TestCreateVM_RequestBodyTooLarge(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "request_too_large")
 }
 
 func TestUploadImage_RequestBodyTooLarge(t *testing.T) {
@@ -2145,6 +2175,7 @@ func TestUploadImage_RequestBodyTooLarge(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", resp.StatusCode)
 	}
+	assertAPIErrorCode(t, resp, "request_too_large")
 }
 
 func TestCreateVM_ConcurrentCreateLimit(t *testing.T) {
