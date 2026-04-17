@@ -22,7 +22,7 @@ func New(path string) (*Store, error) {
 
 	// Ensure all buckets exist
 	err = db.Update(func(tx *bolt.Tx) error {
-		buckets := []string{BucketVMs, BucketImages, BucketSnapshots, BucketPortForwards, BucketConfig}
+		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig}
 		for _, b := range buckets {
 			if _, err := tx.CreateBucketIfNotExists([]byte(b)); err != nil {
 				return err
@@ -117,6 +117,44 @@ func (s *Store) ListImages() ([]*types.Image, error) {
 // DeleteImage removes an image record.
 func (s *Store) DeleteImage(id string) error {
 	return s.delete(BucketImages, id)
+}
+
+// --- Template operations ---
+
+// PutTemplate stores a VM template record.
+func (s *Store) PutTemplate(tpl *types.VMTemplate) error {
+	return s.put(BucketTemplates, tpl.ID, tpl)
+}
+
+// GetTemplate retrieves a VM template by ID.
+func (s *Store) GetTemplate(id string) (*types.VMTemplate, error) {
+	var tpl types.VMTemplate
+	if err := s.get(BucketTemplates, id, &tpl); err != nil {
+		return nil, err
+	}
+	return &tpl, nil
+}
+
+// ListTemplates returns all stored VM templates.
+func (s *Store) ListTemplates() ([]*types.VMTemplate, error) {
+	var templates []*types.VMTemplate
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketTemplates))
+		return b.ForEach(func(k, v []byte) error {
+			var tpl types.VMTemplate
+			if err := json.Unmarshal(v, &tpl); err != nil {
+				return err
+			}
+			templates = append(templates, &tpl)
+			return nil
+		})
+	})
+	return templates, err
+}
+
+// DeleteTemplate removes a VM template record.
+func (s *Store) DeleteTemplate(id string) error {
+	return s.delete(BucketTemplates, id)
 }
 
 // --- Port forward operations ---

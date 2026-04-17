@@ -67,6 +67,27 @@ func (m *Manager) ListImages() ([]*types.Image, error) {
 	return m.store.ListImages()
 }
 
+// CreateTemplate stores a reusable VM template.
+func (m *Manager) CreateTemplate(tpl *types.VMTemplate) (*types.VMTemplate, error) {
+	if err := m.store.PutTemplate(tpl); err != nil {
+		return nil, err
+	}
+	return tpl, nil
+}
+
+// ListTemplates returns all available VM templates.
+func (m *Manager) ListTemplates() ([]*types.VMTemplate, error) {
+	return m.store.ListTemplates()
+}
+
+// DeleteTemplate removes a VM template from metadata storage.
+func (m *Manager) DeleteTemplate(id string) error {
+	if _, err := m.store.GetTemplate(id); err != nil {
+		return err
+	}
+	return m.store.DeleteTemplate(id)
+}
+
 // DeleteImage removes an image from disk and metadata.
 func (m *Manager) DeleteImage(id string) error {
 	img, err := m.store.GetImage(id)

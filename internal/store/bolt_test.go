@@ -180,6 +180,57 @@ func TestImageCRUD(t *testing.T) {
 	}
 }
 
+// --- Template tests ---
+
+func TestTemplateCRUD(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	tpl := &types.VMTemplate{
+		ID:          "tmpl-1",
+		Name:        "small-linux",
+		Image:       "ubuntu-22.04",
+		CPUs:        2,
+		RAMMB:       2048,
+		DiskGB:      20,
+		Description: "small preset",
+		Tags:        []string{"prod", "web"},
+		DefaultUser: "ubuntu",
+		CreatedAt:   time.Now().Truncate(time.Millisecond),
+		UpdatedAt:   time.Now().Truncate(time.Millisecond),
+	}
+
+	if err := s.PutTemplate(tpl); err != nil {
+		t.Fatalf("PutTemplate: %v", err)
+	}
+
+	got, err := s.GetTemplate("tmpl-1")
+	if err != nil {
+		t.Fatalf("GetTemplate: %v", err)
+	}
+	if got.Name != tpl.Name {
+		t.Fatalf("Name = %q, want %q", got.Name, tpl.Name)
+	}
+	if got.DefaultUser != tpl.DefaultUser {
+		t.Fatalf("DefaultUser = %q, want %q", got.DefaultUser, tpl.DefaultUser)
+	}
+
+	list, err := s.ListTemplates()
+	if err != nil {
+		t.Fatalf("ListTemplates: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != tpl.ID {
+		t.Fatalf("ListTemplates = %#v, want template %#v", list, tpl)
+	}
+
+	if err := s.DeleteTemplate(tpl.ID); err != nil {
+		t.Fatalf("DeleteTemplate: %v", err)
+	}
+	if _, err := s.GetTemplate(tpl.ID); err == nil {
+		t.Fatal("expected template to be deleted")
+	}
+}
+
 // --- Port forward tests ---
 
 func TestPortForwardCRUD(t *testing.T) {
