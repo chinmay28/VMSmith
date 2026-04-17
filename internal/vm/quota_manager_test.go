@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
