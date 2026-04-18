@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/vmsmith/vmsmith/internal/api"
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -36,10 +40,10 @@ type Daemon struct {
 }
 
 var (
-	closeVMManager   = func(m vm.Manager) error { return m.Close() }
-	closeNetworkMgr  = func(m *network.Manager) error { return m.Close() }
-	closeStore       = func(s *store.Store) error { return s.Close() }
-	closeLogger      = func() { logger.Close() }
+	closeVMManager  = func(m vm.Manager) error { return m.Close() }
+	closeNetworkMgr = func(m *network.Manager) error { return m.Close() }
+	closeStore      = func(s *store.Store) error { return s.Close() }
+	closeLogger     = func() { logger.Close() }
 )
 
 var (
@@ -48,6 +52,13 @@ var (
 	}
 	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
 		return s.ListenAndServeTLS(certFile, keyFile)
+	}
+	serveAutoTLS = func(s *http.Server) error {
+		ln, err := tls.Listen("tcp", s.Addr, s.TLSConfig)
+		if err != nil {
+			return err
+		}
+		return s.Serve(ln)
 	}
 )
 
@@ -101,18 +112,23 @@ func New(cfg *config.Config) (*Daemon, error) {
 
 	apiServer := api.NewServerWithConfig(vmMgr, storageMgr, portFwd, cfg, web.Handler())
 
+	server := &http.Server{
+		Addr:    cfg.Daemon.Listen,
+		Handler: apiServer,
+	}
+	if cfg.Daemon.AutoCertConfigured() {
+		server.TLSConfig = autoCertTLSConfig(cfg)
+	}
+
 	return &Daemon{
 		cfg:        cfg,
 		store:      s,
 		vmManager:  vmMgr,
 		storageMgr: storageMgr,
 		netManager: netMgr,
-		portFwd:   portFwd,
-		apiServer: apiServer,
-		server: &http.Server{
-			Addr:    cfg.Daemon.Listen,
-			Handler: apiServer,
-		},
+		portFwd:    portFwd,
+		apiServer:  apiServer,
+		server:     server,
 	}, nil
 }
 
@@ -131,7 +147,7 @@ func (d *Daemon) Run() error {
 	// Start server in goroutine.
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen, "tls", strconv.FormatBool(d.cfg.Daemon.TLSConfigured()))
+		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen, "tls", strconv.FormatBool(d.cfg.Daemon.TLSEnabled()), "auto_cert", d.cfg.Daemon.TLS.AutoCert)
 		fmt.Printf("vmSmith daemon listening on %s\n", d.cfg.Daemon.Listen)
 		if err := d.serve(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -231,7 +247,33 @@ func (d *Daemon) serve() error {
 	if d.cfg.Daemon.TLSConfigured() {
 		return listenAndServeTLS(d.server, d.cfg.Daemon.TLS.CertFile, d.cfg.Daemon.TLS.KeyFile)
 	}
+	if d.cfg.Daemon.AutoCertConfigured() {
+		return serveAutoTLS(d.server)
+	}
 	return listenAndServe(d.server)
+}
+
+func autoCertTLSConfig(cfg *config.Config) *tls.Config {
+	cacheDir := cfg.Daemon.TLS.AutoCertCacheDir
+	if cacheDir == "" {
+		cacheDir = config.DefaultConfig().Daemon.TLS.AutoCertCacheDir
+	}
+
+	manager := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      autocert.DirCache(cacheDir),
+		HostPolicy: autocert.HostWhitelist(cfg.Daemon.TLS.AutoCert),
+	}
+
+	return &tls.Config{
+		GetCertificate: manager.GetCertificate,
+		MinVersion:     tls.VersionTLS12,
+		NextProtos: []string{
+			"h2",
+			"http/1.1",
+			acme.ALPNProto,
+		},
+	}
 }
 
 func (d *Daemon) closeResources() error {
