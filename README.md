@@ -214,6 +214,7 @@ quotas:
   max_total_cpus: 64
   max_total_ram_mb: 262144
   max_total_disk_gb: 4000
+  max_snapshots_per_vm: 5
 ```
 
 When configured, VMSmith rejects create/update requests that would exceed these totals and the dashboard shows current allocation versus limit.
@@ -540,6 +541,7 @@ quotas:
   max_total_cpus: 0       # total configured vCPUs across all VMs
   max_total_ram_mb: 0     # total configured RAM across all VMs
   max_total_disk_gb: 0    # total configured disk across all VMs
+  max_snapshots_per_vm: 0 # 0 disables the limit. if set, oldest snapshots are deleted when exceeded
 ```
 
 ---
