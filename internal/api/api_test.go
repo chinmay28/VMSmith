@@ -433,7 +433,7 @@ func TestCreateVM_WithTemplateDefaults(t *testing.T) {
 	if strings.Join(created.Tags, ",") != "prod,web" {
 		t.Fatalf("tags = %v", created.Tags)
 	}
-	if len(created.Spec.Networks) != 1 || created.Spec.Networks[0].NetworkID != "net-private" {
+	if len(created.Spec.Networks) != 1 || created.Spec.Networks[0].Name != "net-private" {
 		t.Fatalf("networks = %+v", created.Spec.Networks)
 	}
 }
