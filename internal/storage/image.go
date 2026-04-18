@@ -80,6 +80,11 @@ func (m *Manager) ListTemplates() ([]*types.VMTemplate, error) {
 	return m.store.ListTemplates()
 }
 
+// GetTemplate retrieves a VM template by ID.
+func (m *Manager) GetTemplate(id string) (*types.VMTemplate, error) {
+	return m.store.GetTemplate(id)
+}
+
 // DeleteTemplate removes a VM template from metadata storage.
 func (m *Manager) DeleteTemplate(id string) error {
 	if _, err := m.store.GetTemplate(id); err != nil {

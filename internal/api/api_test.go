@@ -377,6 +377,133 @@ func TestCreateVM_WithTagsAndDescription(t *testing.T) {
 	}
 }
 
+func TestCreateVM_WithTemplateDefaults(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	templateResp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":         "small-linux",
+		"image":        "ubuntu-22.04",
+		"cpus":         2,
+		"ram_mb":       2048,
+		"disk_gb":      20,
+		"description":  "Template description",
+		"default_user": "ubuntu",
+		"tags":         []string{"prod", "web"},
+		"networks": []map[string]any{{
+			"network_id": "net-private",
+			"mode":       "bridge",
+		}},
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if templateResp.StatusCode != http.StatusCreated {
+		t.Fatalf("template status = %d, want 201", templateResp.StatusCode)
+	}
+
+	var tpl types.VMTemplate
+	decodeJSON(t, templateResp, &tpl)
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, map[string]any{
+		"name":        "templated-vm",
+		"template_id": tpl.ID,
+	}))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Spec.TemplateID != tpl.ID {
+		t.Fatalf("template_id = %q, want %q", created.Spec.TemplateID, tpl.ID)
+	}
+	if created.Spec.Image != "ubuntu-22.04" || created.Spec.CPUs != 2 || created.Spec.RAMMB != 2048 || created.Spec.DiskGB != 20 {
+		t.Fatalf("unexpected spec defaults = %+v", created.Spec)
+	}
+	if created.Description != "Template description" {
+		t.Fatalf("description = %q", created.Description)
+	}
+	if created.Spec.DefaultUser != "ubuntu" {
+		t.Fatalf("default_user = %q", created.Spec.DefaultUser)
+	}
+	if strings.Join(created.Tags, ",") != "prod,web" {
+		t.Fatalf("tags = %v", created.Tags)
+	}
+	if len(created.Spec.Networks) != 1 || created.Spec.Networks[0].NetworkID != "net-private" {
+		t.Fatalf("networks = %+v", created.Spec.Networks)
+	}
+}
+
+func TestCreateVM_WithTemplateOverrides(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	templateResp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":         "base-linux",
+		"image":        "ubuntu-22.04",
+		"cpus":         2,
+		"ram_mb":       2048,
+		"disk_gb":      20,
+		"description":  "Template description",
+		"default_user": "ubuntu",
+		"tags":         []string{"prod", "web"},
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	var tpl types.VMTemplate
+	decodeJSON(t, templateResp, &tpl)
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, map[string]any{
+		"name":         "override-vm",
+		"template_id":  tpl.ID,
+		"image":        "debian-12",
+		"cpus":         4,
+		"description":  "Custom description",
+		"default_user": "debian",
+		"tags":         []string{"staging"},
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Spec.Image != "debian-12" || created.Spec.CPUs != 4 {
+		t.Fatalf("spec overrides = %+v", created.Spec)
+	}
+	if created.Spec.RAMMB != 2048 || created.Spec.DiskGB != 20 {
+		t.Fatalf("template defaults not preserved = %+v", created.Spec)
+	}
+	if created.Description != "Custom description" || created.Spec.DefaultUser != "debian" {
+		t.Fatalf("override metadata = %+v", created)
+	}
+	if strings.Join(created.Tags, ",") != "staging" {
+		t.Fatalf("tags = %v", created.Tags)
+	}
+}
+
+func TestCreateVM_WithMissingTemplate(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, map[string]any{
+		"name":        "templated-vm",
+		"template_id": "tmpl-missing",
+	}))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+	if !strings.Contains(errResp.Message, "tmpl-missing") {
+		t.Fatalf("message = %q", errResp.Message)
+	}
+}
+
 func TestCreateVM_QuotaExceeded_MaxVMs(t *testing.T) {
 	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
 		cfg.Quotas.MaxVMs = 1
