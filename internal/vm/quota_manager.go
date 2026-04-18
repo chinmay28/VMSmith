@@ -3,10 +3,8 @@ package vm
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"github.com/vmsmith/vmsmith/internal/config"
-	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -43,27 +41,7 @@ func (m *quotaManager) Delete(ctx context.Context, id string) error { return m.b
 func (m *quotaManager) Get(ctx context.Context, id string) (*types.VM, error) { return m.base.Get(ctx, id) }
 func (m *quotaManager) List(ctx context.Context) ([]*types.VM, error) { return m.base.List(ctx) }
 func (m *quotaManager) CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error) {
-	snap, err := m.base.CreateSnapshot(ctx, vmID, name)
-	if err != nil {
-		return nil, err
-	}
-
-	if m.quotas.MaxSnapshotsPerVM > 0 {
-		snaps, err := m.base.ListSnapshots(ctx, vmID)
-		if err == nil && len(snaps) > m.quotas.MaxSnapshotsPerVM {
-			sort.Slice(snaps, func(i, j int) bool {
-				return snaps[i].CreatedAt.Before(snaps[j].CreatedAt)
-			})
-			toDelete := len(snaps) - m.quotas.MaxSnapshotsPerVM
-			for i := 0; i < toDelete; i++ {
-				if err := m.base.DeleteSnapshot(ctx, vmID, snaps[i].Name); err != nil {
-					logger.Warn("quotaManager", "failed to delete old snapshot for retention", "vmID", vmID, "snapshot", snaps[i].Name, "error", err.Error())
-				}
-			}
-		}
-	}
-
-	return snap, nil
+	return m.base.CreateSnapshot(ctx, vmID, name)
 }
 func (m *quotaManager) RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error {
 	return m.base.RestoreSnapshot(ctx, vmID, snapshotName)

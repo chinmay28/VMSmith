@@ -27,7 +27,6 @@ type MockManager struct {
 	ListErr            error
 	CreateSnapshotErr  error
 	RestoreSnapshotErr error
-	DeleteSnapshotErr  error
 	CreateDelay        time.Duration
 }
 
@@ -272,10 +271,6 @@ func (m *MockManager) ListSnapshots(ctx context.Context, vmID string) ([]*types.
 }
 
 func (m *MockManager) DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error {
-	if m.DeleteSnapshotErr != nil {
-		return m.DeleteSnapshotErr
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
