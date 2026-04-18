@@ -232,7 +232,7 @@ Automate routine tasks like snapshots and backups.
 | 5.2.3 | Add CRUD endpoints for schedules | M | |
 | 5.2.4 | Add `vmsmith schedule create|list|delete` CLI commands | M | |
 | 5.2.5 | Add schedule management UI to VMDetail page | M | |
-| 5.2.6 | Implement snapshot retention: auto-delete oldest when count exceeds limit | S | ✅ Done — `daemon.quotas.max_snapshots_per_vm` auto-deletes the oldest snapshots to maintain limits |
+| 5.2.6 | Implement snapshot retention: auto-delete oldest when count exceeds limit | S | |
 
 ### 5.3 VM Import/Export (OVA/OVF)
 
