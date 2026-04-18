@@ -19,6 +19,7 @@ type MockManager struct {
 
 	// Hooks for injecting errors in tests
 	CreateErr          error
+	CloneErr           error
 	UpdateErr          error
 	StartErr           error
 	StopErr            error
@@ -78,6 +79,44 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 
 	m.vms[id] = vm
 	return vm, nil
+}
+
+func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error) {
+	if m.CloneErr != nil {
+		return nil, m.CloneErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	source, ok := m.vms[sourceID]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", sourceID)
+	}
+
+	m.nextID++
+	id := fmt.Sprintf("vm-mock-%d", m.nextID)
+
+	spec := source.Spec
+	spec.Name = newName
+	spec.Tags = append([]string(nil), source.Spec.Tags...)
+	spec.Networks = append([]types.NetworkSpec(nil), source.Spec.Networks...)
+
+	clone := &types.VM{
+		ID:          id,
+		Name:        newName,
+		Description: source.Description,
+		Tags:        append([]string(nil), source.Tags...),
+		Spec:        spec,
+		State:       types.VMStateStopped,
+		IP:          "",
+		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	m.vms[id] = clone
+	return clone, nil
 }
 
 func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error) {

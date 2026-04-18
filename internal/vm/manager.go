@@ -12,6 +12,7 @@ import (
 type Manager interface {
 	// VM lifecycle
 	Create(ctx context.Context, spec types.VMSpec) (*types.VM, error)
+	Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error)
 	Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error)
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id string) error
