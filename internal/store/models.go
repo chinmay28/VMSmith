@@ -4,6 +4,7 @@ package store
 const (
 	BucketVMs          = "vms"
 	BucketImages       = "images"
+	BucketTemplates    = "templates"
 	BucketSnapshots    = "snapshots"
 	BucketPortForwards = "port_forwards"
 	BucketConfig       = "config"

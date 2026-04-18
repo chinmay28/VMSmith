@@ -99,8 +99,8 @@ Save and reuse VM configurations without re-specifying every parameter.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 2.4.1 | Define `VMTemplate` type: name, image, CPUs, RAM, disk, networks, tags, default_user | S | Store in new bbolt bucket `templates` |
-| 2.4.2 | Add `POST /api/v1/templates`, `GET /api/v1/templates`, `DELETE /api/v1/templates/{id}` | M | |
+| 2.4.1 | Define `VMTemplate` type: name, image, CPUs, RAM, disk, networks, tags, default_user | S | ✅ Done — `pkg/types/template.go` defines reusable template records backed by a dedicated bbolt `templates` bucket |
+| 2.4.2 | Add `POST /api/v1/templates`, `GET /api/v1/templates`, `DELETE /api/v1/templates/{id}` | M | ✅ Done — API now supports template create/list/delete with validation, pagination, and CRUD test coverage |
 | 2.4.3 | Add `POST /vms` support for `template_id` field — merges template defaults with request overrides | M | |
 | 2.4.4 | Add `vmsmith template create|list|delete` CLI commands | M | |
 | 2.4.5 | Add template selector dropdown to Create VM modal in frontend | S | |

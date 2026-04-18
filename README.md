@@ -452,6 +452,12 @@ curl -X PATCH http://localhost:8080/api/v1/vms/<id> \
 curl -X POST http://localhost:8080/api/v1/vms/<id>/ports \
   -H 'Content-Type: application/json' \
   -d '{"host_port": 2222, "guest_port": 22, "protocol": "tcp"}'
+
+# Create and list reusable VM templates
+curl -X POST http://localhost:8080/api/v1/templates \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"small-linux","image":"ubuntu-22.04","cpus":2,"ram_mb":2048,"disk_gb":20,"tags":["prod","web"]}'
+curl http://localhost:8080/api/v1/templates
 ```
 
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)

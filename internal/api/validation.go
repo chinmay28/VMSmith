@@ -153,6 +153,42 @@ func validateCreateImageRequest(vmID, name string) error {
 	return nil
 }
 
+func validateTemplateRequest(req createTemplateRequest) error {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return types.NewAPIError("invalid_name", "template name is required")
+	}
+	if !vmNameRe.MatchString(name) {
+		return types.NewAPIError("invalid_name", "template name must be 1-64 characters and contain only letters, numbers, and hyphens")
+	}
+	if strings.TrimSpace(req.Image) == "" {
+		return types.NewAPIError("invalid_image", "image is required")
+	}
+	if err := validateOptionalVMResourceValue(req.CPUs, 1, 128, "cpus"); err != nil {
+		return err
+	}
+	if err := validateOptionalVMResourceValue(req.RAMMB, 128, 1024*1024, "ram_mb"); err != nil {
+		return err
+	}
+	if err := validateOptionalVMResourceValue(req.DiskGB, 1, 1024*10, "disk_gb"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateUniqueTemplateName(name string, templates []*types.VMTemplate) error {
+	trimmed := strings.TrimSpace(name)
+	for _, tpl := range templates {
+		if tpl == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(tpl.Name), trimmed) {
+			return types.NewAPIError("invalid_name", fmt.Sprintf("template name %q already exists", trimmed))
+		}
+	}
+	return nil
+}
+
 func validateUploadedImage(filename string, data []byte) error {
 	trimmedName := strings.TrimSpace(filename)
 	if trimmedName == "" {

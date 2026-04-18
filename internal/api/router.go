@@ -137,6 +137,13 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Get("/{imageID}/download", s.DownloadImage)
 		})
 
+		// VM template endpoints
+		r.Route("/templates", func(r chi.Router) {
+			r.Get("/", s.ListTemplates)
+			r.Post("/", s.withRequestBodyLimit(s.CreateTemplate))
+			r.Delete("/{templateID}", s.DeleteTemplate)
+		})
+
 		// Host network discovery
 		r.Get("/host/interfaces", s.ListHostInterfaces)
 
