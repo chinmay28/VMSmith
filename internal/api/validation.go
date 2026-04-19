@@ -143,6 +143,17 @@ func validateCreateSnapshotRequest(name string) error {
 	return nil
 }
 
+func validateCloneVMRequest(req cloneVMRequest) error {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return types.NewAPIError("invalid_name", "vm name is required")
+	}
+	if !vmNameRe.MatchString(name) {
+		return types.NewAPIError("invalid_name", "vm name must be 1-64 characters and contain only letters, numbers, and hyphens")
+	}
+	return nil
+}
+
 func validateCreateImageRequest(vmID, name string) error {
 	if strings.TrimSpace(vmID) == "" {
 		return types.NewAPIError("invalid_spec", "vm_id is required")

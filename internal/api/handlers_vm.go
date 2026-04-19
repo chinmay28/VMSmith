@@ -40,6 +40,10 @@ type bulkVMActionResponse struct {
 	Results []bulkVMActionResult `json:"results"`
 }
 
+type cloneVMRequest struct {
+	Name string `json:"name"`
+}
+
 // CreateVM handles POST /api/v1/vms
 func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	var spec types.VMSpec
@@ -198,6 +202,47 @@ func (s *Server) GetVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, vm)
+}
+
+// CloneVM handles POST /api/v1/vms/{vmID}/clone
+func (s *Server) CloneVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+
+	var req cloneVMRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	if err := validateCloneVMRequest(req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	existingVMs, err := s.vmManager.List(r.Context())
+	if err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	if err := validateUniqueVMName(req.Name, existingVMs); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	cloned, err := s.vmManager.Clone(r.Context(), id, req.Name)
+	if err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, cloned)
 }
 
 // DeleteVM handles DELETE /api/v1/vms/{vmID}
