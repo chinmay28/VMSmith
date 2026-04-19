@@ -62,9 +62,9 @@ Currently the only way to duplicate a VM is export-to-image then create-from-ima
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 2.1.1 | Add `Clone(ctx, sourceID, newName) (*VM, error)` to `vm.Manager` interface | S | |
+| 2.1.1 | Add `Clone(ctx, sourceID, newName) (*VM, error)` to `vm.Manager` interface | S | ✅ Done — cloning groundwork now exists at the manager layer so API/CLI/frontend work can target a stable method |
 | 2.1.2 | Implement in `LibvirtManager`: `qemu-img create` overlay from source disk, new domain XML, new cloud-init ISO | L | Must handle: new MAC, new DHCP reservation, new VM ID. Source VM should be stopped |
-| 2.1.3 | Implement in `MockManager` | S | Copy in-memory state |
+| 2.1.3 | Implement in `MockManager` | S | ✅ Done — mock cloning copies the source VM spec/metadata into a new stopped VM for fast API/CLI test coverage |
 | 2.1.4 | Add `POST /api/v1/vms/{id}/clone` endpoint | S | Body: `{ "name": "clone-name" }` |
 | 2.1.5 | Add `vmsmith vm clone <id> --name <name>` CLI command | S | |
 | 2.1.6 | Add "Clone" button to VMDetail page in frontend | S | |

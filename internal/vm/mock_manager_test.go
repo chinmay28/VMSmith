@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -43,6 +44,74 @@ func TestMockManager_Defaults(t *testing.T) {
 	}
 	if vm.Spec.RAMMB != 2048 {
 		t.Errorf("default RAM = %d, want 2048", vm.Spec.RAMMB)
+	}
+}
+
+func TestMockManager_Clone(t *testing.T) {
+	m := NewMockManager()
+	m.SeedVM(&types.VM{
+		ID:          "vm-source",
+		Name:        "source",
+		Description: "base vm",
+		Tags:        []string{"prod", "web"},
+		State:       types.VMStateRunning,
+		IP:          "192.168.100.50",
+		DiskPath:    "/var/lib/vmsmith/vms/vm-source/disk.qcow2",
+		Spec: types.VMSpec{
+			Name:        "source",
+			CPUs:        4,
+			RAMMB:       8192,
+			DiskGB:      80,
+			Image:       "ubuntu-24.04",
+			Description: "base vm",
+			Tags:        []string{"prod", "web"},
+		},
+	})
+
+	clone, err := m.Clone(context.Background(), "vm-source", "clone-a")
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if clone.ID == "vm-source" {
+		t.Fatalf("clone reused source ID")
+	}
+	if clone.Name != "clone-a" || clone.Spec.Name != "clone-a" {
+		t.Fatalf("clone name = %q / %q, want clone-a", clone.Name, clone.Spec.Name)
+	}
+	if clone.State != types.VMStateStopped {
+		t.Fatalf("clone state = %q, want stopped", clone.State)
+	}
+	if clone.IP != "" {
+		t.Fatalf("clone IP = %q, want empty", clone.IP)
+	}
+	if clone.Spec.CPUs != 4 || clone.Spec.RAMMB != 8192 || clone.Spec.DiskGB != 80 || clone.Spec.Image != "ubuntu-24.04" {
+		t.Fatalf("clone spec mismatch: %+v", clone.Spec)
+	}
+	if len(clone.Tags) != 2 || clone.Tags[0] != "prod" || clone.Tags[1] != "web" {
+		t.Fatalf("clone tags = %#v, want copied tags", clone.Tags)
+	}
+
+	source, err := m.Get(context.Background(), "vm-source")
+	if err != nil {
+		t.Fatalf("Get source: %v", err)
+	}
+	if source.State != types.VMStateRunning || source.IP != "192.168.100.50" {
+		t.Fatalf("source mutated after clone: %+v", source)
+	}
+}
+
+func TestMockManager_Clone_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if _, err := m.Clone(context.Background(), "missing", "clone-a"); err == nil {
+		t.Fatal("expected clone error for missing source VM")
+	}
+}
+
+func TestMockManager_Clone_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	m.CloneErr = fmt.Errorf("clone boom")
+	if _, err := m.Clone(context.Background(), "vm-source", "clone-a"); err == nil || err.Error() != "clone boom" {
+		t.Fatalf("Clone error = %v, want clone boom", err)
 	}
 }
 

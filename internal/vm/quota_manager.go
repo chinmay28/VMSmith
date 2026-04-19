@@ -30,6 +30,17 @@ func (m *quotaManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM
 	return m.base.Create(ctx, spec)
 }
 
+func (m *quotaManager) Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error) {
+	source, err := m.base.Get(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.ensureCreateWithinQuota(ctx, source.Spec); err != nil {
+		return nil, err
+	}
+	return m.base.Clone(ctx, sourceID, newName)
+}
+
 func (m *quotaManager) Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error) {
 	if err := m.ensureUpdateWithinQuota(ctx, id, patch); err != nil {
 		return nil, err

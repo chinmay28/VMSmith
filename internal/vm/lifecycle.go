@@ -219,6 +219,10 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	return vm, nil
 }
 
+func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error) {
+	return nil, fmt.Errorf("vm clone not implemented")
+}
+
 // Start boots a stopped VM.
 func (m *LibvirtManager) Start(ctx context.Context, id string) error {
 	vm, err := m.store.GetVM(id)
