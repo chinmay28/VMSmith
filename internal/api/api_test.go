@@ -391,8 +391,8 @@ func TestCreateVM_WithTemplateDefaults(t *testing.T) {
 		"default_user": "ubuntu",
 		"tags":         []string{"prod", "web"},
 		"networks": []map[string]any{{
-			"network_id": "net-private",
-			"mode":       "bridge",
+			"name": "net-private",
+			"mode": "bridge",
 		}},
 	}))
 	if err != nil {
@@ -498,7 +498,7 @@ func TestCreateVM_WithMissingTemplate(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	errResp := assertAPIErrorCode(t, resp, "invalid_spec")
+	errResp := assertAPIErrorCode(t, resp, "invalid_template_id")
 	if !strings.Contains(errResp.Message, "tmpl-missing") {
 		t.Fatalf("message = %q", errResp.Message)
 	}

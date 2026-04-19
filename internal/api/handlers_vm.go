@@ -61,7 +61,7 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		templateID := strings.TrimSpace(spec.TemplateID)
 		tpl, err := s.storageMgr.GetTemplate(templateID)
 		if err != nil {
-			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_spec", fmt.Sprintf("template_id %q was not found", templateID)))
+			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_template_id", fmt.Sprintf("template_id %q was not found", templateID)))
 			return
 		}
 		spec = mergeVMSpecWithTemplate(spec, tpl)
