@@ -100,7 +100,7 @@ func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string
 	spec := source.Spec
 	spec.Name = newName
 	spec.Tags = append([]string(nil), source.Spec.Tags...)
-	spec.Networks = append([]types.NetworkSpec(nil), source.Spec.Networks...)
+	spec.Networks = append([]types.NetworkAttachment(nil), source.Spec.Networks...)
 
 	clone := &types.VM{
 		ID:          id,
