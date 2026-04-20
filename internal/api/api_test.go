@@ -605,6 +605,116 @@ func TestGetVM_NotFound(t *testing.T) {
 	}
 }
 
+func TestCloneVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:          "vm-source",
+		Name:        "source-vm",
+		Description: "source description",
+		Tags:        []string{"prod", "web"},
+		State:       types.VMStateStopped,
+		Spec: types.VMSpec{
+			Name:        "source-vm",
+			Image:       "ubuntu-24.04",
+			CPUs:        4,
+			RAMMB:       8192,
+			DiskGB:      80,
+			Description: "source description",
+			Tags:        []string{"prod", "web"},
+		},
+	})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-source/clone", "application/json", jsonBody(t, cloneVMRequest{Name: "clone-a"}))
+	if err != nil {
+		t.Fatalf("POST /vms/{id}/clone: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var cloned types.VM
+	decodeJSON(t, resp, &cloned)
+	if cloned.ID == "" || cloned.ID == "vm-source" {
+		t.Fatalf("clone ID = %q, want new VM ID", cloned.ID)
+	}
+	if cloned.Name != "clone-a" {
+		t.Fatalf("clone name = %q, want clone-a", cloned.Name)
+	}
+	if cloned.State != types.VMStateStopped {
+		t.Fatalf("clone state = %q, want stopped", cloned.State)
+	}
+	if cloned.Spec.Name != "clone-a" || cloned.Spec.Image != "ubuntu-24.04" || cloned.Spec.CPUs != 4 || cloned.Spec.RAMMB != 8192 || cloned.Spec.DiskGB != 80 {
+		t.Fatalf("unexpected clone spec: %+v", cloned.Spec)
+	}
+	if len(cloned.Tags) != 2 || cloned.Tags[0] != "prod" || cloned.Tags[1] != "web" {
+		t.Fatalf("clone tags = %#v, want copied tags", cloned.Tags)
+	}
+}
+
+func TestCloneVM_InvalidRequest(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-source", Name: "source-vm", State: types.VMStateStopped, Spec: types.VMSpec{Name: "source-vm", Image: "ubuntu"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-existing", Name: "existing-vm", State: types.VMStateStopped, Spec: types.VMSpec{Name: "existing-vm", Image: "ubuntu"}})
+
+	tests := []struct {
+		name       string
+		body       *bytes.Buffer
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "bad json", body: bytes.NewBufferString("{bad json"), wantStatus: http.StatusBadRequest, wantCode: "invalid_request_body"},
+		{name: "missing name", body: jsonBody(t, cloneVMRequest{}), wantStatus: http.StatusBadRequest, wantCode: "invalid_name"},
+		{name: "invalid name", body: jsonBody(t, cloneVMRequest{Name: "bad name!"}), wantStatus: http.StatusBadRequest, wantCode: "invalid_name"},
+		{name: "duplicate name", body: jsonBody(t, cloneVMRequest{Name: " existing-vm "}), wantStatus: http.StatusBadRequest, wantCode: "invalid_name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Post(ts.URL+"/api/v1/vms/vm-source/clone", "application/json", tt.body)
+			if err != nil {
+				t.Fatalf("POST /vms/{id}/clone: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			assertAPIErrorCode(t, resp, tt.wantCode)
+		})
+	}
+}
+
+func TestCloneVM_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/missing/clone", "application/json", jsonBody(t, cloneVMRequest{Name: "clone-a"}))
+	if err != nil {
+		t.Fatalf("POST /vms/{id}/clone: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestCloneVM_ErrorInjection(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-source", Name: "source-vm", State: types.VMStateStopped, Spec: types.VMSpec{Name: "source-vm", Image: "ubuntu", CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mockMgr.CloneErr = errors.New("creating overlay disk: boom")
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-source/clone", "application/json", jsonBody(t, cloneVMRequest{Name: "clone-a"}))
+	if err != nil {
+		t.Fatalf("POST /vms/{id}/clone: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "storage_error")
+}
+
 func TestDeleteVM(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
