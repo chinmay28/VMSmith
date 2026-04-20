@@ -6,6 +6,7 @@ let vmCounter = 0;
 const vms = new Map();
 const snapshots = new Map();
 const images = new Map();
+const templates = new Map();
 const portForwards = new Map();
 
 function seed() {
@@ -20,6 +21,20 @@ function seed() {
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
     size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id, created_at: new Date().toISOString(),
+  });
+  templates.set("tmpl-1", {
+    id: "tmpl-1",
+    name: "small-ubuntu",
+    image: "/images/ubuntu-base.qcow2",
+    cpus: 1,
+    ram_mb: 1024,
+    disk_gb: 12,
+    description: "Small Ubuntu template",
+    tags: ["starter", "ubuntu"],
+    default_user: "ubuntu",
+    networks: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   });
 }
 
@@ -131,6 +146,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 201, pf);
   }
   if (p === "/api/v1/images" && method === "GET") return json(res, 200, [...images.values()]);
+  if (p === "/api/v1/templates" && method === "GET") return json(res, 200, [...templates.values()]);
   if (p === "/api/v1/logs" && method === "GET") {
     const entries = [
       { ts: new Date().toISOString(), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },

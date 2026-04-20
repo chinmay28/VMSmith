@@ -61,6 +61,7 @@ test.describe("VM List", () => {
 
     // Basic tab fields should be visible by default
     await expect(page.getByTestId("input-vm-name")).toBeVisible();
+    await expect(page.getByTestId("input-vm-template")).toBeVisible();
     await expect(page.getByTestId("input-vm-image")).toBeVisible();
     await expect(page.getByTestId("input-vm-cpus")).toBeVisible();
     await expect(page.getByTestId("input-vm-ram")).toBeVisible();
@@ -106,7 +107,7 @@ test.describe("VM List", () => {
 
     // Fill the form (basic tab)
     await page.getByTestId("input-vm-name").fill("test-new-vm");
-    await page.getByTestId("input-vm-image").fill("ubuntu-22.04");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
     await page.getByTestId("input-vm-cpus").fill("4");
     await page.getByTestId("input-vm-ram").fill("8192");
     await page.getByTestId("input-vm-disk").fill("50");
@@ -116,6 +117,23 @@ test.describe("VM List", () => {
     // Modal should close and new VM should appear
     await expect(page.getByTestId("input-vm-name")).not.toBeVisible();
     await expect(page.getByTestId("vm-card-test-new-vm")).toBeVisible();
+  });
+
+  test("template selection prefills create form", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-template").selectOption("tmpl-1");
+
+    await expect(page.getByTestId("template-hint")).toBeVisible();
+    await expect(page.getByTestId("input-vm-image")).toHaveValue("/images/ubuntu-base.qcow2");
+    await expect(page.getByTestId("input-vm-cpus")).toHaveValue("1");
+    await expect(page.getByTestId("input-vm-ram")).toHaveValue("1024");
+    await expect(page.getByTestId("input-vm-disk")).toHaveValue("12");
+
+    await page.getByTestId("tab-advanced").click();
+    await expect(page.getByTestId("input-vm-default-user")).toHaveValue("ubuntu");
   });
 
   test("cancel create modal", async ({ page }) => {

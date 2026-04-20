@@ -151,6 +151,13 @@ export const ports = {
   remove: (vmId, portId) => request(`/vms/${vmId}/ports/${portId}`, { method: 'DELETE' }),
 };
 
+// --- Templates ---
+export const templates = {
+  list: ({ page, perPage } = {}) => request(withQuery('/templates', { page, per_page: perPage }), { withMeta: true }),
+  create: (spec) => request('/templates', { method: 'POST', body: JSON.stringify(spec) }),
+  delete: (id) => request(`/templates/${id}`, { method: 'DELETE' }),
+};
+
 // --- Host ---
 export const host = {
   interfaces: () => request('/host/interfaces'),
@@ -173,4 +180,4 @@ export const logs = {
   }), { withMeta: true }),
 };
 
-export default { vms, snapshots, images, ports, host, quotas, logs };
+export default { vms, snapshots, images, templates, ports, host, quotas, logs };

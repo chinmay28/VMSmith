@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare } from 'lucide-react';
-import { vms, images as imagesApi, host as hostApi } from '../api/client';
+import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
 
@@ -358,16 +358,44 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
   const createMut = useMutation(vms.create);
-  const { data: imageList } = useFetch(() => imagesApi.list(), [], 0);
+  const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
+  const { data: templateResponse } = useFetch(() => templatesApi.list(), [], 0);
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
+  const imageList = imageResponse?.data || imageResponse || [];
+  const templates = templateResponse?.data || templateResponse || [];
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
+
+  const applyTemplate = (templateId) => {
+    const template = templates.find(t => t.id === templateId);
+    setForm(f => {
+      if (!template) return { ...f, template_id: '' };
+      return {
+        ...f,
+        template_id: template.id,
+        image: template.image || f.image,
+        cpus: template.cpus || f.cpus,
+        ram_mb: template.ram_mb || f.ram_mb,
+        disk_gb: template.disk_gb || f.disk_gb,
+        description: template.description || f.description,
+        tags: (template.tags || []).join(', '),
+        default_user: template.default_user || f.default_user,
+      };
+    });
+    setNetworks(template?.networks?.map(net => ({
+      mode: net.mode || 'macvtap',
+      host_interface: net.host_interface || net.bridge || '',
+      static_ip: net.static_ip || '',
+      gateway: net.gateway || '',
+      dhcp: !net.static_ip,
+    })) || []);
+  };
 
   const humanSize = (bytes) => {
     if (!bytes) return '';
@@ -387,6 +415,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
     if (spec.tags.length === 0) delete spec.tags;
     if (!spec.nat_static_ip) delete spec.nat_static_ip;
     if (!spec.nat_gateway)   delete spec.nat_gateway;
+    if (!spec.template_id) delete spec.template_id;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -407,7 +436,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
     } catch { /* error displayed via mutation */ }
   };
 
-  const noImages = imageList && imageList.length === 0;
+  const noImages = imageList.length === 0;
   const physIfaces = (hostIfaces || []).filter(i => i.is_physical && i.is_up);
   const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
 
@@ -462,14 +491,26 @@ function CreateVMModal({ open, onClose, onCreated }) {
                   <input className="input" placeholder="my-server" value={form.name} onChange={update('name')} autoFocus data-testid="input-vm-name" />
                 </div>
                 <div>
+                  <label className="label">Template <span className="text-steel-500 font-normal">(optional)</span></label>
+                  <select className="input" value={form.template_id} onChange={e => applyTemplate(e.target.value)} data-testid="input-vm-template">
+                    <option value="">No template</option>
+                    {templates.map(template => (
+                      <option key={template.id} value={template.id}>{template.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="label">Base Image</label>
-                  {noImages ? (
+                  {noImages && !form.template_id ? (
                     <div className="input flex items-center text-steel-500 text-xs">
                       No images available — upload one in the Images section first.
                     </div>
                   ) : (
                     <select className="input" value={form.image} onChange={update('image')} data-testid="input-vm-image">
-                      <option value="">Select an image…</option>
+                      <option value="">{form.template_id ? 'Use template default image…' : 'Select an image…'}</option>
                       {(imageList || []).map(img => (
                         <option key={img.id} value={img.path}>
                           {img.name}{humanSize(img.size_bytes)}
@@ -477,6 +518,13 @@ function CreateVMModal({ open, onClose, onCreated }) {
                       ))}
                     </select>
                   )}
+                </div>
+                <div className="flex items-end">
+                  {form.template_id ? (
+                    <p className="text-xs text-steel-500 pb-2" data-testid="template-hint">
+                      Template defaults are prefilled below, and anything you change here overrides them.
+                    </p>
+                  ) : <div />}
                 </div>
               </div>
 
@@ -668,7 +716,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
           )}
           <div className="flex justify-end gap-2">
             <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create">Cancel</button>
-            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || !form.image} data-testid="btn-submit-create">
+            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (!form.image && !form.template_id)} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create
             </button>
