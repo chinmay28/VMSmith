@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -56,6 +57,16 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if spec.TemplateID != "" {
+		templateID := strings.TrimSpace(spec.TemplateID)
+		tpl, err := s.storageMgr.GetTemplate(templateID)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_template_id", fmt.Sprintf("template_id %q was not found", templateID)))
+			return
+		}
+		spec = mergeVMSpecWithTemplate(spec, tpl)
+	}
+
 	if err := validateVMSpec(spec); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
@@ -103,6 +114,36 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, vm)
+}
+
+func mergeVMSpecWithTemplate(spec types.VMSpec, tpl *types.VMTemplate) types.VMSpec {
+	merged := spec
+	merged.TemplateID = strings.TrimSpace(spec.TemplateID)
+	if merged.Image == "" {
+		merged.Image = tpl.Image
+	}
+	if merged.CPUs == 0 {
+		merged.CPUs = tpl.CPUs
+	}
+	if merged.RAMMB == 0 {
+		merged.RAMMB = tpl.RAMMB
+	}
+	if merged.DiskGB == 0 {
+		merged.DiskGB = tpl.DiskGB
+	}
+	if strings.TrimSpace(merged.Description) == "" {
+		merged.Description = tpl.Description
+	}
+	if strings.TrimSpace(merged.DefaultUser) == "" {
+		merged.DefaultUser = tpl.DefaultUser
+	}
+	if len(merged.Tags) == 0 && len(tpl.Tags) > 0 {
+		merged.Tags = append([]string(nil), tpl.Tags...)
+	}
+	if len(merged.Networks) == 0 && len(tpl.Networks) > 0 {
+		merged.Networks = append([]types.NetworkAttachment(nil), tpl.Networks...)
+	}
+	return merged
 }
 
 // UpdateVM handles PATCH /api/v1/vms/{vmID}

@@ -17,6 +17,7 @@ const (
 type VMSpec struct {
 	Name          string   `json:"name" yaml:"name"`
 	Image         string   `json:"image" yaml:"image"`
+	TemplateID    string   `json:"template_id,omitempty" yaml:"template_id,omitempty"`
 	CPUs          int      `json:"cpus" yaml:"cpus"`
 	RAMMB         int      `json:"ram_mb" yaml:"ram_mb"`
 	DiskGB        int      `json:"disk_gb" yaml:"disk_gb"`
