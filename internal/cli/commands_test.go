@@ -989,6 +989,82 @@ func TestCLI_ImageDelete_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	out, err := runCLI(
+		"template", "create", "web-template",
+		"--image", "ubuntu-24.04",
+		"--cpus", "4",
+		"--ram", "8192",
+		"--disk", "80",
+		"--description", "Production web template",
+		"--tag", "Prod",
+		"--tag", "web",
+		"--default-user", "ubuntu",
+	)
+	if err != nil {
+		t.Fatalf("template create: %v", err)
+	}
+	if !strings.Contains(out, "Template created successfully") {
+		t.Fatalf("expected success output, got %q", out)
+	}
+
+	storedTemplates, err := s.ListTemplates()
+	if err != nil {
+		t.Fatalf("ListTemplates: %v", err)
+	}
+	if len(storedTemplates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(storedTemplates))
+	}
+	stored := storedTemplates[0]
+	if stored.Name != "web-template" || stored.Image != "ubuntu-24.04" {
+		t.Fatalf("stored template = %#v", stored)
+	}
+	if stored.CPUs != 4 || stored.RAMMB != 8192 || stored.DiskGB != 80 {
+		t.Fatalf("unexpected sizing in template: %#v", stored)
+	}
+	if stored.DefaultUser != "ubuntu" {
+		t.Fatalf("DefaultUser = %q, want ubuntu", stored.DefaultUser)
+	}
+	if strings.Join(stored.Tags, ",") != "prod,web" {
+		t.Fatalf("Tags = %v", stored.Tags)
+	}
+
+	listOut, err := runCLI("template", "list")
+	if err != nil {
+		t.Fatalf("template list: %v", err)
+	}
+	rows := tableRows(t, listOut)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows: %q", len(rows), listOut)
+	}
+	wantHeader := []string{"ID", "NAME", "IMAGE", "CPUS", "RAM (MB)", "DISK (GB)", "TAGS"}
+	if strings.Join(rows[0], "|") != strings.Join(wantHeader, "|") {
+		t.Fatalf("header = %v, want %v", rows[0], wantHeader)
+	}
+	if rows[1][1] != "web-template" || rows[1][2] != "ubuntu-24.04" || rows[1][3] != "4" || rows[1][4] != "8192" || rows[1][5] != "80" || rows[1][6] != "prod,web" {
+		t.Fatalf("unexpected template row: %v", rows[1])
+	}
+
+	deleteOut, err := runCLI("template", "delete", stored.ID)
+	if err != nil {
+		t.Fatalf("template delete: %v", err)
+	}
+	if !strings.Contains(deleteOut, stored.ID) {
+		t.Fatalf("expected deleted template id in output, got %q", deleteOut)
+	}
+
+	storedTemplates, err = s.ListTemplates()
+	if err != nil {
+		t.Fatalf("ListTemplates after delete: %v", err)
+	}
+	if len(storedTemplates) != 0 {
+		t.Fatalf("expected templates to be deleted, got %d", len(storedTemplates))
+	}
+}
+
 // =====================================================// Port forward command tests
 // =====================================================
 func TestCLI_PortList_Empty(t *testing.T) {
