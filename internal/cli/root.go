@@ -41,6 +41,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for authenticated remote daemon HTTP requests")
 
 	rootCmd.AddCommand(vmCmd)
+	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(snapshotCmd)
 	rootCmd.AddCommand(imageCmd)
 	rootCmd.AddCommand(portCmd)
