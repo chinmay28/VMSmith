@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       CGO_ENABLED: 1
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +121,8 @@ jobs:
   frontend:
     name: Frontend build and mock GUI tests
     runs-on: ubuntu-22.04
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Check out code
         uses: actions/checkout@v4
