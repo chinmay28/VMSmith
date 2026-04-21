@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -42,7 +43,7 @@ func TestCollectHostStats(t *testing.T) {
 		return nil
 	}
 
-	stats, err := collectHostStats(t.Context(), "/tmp/vmsmith", 7)
+	stats, err := collectHostStats(context.Background(), "/tmp/vmsmith", 7)
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 		return nil
 	}
 
-	_, err := collectHostStats(t.Context(), missing, 0)
+	_, err := collectHostStats(context.Background(), missing, 0)
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}
