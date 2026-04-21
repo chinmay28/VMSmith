@@ -161,6 +161,7 @@ export const templates = {
 // --- Host ---
 export const host = {
   interfaces: () => request('/host/interfaces'),
+  stats: () => request('/host/stats'),
 };
 
 // --- Quotas ---
