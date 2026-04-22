@@ -107,6 +107,55 @@ async function main() {
 
     await page.close();
 
+    page = await context.newPage();
+    await page.route("**/api/v1/vms", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": "42",
+        },
+        body: JSON.stringify([
+          {
+            id: "vm-1",
+            name: "web-server",
+            state: "running",
+            ip: "192.168.100.10",
+            spec: { cpus: 2, ram_mb: 4096 },
+          },
+        ]),
+      });
+    });
+    await page.route("**/api/v1/images", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": "7",
+        },
+        body: JSON.stringify([
+          {
+            id: "img-1",
+            name: "ubuntu-base",
+            path: "/images/ubuntu-base.qcow2",
+            format: "qcow2",
+            size_bytes: 1073741824,
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+    await page.goto(BASE);
+    await page.waitForTimeout(1000);
+
+    await runTest("uses pagination metadata for dashboard totals", async (p) => {
+      await assertText(p, "stat-total", "42");
+      await assertText(p, "stat-running", "1");
+      await assertText(p, "stat-images", "7");
+    }, page);
+
+    await page.close();
+
     // ================== VM List Tests ==================
     console.log("\nVM List:");
 
