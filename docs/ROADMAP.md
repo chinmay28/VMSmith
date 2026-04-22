@@ -103,7 +103,7 @@ Save and reuse VM configurations without re-specifying every parameter.
 | 2.4.2 | Add `POST /api/v1/templates`, `GET /api/v1/templates`, `DELETE /api/v1/templates/{id}` | M | ✅ Done — API now supports template create/list/delete with validation, pagination, and CRUD test coverage |
 | 2.4.3 | Add `POST /vms` support for `template_id` field — merges template defaults with request overrides | M | ✅ Done — `POST /api/v1/vms` now accepts `template_id`, applies stored template defaults for image/resources/metadata/networks, preserves explicit request overrides, and returns a clear 400 when the requested template is missing |
 | 2.4.4 | Add `vmsmith template create|list|delete` CLI commands | M | |
-| 2.4.5 | Add template selector dropdown to Create VM modal in frontend | S | |
+| 2.4.5 | Add template selector dropdown to Create VM modal in frontend | S | ✅ Done — the Create VM modal now lists saved templates, prefills form defaults when one is selected, and keeps manual field edits as explicit overrides |
 
 ---
 
