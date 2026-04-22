@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	validatepkg "github.com/vmsmith/vmsmith/internal/validate"
