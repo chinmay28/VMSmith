@@ -22,27 +22,41 @@ import (
 
 // LibvirtManager implements the Manager interface using libvirt.
 type LibvirtManager struct {
-	conn  *libvirt.Connect
-	store *store.Store
-	cfg   *config.Config
+	conn                *libvirt.Connect
+	store               *store.Store
+	cfg                 *config.Config
+	lifecycleCallbackID int
+	lifecycleRegistered bool
+	lifecycleStopCh     chan struct{}
 }
 
 // NewLibvirtManager creates a new libvirt-backed VM manager.
 func NewLibvirtManager(cfg *config.Config, store *store.Store) (*LibvirtManager, error) {
+	if err := ensureLibvirtEventLoop(); err != nil {
+		return nil, fmt.Errorf("initializing libvirt event loop: %w", err)
+	}
+
 	conn, err := libvirt.NewConnect(cfg.Libvirt.URI)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to libvirt (%s): %w", cfg.Libvirt.URI, err)
 	}
 
-	return &LibvirtManager{
+	mgr := &LibvirtManager{
 		conn:  conn,
 		store: store,
 		cfg:   cfg,
-	}, nil
+	}
+	if err := mgr.startLifecycleMonitor(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return mgr, nil
 }
 
 // Close releases the libvirt connection.
 func (m *LibvirtManager) Close() error {
+	m.stopLifecycleMonitor()
 	if _, err := m.conn.Close(); err != nil {
 		return err
 	}
