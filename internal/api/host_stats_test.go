@@ -109,10 +109,11 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	missing := filepath.Join(dir, "missing", "base")
-	if err := os.MkdirAll(filepath.Dir(missing), 0755); err != nil {
-		t.Fatalf("mkdir parent: %v", err)
+	existingParent := filepath.Join(dir, "existing")
+	if err := os.MkdirAll(existingParent, 0755); err != nil {
+		t.Fatalf("mkdir existing parent: %v", err)
 	}
+	missing := filepath.Join(existingParent, "missing", "base")
 	var gotPath string
 	statFS = func(path string, fs *syscall.Statfs_t) error {
 		gotPath = path
@@ -126,7 +127,7 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}
-	if gotPath != filepath.Dir(missing) {
-		t.Fatalf("statFS path = %q, want %q", gotPath, filepath.Dir(missing))
+	if gotPath != existingParent {
+		t.Fatalf("statFS path = %q, want %q", gotPath, existingParent)
 	}
 }

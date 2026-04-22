@@ -54,28 +54,6 @@ func readCPUSample() (cpuSample, error) {
 	return sample, nil
 }
 
-func readCPUCount() (uint64, error) {
-	data, err := readFile("/proc/stat")
-	if err != nil {
-		return 0, err
-	}
-	var count uint64
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "cpu") && len(line) > 3 {
-			suffix := line[3:]
-			if suffix != "" && suffix[0] >= '0' && suffix[0] <= '9' {
-				count++
-			}
-		}
-	}
-	if count == 0 {
-		count = 1
-	}
-	return count, scanner.Err()
-}
-
 func readMemInfo() (total, available uint64, err error) {
 	data, err := readFile("/proc/meminfo")
 	if err != nil {
@@ -127,9 +105,6 @@ func collectHostStats(ctx context.Context, storagePath string, vmCount int) (*ty
 	if err != nil {
 		return nil, err
 	}
-	if _, err := readCPUCount(); err != nil {
-		return nil, err
-	}
 	memoryTotal, memoryAvailable, err := readMemInfo()
 	if err != nil {
 		return nil, err
@@ -139,8 +114,16 @@ func collectHostStats(ctx context.Context, storagePath string, vmCount int) (*ty
 	if targetPath == "" {
 		targetPath = "/"
 	}
-	if _, err := os.Stat(targetPath); err != nil {
-		targetPath = filepath.Dir(targetPath)
+	for {
+		if _, err := os.Stat(targetPath); err == nil {
+			break
+		}
+		parent := filepath.Dir(targetPath)
+		if parent == targetPath {
+			targetPath = "/"
+			break
+		}
+		targetPath = parent
 	}
 	var fs syscall.Statfs_t
 	if err := statFS(targetPath, &fs); err != nil {
