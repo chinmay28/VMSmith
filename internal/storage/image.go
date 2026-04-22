@@ -88,7 +88,6 @@ func (m *Manager) CreateTemplate(tpl *types.VMTemplate) (*types.VMTemplate, erro
 	if tpl.UpdatedAt.IsZero() {
 		tpl.UpdatedAt = now
 	}
-
 	if err := m.store.PutTemplate(tpl); err != nil {
 		return nil, err
 	}

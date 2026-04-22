@@ -1037,6 +1037,9 @@ func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
 	if strings.Join(stored.Tags, ",") != "prod,web" {
 		t.Fatalf("Tags = %v", stored.Tags)
 	}
+	if !strings.Contains(out, "ID:    "+stored.ID) {
+		t.Fatalf("expected create output to include template id %q, got %q", stored.ID, out)
+	}
 
 	listOut, err := runCLI("template", "list")
 	if err != nil {
@@ -1072,7 +1075,6 @@ func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
 }
 
 func TestCLI_TemplateCreate_RejectsInvalidInput(t *testing.T) {
-
 	tests := []struct {
 		name    string
 		args    []string
