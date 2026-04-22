@@ -2,10 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -23,10 +21,9 @@ type createTemplateRequest struct {
 	Networks    []types.NetworkAttachment `json:"networks,omitempty"`
 }
 
-func (req createTemplateRequest) toTemplate(now time.Time) *types.VMTemplate {
+func (req createTemplateRequest) toTemplate() *types.VMTemplate {
 	name := strings.TrimSpace(req.Name)
 	return &types.VMTemplate{
-		ID:          fmt.Sprintf("tmpl-%d", now.UnixNano()),
 		Name:        name,
 		Image:       strings.TrimSpace(req.Image),
 		CPUs:        req.CPUs,
@@ -36,8 +33,6 @@ func (req createTemplateRequest) toTemplate(now time.Time) *types.VMTemplate {
 		Tags:        req.Tags,
 		DefaultUser: strings.TrimSpace(req.DefaultUser),
 		Networks:    req.Networks,
-		CreatedAt:   now,
-		UpdatedAt:   now,
 	}
 }
 
@@ -75,7 +70,7 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tpl, err := s.storageMgr.CreateTemplate(req.toTemplate(time.Now()))
+	tpl, err := s.storageMgr.CreateTemplate(req.toTemplate())
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)

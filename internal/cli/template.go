@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	validatepkg "github.com/vmsmith/vmsmith/internal/validate"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -32,15 +33,16 @@ var templateCreateCmd = &cobra.Command{
 		defaultUser, _ := cmd.Flags().GetString("default-user")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
 
-		if name == "" {
-			return fmt.Errorf("template name is required")
-		}
-		if strings.TrimSpace(image) == "" {
-			return fmt.Errorf("image is required")
-		}
-
 		networks, err := parseNetworkFlags(networkFlags)
 		if err != nil {
+			return err
+		}
+
+		tags, err = validatepkg.NormalizeTags(tags)
+		if err != nil {
+			return err
+		}
+		if err := validatepkg.ValidateTemplateRequest(name, image, cpus, ram, disk); err != nil {
 			return err
 		}
 
@@ -56,10 +58,8 @@ var templateCreateCmd = &cobra.Command{
 			logger.Error("cli", "template create: failed to list templates", "error", err.Error())
 			return err
 		}
-		for _, tpl := range existing {
-			if tpl != nil && strings.EqualFold(strings.TrimSpace(tpl.Name), name) {
-				return fmt.Errorf("template name %q already exists", name)
-			}
+		if err := validatepkg.ValidateUniqueTemplateName(name, existing); err != nil {
+			return err
 		}
 
 		tpl, err := mgr.CreateTemplate(&types.VMTemplate{
@@ -69,7 +69,7 @@ var templateCreateCmd = &cobra.Command{
 			RAMMB:       ram,
 			DiskGB:      disk,
 			Description: strings.TrimSpace(description),
-			Tags:        normalizeTagsForCLI(tags),
+			Tags:        tags,
 			DefaultUser: strings.TrimSpace(defaultUser),
 			Networks:    networks,
 		})
@@ -101,7 +101,11 @@ var templateCreateCmd = &cobra.Command{
 			fmt.Printf("  Tags:  %s\n", strings.Join(tpl.Tags, ", "))
 		}
 		if len(tpl.Networks) > 0 {
-			fmt.Printf("  Networks: %d attached\n", len(tpl.Networks))
+			hostInterfaces := make([]string, 0, len(tpl.Networks))
+			for _, network := range tpl.Networks {
+				hostInterfaces = append(hostInterfaces, network.HostInterface)
+			}
+			fmt.Printf("  Networks: %s\n", strings.Join(hostInterfaces, ", "))
 		}
 		return nil
 	},
@@ -182,7 +186,9 @@ func init() {
 	templateCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to template-created VMs (repeatable)")
 	templateCreateCmd.Flags().String("default-user", "", "default login user for VMs created from this template")
 	templateCreateCmd.Flags().StringSlice("network", nil, "attach template VMs to host network (repeatable); same format as vm create --network")
-	templateCreateCmd.MarkFlagRequired("image")
+	if err := templateCreateCmd.MarkFlagRequired("image"); err != nil {
+		panic(err)
+	}
 
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")

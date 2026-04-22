@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -69,6 +70,25 @@ func (m *Manager) ListImages() ([]*types.Image, error) {
 
 // CreateTemplate stores a reusable VM template.
 func (m *Manager) CreateTemplate(tpl *types.VMTemplate) (*types.VMTemplate, error) {
+	if tpl == nil {
+		return nil, fmt.Errorf("template is required")
+	}
+
+	now := time.Now()
+	tpl.Name = strings.TrimSpace(tpl.Name)
+	tpl.Image = strings.TrimSpace(tpl.Image)
+	tpl.Description = strings.TrimSpace(tpl.Description)
+	tpl.DefaultUser = strings.TrimSpace(tpl.DefaultUser)
+	if tpl.ID == "" {
+		tpl.ID = fmt.Sprintf("tmpl-%d", now.UnixNano())
+	}
+	if tpl.CreatedAt.IsZero() {
+		tpl.CreatedAt = now
+	}
+	if tpl.UpdatedAt.IsZero() {
+		tpl.UpdatedAt = now
+	}
+
 	if err := m.store.PutTemplate(tpl); err != nil {
 		return nil, err
 	}
