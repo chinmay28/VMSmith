@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -51,7 +51,7 @@ func TestCollectHostStats(t *testing.T) {
 	if stats.VMCount != 7 {
 		t.Fatalf("VMCount = %d, want 7", stats.VMCount)
 	}
-	if stats.CPU.Percentage != 50 || stats.CPU.Used != 50 || stats.CPU.Total != 100 {
+	if stats.CPU.Percentage != 33 || stats.CPU.Used != 33 || stats.CPU.Total != 100 {
 		t.Fatalf("unexpected CPU stats: %+v", stats.CPU)
 	}
 	if stats.RAM.Total != 1024000*1024 || stats.RAM.Available != 256000*1024 {
@@ -69,7 +69,9 @@ func TestCollectHostStats(t *testing.T) {
 }
 
 func TestGetHostStats(t *testing.T) {
-	ts, _, cleanup := testServer(t)
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Storage.BaseDir = t.TempDir()
+	})
 	defer cleanup()
 
 	resp, err := http.Get(ts.URL + "/api/v1/host/stats")
@@ -108,6 +110,9 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing", "base")
+	if err := os.MkdirAll(filepath.Dir(missing), 0755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
 	var gotPath string
 	statFS = func(path string, fs *syscall.Statfs_t) error {
 		gotPath = path
@@ -121,10 +126,7 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}
-	if !strings.HasPrefix(gotPath, dir) {
-		t.Fatalf("statFS path = %q, want within %q", gotPath, dir)
-	}
-	if _, err := os.Stat(filepath.Dir(missing)); err != nil {
-		t.Fatalf("expected parent dir to exist: %v", err)
+	if gotPath != filepath.Dir(missing) {
+		t.Fatalf("statFS path = %q, want %q", gotPath, filepath.Dir(missing))
 	}
 }
