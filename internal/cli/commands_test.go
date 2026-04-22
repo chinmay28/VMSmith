@@ -551,6 +551,64 @@ func TestCLI_VMDelete_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_VMClone(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:          "vm-source",
+		Name:        "source",
+		Description: "Base app server",
+		Tags:        []string{"prod", "golden"},
+		Spec:        types.VMSpec{Name: "source", CPUs: 4, RAMMB: 8192, DiskGB: 80, Tags: []string{"prod", "golden"}},
+		State:       types.VMStateStopped,
+	})
+
+	out, err := runCLI("vm", "clone", "vm-source", "--name", "clone-a")
+	if err != nil {
+		t.Fatalf("vm clone: %v", err)
+	}
+	for _, want := range []string{"VM cloned successfully", "Source ID: vm-source", "Name:      clone-a", "State:     stopped", "Tags:      prod, golden"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in output, got %q", want, out)
+		}
+	}
+
+	cloned, err := mock.Get(nil, "vm-mock-1")
+	if err != nil {
+		t.Fatalf("get cloned VM: %v", err)
+	}
+	if cloned.Name != "clone-a" {
+		t.Fatalf("clone name = %q, want clone-a", cloned.Name)
+	}
+	if cloned.State != types.VMStateStopped {
+		t.Fatalf("clone state = %q, want stopped", cloned.State)
+	}
+	if cloned.Description != "Base app server" {
+		t.Fatalf("clone description = %q", cloned.Description)
+	}
+}
+
+func TestCLI_VMClone_RequiresName(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "clone", "vm-source")
+	if err == nil {
+		t.Fatal("expected error when --name is missing")
+	}
+}
+
+func TestCLI_VMClone_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "clone", "missing", "--name", "clone-a")
+	if err == nil {
+		t.Fatal("expected error for nonexistent source VM")
+	}
+}
+
 func TestCLI_VMInfo(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
