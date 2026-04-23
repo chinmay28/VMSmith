@@ -4,15 +4,29 @@ import { vms, images as imagesApi, quotas as quotasApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
 
+function listData(response) {
+  if (Array.isArray(response)) return response;
+  return response?.data || [];
+}
+
+function totalCount(response) {
+  if (Array.isArray(response)) return response.length;
+  const explicitTotal = response?.meta?.totalCount;
+  if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
+  return response?.data?.length ?? 0;
+}
+
 export default function Dashboard() {
-  const { data: vmList, loading: vmLoading, error: vmError } = useFetch(() => vms.list(), [], 5000);
-  const { data: imageList, loading: imgLoading } = useFetch(() => imagesApi.list(), [], 10000);
+  const { data: vmResponse, loading: vmLoading, error: vmError } = useFetch(() => vms.list(), [], 5000);
+  const { data: imageResponse, loading: imgLoading } = useFetch(() => imagesApi.list(), [], 10000);
   const { data: quotaUsage, loading: quotaLoading } = useFetch(() => quotasApi.usage(), [], 5000);
   const navigate = useNavigate();
 
-  const runningCount = (vmList || []).filter(v => v.state === 'running').length;
-  const totalCount = (vmList || []).length;
-  const imageCount = (imageList || []).length;
+  const vmList = listData(vmResponse);
+  const imageList = listData(imageResponse);
+  const runningCount = vmList.filter(v => v.state === 'running').length;
+  const totalVMCount = totalCount(vmResponse);
+  const totalImageCount = totalCount(imageResponse);
 
   return (
     <div>
@@ -28,9 +42,9 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <StatCard label="Total Machines" value={vmLoading ? '—' : totalCount} icon={Server} />
+        <StatCard label="Total Machines" value={vmLoading ? '—' : totalVMCount} icon={Server} />
         <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent />
-        <StatCard label="Images" value={imgLoading ? '—' : imageCount} icon={HardDrive} />
+        <StatCard label="Images" value={imgLoading ? '—' : totalImageCount} icon={HardDrive} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">

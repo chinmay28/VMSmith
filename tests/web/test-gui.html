@@ -99,12 +99,20 @@
       if (res.status === 204) return null;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+      if (options.withMeta) {
+        return {
+          data,
+          meta: {
+            totalCount: Number.parseInt(res.headers.get('X-Total-Count') || '', 10) || 0,
+          },
+        };
+      }
       return data;
     }
 
     const api = {
       vms: {
-        list: () => request('/vms'),
+        list: () => request('/vms', { withMeta: true }),
         get: (id) => request(`/vms/${id}`),
         create: (spec) => request('/vms', { method: 'POST', body: JSON.stringify(spec) }),
         start: (id) => request(`/vms/${id}/start`, { method: 'POST' }),
@@ -118,7 +126,7 @@
         delete: (vmId, name) => request(`/vms/${vmId}/snapshots/${name}`, { method: 'DELETE' }),
       },
       images: {
-        list: () => request('/images'),
+        list: () => request('/images', { withMeta: true }),
         delete: (id) => request(`/images/${id}`, { method: 'DELETE' }),
       },
       ports: {
@@ -171,15 +179,29 @@
       }
     }
 
+    function listData(response) {
+      if (Array.isArray(response)) return response;
+      return response?.data || [];
+    }
+
+    function totalCount(response) {
+      if (Array.isArray(response)) return response.length;
+      const explicitTotal = response?.meta?.totalCount;
+      if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
+      return response?.data?.length ?? 0;
+    }
+
     async function renderDashboard(app) {
-      const [vmList, imageList] = await Promise.all([api.vms.list(), api.images.list()]);
+      const [vmResponse, imageResponse] = await Promise.all([api.vms.list(), api.images.list()]);
+      const vmList = listData(vmResponse);
+      const imageList = listData(imageResponse);
       const running = vmList.filter(v => v.state === 'running').length;
 
       app.innerHTML = `
         <div class="stats">
-          <div class="card stat-card"><div class="value" data-testid="stat-total">${vmList.length}</div><div class="label">Total Machines</div></div>
+          <div class="card stat-card"><div class="value" data-testid="stat-total">${totalCount(vmResponse)}</div><div class="label">Total Machines</div></div>
           <div class="card stat-card"><div class="value" data-testid="stat-running">${running}</div><div class="label">Running</div></div>
-          <div class="card stat-card"><div class="value" data-testid="stat-images">${imageList.length}</div><div class="label">Images</div></div>
+          <div class="card stat-card"><div class="value" data-testid="stat-images">${totalCount(imageResponse)}</div><div class="label">Images</div></div>
         </div>
         <div class="card">
           <h2>Machines</h2>
@@ -201,7 +223,8 @@
     }
 
     async function renderVMList(app) {
-      const vmList = await api.vms.list();
+      const vmResponse = await api.vms.list();
+      const vmList = listData(vmResponse);
 
       app.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -292,7 +315,8 @@
     }
 
     async function renderImages(app) {
-      const imageList = await api.images.list();
+      const imageResponse = await api.images.list();
+      const imageList = listData(imageResponse);
       const humanSize = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+' GB' : b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : b+' B';
 
       app.innerHTML = `

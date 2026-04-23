@@ -21,6 +21,53 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("stat-images")).toHaveText("1");
   });
 
+  test("uses pagination metadata for totals", async ({ page }) => {
+    await page.route("**/api/v1/vms*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": "42",
+        },
+        body: JSON.stringify([
+          {
+            id: "vm-1",
+            name: "web-server",
+            state: "running",
+            ip: "192.168.100.10",
+            spec: { cpus: 2, ram_mb: 4096 },
+          },
+        ]),
+      });
+    });
+
+    await page.route("**/api/v1/images*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": "7",
+        },
+        body: JSON.stringify([
+          {
+            id: "img-1",
+            name: "ubuntu-base",
+            path: "/images/ubuntu-base.qcow2",
+            format: "qcow2",
+            size_bytes: 1073741824,
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+
+    await page.goto(BASE_URL);
+
+    await expect(page.getByTestId("stat-total")).toHaveText("42");
+    await expect(page.getByTestId("stat-running")).toHaveText("1");
+    await expect(page.getByTestId("stat-images")).toHaveText("7");
+  });
+
   test("displays seeded VMs in table", async ({ page }) => {
     await page.goto(BASE_URL);
 
