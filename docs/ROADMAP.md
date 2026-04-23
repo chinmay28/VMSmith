@@ -178,7 +178,7 @@ Users have no visibility into what's happening inside VMs.
 | 4.1.1 | Collect CPU, memory, disk, and network I/O stats from libvirt `DomainStats` API | M | Poll on interval (e.g., 10s), store in ring buffer per VM |
 | 4.1.2 | Add `GET /api/v1/vms/{id}/stats` endpoint: current + recent history | M | Return time-series array |
 | 4.1.3 | Add real-time resource graphs to VMDetail page (CPU/RAM/disk/network) | L | Use lightweight chart library (e.g., recharts or uPlot) |
-| 4.1.4 | Add host-level stats to dashboard: total CPU/RAM usage, disk space, VM count | M | |
+| 4.1.4 | Add host-level stats to dashboard: total CPU/RAM usage, disk space, VM count | M | ✅ Done — added `GET /api/v1/host/stats` for host CPU/RAM/disk utilization + VM count and surfaced it in the dashboard cards |
 | 4.1.5 | Add `vmsmith vm stats <id>` CLI command | S | |
 
 ### 4.2 Event System & Notifications

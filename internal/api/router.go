@@ -21,6 +21,7 @@ type Server struct {
 	vmManager            vm.Manager
 	storageMgr           *storage.Manager
 	portFwd              *network.PortForwarder
+	hostStatsPath        string
 	quotas               config.QuotasConfig
 	maxRequestBodyBytes  int64
 	maxUploadBodyBytes   int64
@@ -61,6 +62,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		vmManager:            vmMgr,
 		storageMgr:           storageMgr,
 		portFwd:              portFwd,
+		hostStatsPath:        cfg.Storage.BaseDir,
 		quotas:               cfg.Quotas,
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
@@ -145,8 +147,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Delete("/{templateID}", s.DeleteTemplate)
 		})
 
-		// Host network discovery
+		// Host discovery and stats
 		r.Get("/host/interfaces", s.ListHostInterfaces)
+		r.Get("/host/stats", s.GetHostStats)
 
 		// Quotas / allocation overview
 		r.Get("/quotas/usage", s.GetQuotaUsage)

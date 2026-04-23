@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'lucide-react';
-import { vms, images as imagesApi, quotas as quotasApi } from '../api/client';
+import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
 
@@ -20,13 +20,16 @@ export default function Dashboard() {
   const { data: vmResponse, loading: vmLoading, error: vmError } = useFetch(() => vms.list(), [], 5000);
   const { data: imageResponse, loading: imgLoading } = useFetch(() => imagesApi.list(), [], 10000);
   const { data: quotaUsage, loading: quotaLoading } = useFetch(() => quotasApi.usage(), [], 5000);
+  const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
   const navigate = useNavigate();
 
   const vmList = listData(vmResponse);
   const imageList = listData(imageResponse);
   const runningCount = vmList.filter(v => v.state === 'running').length;
-  const totalVMCount = totalCount(vmResponse);
-  const totalImageCount = totalCount(imageResponse);
+  const hasVMCountFallback = totalCount(vmResponse) > 0 || vmList.length > 0;
+  const totalVMCount = hostStats?.vm_count ?? totalCount(vmResponse);
+  const totalImageCount = totalCount(imageResponse) || imageList.length;
+  const showHostError = hostError && !hasVMCountFallback;
 
   return (
     <div>
@@ -40,11 +43,18 @@ export default function Dashboard() {
         }
       />
 
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <StatCard label="Total Machines" value={vmLoading ? '—' : totalVMCount} icon={Server} />
+        <StatCard label="Total Machines" value={vmLoading && !hostStats ? '—' : totalVMCount} icon={Server} />
         <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent />
         <StatCard label="Images" value={imgLoading ? '—' : totalImageCount} icon={HardDrive} />
+      </div>
+
+      {showHostError && <div className="mb-4"><ErrorBanner message={hostError} /></div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        <HostUsageCard label="Host CPU" resource={hostStats?.cpu} icon={Cpu} loading={hostLoading} formatValue={(resource) => `${resource?.percentage ?? 0}%`} />
+        <HostUsageCard label="Host RAM" resource={hostStats?.ram} icon={MemoryStick} loading={hostLoading} formatSubtitle={(resource) => `${formatBytes(resource?.used)} / ${formatBytes(resource?.total)} used`} />
+        <HostUsageCard label="Host Disk" resource={hostStats?.disk} icon={Database} loading={hostLoading} formatSubtitle={(resource) => `${formatBytes(resource?.used)} / ${formatBytes(resource?.total)} used`} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
@@ -54,7 +64,6 @@ export default function Dashboard() {
         <QuotaCard label="Disk allocated" resource={quotaUsage?.disk_gb} unit="GB" icon={Database} loading={quotaLoading} />
       </div>
 
-      {/* Recent machines */}
       <div className="card">
         <div className="px-4 py-3 border-b border-steel-800/40">
           <h2 className="text-sm font-display font-semibold text-steel-300">Machines</h2>
@@ -64,7 +73,7 @@ export default function Dashboard() {
 
         {vmLoading ? (
           <div className="flex justify-center py-12"><Spinner size={20} /></div>
-        ) : !vmList?.length ? (
+        ) : !vmList.length ? (
           <EmptyState
             icon={Server}
             title="No machines yet"
@@ -112,6 +121,40 @@ export default function Dashboard() {
   );
 }
 
+function formatBytes(value) {
+  if (!value) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let current = value;
+  let index = 0;
+  while (current >= 1024 && index < units.length - 1) {
+    current /= 1024;
+    index += 1;
+  }
+  const decimals = current >= 10 || index === 0 ? 0 : 1;
+  return `${current.toFixed(decimals)} ${units[index]}`;
+}
+
+function HostUsageCard({ label, resource, icon: Icon, loading, formatValue, formatSubtitle }) {
+  if (loading) {
+    return <StatCard label={label} value="—" icon={Icon} />;
+  }
+
+  const value = formatValue ? formatValue(resource) : `${resource?.percentage ?? 0}%`;
+  const subtitle = formatSubtitle
+    ? formatSubtitle(resource)
+    : `${formatBytes(resource?.available)} free of ${formatBytes(resource?.total)}`;
+
+  return (
+    <div className="card-hover px-4 py-3.5">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
+        {Icon && <Icon size={14} className="text-steel-600" />}
+      </div>
+      <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
+      <p className="text-xs text-steel-500 mt-1">{subtitle}</p>
+    </div>
+  );
+}
 
 function QuotaCard({ label, resource, unit, icon: Icon, loading }) {
   if (loading) {
