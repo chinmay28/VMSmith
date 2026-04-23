@@ -108,7 +108,7 @@ async function main() {
     await page.close();
 
     page = await context.newPage();
-    await page.route("**/api/v1/vms", async (route) => {
+    await page.route("**/api/v1/vms*", async (route) => {
       await route.fulfill({
         status: 200,
         headers: {
@@ -126,7 +126,7 @@ async function main() {
         ]),
       });
     });
-    await page.route("**/api/v1/images", async (route) => {
+    await page.route("**/api/v1/images*", async (route) => {
       await route.fulfill({
         status: 200,
         headers: {

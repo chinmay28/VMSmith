@@ -22,7 +22,7 @@ test.describe("Dashboard", () => {
   });
 
   test("uses pagination metadata for totals", async ({ page }) => {
-    await page.route("**/api/v1/vms", async (route) => {
+    await page.route("**/api/v1/vms*", async (route) => {
       await route.fulfill({
         status: 200,
         headers: {
@@ -41,7 +41,7 @@ test.describe("Dashboard", () => {
       });
     });
 
-    await page.route("**/api/v1/images", async (route) => {
+    await page.route("**/api/v1/images*", async (route) => {
       await route.fulfill({
         status: 200,
         headers: {

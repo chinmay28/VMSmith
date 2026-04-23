@@ -11,7 +11,9 @@ function listData(response) {
 
 function totalCount(response) {
   if (Array.isArray(response)) return response.length;
-  return response?.meta?.totalCount ?? response?.data?.length ?? 0;
+  const explicitTotal = response?.meta?.totalCount;
+  if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
+  return response?.data?.length ?? 0;
 }
 
 export default function Dashboard() {
