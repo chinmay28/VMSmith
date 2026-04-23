@@ -75,7 +75,7 @@ export default function VMDetail() {
           <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">
             <Pencil size={14} /> Edit
           </button>
-          <button className="btn-secondary" onClick={() => setShowCloneModal(true)} title="Clone VM">
+          <button data-testid="btn-clone-vm" className="btn-secondary" onClick={() => setShowCloneModal(true)} title="Clone VM">
             <Copy size={14} /> Clone
           </button>
           <button className="btn-danger" onClick={handleDelete}>
@@ -190,10 +190,12 @@ function CloneVMModal({ vm, open, onClose }) {
   useEffect(() => {
     if (open && vm) {
       setName(`${vm.name}-clone`);
+      cloneMut.reset();
     }
-  }, [open, vm]);
+  }, [open, vm, cloneMut]);
 
   const handleClose = () => {
+    cloneMut.reset();
     setName('');
     onClose();
   };
@@ -219,6 +221,7 @@ function CloneVMModal({ vm, open, onClose }) {
         <div>
           <label className="label">New VM Name</label>
           <input
+            data-testid="input-clone-name"
             className="input font-mono"
             type="text"
             placeholder="my-vm-clone"
@@ -229,8 +232,8 @@ function CloneVMModal({ vm, open, onClose }) {
         </div>
         {cloneMut.error && <p className="text-sm text-red-400">{cloneMut.error}</p>}
         <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={handleClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
+          <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose}>Cancel</button>
+          <button data-testid="btn-submit-clone" className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
             {cloneMut.loading ? <Spinner size={14} /> : <Copy size={14} />} Clone VM
           </button>
         </div>

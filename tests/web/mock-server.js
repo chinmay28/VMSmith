@@ -117,6 +117,24 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "stopped"; return json(res, 200, { status: "stopped" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
+    const source = vms.get(m[1]);
+    if (!source) return json(res, 404, { error: "not found" });
+    const body = await parseBody(req);
+    const vm = createVM({
+      name: body.name || `${source.name}-clone`,
+      image: source.spec.image,
+      cpus: source.spec.cpus,
+      ram_mb: source.spec.ram_mb,
+      disk_gb: source.spec.disk_gb,
+      ssh_pub_key: source.spec.ssh_pub_key,
+      default_user: source.spec.default_user,
+      networks: source.spec.networks,
+    });
+    vm.state = "stopped";
+    vm.ip = "";
+    return json(res, 200, vm);
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
     return json(res, 200, snapshots.get(m[1]) || []);
   }
