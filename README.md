@@ -202,6 +202,9 @@ sudo ./bin/vmsmith vm start web01
 sudo ./bin/vmsmith vm stop --all --tag prod
 sudo ./bin/vmsmith vm start --all
 
+# Clone a VM into a new stopped copy
+sudo ./bin/vmsmith vm clone web01 --name web01-staging
+
 # Delete permanently (removes disk and metadata)
 sudo ./bin/vmsmith vm delete web01
 ```
@@ -473,6 +476,7 @@ vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
                            [--ssh-key "ssh-rsa ..."] [--default-user <user>]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
+vmsmith vm clone  <id>     --name <new-name>
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
 vmsmith vm list             [--tag <tag>] [--status <state>]
 vmsmith vm start  <id>      | --all [--tag <tag>]

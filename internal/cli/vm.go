@@ -235,6 +235,49 @@ var vmDeleteCmd = &cobra.Command{
 	},
 }
 
+var vmCloneCmd = &cobra.Command{
+	Use:   "clone <id>",
+	Short: "Clone a VM into a new stopped VM",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sourceID := args[0]
+		name, _ := cmd.Flags().GetString("name")
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("--name is required")
+		}
+
+		logger.Info("cli", "vm clone", "source_id", sourceID, "name", name)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm clone: failed to init VM manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		result, err := mgr.Clone(context.Background(), sourceID, name)
+		if err != nil {
+			logger.Error("cli", "vm clone failed", "source_id", sourceID, "name", name, "error", err.Error())
+			return fmt.Errorf("cloning VM: %w", err)
+		}
+
+		logger.Info("cli", "vm cloned", "source_id", sourceID, "id", result.ID, "name", result.Name, "state", string(result.State))
+
+		fmt.Printf("VM cloned successfully:\n")
+		fmt.Printf("  Source ID: %s\n", sourceID)
+		fmt.Printf("  ID:        %s\n", result.ID)
+		fmt.Printf("  Name:      %s\n", result.Name)
+		fmt.Printf("  State:     %s\n", result.State)
+		if result.Description != "" {
+			fmt.Printf("  Desc:      %s\n", result.Description)
+		}
+		if len(result.Tags) > 0 {
+			fmt.Printf("  Tags:      %s\n", strings.Join(result.Tags, ", "))
+		}
+		return nil
+	},
+}
+
 var vmEditCmd = &cobra.Command{
 	Use:   "edit <id>",
 	Short: "Edit VM resources (CPU, RAM, disk). VM is stopped, updated, then restarted.",
@@ -394,6 +437,7 @@ Examples:
 	vmEditCmd.Flags().StringSlice("tag", nil, "replace VM tags with the provided values (repeatable)")
 	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
+	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
@@ -405,6 +449,7 @@ Examples:
 	vmListCmd.Flags().Int("offset", 0, "number of VMs to skip before printing results")
 
 	vmCmd.AddCommand(vmCreateCmd)
+	vmCmd.AddCommand(vmCloneCmd)
 	vmCmd.AddCommand(vmEditCmd)
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmStartCmd)
