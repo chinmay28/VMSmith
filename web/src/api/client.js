@@ -77,6 +77,7 @@ export const vms = {
   get:     (id)         => request(`/vms/${id}`),
   create:  (spec)       => request('/vms', { method: 'POST', body: JSON.stringify(spec) }),
   update:  (id, patch)  => request(`/vms/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  clone:   (id, name)   => request(`/vms/${id}/clone`, { method: 'POST', body: JSON.stringify({ name }) }),
   start:   (id)         => request(`/vms/${id}/start`, { method: 'POST' }),
   stop:    (id)         => request(`/vms/${id}/stop`, { method: 'POST' }),
   delete:  (id)         => request(`/vms/${id}`, { method: 'DELETE' }),
