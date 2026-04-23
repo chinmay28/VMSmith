@@ -110,3 +110,30 @@ test('logs.list sends pagination params and returns total count metadata', async
   assert.equal(result.meta.totalCount, 13);
   assert.equal(result.data.entries[0].msg, 'hello');
 });
+
+test('vms.clone posts the requested clone name', async () => {
+  let requestUrl = '';
+  let requestMethod = '';
+  let requestBody = '';
+
+  global.fetch = async (url, options = {}) => {
+    requestUrl = url;
+    requestMethod = options.method;
+    requestBody = options.body;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get() { return null; } },
+      async json() {
+        return { id: 'vm-clone-1', name: 'alpha-clone' };
+      },
+    };
+  };
+
+  const result = await client.vms.clone('vm-1', 'alpha-clone');
+
+  assert.equal(requestUrl, '/api/v1/vms/vm-1/clone');
+  assert.equal(requestMethod, 'POST');
+  assert.equal(requestBody, JSON.stringify({ name: 'alpha-clone' }));
+  assert.equal(result.id, 'vm-clone-1');
+});

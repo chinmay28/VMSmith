@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, Download, Clock, Pencil
+  Plus, RotateCcw, Download, Clock, Pencil, Copy
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -19,6 +19,7 @@ export default function VMDetail() {
   const [showPortModal, setShowPortModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showCloneModal, setShowCloneModal] = useState(false);
 
   const startMut  = useMutation(vms.start);
   const stopMut   = useMutation(vms.stop);
@@ -63,6 +64,9 @@ export default function VMDetail() {
           )}
           <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">
             <Pencil size={14} /> Edit
+          </button>
+          <button className="btn-secondary" onClick={() => setShowCloneModal(true)} title="Clone VM">
+            <Copy size={14} /> Clone
           </button>
           <button className="btn-danger" onClick={handleDelete}>
             <Trash2 size={14} /> Delete
@@ -156,6 +160,7 @@ export default function VMDetail() {
 
       {/* Modals */}
       <EditVMModal vm={vm} open={showEditModal} onClose={() => setShowEditModal(false)} onUpdated={refresh} />
+      <CloneVMModal vm={vm} open={showCloneModal} onClose={() => setShowCloneModal(false)} />
       <CreateSnapshotModal vmId={id} open={showSnapModal} onClose={() => setShowSnapModal(false)} onCreated={refreshSnaps} />
       <AddPortModal vmId={id} open={showPortModal} onClose={() => setShowPortModal(false)} onCreated={refreshPorts} />
       <ExportImageModal vmId={id} open={showImageModal} onClose={() => setShowImageModal(false)} />
@@ -169,6 +174,63 @@ function InfoCard({ label, value, mono }) {
       <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
       <p className={`text-sm text-steel-200 mt-0.5 ${mono ? 'font-mono' : ''}`}>{value}</p>
     </div>
+  );
+}
+
+function CloneVMModal({ vm, open, onClose }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState('');
+  const cloneMut = useMutation((cloneName) => vms.clone(vm.id, cloneName));
+
+  useEffect(() => {
+    if (open && vm) {
+      setName(`${vm.name}-clone`);
+    }
+  }, [open, vm]);
+
+  const handleClose = () => {
+    setName('');
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    try {
+      const cloned = await cloneMut.execute(name.trim());
+      handleClose();
+      if (cloned?.id) {
+        navigate(`/vms/${cloned.id}`);
+      }
+    } catch {
+      // Error shown inline.
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Clone Machine">
+      <div className="space-y-4">
+        <p className="text-xs text-steel-500">
+          Create a copy of this VM with a new name. The source VM should be stopped before cloning.
+        </p>
+        <div>
+          <label className="label">New VM Name</label>
+          <input
+            className="input font-mono"
+            type="text"
+            placeholder="my-vm-clone"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            autoFocus
+          />
+        </div>
+        {cloneMut.error && <p className="text-sm text-red-400">{cloneMut.error}</p>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+          <button className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
+            {cloneMut.loading ? <Spinner size={14} /> : <Copy size={14} />} Clone VM
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
