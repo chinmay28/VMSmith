@@ -26,8 +26,10 @@ export default function Dashboard() {
   const vmList = listData(vmResponse);
   const imageList = listData(imageResponse);
   const runningCount = vmList.filter(v => v.state === 'running').length;
+  const hasVMCountFallback = totalCount(vmResponse) > 0 || vmList.length > 0;
   const totalVMCount = hostStats?.vm_count ?? totalCount(vmResponse);
   const totalImageCount = totalCount(imageResponse) || imageList.length;
+  const showHostError = hostError && !hasVMCountFallback;
 
   return (
     <div>
@@ -47,7 +49,7 @@ export default function Dashboard() {
         <StatCard label="Images" value={imgLoading ? '—' : totalImageCount} icon={HardDrive} />
       </div>
 
-      {hostError && <div className="mb-4"><ErrorBanner message={hostError} /></div>}
+      {showHostError && <div className="mb-4"><ErrorBanner message={hostError} /></div>}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
         <HostUsageCard label="Host CPU" resource={hostStats?.cpu} icon={Cpu} loading={hostLoading} formatValue={(resource) => `${resource?.percentage ?? 0}%`} />
