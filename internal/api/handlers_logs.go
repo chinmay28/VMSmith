@@ -56,6 +56,6 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, logsResponse{
 		Entries: entries,
-		Total:   total,
+		Total:   len(entries),
 	})
 }
