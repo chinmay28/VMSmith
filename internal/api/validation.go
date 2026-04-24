@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
 
+	validatepkg "github.com/vmsmith/vmsmith/internal/validate"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
-var vmNameRe = regexp.MustCompile(`^(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]{0,62}[a-zA-Z0-9])$`)
+var vmNameRe = validatepkg.VMNameRe
 
 func validateVMSpec(spec types.VMSpec) error {
 	name := strings.TrimSpace(spec.Name)
@@ -79,10 +78,7 @@ func validateVMResourceValue(value, min, max int, field string) error {
 }
 
 func validateOptionalVMResourceValue(value, min, max int, field string) error {
-	if value == 0 {
-		return nil
-	}
-	return validateVMResourceValue(value, min, max, field)
+	return validatepkg.ValidateOptionalVMResourceValue(value, min, max, field)
 }
 
 func validateUniqueVMName(name string, vms []*types.VM) error {
@@ -98,31 +94,7 @@ func validateUniqueVMName(name string, vms []*types.VM) error {
 }
 
 func normalizeTags(tags []string) ([]string, error) {
-	if len(tags) == 0 {
-		return nil, nil
-	}
-
-	seen := make(map[string]struct{}, len(tags))
-	normalized := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		trimmed := strings.TrimSpace(strings.ToLower(tag))
-		if trimmed == "" {
-			return nil, types.NewAPIError("invalid_spec", "tags cannot contain empty values")
-		}
-		if len(trimmed) > 32 {
-			return nil, types.NewAPIError("invalid_spec", "tags must be 1-32 characters")
-		}
-		if !regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]*$`).MatchString(trimmed) {
-			return nil, types.NewAPIError("invalid_spec", "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens")
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
-	}
-	sort.Strings(normalized)
-	return normalized, nil
+	return validatepkg.NormalizeTags(tags)
 }
 
 func validateCIDR(value, field string) error {
@@ -165,39 +137,11 @@ func validateCreateImageRequest(vmID, name string) error {
 }
 
 func validateTemplateRequest(req createTemplateRequest) error {
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return types.NewAPIError("invalid_name", "template name is required")
-	}
-	if !vmNameRe.MatchString(name) {
-		return types.NewAPIError("invalid_name", "template name must be 1-64 characters and contain only letters, numbers, and hyphens")
-	}
-	if strings.TrimSpace(req.Image) == "" {
-		return types.NewAPIError("invalid_image", "image is required")
-	}
-	if err := validateOptionalVMResourceValue(req.CPUs, 1, 128, "cpus"); err != nil {
-		return err
-	}
-	if err := validateOptionalVMResourceValue(req.RAMMB, 128, 1024*1024, "ram_mb"); err != nil {
-		return err
-	}
-	if err := validateOptionalVMResourceValue(req.DiskGB, 1, 1024*10, "disk_gb"); err != nil {
-		return err
-	}
-	return nil
+	return validatepkg.ValidateTemplateRequest(req.Name, req.Image, req.CPUs, req.RAMMB, req.DiskGB)
 }
 
 func validateUniqueTemplateName(name string, templates []*types.VMTemplate) error {
-	trimmed := strings.TrimSpace(name)
-	for _, tpl := range templates {
-		if tpl == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(tpl.Name), trimmed) {
-			return types.NewAPIError("invalid_name", fmt.Sprintf("template name %q already exists", trimmed))
-		}
-	}
-	return nil
+	return validatepkg.ValidateUniqueTemplateName(name, templates)
 }
 
 func validateUploadedImage(filename string, data []byte) error {
