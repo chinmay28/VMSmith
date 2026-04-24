@@ -40,9 +40,9 @@ export default function Dashboard() {
       />
 
       <div className="grid grid-cols-3 gap-3 mb-6">
-        <StatCard label="Total Machines" value={vmLoading && !hostStats ? '—' : totalVMCount} icon={Server} />
-        <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent />
-        <StatCard label="Images" value={imgLoading ? '—' : totalImageCount} icon={HardDrive} />
+        <StatCard label="Total Machines" value={vmLoading && !hostStats ? '—' : totalVMCount} icon={Server} testId="stat-total" />
+        <StatCard label="Running" value={vmLoading ? '—' : runningCount} icon={Activity} accent testId="stat-running" />
+        <StatCard label="Images" value={imgLoading ? '—' : totalImageCount} icon={HardDrive} testId="stat-images" />
       </div>
 
       {showHostError && <div className="mb-4"><ErrorBanner message={hostError} /></div>}
@@ -81,7 +81,7 @@ export default function Dashboard() {
             }
           />
         ) : (
-          <table className="w-full">
+          <table className="w-full" data-testid="dashboard-vm-table">
             <thead>
               <tr className="border-b border-steel-800/40">
                 <th className="table-header table-cell">Name</th>
@@ -101,6 +101,7 @@ export default function Dashboard() {
                     key={vm.id}
                     className="cursor-pointer hover:bg-steel-800/30 transition-colors"
                     onClick={() => navigate(`/vms/${vm.id}`)}
+                    data-testid={`vm-row-${vm.name}`}
                   >
                     <td className="table-cell">
                       <span className="font-mono text-steel-100 text-sm">{vm.name}</span>

@@ -59,7 +59,7 @@ export default function ImageList() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <table className="w-full">
+          <table className="w-full" data-testid="image-table">
             <thead>
               <tr className="border-b border-steel-800/40">
                 <th className="table-header table-cell">Name</th>
@@ -72,7 +72,7 @@ export default function ImageList() {
             </thead>
             <tbody>
               {imageList.map(img => (
-                <tr key={img.id} className="hover:bg-steel-800/20 transition-colors">
+                <tr key={img.id} className="hover:bg-steel-800/20 transition-colors" data-testid={`image-row-${img.name}`}>
                   <td className="table-cell">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded bg-steel-800/60 border border-steel-700/30 flex items-center justify-center">

@@ -79,14 +79,14 @@ export function Spinner({ size = 16 }) {
 }
 
 // --- Stat Card ---
-export function StatCard({ label, value, icon: Icon, accent }) {
+export function StatCard({ label, value, icon: Icon, accent, testId }) {
   return (
     <div className="card-hover px-4 py-3.5">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
         {Icon && <Icon size={14} className={accent ? 'text-forge-400' : 'text-steel-600'} />}
       </div>
-      <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
+      <p className="font-display font-bold text-2xl text-steel-100" data-testid={testId}>{value}</p>
     </div>
   );
 }

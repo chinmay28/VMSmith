@@ -471,7 +471,7 @@ test.describe("Full Lifecycle", () => {
     await page.getByTestId("nav-vms").click();
     await page.getByTestId("btn-new-vm").click();
     await page.getByTestId("input-vm-name").fill("e2e-test-vm");
-    await page.getByTestId("input-vm-image").fill("ubuntu-22.04");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
     await page.getByTestId("btn-submit-create").click();
 
     // 2. New VM should appear in list

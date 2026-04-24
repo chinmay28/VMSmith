@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { RefreshCw, ChevronDown } from 'lucide-react';
 import { logs as logsApi } from '../api/client';
 import { PageHeader, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
@@ -80,6 +80,20 @@ export default function LogViewer() {
   };
 
   const filtered = entries.filter(e => LEVEL_ORDER[e.level] >= LEVEL_ORDER[levelFilter]);
+  const firstSourceIndex = useMemo(() => {
+    const map = {};
+    filtered.forEach((entry, index) => {
+      if (map[entry.source] === undefined) map[entry.source] = index;
+    });
+    return map;
+  }, [filtered]);
+  const firstLevelIndex = useMemo(() => {
+    const map = {};
+    filtered.forEach((entry, index) => {
+      if (map[entry.level] === undefined) map[entry.level] = index;
+    });
+    return map;
+  }, [filtered]);
 
   return (
     <div className="flex flex-col h-full">
@@ -93,6 +107,7 @@ export default function LogViewer() {
               className="input py-1 text-xs w-28"
               value={sourceFilter}
               onChange={e => setSourceFilter(e.target.value)}
+              data-testid="log-source-filter"
             >
               <option value="">All sources</option>
               <option value="cli">CLI</option>
@@ -105,6 +120,7 @@ export default function LogViewer() {
               className="input py-1 text-xs w-24"
               value={levelFilter}
               onChange={e => setLevelFilter(e.target.value)}
+              data-testid="log-level-filter"
             >
               <option value="debug">Debug+</option>
               <option value="info">Info+</option>
@@ -116,6 +132,7 @@ export default function LogViewer() {
             <button
               className={`btn-secondary text-xs py-1 px-3 ${paused ? 'text-amber-400 border-amber-700/40' : ''}`}
               onClick={() => setPaused(p => !p)}
+              data-testid="btn-log-pause"
             >
               {paused ? 'Resume' : 'Pause'}
             </button>
@@ -136,6 +153,7 @@ export default function LogViewer() {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto rounded-lg border border-steel-800/60 bg-steel-950/60 font-mono text-xs"
         style={{ minHeight: 0 }}
+        data-testid="log-table"
       >
         {loading && filtered.length === 0 ? (
           <div className="flex justify-center py-20"><Spinner size={18} /></div>
@@ -153,7 +171,12 @@ export default function LogViewer() {
             </thead>
             <tbody>
               {filtered.map((entry, i) => (
-                <LogRow key={i} entry={entry} />
+                <LogRow
+                  key={i}
+                  entry={entry}
+                  sourceTestId={firstSourceIndex[entry.source] === i ? `log-source-${entry.source}` : undefined}
+                  levelTestId={firstLevelIndex[entry.level] === i ? `log-level-${entry.level}` : undefined}
+                />
               ))}
             </tbody>
           </table>
@@ -192,7 +215,7 @@ export default function LogViewer() {
   );
 }
 
-function LogRow({ entry }) {
+function LogRow({ entry, sourceTestId, levelTestId }) {
   const [expanded, setExpanded] = useState(false);
   const hasFields = entry.fields && Object.keys(entry.fields).length > 0;
 
@@ -210,10 +233,10 @@ function LogRow({ entry }) {
         onClick={() => hasFields && setExpanded(e => !e)}
       >
         <td className="px-3 py-1.5 text-steel-500 whitespace-nowrap">{timeStr}</td>
-        <td className="px-3 py-1.5">
+        <td className="px-3 py-1.5" data-testid={levelTestId}>
           <span className={levelBadge(entry.level)}>{entry.level}</span>
         </td>
-        <td className={`px-3 py-1.5 ${sourceBadge(entry.source)}`}>{entry.source}</td>
+        <td className={`px-3 py-1.5 ${sourceBadge(entry.source)}`} data-testid={sourceTestId}>{entry.source}</td>
         <td className="px-3 py-1.5 text-steel-200">{entry.msg}</td>
       </tr>
       {expanded && hasFields && (

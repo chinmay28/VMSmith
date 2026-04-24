@@ -50,25 +50,25 @@ export default function VMDetail() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
-          <button className="btn-ghost -ml-2" onClick={() => navigate('/vms')}>
+          <button className="btn-ghost -ml-2" onClick={() => navigate('/vms')} data-testid="back-link">
             <ArrowLeft size={16} />
           </button>
           <div>
             <div className="flex items-center gap-2.5">
-              <h1 className="font-display font-bold text-2xl text-steel-100 tracking-tight">{vm.name}</h1>
-              <StatusBadge state={vm.state} />
+              <h1 className="font-display font-bold text-2xl text-steel-100 tracking-tight" data-testid="vm-detail-name">{vm.name}</h1>
+              <span data-testid="vm-detail-state"><StatusBadge state={vm.state} /></span>
             </div>
             <p className="text-xs font-mono text-steel-500 mt-0.5">{vm.id}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {vm.state === 'stopped' && (
-            <button className="btn-primary" onClick={() => { startMut.execute(id).then(refresh); }}>
+            <button className="btn-primary" onClick={() => { startMut.execute(id).then(refresh); }} data-testid="btn-start">
               <Play size={14} /> Start
             </button>
           )}
           {vm.state === 'running' && (
-            <button className="btn-secondary" onClick={() => { stopMut.execute(id).then(refresh); }}>
+            <button className="btn-secondary" onClick={() => { stopMut.execute(id).then(refresh); }} data-testid="btn-stop">
               <Square size={14} /> Stop
             </button>
           )}
@@ -78,7 +78,7 @@ export default function VMDetail() {
           <button data-testid="btn-clone-vm" className="btn-secondary" onClick={() => setShowCloneModal(true)} title="Clone VM">
             <Copy size={14} /> Clone
           </button>
-          <button className="btn-danger" onClick={handleDelete}>
+          <button className="btn-danger" onClick={handleDelete} data-testid="btn-delete">
             <Trash2 size={14} /> Delete
           </button>
         </div>
@@ -86,9 +86,9 @@ export default function VMDetail() {
 
       {/* Info grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
-        <InfoCard label="IP Address" value={vm.ip || 'Not assigned'} mono />
-        <InfoCard label="Image" value={spec.image || '—'} mono />
-        <InfoCard label="Resources" value={`${cpuText} vCPU · ${ramText} MB RAM · ${diskText} GB disk`} />
+        <InfoCard label="IP Address" value={vm.ip || 'Not assigned'} mono testId="vm-detail-ip" />
+        <InfoCard label="Image" value={spec.image || '—'} mono testId="vm-detail-image" />
+        <InfoCard label="Resources" value={`${cpuText} vCPU · ${ramText} MB RAM · ${diskText} GB disk`} testId="vm-detail-resources" />
         <InfoCard label="Created" value={createdText} />
         <InfoCard label="Description" value={vm.description || '—'} />
         <InfoCard label="Tags" value={tags.length ? tags.map(tag => `#${tag}`).join(' · ') : '—'} mono />
@@ -134,7 +134,7 @@ export default function VMDetail() {
               <Camera size={14} className="text-steel-500" />
               <h2 className="text-sm font-display font-semibold text-steel-300">Snapshots</h2>
             </div>
-            <button className="btn-ghost text-xs" onClick={() => setShowSnapModal(true)}>
+            <button className="btn-ghost text-xs" onClick={() => setShowSnapModal(true)} data-testid="btn-new-snapshot">
               <Plus size={13} /> New
             </button>
           </div>
@@ -173,11 +173,11 @@ export default function VMDetail() {
   );
 }
 
-function InfoCard({ label, value, mono }) {
+function InfoCard({ label, value, mono, testId }) {
   return (
     <div className="card px-4 py-3">
       <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
-      <p className={`text-sm text-steel-200 mt-0.5 ${mono ? 'font-mono' : ''}`}>{value}</p>
+      <p className={`text-sm text-steel-200 mt-0.5 ${mono ? 'font-mono' : ''}`} data-testid={testId}>{value}</p>
     </div>
   );
 }
@@ -192,7 +192,7 @@ function CloneVMModal({ vm, open, onClose }) {
       setName(`${vm.name}-clone`);
       cloneMut.reset();
     }
-  }, [open, vm, cloneMut]);
+  }, [open, vm, cloneMut.reset]);
 
   const handleClose = () => {
     cloneMut.reset();
@@ -402,7 +402,7 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
   return (
     <div className="divide-y divide-steel-800/40">
       {snapList.map(snap => (
-        <div key={snap.name} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors">
+        <div key={snap.name} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors" data-testid={`snap-${snap.name}`}>
           <div className="flex items-center gap-2">
             <Clock size={12} className="text-steel-600" />
             <span className="font-mono text-sm text-steel-200">{snap.name}</span>
@@ -417,6 +417,7 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
             <button
               className="btn-ghost text-xs text-red-400 hover:text-red-300"
               onClick={async () => { await deleteMut.execute(snap.name); refreshSnaps(); }}
+              data-testid={`btn-delete-snap-${snap.name}`}
             >
               <Trash2 size={12} />
             </button>
@@ -474,12 +475,12 @@ function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
       <div className="space-y-4">
         <div>
           <label className="label">Snapshot Name</label>
-          <input className="input" placeholder="before-update" value={name} onChange={e => setName(e.target.value)} autoFocus />
+          <input className="input" placeholder="before-update" value={name} onChange={e => setName(e.target.value)} autoFocus data-testid="input-snap-name" />
         </div>
         {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
         <div className="flex justify-end gap-2">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading}>
+          <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading} data-testid="btn-submit-snapshot">
             {createMut.loading ? <Spinner size={14} /> : <Camera size={14} />} Create
           </button>
         </div>
