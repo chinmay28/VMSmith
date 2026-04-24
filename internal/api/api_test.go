@@ -2770,6 +2770,9 @@ func TestGetLogs_LimitParam(t *testing.T) {
 	if result.Total > 5 {
 		t.Errorf("with limit=5, Total = %d, want <= 5", result.Total)
 	}
+	if got := resp.Header.Get("X-Total-Count"); got == "" {
+		t.Fatalf("X-Total-Count header missing")
+	}
 }
 
 func TestGetLogs_LevelFilter(t *testing.T) {
@@ -2868,6 +2871,9 @@ func TestGetLogs_MaxLimitCapped(t *testing.T) {
 
 	if result.Total > 2000 {
 		t.Errorf("Total = %d exceeds maximum cap of 2000", result.Total)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got == "" {
+		t.Fatalf("X-Total-Count header missing")
 	}
 }
 
