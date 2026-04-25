@@ -69,6 +69,7 @@ test-integration:
 
 test-web:
 	node tests/web/run-gui-tests.js
+	node tests/web/run-built-web-regression.js
 
 test-all: test test-web
 

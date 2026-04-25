@@ -274,6 +274,10 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
   const startMut = useMutation(vms.start);
   const stopMut  = useMutation(vms.stop);
   const delMut   = useMutation(vms.delete);
+  const spec = vm.spec || {};
+  const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
+  const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
+  const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
 
   const handleAction = async (action) => {
     setActionMenu(null);
@@ -314,7 +318,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
           <StatusBadge state={vm.state} />
         </div>
         <p className="text-xs font-mono text-steel-500 mt-0.5">
-          {vm.spec.cpus} vCPU · {vm.spec.ram_mb} MB · {vm.spec.disk_gb} GB
+          {cpuText} vCPU · {ramText} MB · {diskText} GB
           {vm.ip && <> · {vm.ip}</>}
         </p>
         {vm.description && <p className="text-xs text-steel-400 mt-1 truncate">{vm.description}</p>}
