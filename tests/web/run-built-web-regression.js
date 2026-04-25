@@ -78,7 +78,7 @@ async function runTest(name, fn) {
 
     page.on('pageerror', (err) => pageErrors.push(err.message));
 
-    await page.route('**/api/v1/vms*', async (route) => {
+    await page.route(/\/api\/v1\/vms(?:\/.*)?(?:\?.*)?$/, async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === '/api/v1/vms') {
         await route.fulfill({
@@ -140,6 +140,22 @@ async function runTest(name, fn) {
             created_at: new Date().toISOString(),
           },
         ]),
+      });
+    });
+
+    await page.route(/\/api\/v1\/vms\/[^/]+\/snapshots(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: 'null',
+      });
+    });
+
+    await page.route(/\/api\/v1\/vms\/[^/]+\/ports(?:\/.*)?(?:\?.*)?$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: 'null',
       });
     });
 
@@ -210,6 +226,16 @@ async function runTest(name, fn) {
       }
     });
 
+    await runTest('/vms/:id survives malformed spec data and opens edit modal', async () => {
+      await page.goto(`${BASE}/vms/vm-1`, { waitUntil: 'networkidle' });
+      const editButton = page.getByTestId('btn-edit-vm');
+      await expectVisible(editButton, 'detail edit button not visible');
+      await editButton.click();
+      await expectVisible(page.getByTestId('input-edit-cpus'), 'edit modal did not open');
+      if (pageErrors.length > 0) {
+        throw new Error(`unexpected page errors: ${pageErrors.join(' | ')}`);
+      }
+    });
 
     console.log('\nBuilt frontend regression checks passed.');
   } finally {

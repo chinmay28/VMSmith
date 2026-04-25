@@ -265,7 +265,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
       setTags(safeArray(vm.tags).join(', '));
       setNatIP(currentIP);
     }
-  }, [open, vm, currentCpus, currentRamMb, currentDiskGb, currentIP]);
+  }, [open, vm]);
 
   const handleSubmit = async () => {
     const patch = {};
