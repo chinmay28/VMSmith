@@ -83,12 +83,17 @@ async function runTest(name, fn) {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify([
+          null,
           {
             id: 'vm-1',
             name: 'broken-spec-vm',
             state: 'running',
             ip: '192.168.100.50',
             created_at: new Date().toISOString(),
+          },
+          {
+            tags: 'not-an-array',
+            spec: 'not-an-object',
           },
         ]),
       });
@@ -138,7 +143,7 @@ async function runTest(name, fn) {
           cpu: { percentage: 12 },
           ram: { used: 4 * 1024 * 1024 * 1024, total: 8 * 1024 * 1024 * 1024, available: 4 * 1024 * 1024 * 1024 },
           disk: { used: 20 * 1024 * 1024 * 1024, total: 100 * 1024 * 1024 * 1024, available: 80 * 1024 * 1024 * 1024 },
-          vm_count: 1,
+          vm_count: 3,
         }),
       });
     });
@@ -148,7 +153,7 @@ async function runTest(name, fn) {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          vms: { used: 1, limit: 10 },
+          vms: { used: 3, limit: 10 },
           cpus: { used: 2, limit: 16 },
           ram_mb: { used: 2048, limit: 32768 },
           disk_gb: { used: 20, limit: 500 },
@@ -165,10 +170,11 @@ async function runTest(name, fn) {
       }
     });
 
-    await runTest('/vms survives VMs with missing spec data and still opens create modal', async () => {
+    await runTest('/vms survives malformed list entries and still opens create modal', async () => {
       await page.goto(`${BASE}/vms`, { waitUntil: 'networkidle' });
       await expectVisible(page.getByRole('heading', { name: 'Machines' }), '/vms heading not visible');
       await expectVisible(page.getByText('broken-spec-vm'), 'VM card did not render');
+      await expectVisible(page.getByText('unnamed-vm'), 'fallback VM name did not render');
       await page.getByRole('button', { name: /new machine/i }).click();
       await expectVisible(page.getByText('Create Machine'), 'create modal did not open');
       await expectVisible(page.getByTestId('input-vm-name'), 'name input missing');

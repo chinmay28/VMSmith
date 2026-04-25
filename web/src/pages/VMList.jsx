@@ -7,6 +7,27 @@ import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, Pagin
 
 const DEFAULT_PER_PAGE = 25;
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeVM(vm, index) {
+  if (!vm || typeof vm !== 'object') return null;
+  return {
+    ...vm,
+    id: vm.id || `invalid-vm-${index}`,
+    name: vm.name || 'unnamed-vm',
+    state: vm.state || 'unknown',
+    tags: Array.isArray(vm.tags) ? vm.tags : [],
+    spec: vm.spec && typeof vm.spec === 'object' ? vm.spec : {},
+  };
+}
+
+function listData(response) {
+  if (Array.isArray(response)) return response;
+  return safeArray(response?.data);
+}
+
 export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
@@ -22,11 +43,13 @@ export default function VMList() {
     5000,
   );
   const navigate = useNavigate();
-  const vmList = vmResponse?.data || [];
+  const vmList = listData(vmResponse)
+    .map(normalizeVM)
+    .filter(Boolean);
   const totalVMs = vmResponse?.meta?.totalCount ?? vmList.length;
-  const allTags = [...new Set((vmList || []).flatMap(vm => vm.tags || []))].sort();
+  const allTags = [...new Set(vmList.flatMap(vm => vm.tags))].sort();
 
-  const visibleVMs = vmList || [];
+  const visibleVMs = vmList;
   const selectedVMs = useMemo(
     () => visibleVMs.filter(vm => selectedIds.includes(vm.id)),
     [visibleVMs, selectedIds],
@@ -370,8 +393,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
   const { data: templateResponse } = useFetch(() => templatesApi.list(), [], 0);
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
-  const imageList = imageResponse?.data || imageResponse || [];
-  const templates = templateResponse?.data || templateResponse || [];
+  const imageList = safeArray(imageResponse?.data || imageResponse);
+  const templates = safeArray(templateResponse?.data || templateResponse);
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
@@ -441,8 +464,9 @@ function CreateVMModal({ open, onClose, onCreated }) {
   };
 
   const noImages = imageList.length === 0;
-  const physIfaces = (hostIfaces || []).filter(i => i.is_physical && i.is_up);
-  const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
+  const hostInterfaces = safeArray(hostIfaces);
+  const physIfaces = hostInterfaces.filter(i => i && i.is_physical && i.is_up);
+  const natIface = hostInterfaces.find(i => i && i.name === 'vmsmith0');
 
   const advancedCount = [
     form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
