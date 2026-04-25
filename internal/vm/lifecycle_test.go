@@ -259,6 +259,61 @@ func TestParseNetworkHostIPs_Empty(t *testing.T) {
 	}
 }
 
+func TestCloneVMSpec(t *testing.T) {
+	source := types.VMSpec{
+		Name:        "source-vm",
+		Image:       "ubuntu-24.04",
+		CPUs:        4,
+		RAMMB:       8192,
+		DiskGB:      80,
+		Description: "source description",
+		Tags:        []string{"prod", "web"},
+		NatStaticIP: "192.168.100.50/24",
+		NatGateway:  "192.168.100.1",
+		Networks: []types.NetworkAttachment{
+			{
+				Mode:        types.NetworkModeMacvtap,
+				HostInterface: "eth1",
+				StaticIP:    "10.0.0.10/24",
+				Gateway:     "10.0.0.1",
+				MacAddress:  "52:54:00:aa:bb:cc",
+			},
+		},
+	}
+
+	cloned := cloneVMSpec(source, "clone-a")
+	if cloned.Name != "clone-a" {
+		t.Fatalf("clone name = %q, want clone-a", cloned.Name)
+	}
+	if cloned.Image != source.Image || cloned.CPUs != source.CPUs || cloned.RAMMB != source.RAMMB || cloned.DiskGB != source.DiskGB {
+		t.Fatalf("clone spec lost source resources: %+v", cloned)
+	}
+	if cloned.NatStaticIP != "" || cloned.NatGateway != "" {
+		t.Fatalf("clone NAT config = %q / %q, want empty", cloned.NatStaticIP, cloned.NatGateway)
+	}
+	if len(cloned.Tags) != 2 || cloned.Tags[0] != "prod" || cloned.Tags[1] != "web" {
+		t.Fatalf("clone tags = %#v", cloned.Tags)
+	}
+	if len(cloned.Networks) != 1 {
+		t.Fatalf("clone networks len = %d, want 1", len(cloned.Networks))
+	}
+	if cloned.Networks[0].StaticIP != "" || cloned.Networks[0].Gateway != "" {
+		t.Fatalf("clone network static config = %+v, want cleared", cloned.Networks[0])
+	}
+	if cloned.Networks[0].MacAddress == "" || cloned.Networks[0].MacAddress == source.Networks[0].MacAddress {
+		t.Fatalf("clone network MAC = %q, want new generated MAC", cloned.Networks[0].MacAddress)
+	}
+
+	cloned.Tags[0] = "changed"
+	cloned.Networks[0].HostInterface = "eth9"
+	if source.Tags[0] != "prod" {
+		t.Fatal("source tags mutated after clone")
+	}
+	if source.Networks[0].HostInterface != "eth1" {
+		t.Fatal("source networks mutated after clone")
+	}
+}
+
 func TestParseNetworkHostIPs_MultipleIPBlocks(t *testing.T) {
 	xmlStr := `<network>
   <ip address='192.168.100.1'>

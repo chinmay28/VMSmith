@@ -234,7 +234,85 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 }
 
 func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error) {
-	return nil, fmt.Errorf("vm clone not implemented")
+	sourceVM, err := m.store.GetVM(sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := m.conn.LookupDomainByName(sourceVM.Name)
+	if err != nil {
+		return nil, fmt.Errorf("looking up domain %s: %w", sourceVM.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return nil, fmt.Errorf("getting domain state %s: %w", sourceVM.Name, err)
+	}
+	if state == libvirt.DOMAIN_RUNNING {
+		return nil, types.NewAPIError("invalid_vm_state", "source VM must be stopped before cloning")
+	}
+
+	if err := network.NewManager(m.conn, m.cfg).EnsureNetwork(); err != nil {
+		return nil, fmt.Errorf("ensuring NAT network: %w", err)
+	}
+
+	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
+	vmDir := filepath.Join(m.cfg.Storage.BaseDir, id)
+	if err := os.MkdirAll(vmDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating VM dir: %w", err)
+	}
+
+	clonedSpec := cloneVMSpec(sourceVM.Spec, newName)
+	clonedDiskPath := filepath.Join(vmDir, "disk.qcow2")
+	if err := createClonedDisk(sourceVM.DiskPath, clonedDiskPath); err != nil {
+		os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("creating overlay disk: %w", err)
+	}
+
+	natMAC := generateMAC()
+	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
+	if err := createCloudInitISO(cloudInitISO, clonedSpec, natMAC, ""); err != nil {
+		os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
+	}
+
+	params := DomainParamsFromSpec(clonedSpec, clonedDiskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
+	params.Machine = detectMachineType(m.conn)
+	xmlDoc, err := GenerateDomainXML(params)
+	if err != nil {
+		os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("generating domain XML: %w", err)
+	}
+
+	cloneDom, err := m.conn.DomainDefineXML(xmlDoc)
+	if err != nil {
+		os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("defining domain: %w", err)
+	}
+	defer cloneDom.Free()
+
+	cloned := &types.VM{
+		ID:          id,
+		Name:        newName,
+		Description: sourceVM.Description,
+		Tags:        append([]string(nil), sourceVM.Tags...),
+		Spec:        clonedSpec,
+		State:       types.VMStateStopped,
+		IP:          "",
+		NatMAC:      natMAC,
+		DiskPath:    clonedDiskPath,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := m.store.PutVM(cloned); err != nil {
+		cloneDom.Undefine()
+		os.RemoveAll(vmDir)
+		return nil, fmt.Errorf("storing VM metadata: %w", err)
+	}
+
+	return cloned, nil
 }
 
 // Start boots a stopped VM.
@@ -657,6 +735,34 @@ func (m *LibvirtManager) DeleteSnapshot(ctx context.Context, vmID string, snapsh
 }
 
 // --- helpers ---
+
+func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
+	cloned := source
+	cloned.Name = newName
+	cloned.NatStaticIP = ""
+	cloned.NatGateway = ""
+	cloned.Tags = append([]string(nil), source.Tags...)
+	cloned.Networks = append([]types.NetworkAttachment(nil), source.Networks...)
+	for i := range cloned.Networks {
+		cloned.Networks[i].MacAddress = generateMAC()
+		cloned.Networks[i].StaticIP = ""
+		cloned.Networks[i].Gateway = ""
+	}
+	return cloned
+}
+
+func createClonedDisk(sourceDiskPath, diskPath string) error {
+	cmd := exec.Command("qemu-img", "convert",
+		"-f", "qcow2",
+		"-O", "qcow2",
+		sourceDiskPath,
+		diskPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
+	}
+	return nil
+}
 
 func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 	// Create a qcow2 overlay backed by the base image
