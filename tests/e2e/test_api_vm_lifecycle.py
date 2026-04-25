@@ -214,6 +214,54 @@ class TestAPIVMLifecycle:
         assert resp.json()["state"] == "stopped"
 
     # ------------------------------------------------------------------
+    # Step 2e: Clone the VM via API
+    # ------------------------------------------------------------------
+
+    def test_clone_vm(self, api_vm_cleanup):
+        """POST /vms/{id}/clone should create a distinct stopped VM with copied metadata."""
+        vm_id = getattr(TestAPIVMLifecycle, "_vm_id", None)
+        if not vm_id:
+            pytest.skip("No VM")
+
+        source = api_get(f"/vms/{vm_id}")
+        assert source.status_code == 200, f"Source GET failed: {source.text}"
+        source_vm = source.json()
+
+        resp = api_post(f"/vms/{vm_id}/clone", json={"name": "e2e-api-rocky-clone"})
+        assert resp.status_code == 201, f"Clone failed: {resp.text}"
+
+        cloned = resp.json()
+        clone_id = cloned["id"]
+        api_vm_cleanup.append(clone_id)
+
+        assert clone_id != vm_id
+        assert clone_id.startswith("vm-")
+        assert cloned["name"] == "e2e-api-rocky-clone"
+        assert cloned["state"] == "stopped"
+        assert cloned["ip"] == ""
+        assert cloned["spec"]["name"] == "e2e-api-rocky-clone"
+        assert cloned["spec"]["image"] == source_vm["spec"]["image"]
+        assert cloned["spec"]["cpus"] == source_vm["spec"]["cpus"]
+        assert cloned["spec"]["ram_mb"] == source_vm["spec"]["ram_mb"]
+        assert cloned["spec"]["disk_gb"] == source_vm["spec"]["disk_gb"]
+
+        detail = api_get(f"/vms/{clone_id}")
+        assert detail.status_code == 200, f"Clone GET failed: {detail.text}"
+        stored = detail.json()
+        assert stored["name"] == "e2e-api-rocky-clone"
+        assert stored["state"] == "stopped"
+        assert stored["spec"]["name"] == "e2e-api-rocky-clone"
+        assert stored["spec"]["image"] == cloned["spec"]["image"]
+        assert stored["spec"]["cpus"] == cloned["spec"]["cpus"]
+        assert stored["spec"]["ram_mb"] == cloned["spec"]["ram_mb"]
+        assert stored["spec"]["disk_gb"] == cloned["spec"]["disk_gb"]
+
+        listed = api_get("/vms")
+        assert listed.status_code == 200
+        listed_ids = [vm["id"] for vm in listed.json()]
+        assert clone_id in listed_ids
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
