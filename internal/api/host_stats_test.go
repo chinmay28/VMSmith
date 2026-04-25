@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,10 @@ import (
 	"testing"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/network"
+	"github.com/vmsmith/vmsmith/internal/storage"
+	"github.com/vmsmith/vmsmith/internal/store"
+	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
