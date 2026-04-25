@@ -3,27 +3,7 @@ import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'l
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeVM(vm, index) {
-  if (!vm || typeof vm !== 'object') return null;
-  return {
-    ...vm,
-    id: vm.id || `invalid-vm-${index}`,
-    name: vm.name || 'unnamed-vm',
-    state: vm.state || 'unknown',
-    tags: Array.isArray(vm.tags) ? vm.tags : [],
-    spec: vm.spec && typeof vm.spec === 'object' ? vm.spec : {},
-  };
-}
-
-function listData(response) {
-  if (Array.isArray(response)) return response;
-  return safeArray(response?.data);
-}
+import { listData, normalizeVMList } from '../utils/normalize';
 
 function totalCount(response) {
   if (Array.isArray(response)) return response.length;
@@ -39,9 +19,7 @@ export default function Dashboard() {
   const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
   const navigate = useNavigate();
 
-  const vmList = listData(vmResponse)
-    .map(normalizeVM)
-    .filter(Boolean);
+  const vmList = normalizeVMList(vmResponse);
   const imageList = listData(imageResponse);
   const runningCount = vmList.filter(v => v.state === 'running').length;
   const hasVMCountFallback = totalCount(vmResponse) > 0 || vmList.length > 0;

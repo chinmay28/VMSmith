@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 type createSnapshotRequest struct {
@@ -53,6 +54,9 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	total := len(snaps)
 	pagination := parsePagination(r)
 	snaps = paginateSlice(snaps, pagination.Page, pagination.PerPage)
+	if snaps == nil {
+		snaps = []*types.Snapshot{}
+	}
 	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, snaps)

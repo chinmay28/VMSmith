@@ -79,23 +79,50 @@ async function runTest(name, fn) {
     page.on('pageerror', (err) => pageErrors.push(err.message));
 
     await page.route('**/api/v1/vms*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          null,
-          {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/v1/vms') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            null,
+            {
+              id: 'vm-1',
+              name: 'broken-spec-vm',
+              state: 'running',
+              ip: '192.168.100.50',
+              created_at: new Date().toISOString(),
+            },
+            {
+              tags: 'not-an-array',
+              spec: 'not-an-object',
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (url.pathname === '/api/v1/vms/vm-1') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
             id: 'vm-1',
             name: 'broken-spec-vm',
             state: 'running',
             ip: '192.168.100.50',
             created_at: new Date().toISOString(),
-          },
-          {
-            tags: 'not-an-array',
             spec: 'not-an-object',
-          },
-        ]),
+            tags: 'not-an-array',
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: `unmocked VM API path: ${url.pathname}` }),
       });
     });
 
@@ -120,7 +147,7 @@ async function runTest(name, fn) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([]),
+        body: 'null',
       });
     });
 
@@ -182,6 +209,7 @@ async function runTest(name, fn) {
         throw new Error(`unexpected page errors: ${pageErrors.join(' | ')}`);
       }
     });
+
 
     console.log('\nBuilt frontend regression checks passed.');
   } finally {

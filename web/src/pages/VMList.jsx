@@ -4,29 +4,9 @@ import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSqua
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
+import { normalizeVMList, safeArray } from '../utils/normalize';
 
 const DEFAULT_PER_PAGE = 25;
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeVM(vm, index) {
-  if (!vm || typeof vm !== 'object') return null;
-  return {
-    ...vm,
-    id: vm.id || `invalid-vm-${index}`,
-    name: vm.name || 'unnamed-vm',
-    state: vm.state || 'unknown',
-    tags: Array.isArray(vm.tags) ? vm.tags : [],
-    spec: vm.spec && typeof vm.spec === 'object' ? vm.spec : {},
-  };
-}
-
-function listData(response) {
-  if (Array.isArray(response)) return response;
-  return safeArray(response?.data);
-}
 
 export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,9 +23,7 @@ export default function VMList() {
     5000,
   );
   const navigate = useNavigate();
-  const vmList = listData(vmResponse)
-    .map(normalizeVM)
-    .filter(Boolean);
+  const vmList = normalizeVMList(vmResponse);
   const totalVMs = vmResponse?.meta?.totalCount ?? vmList.length;
   const allTags = [...new Set(vmList.flatMap(vm => vm.tags))].sort();
 

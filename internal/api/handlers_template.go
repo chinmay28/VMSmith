@@ -92,6 +92,9 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	total := len(templates)
 	pagination := parsePagination(r)
 	templates = paginateSlice(templates, pagination.Page, pagination.PerPage)
+	if templates == nil {
+		templates = []*types.VMTemplate{}
+	}
 	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, templates)

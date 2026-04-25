@@ -63,6 +63,9 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 	total := len(imgs)
 	pagination := parsePagination(r)
 	imgs = paginateSlice(imgs, pagination.Page, pagination.PerPage)
+	if imgs == nil {
+		imgs = []*types.Image{}
+	}
 	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, imgs)
