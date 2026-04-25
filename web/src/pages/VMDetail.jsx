@@ -7,6 +7,7 @@ import {
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
+import { normalizeSpec, safeArray } from '../utils/normalize';
 
 export default function VMDetail() {
   const { id } = useParams();
@@ -28,6 +29,15 @@ export default function VMDetail() {
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
   if (error) return <ErrorBanner message={error} />;
   if (!vm) return null;
+
+  const spec = normalizeSpec(vm.spec);
+  const tags = safeArray(vm.tags);
+  const networks = safeArray(spec.networks);
+  const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
+  const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
+  const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
+  const createdText = vm.created_at ? new Date(vm.created_at).toLocaleString() : '—';
+  const sshUser = spec.default_user || 'root';
 
   const handleDelete = async () => {
     if (!window.confirm(`Delete ${vm.name}? This cannot be undone.`)) return;
@@ -77,32 +87,27 @@ export default function VMDetail() {
       {/* Info grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
         <InfoCard label="IP Address" value={vm.ip || 'Not assigned'} mono />
-        <InfoCard label="Image" value={vm.spec.image} mono />
-        <InfoCard label="Resources" value={`${vm.spec.cpus} vCPU · ${vm.spec.ram_mb} MB RAM · ${vm.spec.disk_gb} GB disk`} />
-        <InfoCard label="Created" value={new Date(vm.created_at).toLocaleString()} />
+        <InfoCard label="Image" value={spec.image || '—'} mono />
+        <InfoCard label="Resources" value={`${cpuText} vCPU · ${ramText} MB RAM · ${diskText} GB disk`} />
+        <InfoCard label="Created" value={createdText} />
         <InfoCard label="Description" value={vm.description || '—'} />
-        <InfoCard label="Tags" value={vm.tags?.length ? vm.tags.map(tag => `#${tag}`).join(' · ') : '—'} mono />
-        {(() => {
-          const sshUser = vm.spec.default_user || 'root';
-          return (
-            <InfoCard
-              label="SSH"
-              value={vm.ip ? `ssh ${sshUser}@${vm.ip}` : `user: ${sshUser}`}
-              mono
-            />
-          );
-        })()}
+        <InfoCard label="Tags" value={tags.length ? tags.map(tag => `#${tag}`).join(' · ') : '—'} mono />
+        <InfoCard
+          label="SSH"
+          value={vm.ip ? `ssh ${sshUser}@${vm.ip}` : `user: ${sshUser}`}
+          mono
+        />
       </div>
 
       {/* Attached Networks */}
-      {vm.spec?.networks?.length > 0 && (
+      {networks.length > 0 && (
         <div className="card mb-4">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-steel-800/40">
             <Network size={14} className="text-steel-500" />
             <h2 className="text-sm font-display font-semibold text-steel-300">Extra Networks</h2>
           </div>
           <div className="divide-y divide-steel-800/40">
-            {vm.spec.networks.map((net, i) => (
+            {networks.map((net, i) => (
               <div key={i} className="flex items-center gap-3 px-4 py-2.5">
                 <span className="font-mono text-xs text-steel-500 w-10">eth{i + 1}</span>
                 <span className="badge bg-steel-800/60 text-steel-400 border-steel-700/40">{net.mode}</span>
@@ -243,17 +248,21 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [tags, setTags] = useState('');
   const [natIP, setNatIP] = useState('');
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
+  const spec = normalizeSpec(vm.spec);
+  const currentCpus = Number.isFinite(spec.cpus) ? spec.cpus : 0;
+  const currentRamMb = Number.isFinite(spec.ram_mb) ? spec.ram_mb : 0;
+  const currentDiskGb = Number.isFinite(spec.disk_gb) ? spec.disk_gb : 0;
 
   // Current IP shown as a plain address; strip /24 suffix if present
-  const currentIP = vm.ip || (vm.spec.nat_static_ip ? vm.spec.nat_static_ip.replace(/\/\d+$/, '') : '');
+  const currentIP = vm.ip || (spec.nat_static_ip ? spec.nat_static_ip.replace(/\/\d+$/, '') : '');
 
   useEffect(() => {
     if (open && vm) {
-      setCpus(String(vm.spec.cpus));
-      setRamMb(String(vm.spec.ram_mb));
-      setDiskGb(String(vm.spec.disk_gb));
+      setCpus(currentCpus > 0 ? String(currentCpus) : '');
+      setRamMb(currentRamMb > 0 ? String(currentRamMb) : '');
+      setDiskGb(currentDiskGb > 0 ? String(currentDiskGb) : '');
       setDescription(vm.description || '');
-      setTags((vm.tags || []).join(', '));
+      setTags(safeArray(vm.tags).join(', '));
       setNatIP(currentIP);
     }
   }, [open, vm]);
@@ -263,12 +272,12 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     const newCpus = parseInt(cpus, 10);
     const newRam  = parseInt(ramMb, 10);
     const newDisk = parseInt(diskGb, 10);
-    if (newCpus !== vm.spec.cpus)    patch.cpus    = newCpus;
-    if (newRam  !== vm.spec.ram_mb)  patch.ram_mb  = newRam;
-    if (newDisk !== vm.spec.disk_gb) patch.disk_gb = newDisk;
+    if (newCpus !== currentCpus)    patch.cpus    = newCpus;
+    if (newRam  !== currentRamMb)   patch.ram_mb  = newRam;
+    if (newDisk !== currentDiskGb)  patch.disk_gb = newDisk;
     if (description.trim() !== (vm.description || '')) patch.description = description.trim();
     const nextTags = tags.split(',').map(tag => tag.trim()).filter(Boolean);
-    if (nextTags.join(',') !== (vm.tags || []).join(',')) patch.tags = nextTags;
+    if (nextTags.join(',') !== safeArray(vm.tags).join(',')) patch.tags = nextTags;
 
     // Normalise the IP: accept bare IP and append /24 for the API
     const trimmedIP = natIP.trim();
@@ -306,7 +315,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
               value={cpus}
               onChange={e => setCpus(e.target.value)}
             />
-            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.cpus}</p>
+            <p className="text-[10px] text-steel-600 mt-1">current: {currentCpus || '—'}</p>
           </div>
           <div>
             <label className="label">RAM (MB)</label>
@@ -319,7 +328,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
               value={ramMb}
               onChange={e => setRamMb(e.target.value)}
             />
-            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.ram_mb}</p>
+            <p className="text-[10px] text-steel-600 mt-1">current: {currentRamMb || '—'}</p>
           </div>
           <div>
             <label className="label">Disk (GB)</label>
@@ -327,11 +336,11 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
               data-testid="input-edit-disk"
               className="input"
               type="number"
-              min={vm.spec.disk_gb}
+              min={Math.max(currentDiskGb, 1)}
               value={diskGb}
               onChange={e => setDiskGb(e.target.value)}
             />
-            <p className="text-[10px] text-steel-600 mt-1">current: {vm.spec.disk_gb} · grow only</p>
+            <p className="text-[10px] text-steel-600 mt-1">current: {currentDiskGb || '—'} · grow only</p>
           </div>
         </div>
 

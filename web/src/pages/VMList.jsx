@@ -4,6 +4,7 @@ import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSqua
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
+import { normalizeVMList, safeArray } from '../utils/normalize';
 
 const DEFAULT_PER_PAGE = 25;
 
@@ -22,11 +23,11 @@ export default function VMList() {
     5000,
   );
   const navigate = useNavigate();
-  const vmList = vmResponse?.data || [];
+  const vmList = normalizeVMList(vmResponse);
   const totalVMs = vmResponse?.meta?.totalCount ?? vmList.length;
-  const allTags = [...new Set((vmList || []).flatMap(vm => vm.tags || []))].sort();
+  const allTags = [...new Set(vmList.flatMap(vm => vm.tags))].sort();
 
-  const visibleVMs = vmList || [];
+  const visibleVMs = vmList;
   const selectedVMs = useMemo(
     () => visibleVMs.filter(vm => selectedIds.includes(vm.id)),
     [visibleVMs, selectedIds],
@@ -274,6 +275,10 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
   const startMut = useMutation(vms.start);
   const stopMut  = useMutation(vms.stop);
   const delMut   = useMutation(vms.delete);
+  const spec = vm.spec || {};
+  const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
+  const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
+  const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
 
   const handleAction = async (action) => {
     setActionMenu(null);
@@ -314,7 +319,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
           <StatusBadge state={vm.state} />
         </div>
         <p className="text-xs font-mono text-steel-500 mt-0.5">
-          {vm.spec.cpus} vCPU · {vm.spec.ram_mb} MB · {vm.spec.disk_gb} GB
+          {cpuText} vCPU · {ramText} MB · {diskText} GB
           {vm.ip && <> · {vm.ip}</>}
         </p>
         {vm.description && <p className="text-xs text-steel-400 mt-1 truncate">{vm.description}</p>}
@@ -366,8 +371,8 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
   const { data: templateResponse } = useFetch(() => templatesApi.list(), [], 0);
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
-  const imageList = imageResponse?.data || imageResponse || [];
-  const templates = templateResponse?.data || templateResponse || [];
+  const imageList = safeArray(imageResponse?.data || imageResponse);
+  const templates = safeArray(templateResponse?.data || templateResponse);
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
@@ -437,8 +442,9 @@ function CreateVMModal({ open, onClose, onCreated }) {
   };
 
   const noImages = imageList.length === 0;
-  const physIfaces = (hostIfaces || []).filter(i => i.is_physical && i.is_up);
-  const natIface = (hostIfaces || []).find(i => i.name === 'vmsmith0');
+  const hostInterfaces = safeArray(hostIfaces);
+  const physIfaces = hostInterfaces.filter(i => i && i.is_physical && i.is_up);
+  const natIface = hostInterfaces.find(i => i && i.name === 'vmsmith0');
 
   const advancedCount = [
     form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,

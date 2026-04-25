@@ -3,11 +3,7 @@ import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'l
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
-
-function listData(response) {
-  if (Array.isArray(response)) return response;
-  return response?.data || [];
-}
+import { listData, normalizeVMList } from '../utils/normalize';
 
 function totalCount(response) {
   if (Array.isArray(response)) return response.length;
@@ -23,7 +19,7 @@ export default function Dashboard() {
   const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
   const navigate = useNavigate();
 
-  const vmList = listData(vmResponse);
+  const vmList = normalizeVMList(vmResponse);
   const imageList = listData(imageResponse);
   const runningCount = vmList.filter(v => v.state === 'running').length;
   const hasVMCountFallback = totalCount(vmResponse) > 0 || vmList.length > 0;
@@ -95,24 +91,30 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {vmList.map(vm => (
-                <tr
-                  key={vm.id}
-                  className="cursor-pointer hover:bg-steel-800/30 transition-colors"
-                  onClick={() => navigate(`/vms/${vm.id}`)}
-                >
-                  <td className="table-cell">
-                    <span className="font-mono text-steel-100 text-sm">{vm.name}</span>
-                  </td>
-                  <td className="table-cell"><StatusBadge state={vm.state} /></td>
-                  <td className="table-cell font-mono text-xs text-steel-400">
-                    {vm.ip || '—'}
-                  </td>
-                  <td className="table-cell font-mono text-xs text-steel-400">
-                    {vm.spec.cpus} vCPU · {vm.spec.ram_mb} MB
-                  </td>
-                </tr>
-              ))}
+              {vmList.map(vm => {
+                const spec = vm.spec || {};
+                const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
+                const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
+
+                return (
+                  <tr
+                    key={vm.id}
+                    className="cursor-pointer hover:bg-steel-800/30 transition-colors"
+                    onClick={() => navigate(`/vms/${vm.id}`)}
+                  >
+                    <td className="table-cell">
+                      <span className="font-mono text-steel-100 text-sm">{vm.name}</span>
+                    </td>
+                    <td className="table-cell"><StatusBadge state={vm.state} /></td>
+                    <td className="table-cell font-mono text-xs text-steel-400">
+                      {vm.ip || '—'}
+                    </td>
+                    <td className="table-cell font-mono text-xs text-steel-400">
+                      {cpuText} vCPU · {ramText} MB
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
