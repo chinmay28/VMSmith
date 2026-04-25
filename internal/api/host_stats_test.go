@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -130,4 +131,91 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 	if gotPath != existingParent {
 		t.Fatalf("statFS path = %q, want %q", gotPath, existingParent)
 	}
+}
+
+func TestGetHostStatsSanitizesManagerErrors(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.ListErr = fmt.Errorf("connecting to libvirt: dial tcp 127.0.0.1:16509: connect: connection refused")
+
+	resp, err := http.Get(ts.URL + "/api/v1/host/stats")
+	if err != nil {
+		t.Fatalf("GET /host/stats: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "service_unavailable")
+}
+
+func TestGetHostStatsSanitizesCollectorErrors(t *testing.T) {
+	origReadFile := readFile
+	defer func() { readFile = origReadFile }()
+	readFile = func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("open %s: permission denied", path)
+	}
+
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/host/stats")
+	if err != nil {
+		t.Fatalf("GET /host/stats: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	errResp := assertAPIErrorCode(t, resp, "internal_error")
+	if strings.Contains(strings.ToLower(errResp.Message+" "+errResp.Error), "permission denied") {
+		t.Fatalf("expected sanitized error, got %#v", errResp)
+	}
+}
+
+func TestGetHostStatsTimesOutCanceledRequests(t *testing.T) {
+	origReadFile := readFile
+	defer func() { readFile = origReadFile }()
+	readFile = func(path string) ([]byte, error) {
+		if path == "/proc/stat" {
+			return []byte("cpu  10 0 10 80 0 0 0 0 0 0\n"), nil
+		}
+		return origReadFile(path)
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+		t.Fatalf("mkdir images dir: %v", err)
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer s.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	mockMgr := vm.NewMockManager()
+	server := NewServerWithConfig(mockMgr, storage.NewManager(cfg, s), network.NewPortForwarder(s), cfg, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/host/stats", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want 408", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "request_timeout")
 }
