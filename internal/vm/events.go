@@ -100,6 +100,18 @@ func (m *LibvirtManager) handleLifecycleEvent(dom *libvirt.Domain, event *libvir
 		return
 	}
 
+	// Persist event record
+	evt := &types.Event{
+		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+		VMID:      vmRecord.ID,
+		Type:      fmt.Sprintf("lifecycle_%d", event.Event),
+		Message:   fmt.Sprintf("VM %s state changed to %s", name, string(vmRecord.State)),
+		CreatedAt: time.Now(),
+	}
+	if err := m.store.PutEvent(evt); err != nil {
+		logger.Warn("daemon", "failed to persist event log", "vm", name, "error", err.Error())
+	}
+
 	logger.Info("daemon", "vm lifecycle event received", "vm", name, "event", event.String(), "state", string(vmRecord.State))
 }
 

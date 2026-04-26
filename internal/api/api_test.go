@@ -2642,7 +2642,7 @@ func testServerWithWeb(t *testing.T) (*httptest.Server, func()) {
 		w.Write([]byte("<!doctype html><html><body><div id=\"root\"></div></body></html>"))
 	})
 
-	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, webHandler)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {

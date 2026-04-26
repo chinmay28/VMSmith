@@ -22,7 +22,7 @@ func New(path string) (*Store, error) {
 
 	// Ensure all buckets exist
 	err = db.Update(func(tx *bolt.Tx) error {
-		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig}
+		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig, BucketEvents}
 		for _, b := range buckets {
 			if _, err := tx.CreateBucketIfNotExists([]byte(b)); err != nil {
 				return err
@@ -217,4 +217,26 @@ func (s *Store) delete(bucket, key string) error {
 		b := tx.Bucket([]byte(bucket))
 		return b.Delete([]byte(key))
 	})
+}
+
+// --- Events ---
+
+func (s *Store) PutEvent(event *types.Event) error {
+	return s.put(BucketEvents, event.ID, event)
+}
+
+func (s *Store) ListEvents() ([]*types.Event, error) {
+	var events []*types.Event
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketEvents))
+		return b.ForEach(func(k, v []byte) error {
+			var event types.Event
+			if err := json.Unmarshal(v, &event); err != nil {
+				return err
+			}
+			events = append(events, &event)
+			return nil
+		})
+	})
+	return events, err
 }
