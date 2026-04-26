@@ -237,6 +237,115 @@ async function runTest(name, fn) {
       }
     });
 
+    await runTest('edit modal preserves typed CPU/RAM through background polling and PATCHes them', async () => {
+      const patches = [];
+
+      // Override the catch-all VM route for vm-2 so we can serve a well-formed
+      // VM payload and capture the eventual PATCH body. Routes registered later
+      // win in Playwright, so this takes precedence over the malformed-spec
+      // route added above.
+      await page.route('**/api/v1/vms/vm-2', async (route, request) => {
+        if (request.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              id: 'vm-2',
+              name: 'edit-test-vm',
+              state: 'running',
+              ip: '192.168.100.51',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              spec: {
+                name: 'edit-test-vm',
+                image: 'ubuntu-22.04',
+                cpus: 2,
+                ram_mb: 4096,
+                disk_gb: 20,
+              },
+              tags: [],
+              description: '',
+            }),
+          });
+          return;
+        }
+        if (request.method() === 'PATCH') {
+          let body = {};
+          try { body = JSON.parse(request.postData() || '{}'); } catch { /* keep {} */ }
+          patches.push(body);
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              id: 'vm-2',
+              name: 'edit-test-vm',
+              state: 'running',
+              ip: '192.168.100.51',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              spec: {
+                name: 'edit-test-vm',
+                image: 'ubuntu-22.04',
+                cpus: body.cpus || 2,
+                ram_mb: body.ram_mb || 4096,
+                disk_gb: body.disk_gb || 20,
+              },
+              tags: [],
+              description: '',
+            }),
+          });
+          return;
+        }
+        await route.fulfill({ status: 405, contentType: 'application/json', body: '{}' });
+      });
+
+      await page.goto(`${BASE}/vms/vm-2`, { waitUntil: 'networkidle' });
+
+      const editButton = page.getByTestId('btn-edit-vm');
+      await expectVisible(editButton, 'edit button not visible');
+      await editButton.click();
+
+      const cpuInput = page.getByTestId('input-edit-cpus');
+      const ramInput = page.getByTestId('input-edit-ram');
+      await expectVisible(cpuInput, 'edit modal did not open');
+
+      const initialCpu = await cpuInput.inputValue();
+      const initialRam = await ramInput.inputValue();
+      if (initialCpu !== '2') throw new Error(`pre-fill cpus = "${initialCpu}", want "2"`);
+      if (initialRam !== '4096') throw new Error(`pre-fill ram_mb = "${initialRam}", want "4096"`);
+
+      await cpuInput.fill('8');
+      await ramInput.fill('16384');
+
+      // VMDetail polls vms.get every 5s. Wait long enough for at least one
+      // background refresh to fire while the modal is open. Before the fix
+      // the form-init effect re-ran on every `vm` prop change and reset
+      // these inputs back to the API's current values, so the diff check
+      // in handleSubmit silently dropped cpus/ram_mb from the PATCH body.
+      await page.waitForTimeout(6000);
+
+      const cpuAfterPoll = await cpuInput.inputValue();
+      const ramAfterPoll = await ramInput.inputValue();
+      if (cpuAfterPoll !== '8') {
+        throw new Error(`cpus input reset to "${cpuAfterPoll}" by polling refresh, want "8"`);
+      }
+      if (ramAfterPoll !== '16384') {
+        throw new Error(`ram input reset to "${ramAfterPoll}" by polling refresh, want "16384"`);
+      }
+
+      await page.getByTestId('btn-submit-edit').click();
+      await page.getByTestId('input-edit-cpus').waitFor({ state: 'hidden', timeout: 5000 });
+
+      if (patches.length === 0) throw new Error('no PATCH /vms/vm-2 captured');
+      const last = patches[patches.length - 1];
+      if (last.cpus !== 8) throw new Error(`PATCH cpus = ${JSON.stringify(last.cpus)}, want 8`);
+      if (last.ram_mb !== 16384) throw new Error(`PATCH ram_mb = ${JSON.stringify(last.ram_mb)}, want 16384`);
+
+      if (pageErrors.length > 0) {
+        throw new Error(`unexpected page errors: ${pageErrors.join(' | ')}`);
+      }
+    });
+
     console.log('\nBuilt frontend regression checks passed.');
   } finally {
     if (browser) await browser.close().catch(() => {});
