@@ -245,6 +245,68 @@ async function main() {
       await assertNotVisible(p, "snap-before-deploy");
     }, page);
 
+    await runTest("edit modal pre-fills with current CPU/RAM/disk", async (p) => {
+      await p.locator('[data-testid="btn-edit-vm"]').click();
+      await p.waitForTimeout(300);
+      const cpu = await p.locator('[data-testid="input-edit-cpus"]').inputValue();
+      const ram = await p.locator('[data-testid="input-edit-ram"]').inputValue();
+      const disk = await p.locator('[data-testid="input-edit-disk"]').inputValue();
+      if (cpu !== "2") throw new Error(`pre-filled cpus = "${cpu}", want "2"`);
+      if (ram !== "4096") throw new Error(`pre-filled ram = "${ram}", want "4096"`);
+      if (disk !== "40") throw new Error(`pre-filled disk = "${disk}", want "40"`);
+      await p.locator('[data-testid="btn-cancel-edit"]').click();
+      await p.waitForTimeout(300);
+    }, page);
+
+    await runTest("edit CPU and RAM persists through background polling", async (p) => {
+      // Track every PATCH so we can confirm the user's typed values reach
+      // the server (the bug we're guarding against silently dropped them).
+      const patches = [];
+      await p.route("**/api/v1/vms/**", async (route, request) => {
+        if (request.method() === "PATCH") {
+          try { patches.push(JSON.parse(request.postData() || "{}")); }
+          catch { patches.push({}); }
+        }
+        await route.continue();
+      });
+
+      await p.locator('[data-testid="btn-edit-vm"]').click();
+      await p.waitForTimeout(300);
+
+      await p.locator('[data-testid="input-edit-cpus"]').fill("8");
+      await p.locator('[data-testid="input-edit-ram"]').fill("16384");
+
+      // VMDetail polls vms.get every 5s. Wait long enough for at least one
+      // refresh cycle. With the bug, the form effect re-ran on every `vm`
+      // prop change and reset these inputs back to current API values, so
+      // the diff check in handleSubmit skipped sending cpus/ram_mb at all.
+      await p.waitForTimeout(6000);
+
+      const cpu = await p.locator('[data-testid="input-edit-cpus"]').inputValue();
+      const ram = await p.locator('[data-testid="input-edit-ram"]').inputValue();
+      if (cpu !== "8") {
+        throw new Error(`cpus input reset to "${cpu}" by polling refresh, want "8"`);
+      }
+      if (ram !== "16384") {
+        throw new Error(`ram input reset to "${ram}" by polling refresh, want "16384"`);
+      }
+
+      await p.locator('[data-testid="btn-submit-edit"]').click();
+      await p.waitForTimeout(1000);
+      await assertNotVisible(p, "input-edit-cpus");
+      await assertText(p, "vm-detail-resources", "8 vCPU");
+      await assertText(p, "vm-detail-resources", "16384 MB");
+
+      if (patches.length === 0) {
+        throw new Error("no PATCH /vms/{id} requests captured");
+      }
+      const last = patches[patches.length - 1];
+      if (last.cpus !== 8) throw new Error(`PATCH cpus = ${last.cpus}, want 8`);
+      if (last.ram_mb !== 16384) throw new Error(`PATCH ram_mb = ${last.ram_mb}, want 16384`);
+
+      await p.unroute("**/api/v1/vms/**");
+    }, page);
+
     await runTest("back link returns to VM list", async (p) => {
       await p.locator('[data-testid="back-link"]').click();
       await p.waitForTimeout(500);
