@@ -256,16 +256,19 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   // Current IP shown as a plain address; strip /24 suffix if present
   const currentIP = vm.ip || (spec.nat_static_ip ? spec.nat_static_ip.replace(/\/\d+$/, '') : '');
 
+  // Initialize form fields only on open. Including `vm` in the deps would cause
+  // the parent's 5s polling refresh to overwrite the user's in-progress edits
+  // mid-typing, making CPU/RAM changes silently fall back to current values.
   useEffect(() => {
-    if (open && vm) {
-      setCpus(currentCpus > 0 ? String(currentCpus) : '');
-      setRamMb(currentRamMb > 0 ? String(currentRamMb) : '');
-      setDiskGb(currentDiskGb > 0 ? String(currentDiskGb) : '');
-      setDescription(vm.description || '');
-      setTags(safeArray(vm.tags).join(', '));
-      setNatIP(currentIP);
-    }
-  }, [open, vm]);
+    if (!open || !vm) return;
+    setCpus(currentCpus > 0 ? String(currentCpus) : '');
+    setRamMb(currentRamMb > 0 ? String(currentRamMb) : '');
+    setDiskGb(currentDiskGb > 0 ? String(currentDiskGb) : '');
+    setDescription(vm.description || '');
+    setTags(safeArray(vm.tags).join(', '));
+    setNatIP(currentIP);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleSubmit = async () => {
     const patch = {};

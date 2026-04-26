@@ -299,6 +299,82 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-resources")).toContainText("8 vCPU");
   });
 
+  test("typed CPU and RAM values survive background polling refreshes", async ({ page }) => {
+    // Capture every PATCH so we can verify the values typed by the user
+    // (not the stale ones from the polling refresh) are what reach the server.
+    const patches = [];
+    await page.route("**/api/v1/vms/**", async (route, request) => {
+      if (request.method() === "PATCH") {
+        try {
+          patches.push(JSON.parse(request.postData() || "{}"));
+        } catch {
+          patches.push({});
+        }
+      }
+      await route.continue();
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("btn-edit-vm").click();
+
+    // Pre-fill should match seeded VM (cpus=2, ram=4096).
+    await expect(page.getByTestId("input-edit-cpus")).toHaveValue("2");
+    await expect(page.getByTestId("input-edit-ram")).toHaveValue("4096");
+
+    // Type new values, then wait longer than VMDetail's 5s poll interval so
+    // a background refresh fires while the modal is open. With the bug,
+    // the form effect re-runs on every `vm` prop change and resets these
+    // inputs back to "2"/"4096".
+    await page.getByTestId("input-edit-cpus").fill("8");
+    await page.getByTestId("input-edit-ram").fill("16384");
+    await page.waitForTimeout(6000);
+
+    await expect(page.getByTestId("input-edit-cpus")).toHaveValue("8");
+    await expect(page.getByTestId("input-edit-ram")).toHaveValue("16384");
+
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("input-edit-cpus")).not.toBeVisible();
+
+    // Updated values should be reflected on the detail view, proving the
+    // PATCH was sent with the user's typed values rather than skipped.
+    await expect(page.getByTestId("vm-detail-resources")).toContainText("8 vCPU");
+    await expect(page.getByTestId("vm-detail-resources")).toContainText("16384 MB");
+
+    expect(patches.length).toBeGreaterThan(0);
+    expect(patches[patches.length - 1]).toMatchObject({ cpus: 8, ram_mb: 16384 });
+  });
+
+  test("editing only CPU sends just the CPU field", async ({ page }) => {
+    const patches = [];
+    await page.route("**/api/v1/vms/**", async (route, request) => {
+      if (request.method() === "PATCH") {
+        try {
+          patches.push(JSON.parse(request.postData() || "{}"));
+        } catch {
+          patches.push({});
+        }
+      }
+      await route.continue();
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("btn-edit-vm").click();
+
+    await page.getByTestId("input-edit-cpus").fill("6");
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("input-edit-cpus")).not.toBeVisible();
+
+    expect(patches.length).toBeGreaterThan(0);
+    const last = patches[patches.length - 1];
+    expect(last).toMatchObject({ cpus: 6 });
+    // Unchanged fields should not be sent so the server doesn't redefine
+    // the domain unnecessarily.
+    expect(last.ram_mb).toBeUndefined();
+    expect(last.disk_gb).toBeUndefined();
+  });
+
   test("edit IP field is visible and accepts new address", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
