@@ -110,7 +110,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		logger.Info("daemon", "port forwarding rules restored")
 	}
 
-	apiServer := api.NewServerWithConfig(vmMgr, storageMgr, portFwd, cfg, web.Handler())
+	apiServer := api.NewServerWithConfig(vmMgr, storageMgr, portFwd, s, cfg, web.Handler())
 
 	server := &http.Server{
 		Addr:    cfg.Daemon.Listen,
