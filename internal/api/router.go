@@ -13,6 +13,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 // Server holds the API dependencies and serves HTTP.

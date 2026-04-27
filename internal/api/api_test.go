@@ -52,7 +52,7 @@ func testServerWithConfig(t *testing.T, mutator func(*config.Config)) (*httptest
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
-	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, nil)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, nil)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
@@ -1653,7 +1653,7 @@ func testServerFull(t *testing.T) (*httptest.Server, *vm.MockManager, *store.Sto
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
-	apiServer := NewServer(mockMgr, storageMgr, portFwd)
+	apiServer := NewServer(mockMgr, storageMgr, portFwd, s)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
@@ -2990,7 +2990,7 @@ func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
 		w.Write([]byte("ok"))
 	})
 
-	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, webHandler)
 	ts := httptest.NewServer(apiServer)
 	defer ts.Close()
 	defer s.Close()
