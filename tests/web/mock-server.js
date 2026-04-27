@@ -2,6 +2,9 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+const DIST_DIR = path.resolve(__dirname, "../../internal/web/dist");
+const DIST_INDEX = path.join(DIST_DIR, "index.html");
+
 let vmCounter = 0;
 const vms = new Map();
 const snapshots = new Map();
@@ -38,6 +41,16 @@ function seed() {
   });
 }
 
+function resetState() {
+  vmCounter = 0;
+  vms.clear();
+  snapshots.clear();
+  images.clear();
+  templates.clear();
+  portForwards.clear();
+  seed();
+}
+
 function createVM(spec) {
   vmCounter++;
   const id = `vm-${vmCounter}`;
@@ -61,8 +74,8 @@ function parseBody(req) {
   });
 }
 
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+function json(res, status, data, headers = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(data));
 }
 
@@ -72,7 +85,10 @@ const server = http.createServer(async (req, res) => {
   const method = req.method;
 
   // API routes
-  if (p === "/api/v1/vms" && method === "GET") return json(res, 200, [...vms.values()]);
+  if (p === "/api/v1/vms" && method === "GET") {
+    const list = [...vms.values()];
+    return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
   if (p === "/api/v1/vms" && method === "POST") {
     const spec = await parseBody(req);
     const vm = createVM(spec);
@@ -117,6 +133,24 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "stopped"; return json(res, 200, { status: "stopped" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
+    const source = vms.get(m[1]);
+    if (!source) return json(res, 404, { error: "not found" });
+    const body = await parseBody(req);
+    const vm = createVM({
+      name: body.name || `${source.name}-clone`,
+      image: source.spec.image,
+      cpus: source.spec.cpus,
+      ram_mb: source.spec.ram_mb,
+      disk_gb: source.spec.disk_gb,
+      ssh_pub_key: source.spec.ssh_pub_key,
+      default_user: source.spec.default_user,
+      networks: source.spec.networks,
+    });
+    vm.state = "stopped";
+    vm.ip = "";
+    return json(res, 200, vm);
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
     return json(res, 200, snapshots.get(m[1]) || []);
   }
@@ -145,8 +179,29 @@ const server = http.createServer(async (req, res) => {
     const list = portForwards.get(m[1]) || []; list.push(pf); portForwards.set(m[1], list);
     return json(res, 201, pf);
   }
-  if (p === "/api/v1/images" && method === "GET") return json(res, 200, [...images.values()]);
-  if (p === "/api/v1/templates" && method === "GET") return json(res, 200, [...templates.values()]);
+  if (p === "/api/v1/images" && method === "GET") {
+    const list = [...images.values()];
+    return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
+  if (p === "/api/v1/templates" && method === "GET") {
+    const list = [...templates.values()];
+    return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
+  if (p === "/api/v1/quotas/usage" && method === "GET") {
+    const list = [...vms.values()];
+    const totals = list.reduce((acc, vm) => {
+      acc.cpus += vm.spec.cpus || 0;
+      acc.ram_mb += vm.spec.ram_mb || 0;
+      acc.disk_gb += vm.spec.disk_gb || 0;
+      return acc;
+    }, { cpus: 0, ram_mb: 0, disk_gb: 0 });
+    return json(res, 200, {
+      vms: { used: list.length, limit: 0 },
+      cpus: { used: totals.cpus, limit: 0 },
+      ram_mb: { used: totals.ram_mb, limit: 0 },
+      disk_gb: { used: totals.disk_gb, limit: 0 },
+    });
+  }
   if (p === "/api/v1/logs" && method === "GET") {
     const entries = [
       { ts: new Date().toISOString(), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },
@@ -162,8 +217,9 @@ const server = http.createServer(async (req, res) => {
     const minLevel = levelOrder[level] ?? 0;
     let filtered = entries.filter(e => (levelOrder[e.level] ?? 0) >= minLevel);
     if (source) filtered = filtered.filter(e => e.source === source);
+    const total = filtered.length;
     if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
-    return json(res, 200, { entries: filtered, total: filtered.length });
+    return json(res, 200, { entries: filtered, total }, { "X-Total-Count": String(total) });
   }
   if (p === "/api/v1/host/interfaces" && method === "GET") {
     return json(res, 200, [
@@ -172,8 +228,34 @@ const server = http.createServer(async (req, res) => {
     ]);
   }
 
-  // Serve test GUI HTML
+  // Serve the real built SPA when available, otherwise fall back to the lightweight test HTML.
   if (!p.startsWith("/api/")) {
+    if (p === "/" || p === "/index.html") {
+      resetState();
+    }
+
+    if (fs.existsSync(DIST_INDEX)) {
+      const reqPath = p === "/" ? "/index.html" : p;
+      const filePath = path.join(DIST_DIR, reqPath.replace(/^\//, ""));
+      if (filePath.startsWith(DIST_DIR) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath);
+        const contentType = {
+          ".html": "text/html",
+          ".js": "application/javascript",
+          ".css": "text/css",
+          ".json": "application/json",
+          ".svg": "image/svg+xml",
+          ".png": "image/png",
+          ".ico": "image/x-icon",
+        }[ext] || "application/octet-stream";
+        res.writeHead(200, { "Content-Type": contentType });
+        return res.end(fs.readFileSync(filePath));
+      }
+
+      res.writeHead(200, { "Content-Type": "text/html" });
+      return res.end(fs.readFileSync(DIST_INDEX, "utf8"));
+    }
+
     const htmlPath = path.join(__dirname, "test-gui.html");
     if (fs.existsSync(htmlPath)) {
       res.writeHead(200, { "Content-Type": "text/html" });
@@ -184,6 +266,6 @@ const server = http.createServer(async (req, res) => {
   json(res, 404, { error: `not found: ${method} ${p}` });
 });
 
-seed();
+resetState();
 const PORT = parseInt(process.env.PORT || "4173", 10);
 server.listen(PORT, () => console.log(`Mock vmSmith server on http://localhost:${PORT}`));

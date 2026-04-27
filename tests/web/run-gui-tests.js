@@ -5,9 +5,13 @@
 
 // Import playwright-core for browser automation
 const { chromium } = require("playwright");
-const http = require("http");
 const { execSync, spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
+
+const REPO_ROOT = path.resolve(__dirname, "../..");
+const WEB_DIR = path.join(REPO_ROOT, "web");
+const DIST_INDEX = path.join(REPO_ROOT, "internal", "web", "dist", "index.html");
 
 const BASE = "http://localhost:4173";
 let passed = 0;
@@ -62,6 +66,16 @@ async function runTest(name, fn, page) {
 // Tests
 // ============================================================
 async function main() {
+  console.log("Building frontend bundle for GUI tests...");
+  execSync("npm run build", {
+    cwd: WEB_DIR,
+    stdio: "inherit",
+  });
+
+  if (!fs.existsSync(DIST_INDEX)) {
+    throw new Error(`Frontend bundle missing after build: ${DIST_INDEX}`);
+  }
+
   // Start mock server
   const server = spawn("node", [path.join(__dirname, "mock-server.js")], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -184,7 +198,7 @@ async function main() {
       await p.locator('[data-testid="btn-new-vm"]').click();
       await p.waitForTimeout(300);
       await p.locator('[data-testid="input-vm-name"]').fill("test-new-vm");
-      await p.locator('[data-testid="input-vm-image"]').fill("ubuntu-22.04");
+      await p.locator('[data-testid="input-vm-image"]').selectOption('/images/ubuntu-base.qcow2');
       await p.locator('[data-testid="input-vm-cpus"]').fill("4");
       await p.locator('[data-testid="input-vm-ram"]').fill("8192");
       await p.locator('[data-testid="btn-submit-create"]').click();
@@ -313,7 +327,7 @@ async function main() {
       await p.locator('[data-testid="btn-new-vm"]').click();
       await p.waitForTimeout(300);
       await p.locator('[data-testid="input-vm-name"]').fill("e2e-lifecycle");
-      await p.locator('[data-testid="input-vm-image"]').fill("ubuntu-22.04");
+      await p.locator('[data-testid="input-vm-image"]').selectOption('/images/ubuntu-base.qcow2');
       await p.locator('[data-testid="btn-submit-create"]').click();
       await p.waitForTimeout(1000);
 

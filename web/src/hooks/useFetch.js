@@ -38,6 +38,10 @@ export function useMutation(mutationFn) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const reset = useCallback(() => {
+    setError(null);
+  }, []);
+
   const execute = useCallback(async (...args) => {
     setLoading(true);
     setError(null);
@@ -52,5 +56,5 @@ export function useMutation(mutationFn) {
     }
   }, [mutationFn]);
 
-  return { execute, loading, error };
+  return { execute, loading, error, reset };
 }

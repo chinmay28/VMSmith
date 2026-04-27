@@ -329,6 +329,21 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-resources")).toContainText("2 vCPU");
   });
 
+  test("clone VM opens modal and redirects to cloned machine", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-clone-vm").click();
+    await expect(page.getByTestId("input-clone-name")).toHaveValue("web-server-clone");
+
+    await page.getByTestId("input-clone-name").fill("web-server-copy");
+    await page.getByTestId("btn-submit-clone").click();
+
+    await expect(page).toHaveURL(/\/vms\/vm-3$/);
+    await expect(page.getByTestId("vm-detail-name")).toHaveText("web-server-copy");
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
+  });
+
   test("back link returns to VM list", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
@@ -456,7 +471,7 @@ test.describe("Full Lifecycle", () => {
     await page.getByTestId("nav-vms").click();
     await page.getByTestId("btn-new-vm").click();
     await page.getByTestId("input-vm-name").fill("e2e-test-vm");
-    await page.getByTestId("input-vm-image").fill("ubuntu-22.04");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
     await page.getByTestId("btn-submit-create").click();
 
     // 2. New VM should appear in list
