@@ -9,9 +9,101 @@ log() {
   printf '%s\n' "$*"
 }
 
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+sudo_run() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    fail "this step needs root; re-run as root or install sudo"
+  fi
+}
+
+detect_os() {
+  OS_ID=""
+  OS_ID_LIKE=""
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_ID="${ID:-}"
+    OS_ID_LIKE="${ID_LIKE:-}"
+  fi
+}
+
+pkg_family() {
+  case "$OS_ID" in
+    ubuntu|debian) printf 'apt\n'; return ;;
+    rocky|rhel|centos|almalinux|fedora) printf 'dnf\n'; return ;;
+  esac
+  case " $OS_ID_LIKE " in
+    *debian*|*ubuntu*) printf 'apt\n'; return ;;
+    *rhel*|*fedora*|*centos*) printf 'dnf\n'; return ;;
+  esac
+  printf 'unknown\n'
+}
+
+install_deps_apt() {
+  log "Detected Ubuntu/Debian (${OS_ID:-unknown}); installing runtime dependencies via apt-get..."
+  sudo_run env DEBIAN_FRONTEND=noninteractive apt-get update
+  sudo_run env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    qemu-kvm \
+    qemu-utils \
+    libvirt-daemon-system \
+    libvirt-clients \
+    genisoimage \
+    iptables \
+    bridge-utils
+}
+
+install_deps_dnf() {
+  log "Detected Rocky/RHEL (${OS_ID:-unknown}); installing runtime dependencies via dnf..."
+  if command -v dnf >/dev/null 2>&1; then
+    PM="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    PM="yum"
+  else
+    fail "neither dnf nor yum found; cannot install dependencies"
+  fi
+  sudo_run "$PM" install -y \
+    qemu-kvm \
+    qemu-img \
+    libvirt \
+    libvirt-client \
+    genisoimage \
+    iptables-nft
+}
+
+enable_libvirtd() {
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo_run systemctl enable --now libvirtd || \
+      warn "could not enable libvirtd; start it manually with 'systemctl enable --now libvirtd'"
+  else
+    warn "systemctl not found; start libvirtd manually for vmsmith to function"
+  fi
+}
+
+install_deps() {
+  detect_os
+  family="$(pkg_family)"
+  case "$family" in
+    apt) install_deps_apt ;;
+    dnf) install_deps_dnf ;;
+    *)
+      warn "unrecognized distro (ID=${OS_ID:-?}, ID_LIKE=${OS_ID_LIKE:-?}); skipping dependency install"
+      warn "install qemu-kvm, libvirt, genisoimage and iptables manually before running vmsmith"
+      return 0
+      ;;
+  esac
+  enable_libvirtd
 }
 
 uname_s() {
@@ -59,8 +151,21 @@ OS="$(uname_s)"
 ARCH_RAW="$(uname_m)"
 BIN_DIR="${BIN_DIR:-$DEFAULT_BIN_DIR}"
 VERSION="${VERSION:-latest}"
+INSTALL_DEPS="${INSTALL_DEPS:-yes}"
 
 [ "$OS" = "Linux" ] || fail "unsupported OS: $OS (Linux only)"
+
+case "$INSTALL_DEPS" in
+  1|y|yes|true|on)
+    install_deps
+    ;;
+  0|n|no|false|off|skip)
+    log "Skipping dependency install (INSTALL_DEPS=$INSTALL_DEPS)."
+    ;;
+  *)
+    fail "invalid INSTALL_DEPS value: $INSTALL_DEPS (use yes/no)"
+    ;;
+esac
 
 case "$ARCH_RAW" in
   x86_64|amd64)
