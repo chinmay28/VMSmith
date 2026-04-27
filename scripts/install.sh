@@ -32,10 +32,10 @@ detect_os() {
   OS_ID=""
   OS_ID_LIKE=""
   if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    OS_ID="${ID:-}"
-    OS_ID_LIKE="${ID_LIKE:-}"
+    # Read in subshells so /etc/os-release variables (ID, VERSION, NAME, ...)
+    # do not leak into this script's scope and clobber our own VERSION etc.
+    OS_ID=$(. /etc/os-release 2>/dev/null; printf '%s' "${ID:-}")
+    OS_ID_LIKE=$(. /etc/os-release 2>/dev/null; printf '%s' "${ID_LIKE:-}")
   fi
 }
 
