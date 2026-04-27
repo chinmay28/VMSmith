@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -18,7 +19,7 @@ func (s *Server) GetHostStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := collectHostStats(r.Context(), s.hostStatsPath, len(vms))
 	if err != nil {
-		if err == context.Canceled || err == context.DeadlineExceeded {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			writeAPIError(w, http.StatusRequestTimeout, types.NewAPIError("request_timeout", "request timed out"))
 			return
 		}
