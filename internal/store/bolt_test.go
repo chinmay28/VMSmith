@@ -330,3 +330,42 @@ func TestVMWithNetworksRoundTrip(t *testing.T) {
 		t.Errorf("network[1] Mode = %q, want bridge", got.Spec.Networks[1].Mode)
 	}
 }
+
+// --- Event tests ---
+
+func TestEventCRUD(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	now := time.Now().Truncate(time.Millisecond)
+
+	evt1 := &types.Event{
+		ID:        "evt-1",
+		VMID:      "vm-1",
+		Type:      "vm_started",
+		Message:   "VM started",
+		CreatedAt: now,
+	}
+	evt2 := &types.Event{
+		ID:        "evt-2",
+		VMID:      "vm-1",
+		Type:      "vm_stopped",
+		Message:   "VM stopped",
+		CreatedAt: now.Add(time.Hour),
+	}
+
+	if err := s.PutEvent(evt1); err != nil {
+		t.Fatalf("PutEvent 1 failed: %v", err)
+	}
+	if err := s.PutEvent(evt2); err != nil {
+		t.Fatalf("PutEvent 2 failed: %v", err)
+	}
+
+	events, err := s.ListEvents()
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("ListEvents returned %d items, want 2", len(events))
+	}
+}

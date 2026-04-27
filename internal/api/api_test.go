@@ -2642,7 +2642,7 @@ func testServerWithWeb(t *testing.T) (*httptest.Server, func()) {
 		w.Write([]byte("<!doctype html><html><body><div id=\"root\"></div></body></html>"))
 	})
 
-	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, cfg, webHandler)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, webHandler)
 	ts := httptest.NewServer(apiServer)
 
 	cleanup := func() {
@@ -3003,5 +3003,64 @@ func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// Event endpoint tests
+// ============================================================
+
+func TestListEvents_Empty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/events")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	var events []*types.Event
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events, got %d", len(events))
+	}
+}
+
+func TestListEvents_WithDataAndFilters(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	now := time.Now().Truncate(time.Millisecond)
+
+	s.PutEvent(&types.Event{ID: "evt-1", VMID: "vm-1", Type: "vm_started", CreatedAt: now.Add(-10 * time.Minute)})
+	s.PutEvent(&types.Event{ID: "evt-2", VMID: "vm-2", Type: "vm_stopped", CreatedAt: now.Add(-5 * time.Minute)})
+	s.PutEvent(&types.Event{ID: "evt-3", VMID: "vm-1", Type: "vm_deleted", CreatedAt: now.Add(-1 * time.Minute)})
+
+	// Test all
+	resp, _ := http.Get(ts.URL + "/api/v1/events")
+	var events []*types.Event
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+	if events[0].ID != "evt-3" || events[2].ID != "evt-1" {
+		t.Errorf("expected descending sort order")
+	}
+
+	// Test vm_id filter
+	resp, _ = http.Get(ts.URL + "/api/v1/events?vm_id=vm-1")
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events for vm-1, got %d", len(events))
+	}
+
+	// Test since filter
+	sinceStr := now.Add(-6 * time.Minute).Format(time.RFC3339)
+	resp, _ = http.Get(ts.URL + "/api/v1/events?since=" + sinceStr)
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events since %s, got %d", sinceStr, len(events))
+	}
+	if events[0].ID != "evt-3" || events[1].ID != "evt-2" {
+		t.Errorf("expected evt-3 and evt-2")
 	}
 }
