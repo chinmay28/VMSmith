@@ -253,7 +253,8 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 		return nil, types.NewAPIError("invalid_vm_state", "source VM must be stopped before cloning")
 	}
 
-	if err := network.NewManager(m.conn, m.cfg).EnsureNetwork(); err != nil {
+	netMgr := network.NewManager(m.conn, m.cfg)
+	if err := netMgr.EnsureNetwork(); err != nil {
 		return nil, fmt.Errorf("ensuring NAT network: %w", err)
 	}
 
@@ -271,8 +272,34 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	}
 
 	natMAC := generateMAC()
+	reservedCloneIP := ""
+	if clonedSpec.NatStaticIP == "" {
+		if staticIP, err := m.findAvailableIP(); err == nil {
+			gw := gatewayFromSubnet(m.cfg.Network.Subnet)
+			netMgr.RemoveDHCPHostByName(clonedSpec.Name)
+			if err := netMgr.AddDHCPHost(natMAC, staticIP, clonedSpec.Name); err == nil {
+				clonedSpec.NatStaticIP = staticIP + "/24"
+				clonedSpec.NatGateway = gw
+				reservedCloneIP = staticIP
+			} else {
+				logger.Warn("daemon", "failed to reserve DHCP IP for clone; falling back to dynamic assignment",
+					"vm", clonedSpec.Name, "ip", staticIP, "error", err.Error())
+			}
+		} else {
+			logger.Warn("daemon", "DHCP range exhausted for clone; falling back to dynamic IP assignment",
+				"vm", clonedSpec.Name, "error", err.Error())
+		}
+	}
+
+	cleanupCloneReservation := func() {
+		if reservedCloneIP != "" {
+			netMgr.RemoveDHCPHost(natMAC, reservedCloneIP)
+		}
+	}
+
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
 	if err := createCloudInitISO(cloudInitISO, clonedSpec, natMAC, ""); err != nil {
+		cleanupCloneReservation()
 		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
 	}
@@ -281,12 +308,14 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	params.Machine = detectMachineType(m.conn)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
+		cleanupCloneReservation()
 		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("generating domain XML: %w", err)
 	}
 
 	cloneDom, err := m.conn.DomainDefineXML(xmlDoc)
 	if err != nil {
+		cleanupCloneReservation()
 		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("defining domain: %w", err)
 	}
@@ -308,6 +337,7 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 
 	if err := m.store.PutVM(cloned); err != nil {
 		cloneDom.Undefine()
+		cleanupCloneReservation()
 		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("storing VM metadata: %w", err)
 	}
