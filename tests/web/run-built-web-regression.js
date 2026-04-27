@@ -50,6 +50,20 @@ async function expectVisible(locator, message) {
   }
 }
 
+// waitForInputValue polls a Locator's inputValue() until it equals expected
+// or the timeout elapses. Used to bridge the brief gap between React
+// committing a modal mount and its useEffect-driven form population.
+async function waitForInputValue(locator, expected, label, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '';
+  while (Date.now() < deadline) {
+    last = await locator.inputValue().catch(() => '');
+    if (last === expected) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${label}: input value = "${last}", want "${expected}"`);
+}
+
 async function runTest(name, fn) {
   try {
     await fn();
@@ -238,111 +252,122 @@ async function runTest(name, fn) {
     });
 
     await runTest('edit modal preserves typed CPU/RAM through background polling and PATCHes them', async () => {
-      const patches = [];
+      // Run this test in a fully isolated browser context so it doesn't
+      // share routing or in-memory state with the malformed-spec tests
+      // above. That way route precedence and prior modal state cannot
+      // interfere with the polling-vs-edit timing we're verifying.
+      const editContext = await browser.newContext();
+      const editPage = await editContext.newPage();
+      const editPageErrors = [];
+      editPage.on('pageerror', (err) => editPageErrors.push(err.message));
 
-      // Override the catch-all VM route for vm-2 so we can serve a well-formed
-      // VM payload and capture the eventual PATCH body. Routes registered later
-      // win in Playwright, so this takes precedence over the malformed-spec
-      // route added above.
-      await page.route('**/api/v1/vms/vm-2', async (route, request) => {
-        if (request.method() === 'GET') {
+      const patches = [];
+      const vmPayload = (overrides = {}) => ({
+        id: 'vm-edit',
+        name: 'edit-test-vm',
+        state: 'running',
+        ip: '192.168.100.51',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        spec: {
+          name: 'edit-test-vm',
+          image: 'ubuntu-22.04',
+          cpus: 2,
+          ram_mb: 4096,
+          disk_gb: 20,
+          ...overrides,
+        },
+        tags: [],
+        description: '',
+      });
+
+      await editPage.route('**/api/v1/vms/vm-edit', async (route) => {
+        const req = route.request();
+        if (req.method() === 'GET') {
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({
-              id: 'vm-2',
-              name: 'edit-test-vm',
-              state: 'running',
-              ip: '192.168.100.51',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              spec: {
-                name: 'edit-test-vm',
-                image: 'ubuntu-22.04',
-                cpus: 2,
-                ram_mb: 4096,
-                disk_gb: 20,
-              },
-              tags: [],
-              description: '',
-            }),
+            body: JSON.stringify(vmPayload()),
           });
           return;
         }
-        if (request.method() === 'PATCH') {
+        if (req.method() === 'PATCH') {
           let body = {};
-          try { body = JSON.parse(request.postData() || '{}'); } catch { /* keep {} */ }
+          try { body = JSON.parse(req.postData() || '{}'); } catch { /* keep {} */ }
           patches.push(body);
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({
-              id: 'vm-2',
-              name: 'edit-test-vm',
-              state: 'running',
-              ip: '192.168.100.51',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              spec: {
-                name: 'edit-test-vm',
-                image: 'ubuntu-22.04',
-                cpus: body.cpus || 2,
-                ram_mb: body.ram_mb || 4096,
-                disk_gb: body.disk_gb || 20,
-              },
-              tags: [],
-              description: '',
-            }),
+            body: JSON.stringify(vmPayload({
+              cpus: body.cpus || 2,
+              ram_mb: body.ram_mb || 4096,
+              disk_gb: body.disk_gb || 20,
+            })),
           });
           return;
         }
         await route.fulfill({ status: 405, contentType: 'application/json', body: '{}' });
       });
 
-      await page.goto(`${BASE}/vms/vm-2`, { waitUntil: 'networkidle' });
+      // Stub the side panels so VMDetail's parallel fetches don't 404.
+      await editPage.route(/\/api\/v1\/vms\/vm-edit\/(snapshots|ports)(?:\?.*)?$/, async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+      });
 
-      const editButton = page.getByTestId('btn-edit-vm');
-      await expectVisible(editButton, 'edit button not visible');
-      await editButton.click();
+      // Static asset server (used by the suite) needs to serve index.html for
+      // the SPA route. The unmocked /api guard already handles other endpoints.
 
-      const cpuInput = page.getByTestId('input-edit-cpus');
-      const ramInput = page.getByTestId('input-edit-ram');
-      await expectVisible(cpuInput, 'edit modal did not open');
+      try {
+        await editPage.goto(`${BASE}/vms/vm-edit`, { waitUntil: 'networkidle' });
 
-      const initialCpu = await cpuInput.inputValue();
-      const initialRam = await ramInput.inputValue();
-      if (initialCpu !== '2') throw new Error(`pre-fill cpus = "${initialCpu}", want "2"`);
-      if (initialRam !== '4096') throw new Error(`pre-fill ram_mb = "${initialRam}", want "4096"`);
+        const editButton = editPage.getByTestId('btn-edit-vm');
+        await expectVisible(editButton, 'edit button not visible');
+        await editButton.click();
 
-      await cpuInput.fill('8');
-      await ramInput.fill('16384');
+        const cpuInput = editPage.getByTestId('input-edit-cpus');
+        const ramInput = editPage.getByTestId('input-edit-ram');
+        await expectVisible(cpuInput, 'edit modal did not open');
 
-      // VMDetail polls vms.get every 5s. Wait long enough for at least one
-      // background refresh to fire while the modal is open. Before the fix
-      // the form-init effect re-ran on every `vm` prop change and reset
-      // these inputs back to the API's current values, so the diff check
-      // in handleSubmit silently dropped cpus/ram_mb from the PATCH body.
-      await page.waitForTimeout(6000);
+        // The modal mounts on click, but the form-init useEffect runs after
+        // React commits — so the inputs briefly hold their initial empty
+        // state before the effect populates them. Poll until the field
+        // settles, instead of racing the React commit cycle.
+        await waitForInputValue(cpuInput, '2', 'pre-fill cpus');
+        await waitForInputValue(ramInput, '4096', 'pre-fill ram_mb');
 
-      const cpuAfterPoll = await cpuInput.inputValue();
-      const ramAfterPoll = await ramInput.inputValue();
-      if (cpuAfterPoll !== '8') {
-        throw new Error(`cpus input reset to "${cpuAfterPoll}" by polling refresh, want "8"`);
-      }
-      if (ramAfterPoll !== '16384') {
-        throw new Error(`ram input reset to "${ramAfterPoll}" by polling refresh, want "16384"`);
-      }
+        await cpuInput.fill('8');
+        await ramInput.fill('16384');
 
-      await page.getByTestId('btn-submit-edit').click();
-      await page.getByTestId('input-edit-cpus').waitFor({ state: 'hidden', timeout: 5000 });
+        // VMDetail polls vms.get every 5s. Wait long enough for at least
+        // one background refresh to fire while the modal is open. Before
+        // the fix, the form-init effect re-ran on every `vm` prop change
+        // and reset these inputs back to the API's current values, so the
+        // diff check in handleSubmit silently dropped cpus/ram_mb from
+        // the PATCH body.
+        await editPage.waitForTimeout(6000);
 
-      if (patches.length === 0) throw new Error('no PATCH /vms/vm-2 captured');
-      const last = patches[patches.length - 1];
-      if (last.cpus !== 8) throw new Error(`PATCH cpus = ${JSON.stringify(last.cpus)}, want 8`);
-      if (last.ram_mb !== 16384) throw new Error(`PATCH ram_mb = ${JSON.stringify(last.ram_mb)}, want 16384`);
+        const cpuAfterPoll = await cpuInput.inputValue();
+        const ramAfterPoll = await ramInput.inputValue();
+        if (cpuAfterPoll !== '8') {
+          throw new Error(`cpus input reset to "${cpuAfterPoll}" by polling refresh, want "8"`);
+        }
+        if (ramAfterPoll !== '16384') {
+          throw new Error(`ram input reset to "${ramAfterPoll}" by polling refresh, want "16384"`);
+        }
 
-      if (pageErrors.length > 0) {
-        throw new Error(`unexpected page errors: ${pageErrors.join(' | ')}`);
+        await editPage.getByTestId('btn-submit-edit').click();
+        await editPage.getByTestId('input-edit-cpus').waitFor({ state: 'hidden', timeout: 5000 });
+
+        if (patches.length === 0) throw new Error('no PATCH /vms/vm-edit captured');
+        const last = patches[patches.length - 1];
+        if (last.cpus !== 8) throw new Error(`PATCH cpus = ${JSON.stringify(last.cpus)}, want 8`);
+        if (last.ram_mb !== 16384) throw new Error(`PATCH ram_mb = ${JSON.stringify(last.ram_mb)}, want 16384`);
+
+        if (editPageErrors.length > 0) {
+          throw new Error(`unexpected page errors: ${editPageErrors.join(' | ')}`);
+        }
+      } finally {
+        await editContext.close();
       }
     });
 
