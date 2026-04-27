@@ -158,8 +158,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/VMID'
       responses:
-        '204':
+        '200':
           description: VM started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
         '404':
           $ref: '#/components/responses/APIError'
         default:
@@ -171,8 +175,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/VMID'
       responses:
-        '204':
+        '200':
           description: VM stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
         '404':
           $ref: '#/components/responses/APIError'
         default:
@@ -255,8 +263,12 @@ paths:
         - $ref: '#/components/parameters/VMID'
         - $ref: '#/components/parameters/SnapshotName'
       responses:
-        '204':
+        '200':
           description: Snapshot restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
         '404':
           $ref: '#/components/responses/APIError'
         default:
@@ -588,9 +600,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/LogEntry'
+                $ref: '#/components/schemas/LogsResponse'
         default:
           $ref: '#/components/responses/APIError'
 components:
@@ -807,15 +817,21 @@ components:
             type: string
     BulkVMActionResult:
       type: object
-      required: [id, ok]
+      required: [id, success]
       properties:
         id:
           type: string
-        ok:
+        success:
           type: boolean
-        error:
-          type: string
         code:
+          type: string
+        message:
+          type: string
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
           type: string
     BulkVMActionResponse:
       type: object
@@ -1027,17 +1043,27 @@ components:
       type: object
       additionalProperties:
         type: string
+    LogsResponse:
+      type: object
+      required: [entries, total]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogEntry'
+        total:
+          type: integer
     LogEntry:
       type: object
       properties:
-        timestamp:
+        ts:
           type: string
           format: date-time
         level:
           type: string
         source:
           type: string
-        message:
+        msg:
           type: string
         fields:
           $ref: '#/components/schemas/LogField'
