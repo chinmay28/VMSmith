@@ -35,8 +35,12 @@ export default function LogViewer() {
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState(false);
-  const bottomRef = useRef(null);
   const listRef = useRef(null);
+  const autoScrollRef = useRef(true);
+
+  useEffect(() => {
+    autoScrollRef.current = autoScroll;
+  }, [autoScroll]);
 
   const fetchLogs = useCallback(async () => {
     if (paused) return;
@@ -65,18 +69,23 @@ export default function LogViewer() {
     setPage(1);
   }, [levelFilter, sourceFilter]);
 
-  // Auto-scroll to bottom when new entries arrive.
+  // Auto-scroll to bottom when new entries arrive — only when the user
+  // is already pinned to the bottom. Use direct scrollTop (not smooth
+  // scrollIntoView) so we don't fire intermediate scroll events that
+  // would race with the user's own scrolling.
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!autoScroll || !listRef.current) return;
+    const el = listRef.current;
+    el.scrollTop = el.scrollHeight;
   }, [entries, autoScroll]);
 
   const handleScroll = () => {
     if (!listRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = listRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 40;
-    setAutoScroll(atBottom);
+    if (atBottom !== autoScrollRef.current) {
+      setAutoScroll(atBottom);
+    }
   };
 
   const filtered = entries.filter(e => LEVEL_ORDER[e.level] >= LEVEL_ORDER[levelFilter]);
@@ -158,7 +167,6 @@ export default function LogViewer() {
             </tbody>
           </table>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {totalEntries > 0 && (
@@ -182,7 +190,9 @@ export default function LogViewer() {
           className="absolute bottom-6 right-6 btn-secondary text-xs py-1 px-3 flex items-center gap-1 shadow-lg"
           onClick={() => {
             setAutoScroll(true);
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            if (listRef.current) {
+              listRef.current.scrollTop = listRef.current.scrollHeight;
+            }
           }}
         >
           <ChevronDown size={13} /> Latest
