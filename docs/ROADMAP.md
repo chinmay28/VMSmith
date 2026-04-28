@@ -188,8 +188,8 @@ No way to know when a VM crashes, completes creation, or changes state.
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 4.2.1 | Subscribe to libvirt domain lifecycle events (start, stop, crash, reboot) | M | ✅ Done — `internal/vm/events.go` subscribes to libvirt events via `ConnectDomainEventLifecycleRegister` and updates store |
-| 4.2.2 | Store events in new bbolt bucket with timestamp, VM ID, event type | S | |
-| 4.2.3 | Add `GET /api/v1/events` endpoint with optional `?vm_id=` and `?since=` filters | M | |
+| 4.2.2 | Store events in new bbolt bucket with timestamp, VM ID, event type | S | ✅ Done — events persist in the `events` bucket with store coverage in `internal/store/bolt_test.go` |
+| 4.2.3 | Add `GET /api/v1/events` endpoint with optional `?vm_id=` and `?since=` filters | M | ✅ Done — `handlers_events.go` implements filtering, descending sort, and pagination |
 | 4.2.4 | Add Server-Sent Events (SSE) stream at `GET /api/v1/events/stream` | M | Real-time push instead of polling |
 | 4.2.5 | Add event timeline to VMDetail page | M | |
 | 4.2.6 | (Future) Webhook support: POST to configured URL on configurable events | L | |

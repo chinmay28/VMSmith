@@ -18,14 +18,17 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by vm_id if provided
 	vmID := strings.TrimSpace(r.URL.Query().Get("vm_id"))
-	
+
 	// Filter by since if provided
 	sinceStr := strings.TrimSpace(r.URL.Query().Get("since"))
 	var sinceTime time.Time
 	if sinceStr != "" {
-		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
-			sinceTime = t
+		parsed, err := time.Parse(time.RFC3339Nano, sinceStr)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_since", "since must be a valid RFC3339 timestamp"))
+			return
 		}
+		sinceTime = parsed
 	}
 
 	filtered := make([]*types.Event, 0)

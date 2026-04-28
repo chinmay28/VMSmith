@@ -3010,16 +3010,23 @@ func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
 // ============================================================
 
 func TestListEvents_Empty(t *testing.T) {
-	ts, _, s, cleanup := testServerFull(t)
+	ts, _, _, cleanup := testServerFull(t)
 	defer cleanup()
 
-	resp, _ := http.Get(ts.URL + "/api/v1/events")
+	resp, err := http.Get(ts.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatalf("GET /api/v1/events: %v", err)
+	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 
 	var events []*types.Event
-	json.NewDecoder(resp.Body).Decode(&events)
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events, got %d", len(events))
 	}
@@ -3036,9 +3043,15 @@ func TestListEvents_WithDataAndFilters(t *testing.T) {
 	s.PutEvent(&types.Event{ID: "evt-3", VMID: "vm-1", Type: "vm_deleted", CreatedAt: now.Add(-1 * time.Minute)})
 
 	// Test all
-	resp, _ := http.Get(ts.URL + "/api/v1/events")
+	resp, err := http.Get(ts.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatalf("GET all events: %v", err)
+	}
 	var events []*types.Event
-	json.NewDecoder(resp.Body).Decode(&events)
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode all events response: %v", err)
+	}
+	resp.Body.Close()
 	if len(events) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(events))
 	}
@@ -3047,20 +3060,55 @@ func TestListEvents_WithDataAndFilters(t *testing.T) {
 	}
 
 	// Test vm_id filter
-	resp, _ = http.Get(ts.URL + "/api/v1/events?vm_id=vm-1")
-	json.NewDecoder(resp.Body).Decode(&events)
+	resp, err = http.Get(ts.URL + "/api/v1/events?vm_id=vm-1")
+	if err != nil {
+		t.Fatalf("GET vm_id filtered events: %v", err)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode vm_id filtered response: %v", err)
+	}
+	resp.Body.Close()
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events for vm-1, got %d", len(events))
 	}
 
 	// Test since filter
-	sinceStr := now.Add(-6 * time.Minute).Format(time.RFC3339)
-	resp, _ = http.Get(ts.URL + "/api/v1/events?since=" + sinceStr)
-	json.NewDecoder(resp.Body).Decode(&events)
+	sinceStr := now.Add(-6 * time.Minute).Format(time.RFC3339Nano)
+	resp, err = http.Get(ts.URL + "/api/v1/events?since=" + sinceStr)
+	if err != nil {
+		t.Fatalf("GET since filtered events: %v", err)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode since filtered response: %v", err)
+	}
+	resp.Body.Close()
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events since %s, got %d", sinceStr, len(events))
 	}
 	if events[0].ID != "evt-3" || events[1].ID != "evt-2" {
 		t.Errorf("expected evt-3 and evt-2")
+	}
+}
+
+func TestListEvents_InvalidSince(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?since=not-a-timestamp")
+	if err != nil {
+		t.Fatalf("GET invalid since: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var apiErr errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if apiErr.Code != "invalid_since" {
+		t.Fatalf("code = %q, want %q", apiErr.Code, "invalid_since")
 	}
 }
