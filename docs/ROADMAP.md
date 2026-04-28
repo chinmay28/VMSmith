@@ -408,7 +408,7 @@ API documentation is hand-written in ARCHITECTURE.md. Auto-generated spec enable
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 4.3.1 | Add OpenAPI 3.0 annotations to all handlers (or generate from types) | L | ✅ Done — added hand-written `docs/openapi.yaml` covering the implemented `/api/v1` endpoints, shared schemas, pagination headers, and bearer-auth requirements |
-| 4.3.2 | Serve Swagger UI at `/api/docs` | S | Embed swagger-ui dist |
+| 4.3.2 | Serve Swagger UI at `/api/docs` | S | ✅ Done — added embedded docs handlers that serve Swagger UI at `/api/docs` and the OpenAPI schema at `/api/openapi.yaml` |
 | 4.3.3 | Generate TypeScript API client from OpenAPI spec for frontend | M | Replace hand-written `client.js` |
 
 ---

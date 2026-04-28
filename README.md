@@ -464,7 +464,8 @@ curl http://localhost:8080/api/v1/templates
 ```
 
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
-Machine-readable schema: [docs/openapi.yaml](docs/openapi.yaml)
+Interactive API docs: `/api/docs`
+Machine-readable schema: [docs/openapi.yaml](docs/openapi.yaml) and `/api/openapi.yaml`
 
 Production deployment guide: [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
 

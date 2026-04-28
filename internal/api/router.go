@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	apidocs "github.com/vmsmith/vmsmith/docs"
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
@@ -99,6 +100,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	r.Use(s.trackInFlightRequests)
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(middleware.Recoverer)
+
+	r.Get("/api/docs", apidocs.UIHandler().ServeHTTP)
+	r.Get("/api/openapi.yaml", apidocs.SpecHandler().ServeHTTP)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.rateLimitMiddleware)

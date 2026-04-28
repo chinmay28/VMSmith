@@ -102,6 +102,7 @@ vmsmith/
 │   └── install.sh               # Release installer for curl|sh installs to /usr/local/bin
 ├── docs/ARCHITECTURE.md         # Detailed architecture reference
 ├── docs/openapi.yaml            # OpenAPI 3 schema for the implemented REST API surface
+├── docs/apidocs.go              # Embedded Swagger UI + OpenAPI spec handlers
 ├── Makefile
 └── vmsmith.yaml.example         # Reference configuration
 ```
