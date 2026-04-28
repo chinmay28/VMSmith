@@ -1,0 +1,1069 @@
+openapi: 3.0.3
+info:
+  title: VMSmith API
+  version: 0.2.0
+  description: |
+    OpenAPI description for the VMSmith REST API.
+
+    This spec covers the implemented `/api/v1/*` surface exposed by the daemon,
+    including VM lifecycle, bulk actions, cloning, snapshots, images, templates,
+    host discovery, quotas, and log retrieval.
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local daemon
+security:
+  - bearerAuth: []
+tags:
+  - name: VMs
+  - name: Snapshots
+  - name: Port Forwards
+  - name: Images
+  - name: Templates
+  - name: Host
+  - name: Quotas
+  - name: Logs
+paths:
+  /vms:
+    get:
+      tags: [VMs]
+      summary: List virtual machines
+      parameters:
+        - $ref: '#/components/parameters/TagFilter'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: VM list
+          headers:
+            X-Total-Count:
+              $ref: '#/components/headers/XTotalCount'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VM'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [VMs]
+      summary: Create a VM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VMSpec'
+      responses:
+        '201':
+          description: VM created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '429':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/bulk:
+    post:
+      tags: [VMs]
+      summary: Run a bulk VM action
+      description: Start, stop, or delete multiple VMs in one request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkVMActionRequest'
+      responses:
+        '200':
+          description: Per-VM bulk action results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkVMActionResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}:
+    get:
+      tags: [VMs]
+      summary: Get a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    patch:
+      tags: [VMs]
+      summary: Update a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VMUpdateSpec'
+      responses:
+        '200':
+          description: Updated VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '429':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    delete:
+      tags: [VMs]
+      summary: Delete a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '204':
+          description: VM deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/start:
+    post:
+      tags: [VMs]
+      summary: Start a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/stop:
+    post:
+      tags: [VMs]
+      summary: Stop a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/clone:
+    post:
+      tags: [VMs]
+      summary: Clone a VM
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneVMRequest'
+      responses:
+        '201':
+          description: Cloned VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/snapshots:
+    get:
+      tags: [Snapshots]
+      summary: List VM snapshots
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Snapshot'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Snapshots]
+      summary: Create a VM snapshot
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSnapshotRequest'
+      responses:
+        '201':
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/snapshots/{snapName}/restore:
+    post:
+      tags: [Snapshots]
+      summary: Restore a snapshot
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/SnapshotName'
+      responses:
+        '200':
+          description: Snapshot restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/snapshots/{snapName}:
+    delete:
+      tags: [Snapshots]
+      summary: Delete a snapshot
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/SnapshotName'
+      responses:
+        '204':
+          description: Snapshot deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/ports:
+    get:
+      tags: [Port Forwards]
+      summary: List a VM's port forwards
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: Port forward list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PortForward'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Port Forwards]
+      summary: Add a port forward
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPortRequest'
+      responses:
+        '201':
+          description: Port forward created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortForward'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/ports/{portID}:
+    delete:
+      tags: [Port Forwards]
+      summary: Remove a port forward
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/PortID'
+      responses:
+        '204':
+          description: Port forward removed
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /images:
+    get:
+      tags: [Images]
+      summary: List images
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Image list
+          headers:
+            X-Total-Count:
+              $ref: '#/components/headers/XTotalCount'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Image'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Images]
+      summary: Export a VM to an image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateImageRequest'
+      responses:
+        '201':
+          description: Image created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Image'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /images/upload:
+    post:
+      tags: [Images]
+      summary: Upload a qcow2 image
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name:
+                  type: string
+                  description: Optional display name override.
+      responses:
+        '201':
+          description: Image uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Image'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '507':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /images/{imageID}:
+    delete:
+      tags: [Images]
+      summary: Delete an image
+      parameters:
+        - $ref: '#/components/parameters/ImageID'
+      responses:
+        '204':
+          description: Image deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /images/{imageID}/download:
+    get:
+      tags: [Images]
+      summary: Download an image file
+      parameters:
+        - $ref: '#/components/parameters/ImageID'
+      responses:
+        '200':
+          description: Binary image download
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /templates:
+    get:
+      tags: [Templates]
+      summary: List reusable VM templates
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Template list
+          headers:
+            X-Total-Count:
+              $ref: '#/components/headers/XTotalCount'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VMTemplate'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Templates]
+      summary: Create a reusable VM template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VMTemplate'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /templates/{templateID}:
+    delete:
+      tags: [Templates]
+      summary: Delete a template
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+      responses:
+        '204':
+          description: Template deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /host/interfaces:
+    get:
+      tags: [Host]
+      summary: Discover host interfaces
+      responses:
+        '200':
+          description: Host interfaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostInterface'
+        default:
+          $ref: '#/components/responses/APIError'
+  /host/stats:
+    get:
+      tags: [Host]
+      summary: Get host utilization stats
+      responses:
+        '200':
+          description: Host stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostStats'
+        default:
+          $ref: '#/components/responses/APIError'
+  /quotas/usage:
+    get:
+      tags: [Quotas]
+      summary: Get current quota usage
+      responses:
+        '200':
+          description: Quota usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaUsage'
+        default:
+          $ref: '#/components/responses/APIError'
+  /logs:
+    get:
+      tags: [Logs]
+      summary: List recent daemon logs
+      parameters:
+        - name: level
+          in: query
+          schema:
+            type: string
+          description: Minimum log level.
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return entries at or after this timestamp.
+        - name: source
+          in: query
+          schema:
+            type: string
+          description: Filter by structured log source.
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+          description: Alias retained for compatibility.
+      responses:
+        '200':
+          description: Log entries
+          headers:
+            X-Total-Count:
+              $ref: '#/components/headers/XTotalCount'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogsResponse'
+        default:
+          $ref: '#/components/responses/APIError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+  headers:
+    XTotalCount:
+      description: Total matching records before pagination.
+      schema:
+        type: integer
+  parameters:
+    VMID:
+      name: vmID
+      in: path
+      required: true
+      schema:
+        type: string
+    ImageID:
+      name: imageID
+      in: path
+      required: true
+      schema:
+        type: string
+    TemplateID:
+      name: templateID
+      in: path
+      required: true
+      schema:
+        type: string
+    PortID:
+      name: portID
+      in: path
+      required: true
+      schema:
+        type: string
+    SnapshotName:
+      name: snapName
+      in: path
+      required: true
+      schema:
+        type: string
+    TagFilter:
+      name: tag
+      in: query
+      schema:
+        type: string
+      description: Case-insensitive tag filter.
+    StatusFilter:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [creating, running, stopped, deleted, unknown]
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+  responses:
+    APIError:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/APIError'
+  schemas:
+    APIError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    Protocol:
+      type: string
+      enum: [tcp, udp]
+    VMState:
+      type: string
+      enum: [creating, running, stopped, deleted, unknown]
+    NetworkMode:
+      type: string
+      enum: [nat, macvtap, bridge]
+    NetworkAttachment:
+      type: object
+      properties:
+        name:
+          type: string
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        host_interface:
+          type: string
+        bridge:
+          type: string
+        static_ip:
+          type: string
+        gateway:
+          type: string
+        mac_address:
+          type: string
+    VMSpec:
+      type: object
+      required: [name, image]
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        template_id:
+          type: string
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        cloud_init_file:
+          type: string
+        ssh_pub_key:
+          type: string
+        default_user:
+          type: string
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkAttachment'
+        nat_static_ip:
+          type: string
+        nat_gateway:
+          type: string
+    VMUpdateSpec:
+      type: object
+      properties:
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        nat_static_ip:
+          type: string
+        nat_gateway:
+          type: string
+    VM:
+      type: object
+      required: [id, name, spec, state, disk_path, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        spec:
+          $ref: '#/components/schemas/VMSpec'
+        state:
+          $ref: '#/components/schemas/VMState'
+        ip:
+          type: string
+        nat_mac:
+          type: string
+        disk_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CloneVMRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    BulkVMActionRequest:
+      type: object
+      required: [action, ids]
+      properties:
+        action:
+          type: string
+          enum: [start, stop, delete]
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    BulkVMActionResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+    BulkVMActionResponse:
+      type: object
+      required: [action, results]
+      properties:
+        action:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkVMActionResult'
+    Snapshot:
+      type: object
+      required: [id, vm_id, name, created_at]
+      properties:
+        id:
+          type: string
+        vm_id:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateSnapshotRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    AddPortRequest:
+      type: object
+      required: [host_port, guest_port]
+      properties:
+        host_port:
+          type: integer
+        guest_port:
+          type: integer
+        protocol:
+          $ref: '#/components/schemas/Protocol'
+    PortForward:
+      type: object
+      required: [id, vm_id, host_port, guest_port, guest_ip, protocol]
+      properties:
+        id:
+          type: string
+        vm_id:
+          type: string
+        host_port:
+          type: integer
+        guest_port:
+          type: integer
+        guest_ip:
+          type: string
+        protocol:
+          $ref: '#/components/schemas/Protocol'
+    Image:
+      type: object
+      required: [id, name, path, size_bytes, format, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        format:
+          type: string
+        source_vm:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateImageRequest:
+      type: object
+      required: [vm_id, name]
+      properties:
+        vm_id:
+          type: string
+        name:
+          type: string
+    VMTemplate:
+      type: object
+      required: [id, name, image, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        default_user:
+          type: string
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkAttachment'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateTemplateRequest:
+      type: object
+      required: [name, image]
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        default_user:
+          type: string
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkAttachment'
+    HostInterface:
+      type: object
+      required: [name, ips, mac, is_up, is_physical]
+      properties:
+        name:
+          type: string
+        ips:
+          type: array
+          items:
+            type: string
+        mac:
+          type: string
+        is_up:
+          type: boolean
+        is_physical:
+          type: boolean
+    HostResourceUsageSummary:
+      type: object
+      required: [used, total]
+      properties:
+        used:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+        available:
+          type: integer
+          format: int64
+        percentage:
+          type: integer
+    HostStats:
+      type: object
+      required: [vm_count, cpu, ram, disk]
+      properties:
+        vm_count:
+          type: integer
+        cpu:
+          $ref: '#/components/schemas/HostResourceUsageSummary'
+        ram:
+          $ref: '#/components/schemas/HostResourceUsageSummary'
+        disk:
+          $ref: '#/components/schemas/HostResourceUsageSummary'
+    QuotaUsageSummary:
+      type: object
+      required: [used]
+      properties:
+        used:
+          type: integer
+        limit:
+          type: integer
+    QuotaUsage:
+      type: object
+      required: [vms, cpus, ram_mb, disk_gb]
+      properties:
+        vms:
+          $ref: '#/components/schemas/QuotaUsageSummary'
+        cpus:
+          $ref: '#/components/schemas/QuotaUsageSummary'
+        ram_mb:
+          $ref: '#/components/schemas/QuotaUsageSummary'
+        disk_gb:
+          $ref: '#/components/schemas/QuotaUsageSummary'
+    LogField:
+      type: object
+      additionalProperties:
+        type: string
+    LogsResponse:
+      type: object
+      required: [entries, total]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogEntry'
+        total:
+          type: integer
+    LogEntry:
+      type: object
+      properties:
+        ts:
+          type: string
+          format: date-time
+        level:
+          type: string
+        source:
+          type: string
+        msg:
+          type: string
+        fields:
+          $ref: '#/components/schemas/LogField'
