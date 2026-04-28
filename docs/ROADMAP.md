@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-04-04
-> **Status:** Draft — active work started on Phase 1.1 CI, Phase 1.2 / 1.3 validation and error-handling improvements, contributor/developer workflow docs, and container/distribution packaging
+> **Last updated:** 2026-04-28
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host dashboard stats, and frontend pagination are now complete; the main remaining gaps are cloning, VM-level metrics, events/notifications, OpenAPI tooling, and advanced operations features
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -299,31 +299,20 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 ---
 
-## Summary: Suggested Priority Order
+## Summary: Suggested Next Priority Order
 
-For maximum impact, work through these in roughly this order:
+With the initial platform hardening work mostly done, the next highest-value roadmap items are:
 
 | Priority | Area | Key Tasks | Why |
 |----------|------|-----------|-----|
-| **P0** | CI/CD | 1.1.1 – 1.1.5 | Prevents regressions, enables confident development |
-| **P0** | Validation | 1.2.1 – 1.2.6 | Users hit confusing 500 errors on bad input today |
-| **P1** | Tests | 1.3.1 – 1.3.5 | Lock in validation work with tests |
-| **P1** | VM Cloning | 2.1.1 – 2.1.7 | Most-requested missing feature |
-| **P1** | Tags | 2.2.1 – 2.2.6 | Essential for organizing VMs at any scale |
-| **P2** | Auth | 3.1.1 – 3.1.4 | Blocks network-exposed deployments |
-| **P2** | Systemd | 3.3.1 – 3.3.3 | Required for production use |
-| **P2** | Metrics | 4.1.1 – 4.1.4 | Users need visibility into VM health |
-| **P2** | Events | 4.2.1 – 4.2.5 | Know when things go wrong |
-| **P3** | TLS | 3.2.1 – 3.2.4 | Needed with auth for secure deployments |
-| **P3** | Quotas | 3.5.1 – 3.5.3 | Protect host from over-provisioning |
-| **P3** | Templates | 2.4.1 – 2.4.5 | Quality-of-life for repeat VM creation |
-| **P3** | Bulk Ops | 2.3.1 – 2.3.3 | Quality-of-life for managing many VMs |
-| **P4** | Console | 5.1.1 – 5.1.4 | High value but high effort |
-| **P4** | Schedules | 5.2.1 – 5.2.6 | Automation for ops teams |
-| **P4** | Pagination | 5.4.1 – 5.4.4 | Only needed at scale |
-| **P5** | OpenAPI | 4.3.1 – 4.3.3 | Nice-to-have for API consumers |
-| **P5** | OVA | 5.3.1 – 5.3.3 | Interop, niche use case |
-| **P5** | Multi-host | 5.5.1 – 5.5.4 | Major architecture change; long-term vision |
+| **P0** | VM Cloning | 2.1.1 – 2.1.7 | The biggest day-to-day workflow gap still called out in the roadmap |
+| **P0** | Events | 4.2.1 – 4.2.5 | Lifecycle visibility and notifications remain missing across API and UI |
+| **P1** | VM Resource Metrics | 4.1.1 – 4.1.3, 4.1.5 | Host stats are in place, but VM-level CPU/RAM/disk/network visibility is still absent |
+| **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | A spec plus Swagger UI/client generation would make the API easier to consume safely |
+| **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
+| **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
+| **P3** | OVA Import/Export | 5.3.1 – 5.3.3 | Helpful interoperability feature, but less urgent than core ops gaps |
+| **P3** | Multi-Host Management | 5.5.1 – 5.5.4 | Still a long-term architecture track rather than near-term delivery |
 
 ---
 
