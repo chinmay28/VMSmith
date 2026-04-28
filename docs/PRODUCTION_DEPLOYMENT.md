@@ -9,6 +9,8 @@ This guide shows one practical way to run VMSmith on a real Linux host:
 
 It is intentionally focused on **reverse proxy + TLS** as the recommended production setup. This avoids coupling deployment to VMSmith's future built-in HTTPS support and works today.
 
+> Prefer the reverse-proxy pattern for most deployments. VMSmith now also supports built-in Let's Encrypt via `daemon.tls.auto_cert`, but that is best reserved for simpler single-service setups where the daemon can listen directly on `:443`.
+
 ---
 
 ## 1. Recommended architecture

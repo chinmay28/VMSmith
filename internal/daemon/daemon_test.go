@@ -14,6 +14,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 func TestServeUsesHTTPWithoutTLS(t *testing.T) {
@@ -82,6 +83,63 @@ func TestServeUsesHTTPSWhenTLSConfigured(t *testing.T) {
 	}
 	if gotCert != "/etc/vmsmith/server.crt" || gotKey != "/etc/vmsmith/server.key" {
 		t.Fatalf("ListenAndServeTLS called with cert=%q key=%q", gotCert, gotKey)
+	}
+}
+
+func TestServeUsesAutoCertWhenConfigured(t *testing.T) {
+	var gotManager *autocert.Manager
+	d := &Daemon{
+		cfg: &config.Config{
+			Daemon: config.DaemonConfig{
+				TLS: config.TLSConfig{
+					AutoCert:         true,
+					AutoCertHosts:    []string{"vmsmith.example.com"},
+					AutoCertCacheDir: "/var/lib/vmsmith/autocert",
+					AutoCertEmail:    "ops@example.com",
+				},
+			},
+		},
+		server: &http.Server{TLSConfig: &tls.Config{}},
+	}
+
+	orig := listenAndServe
+	origTLS := listenAndServeTLS
+	origAutoTLS := listenAndServeAutoTLS
+	listenAndServe = func(s *http.Server) error {
+		t.Fatal("ListenAndServe called unexpectedly")
+		return nil
+	}
+	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
+		t.Fatalf("ListenAndServeTLS called unexpectedly with cert=%q key=%q", certFile, keyFile)
+		return nil
+	}
+	listenAndServeAutoTLS = func(s *http.Server, mgr *autocert.Manager) error {
+		gotManager = mgr
+		return http.ErrServerClosed
+	}
+	defer func() {
+		listenAndServe = orig
+		listenAndServeTLS = origTLS
+		listenAndServeAutoTLS = origAutoTLS
+	}()
+
+	if err := d.serve(); err != http.ErrServerClosed {
+		t.Fatalf("serve() error = %v, want %v", err, http.ErrServerClosed)
+	}
+	if gotManager == nil {
+		t.Fatal("autocert manager was not provided")
+	}
+	if gotManager.Cache == nil {
+		t.Fatal("autocert cache = nil, want DirCache")
+	}
+	if gotManager.Email != "ops@example.com" {
+		t.Fatalf("autocert email = %q, want ops@example.com", gotManager.Email)
+	}
+	if err := gotManager.HostPolicy(nil, "vmsmith.example.com"); err != nil {
+		t.Fatalf("HostPolicy rejected configured host: %v", err)
+	}
+	if err := gotManager.HostPolicy(nil, "other.example.com"); err == nil {
+		t.Fatal("HostPolicy accepted unexpected host")
 	}
 }
 

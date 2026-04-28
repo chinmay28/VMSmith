@@ -8,6 +8,10 @@ daemon:
   tls:
     cert_file: ""                      # optional; when both cert_file + key_file are set, daemon serves HTTPS
     key_file: ""
+    auto_cert: false                    # optional; obtain Let's Encrypt certs over TLS-ALPN when listening on :443
+    auto_cert_hosts: []                 # required with auto_cert; exact hostnames allowed for certificate issuance
+    auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
+    auto_cert_email: ""                # optional ACME contact email
   auth:
     enabled: false                      # when true, API requests must send Authorization: Bearer <key>
     api_keys: []                        # one or more shared secrets for API clients

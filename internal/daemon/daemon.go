@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/internal/web"
+	"golang.org/x/crypto/acme/autocert"
 	"libvirt.org/go/libvirt"
 )
 
@@ -48,6 +50,18 @@ var (
 	}
 	listenAndServeTLS = func(s *http.Server, certFile, keyFile string) error {
 		return s.ListenAndServeTLS(certFile, keyFile)
+	}
+	listenAndServeAutoTLS = func(s *http.Server, mgr *autocert.Manager) error {
+		tlsConfig := s.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{}
+		} else {
+			tlsConfig = tlsConfig.Clone()
+		}
+		tlsConfig.GetCertificate = mgr.GetCertificate
+		tlsConfig.NextProtos = append([]string{acme.ALPNProto}, tlsConfig.NextProtos...)
+		s.TLSConfig = tlsConfig
+		return s.ListenAndServeTLS("", "")
 	}
 )
 
@@ -131,7 +145,7 @@ func (d *Daemon) Run() error {
 	// Start server in goroutine.
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen, "tls", strconv.FormatBool(d.cfg.Daemon.TLSConfigured()))
+		logger.Info("daemon", "HTTP server listening", "addr", d.cfg.Daemon.Listen, "tls", strconv.FormatBool(d.cfg.Daemon.TLSConfigured() || d.cfg.Daemon.AutoCertConfigured()))
 		fmt.Printf("vmSmith daemon listening on %s\n", d.cfg.Daemon.Listen)
 		if err := d.serve(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -230,6 +244,15 @@ func Status(pidFile string) (bool, int) {
 func (d *Daemon) serve() error {
 	if d.cfg.Daemon.TLSConfigured() {
 		return listenAndServeTLS(d.server, d.cfg.Daemon.TLS.CertFile, d.cfg.Daemon.TLS.KeyFile)
+	}
+	if d.cfg.Daemon.AutoCertConfigured() {
+		mgr := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			Cache:      autocert.DirCache(d.cfg.Daemon.TLS.AutoCertCacheDir),
+			HostPolicy: autocert.HostWhitelist(d.cfg.Daemon.TLS.AutoCertHosts...),
+			Email:      d.cfg.Daemon.TLS.AutoCertEmail,
+		}
+		return listenAndServeAutoTLS(d.server, mgr)
 	}
 	return listenAndServe(d.server)
 }

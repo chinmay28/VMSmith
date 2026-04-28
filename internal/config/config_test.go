@@ -94,6 +94,12 @@ daemon:
   tls:
     cert_file: "/etc/vmsmith/tls/server.crt"
     key_file: "/etc/vmsmith/tls/server.key"
+    auto_cert: true
+    auto_cert_hosts:
+      - "vmsmith.example.com"
+      - "api.vmsmith.example.com"
+    auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
+    auto_cert_email: "ops@example.com"
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
   max_concurrent_creates: 1
@@ -129,6 +135,18 @@ quotas:
 	}
 	if cfg.Daemon.TLS.KeyFile != "/etc/vmsmith/tls/server.key" {
 		t.Errorf("Daemon.TLS.KeyFile = %q, want /etc/vmsmith/tls/server.key", cfg.Daemon.TLS.KeyFile)
+	}
+	if !cfg.Daemon.TLS.AutoCert {
+		t.Error("Daemon.TLS.AutoCert = false, want true")
+	}
+	if got := len(cfg.Daemon.TLS.AutoCertHosts); got != 2 {
+		t.Fatalf("Daemon.TLS.AutoCertHosts len = %d, want 2", got)
+	}
+	if cfg.Daemon.TLS.AutoCertCacheDir != "/var/lib/vmsmith/autocert" {
+		t.Errorf("Daemon.TLS.AutoCertCacheDir = %q, want /var/lib/vmsmith/autocert", cfg.Daemon.TLS.AutoCertCacheDir)
+	}
+	if cfg.Daemon.TLS.AutoCertEmail != "ops@example.com" {
+		t.Errorf("Daemon.TLS.AutoCertEmail = %q, want ops@example.com", cfg.Daemon.TLS.AutoCertEmail)
 	}
 	if !cfg.Daemon.TLSConfigured() {
 		t.Error("Daemon.TLSConfigured() = false, want true")
@@ -172,6 +190,26 @@ quotas:
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {
 		t.Errorf("Libvirt.URI should keep default, got %q", cfg.Libvirt.URI)
+	}
+}
+
+func TestAutoCertConfiguredRequiresEnabledHosts(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  DaemonConfig
+		want bool
+	}{
+		{name: "disabled", cfg: DaemonConfig{TLS: TLSConfig{AutoCert: false, AutoCertHosts: []string{"vmsmith.example.com"}}}, want: false},
+		{name: "enabled without hosts", cfg: DaemonConfig{TLS: TLSConfig{AutoCert: true}}, want: false},
+		{name: "enabled with hosts", cfg: DaemonConfig{TLS: TLSConfig{AutoCert: true, AutoCertHosts: []string{"vmsmith.example.com"}}}, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.AutoCertConfigured(); got != tc.want {
+				t.Fatalf("AutoCertConfigured() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

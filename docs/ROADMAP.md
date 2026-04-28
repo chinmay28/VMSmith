@@ -131,7 +131,7 @@ Required for any non-localhost deployment.
 |---|------|--------|-------|
 | 3.2.1 | Add `daemon.tls.cert_file` and `daemon.tls.key_file` config fields | S | ✅ Done — `internal/config/config.go` defines `daemon.tls.cert_file` / `key_file`, and `internal/config/config_test.go` covers loading them from YAML |
 | 3.2.2 | Switch `http.ListenAndServe` to `http.ListenAndServeTLS` when TLS configured | S | ✅ Done — `internal/daemon/daemon.go` switches to `ListenAndServeTLS` when both TLS files are configured, with daemon tests covering both HTTP and HTTPS paths |
-| 3.2.3 | Add `daemon.tls.auto_cert` option for Let's Encrypt via `autocert` package | M | Only practical if daemon has a public FQDN |
+| 3.2.3 | Add `daemon.tls.auto_cert` option for Let's Encrypt via `autocert` package | M | ✅ Done — `daemon.tls.auto_cert` now enables built-in Let's Encrypt via ACME TLS-ALPN with host allowlisting, cache/email config, daemon tests, and README/example config docs for direct `:443` deployments |
 | 3.2.4 | Document reverse proxy setup (nginx/caddy) as alternative to built-in TLS | S | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers reverse proxy deployment with both nginx and Caddy, TLS, and firewall guidance |
 
 ### 3.3 Systemd Integration

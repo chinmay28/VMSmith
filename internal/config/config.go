@@ -36,12 +36,20 @@ type AuthConfig struct {
 }
 
 type TLSConfig struct {
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
+	CertFile         string   `yaml:"cert_file"`
+	KeyFile          string   `yaml:"key_file"`
+	AutoCert         bool     `yaml:"auto_cert"`
+	AutoCertHosts    []string `yaml:"auto_cert_hosts"`
+	AutoCertCacheDir string   `yaml:"auto_cert_cache_dir"`
+	AutoCertEmail    string   `yaml:"auto_cert_email"`
 }
 
 func (d DaemonConfig) TLSConfigured() bool {
 	return d.TLS.CertFile != "" && d.TLS.KeyFile != ""
+}
+
+func (d DaemonConfig) AutoCertConfigured() bool {
+	return d.TLS.AutoCert && len(d.TLS.AutoCertHosts) > 0
 }
 
 type LibvirtConfig struct {
@@ -88,6 +96,9 @@ func DefaultConfig() *Config {
 			Listen:               "0.0.0.0:8080",
 			PIDFile:              "/var/run/vmsmith.pid",
 			LogFile:              filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
+			TLS: TLSConfig{
+				AutoCertCacheDir: filepath.Join(dataDir, "autocert"),
+			},
 			MaxRequestBodyBytes:  50 << 20,
 			MaxUploadBodyBytes:   50 << 30,
 			MaxConcurrentCreates: 2,

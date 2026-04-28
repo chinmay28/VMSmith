@@ -509,6 +509,10 @@ daemon:
   tls:
     cert_file: ""   # optional; set both cert_file + key_file to serve HTTPS
     key_file: ""
+    auto_cert: false              # optional; request Let's Encrypt certs over TLS-ALPN when listening on :443
+    auto_cert_hosts: []           # required when auto_cert is true; exact hostnames to issue for
+    auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
+    auto_cert_email: ""          # optional contact email for Let's Encrypt
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
   max_concurrent_creates: 2   # return HTTP 429 when the create queue is full
@@ -541,6 +545,21 @@ quotas:
   max_total_ram_mb: 0     # total configured RAM across all VMs
   max_total_disk_gb: 0    # total configured disk across all VMs
 ```
+
+If you prefer built-in HTTPS instead of a reverse proxy, you can enable Let's Encrypt certificate management directly:
+
+```yaml
+daemon:
+  listen: ":443"
+  tls:
+    auto_cert: true
+    auto_cert_hosts:
+      - "vmsmith.example.com"
+    auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
+    auto_cert_email: "ops@example.com"
+```
+
+This uses ACME TLS-ALPN challenges, so the daemon must be reachable on port 443 for the listed public hostnames.
 
 ---
 
