@@ -207,7 +207,7 @@ func TestGetHostStatsTimesOutCanceledRequests(t *testing.T) {
 	cfg.Storage.DBPath = dbPath
 
 	mockMgr := vm.NewMockManager()
-	server := NewServerWithConfig(mockMgr, storage.NewManager(cfg, s), network.NewPortForwarder(s), cfg, nil)
+	server := NewServerWithConfig(mockMgr, storage.NewManager(cfg, s), network.NewPortForwarder(s), s, cfg, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/host/stats", nil)
 	ctx, cancel := context.WithCancel(req.Context())

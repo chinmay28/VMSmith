@@ -13,6 +13,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 // Server holds the API dependencies and serves HTTP.
@@ -21,6 +22,7 @@ type Server struct {
 	vmManager            vm.Manager
 	storageMgr           *storage.Manager
 	portFwd              *network.PortForwarder
+	store                Store
 	hostStatsPath        string
 	quotas               config.QuotasConfig
 	maxRequestBodyBytes  int64
@@ -46,13 +48,17 @@ type tokenBucket struct {
 	last   time.Time
 }
 
+type Store interface {
+	ListEvents() ([]*types.Event, error)
+}
+
 // NewServer creates a new API server with default body-size limits.
-func NewServer(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder) *Server {
-	return NewServerWithConfig(vmMgr, storageMgr, portFwd, config.DefaultConfig(), nil)
+func NewServer(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, store Store) *Server {
+	return NewServerWithConfig(vmMgr, storageMgr, portFwd, store, config.DefaultConfig(), nil)
 }
 
 // NewServerWithConfig creates a new API server using the provided config.
-func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, cfg *config.Config, webHandler http.Handler) *Server {
+func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, store Store, cfg *config.Config, webHandler http.Handler) *Server {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
@@ -62,6 +68,7 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 		vmManager:            vmMgr,
 		storageMgr:           storageMgr,
 		portFwd:              portFwd,
+		store:                store,
 		hostStatsPath:        cfg.Storage.BaseDir,
 		quotas:               cfg.Quotas,
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
@@ -81,8 +88,8 @@ func NewServerWithConfig(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd 
 }
 
 // NewServerWithWeb creates a new API server with an embedded web GUI handler.
-func NewServerWithWeb(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, webHandler http.Handler) *Server {
-	return NewServerWithConfig(vmMgr, storageMgr, portFwd, config.DefaultConfig(), webHandler)
+func NewServerWithWeb(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd *network.PortForwarder, store Store, webHandler http.Handler) *Server {
+	return NewServerWithConfig(vmMgr, storageMgr, portFwd, store, config.DefaultConfig(), webHandler)
 }
 
 func (s *Server) setupRoutes(webHandler http.Handler) {
@@ -100,6 +107,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 		// Log viewer endpoint
 		r.Get("/logs", s.GetLogs)
+
+		// Events
+		r.Get("/events", s.ListEvents)
 
 		// VM endpoints
 		r.Route("/vms", func(r chi.Router) {
