@@ -461,6 +461,41 @@ test.describe("Log Viewer", () => {
 });
 
 // ============================================================
+// Activity page
+// ============================================================
+test.describe("Activity", () => {
+  test("nav link reaches Activity page", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-activity").click();
+    await expect(page).toHaveURL(/\/activity/);
+    await expect(page.getByTestId("activity-table")).toBeVisible();
+  });
+
+  test("renders seeded events from mock server", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Mock server returns three events; at least one row should appear.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toContainText("vm_started");
+  });
+
+  test("source filter narrows results", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-source").selectOption("app");
+    // evt-2 is source=app; evt-3 is libvirt and should be hidden after the request.
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
+  test("VM detail Activity tab shows scoped timeline", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms`);
+    // Click into the first VM card.
+    await page.locator('[data-testid^="vm-card-"]').first().click();
+    await page.getByTestId("tab-activity").click();
+    await expect(page.getByTestId("vm-detail-activity")).toBeVisible();
+  });
+});
+
+// ============================================================
 // Full E2E lifecycle test
 // ============================================================
 test.describe("Full Lifecycle", () => {

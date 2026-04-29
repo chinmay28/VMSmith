@@ -1061,6 +1061,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recent events
+         * @description Returns the most recent events matching the provided filters, sorted
+         *     newest-first. Each event carries a monotonic numeric ID assigned by the
+         *     EventBus, plus a structured payload (source, severity, attributes).
+         *
+         *     Pagination is page/per_page; clients can also provide `until=<seq>` to
+         *     fetch events older than a known sequence ID (cursor pagination).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Filter by VM ID (exact match). */
+                    vm_id?: string;
+                    /** @description Filter by event type (e.g., `vm.started`). */
+                    type?: string;
+                    /** @description Filter by event source. */
+                    source?: "libvirt" | "app" | "system";
+                    /** @description Filter by severity. */
+                    severity?: "info" | "warn" | "error";
+                    /** @description Return only events with `occurred_at` after this RFC3339 timestamp. */
+                    since?: string;
+                    /** @description Cursor — exclude events with sequence ID >= this uint64. */
+                    until?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event list */
+                200: {
+                    headers: {
+                        "X-Total-Count": components["headers"]["XTotalCount"];
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Event"][];
+                    };
+                };
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1256,6 +1317,30 @@ export interface components {
             source?: string;
             msg?: string;
             fields?: components["schemas"]["LogField"];
+        };
+        Event: {
+            /** @description Stringified monotonic uint64 assigned by the EventBus. */
+            id: string;
+            /** @description Event type (e.g., `vm.started`, `vm.created`). */
+            type: string;
+            /** @enum {string} */
+            source: "libvirt" | "app" | "system";
+            vm_id?: string;
+            resource_id?: string;
+            /** @enum {string} */
+            severity: "info" | "warn" | "error";
+            message: string;
+            attributes?: {
+                [key: string]: string;
+            };
+            actor?: string;
+            /** Format: date-time */
+            occurred_at: string;
+            /**
+             * Format: date-time
+             * @description Legacy timestamp; prefer `occurred_at` for new code.
+             */
+            created_at?: string;
         };
     };
     responses: {

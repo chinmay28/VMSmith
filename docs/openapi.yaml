@@ -22,6 +22,7 @@ tags:
   - name: Host
   - name: Quotas
   - name: Logs
+  - name: Events
 paths:
   /vms:
     get:
@@ -603,6 +604,67 @@ paths:
                 $ref: '#/components/schemas/LogsResponse'
         default:
           $ref: '#/components/responses/APIError'
+  /events:
+    get:
+      tags: [Events]
+      summary: List recent events
+      description: |
+        Returns the most recent events matching the provided filters, sorted
+        newest-first. Each event carries a monotonic numeric ID assigned by the
+        EventBus, plus a structured payload (source, severity, attributes).
+
+        Pagination is page/per_page; clients can also provide `until=<seq>` to
+        fetch events older than a known sequence ID (cursor pagination).
+      parameters:
+        - name: vm_id
+          in: query
+          schema:
+            type: string
+          description: Filter by VM ID (exact match).
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type (e.g., `vm.started`).
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [libvirt, app, system]
+          description: Filter by event source.
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, warn, error]
+          description: Filter by severity.
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return only events with `occurred_at` after this RFC3339 timestamp.
+        - name: until
+          in: query
+          schema:
+            type: string
+          description: Cursor — exclude events with sequence ID >= this uint64.
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Event list
+          headers:
+            X-Total-Count:
+              $ref: '#/components/headers/XTotalCount'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+        default:
+          $ref: '#/components/responses/APIError'
 components:
   securitySchemes:
     bearerAuth:
@@ -1067,3 +1129,38 @@ components:
           type: string
         fields:
           $ref: '#/components/schemas/LogField'
+    Event:
+      type: object
+      required: [id, type, source, severity, message, occurred_at]
+      properties:
+        id:
+          type: string
+          description: Stringified monotonic uint64 assigned by the EventBus.
+        type:
+          type: string
+          description: Event type (e.g., `vm.started`, `vm.created`).
+        source:
+          type: string
+          enum: [libvirt, app, system]
+        vm_id:
+          type: string
+        resource_id:
+          type: string
+        severity:
+          type: string
+          enum: [info, warn, error]
+        message:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+        actor:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+          description: Legacy timestamp; prefer `occurred_at` for new code.
