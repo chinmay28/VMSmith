@@ -102,6 +102,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/docs", apidocs.UIHandler().ServeHTTP)
+	r.Get("/api/docs/*", func(w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/api/docs/", apidocs.AssetHandler()).ServeHTTP(w, r)
+	})
 	r.Get("/api/openapi.yaml", apidocs.SpecHandler().ServeHTTP)
 
 	r.Route("/api/v1", func(r chi.Router) {

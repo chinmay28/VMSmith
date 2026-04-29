@@ -2,20 +2,21 @@ package apidocs
 
 import (
 	"embed"
-	"html/template"
 	"net/http"
+	"path"
+	"strings"
 )
 
-//go:embed openapi.yaml
-var specFS embed.FS
+//go:embed openapi.yaml swagger-ui/*
+var assetsFS embed.FS
 
-var docsHTML = template.Must(template.New("swagger-ui").Parse(`<!doctype html>
+var docsHTML = []byte(`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VMSmith API Docs</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
+    <link rel="stylesheet" href="/api/docs/swagger-ui.css" />
     <style>
       html { box-sizing: border-box; overflow-y: scroll; }
       *, *:before, *:after { box-sizing: inherit; }
@@ -24,7 +25,7 @@ var docsHTML = template.Must(template.New("swagger-ui").Parse(`<!doctype html>
   </head>
   <body>
     <div id="swagger-ui"></div>
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="/api/docs/swagger-ui-bundle.js"></script>
     <script>
       window.onload = function () {
         window.ui = SwaggerUIBundle({
@@ -36,18 +37,30 @@ var docsHTML = template.Must(template.New("swagger-ui").Parse(`<!doctype html>
       };
     </script>
   </body>
-</html>`))
+</html>`)
 
 func SpecHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-		http.ServeFileFS(w, r, specFS, "openapi.yaml")
+		http.ServeFileFS(w, r, assetsFS, "openapi.yaml")
 	})
 }
 
 func UIHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = docsHTML.Execute(w, nil)
+		_, _ = w.Write(docsHTML)
+	})
+}
+
+func AssetHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		name = path.Clean(name)
+		if name == "." || strings.Contains(name, "..") {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFileFS(w, r, assetsFS, path.Join("swagger-ui", name))
 	})
 }

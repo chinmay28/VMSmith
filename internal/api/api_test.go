@@ -2742,8 +2742,38 @@ func TestSwaggerUIRouteServesHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), "/api/openapi.yaml") {
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "/api/openapi.yaml") {
 		t.Fatalf("swagger UI body missing spec URL")
+	}
+	if !strings.Contains(bodyStr, "/api/docs/swagger-ui.css") || !strings.Contains(bodyStr, "/api/docs/swagger-ui-bundle.js") {
+		t.Fatalf("swagger UI body missing embedded asset URLs")
+	}
+}
+
+func TestSwaggerUIAssetRouteServesEmbeddedBundle(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/docs/swagger-ui.css")
+	if err != nil {
+		t.Fatalf("GET /api/docs/swagger-ui.css: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Fatalf("Content-Type = %q, want text/css", ct)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), ".swagger-ui") {
+		t.Fatalf("embedded swagger css body missing expected content")
 	}
 }
 

@@ -356,7 +356,11 @@ Key config fields:
 - `daemon.listen` — HTTP listen address (default `0.0.0.0:8080`)
 - `daemon.log_file` — structured log output path (default `~/.vmsmith/vmsmith.log`); leave empty to disable file logging
 - `daemon.tls.cert_file` / `daemon.tls.key_file` — when both are set, the daemon serves HTTPS via `ListenAndServeTLS`
-- `daemon.tls.auto_cert` — public FQDN for automatic Let's Encrypt certificates via Go `autocert`; cached under `daemon.tls.auto_cert_cache_dir` and intended for a public `:443` listener. Manual cert/key files take precedence if both are set
+- `daemon.tls.auto_cert` — enable automatic Let's Encrypt certificates via Go `autocert`
+- `daemon.tls.auto_cert_hosts` — hostnames to request certificates for; the daemon must be reachable on public `:443` for TLS-ALPN validation
+- `daemon.tls.auto_cert_cache_dir` — on-disk cache directory for ACME account/certificate state
+- `daemon.tls.auto_cert_email` — optional contact email for ACME registration
+- Manual cert/key files take precedence over auto-cert if both are configured
 - `daemon.max_concurrent_creates` — maximum number of simultaneous `POST /api/v1/vms` operations; extra create requests fail fast with HTTP 429 / `create_limit_reached`
 - `libvirt.uri` — libvirt connection URI (use `qemu:///session` for rootless)
 - `storage.images_dir` — must be world-readable (libvirt-qemu user reads VM disks)
@@ -400,7 +404,11 @@ Key config fields:
 
 ## REST API Reference (Quick)
 
-All routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
+Most API routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
+
+Additional docs routes:
+- `GET /api/docs` — embedded Swagger UI for the REST API
+- `GET /api/openapi.yaml` — served OpenAPI schema consumed by Swagger UI
 
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
