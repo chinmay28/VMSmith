@@ -16,9 +16,12 @@ import (
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/internal/api"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/internal/metrics"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -29,14 +32,17 @@ import (
 
 // Daemon encapsulates the long-running vmSmith server.
 type Daemon struct {
-	cfg        *config.Config
-	store      *store.Store
-	vmManager  vm.Manager
-	storageMgr *storage.Manager
-	netManager *network.Manager
-	portFwd    *network.PortForwarder
-	apiServer  *api.Server
-	server     *http.Server
+	cfg            *config.Config
+	store          *store.Store
+	vmManager      vm.Manager
+	storageMgr     *storage.Manager
+	netManager     *network.Manager
+	portFwd        *network.PortForwarder
+	metricsManager metrics.Manager
+	eventBus       *events.EventBus
+	apiServer      *api.Server
+	server         *http.Server
+	metricsSrv     *http.Server // optional separate Prometheus scrape server
 }
 
 var (
@@ -110,7 +116,32 @@ func New(cfg *config.Config) (*Daemon, error) {
 		logger.Info("daemon", "port forwarding rules restored")
 	}
 
-	apiServer := api.NewServerWithConfig(vmMgr, storageMgr, portFwd, s, cfg, web.Handler())
+	// Initialise metrics manager.
+	// Open a dedicated libvirt connection for the metrics sampler so the polling
+	// goroutine does not contend with the VM manager's connection.
+	var metricsMgr metrics.Manager
+	if cfg.Metrics.Enabled {
+		metricsConn, metricsConnErr := libvirt.NewConnect(cfg.Libvirt.URI)
+		if metricsConnErr != nil {
+			logger.Warn("daemon", "metrics: could not open libvirt connection; metrics disabled", "error", metricsConnErr.Error())
+		} else {
+			sampleInterval := time.Duration(cfg.Metrics.SampleInterval) * time.Second
+			histSize := cfg.Metrics.HistorySize
+			metricsMgr = metrics.NewLibvirtMetricsManager(metricsConn, sampleInterval, histSize)
+			logger.Info("daemon", "metrics sampler initialised",
+				"interval_seconds", fmt.Sprintf("%d", cfg.Metrics.SampleInterval),
+				"history_size", fmt.Sprintf("%d", histSize))
+		}
+	} else {
+		logger.Info("daemon", "metrics collection disabled by config")
+	}
+
+	// Create event bus backed by the store.
+	eventBus := events.New(s)
+	logger.Info("daemon", "event bus initialised")
+
+	apiServer := api.NewServerWithMetrics(vmMgr, storageMgr, portFwd, s, cfg, web.Handler(), metricsMgr)
+	apiServer.SetEventBus(eventBus)
 
 	server := &http.Server{
 		Addr:    cfg.Daemon.Listen,
@@ -120,16 +151,32 @@ func New(cfg *config.Config) (*Daemon, error) {
 		server.TLSConfig = autoCertTLSConfig(cfg)
 	}
 
-	return &Daemon{
-		cfg:        cfg,
-		store:      s,
-		vmManager:  vmMgr,
-		storageMgr: storageMgr,
-		netManager: netMgr,
-		portFwd:    portFwd,
-		apiServer:  apiServer,
-		server:     server,
-	}, nil
+	d := &Daemon{
+		cfg:            cfg,
+		store:          s,
+		vmManager:      vmMgr,
+		storageMgr:     storageMgr,
+		netManager:     netMgr,
+		portFwd:        portFwd,
+		metricsManager: metricsMgr,
+		eventBus:       eventBus,
+		apiServer:      apiServer,
+		server:         server,
+	}
+
+	// If a separate scrape listen address is configured, spin up a secondary
+	// HTTP server that serves only GET /metrics (no auth required).
+	if cfg.Metrics.Enabled && cfg.Metrics.ScrapeListen != "" {
+		scrapeRouter := chi.NewRouter()
+		scrapeRouter.Get("/metrics", apiServer.PrometheusMetrics)
+		d.metricsSrv = &http.Server{
+			Addr:    cfg.Metrics.ScrapeListen,
+			Handler: scrapeRouter,
+		}
+		logger.Info("daemon", "prometheus scrape endpoint on separate port", "addr", cfg.Metrics.ScrapeListen)
+	}
+
+	return d, nil
 }
 
 // Run starts the HTTP server and blocks until shutdown signal.
@@ -143,6 +190,31 @@ func (d *Daemon) Run() error {
 	// Handle shutdown signals.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Start event bus.
+	if d.eventBus != nil {
+		d.eventBus.Start()
+		logger.Info("daemon", "event bus started")
+	}
+
+	// Start metrics sampler.
+	if d.metricsManager != nil {
+		if err := d.metricsManager.Start(ctx); err != nil {
+			logger.Warn("daemon", "metrics sampler failed to start", "error", err.Error())
+		} else {
+			logger.Info("daemon", "metrics sampler started")
+		}
+	}
+
+	// Start optional separate Prometheus scrape server.
+	if d.metricsSrv != nil {
+		go func() {
+			logger.Info("daemon", "prometheus scrape server listening", "addr", d.metricsSrv.Addr)
+			if err := d.metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Warn("daemon", "prometheus scrape server error", "error", err.Error())
+			}
+		}()
+	}
 
 	// Start server in goroutine.
 	errCh := make(chan error, 1)
@@ -177,6 +249,13 @@ func (d *Daemon) Run() error {
 		logger.Error("daemon", "graceful shutdown error", "error", err.Error())
 		_ = d.closeResources()
 		return fmt.Errorf("shutdown: %w", err)
+	}
+
+	// Stop the optional scrape server.
+	if d.metricsSrv != nil {
+		if err := d.metricsSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("daemon", "prometheus scrape server shutdown error", "error", err.Error())
+		}
 	}
 
 	if d.apiServer != nil {
@@ -278,6 +357,19 @@ func autoCertTLSConfig(cfg *config.Config) *tls.Config {
 
 func (d *Daemon) closeResources() error {
 	var errs []error
+
+	// Stop event bus (drains pending events before closing store).
+	if d.eventBus != nil {
+		d.eventBus.Stop()
+	}
+
+	// Stop metrics sampler before closing the libvirt connection.
+	if d.metricsManager != nil {
+		if err := d.metricsManager.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("stopping metrics manager: %w", err))
+		}
+	}
+
 	if d.vmManager != nil {
 		if err := closeVMManager(d.vmManager); err != nil {
 			errs = append(errs, fmt.Errorf("closing VM manager: %w", err))
