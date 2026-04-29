@@ -144,6 +144,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 		r.Route("/templates", func(r chi.Router) {
 			r.Get("/", s.ListTemplates)
 			r.Post("/", s.withRequestBodyLimit(s.CreateTemplate))
+			r.Put("/{templateID}", s.withRequestBodyLimit(s.UpdateTemplate))
 			r.Delete("/{templateID}", s.DeleteTemplate)
 		})
 

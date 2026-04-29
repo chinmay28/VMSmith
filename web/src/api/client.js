@@ -156,6 +156,7 @@ export const ports = {
 export const templates = {
   list: ({ page, perPage } = {}) => request(withQuery('/templates', { page, per_page: perPage }), { withMeta: true }),
   create: (spec) => request('/templates', { method: 'POST', body: JSON.stringify(spec) }),
+  update: (id, spec) => request(`/templates/${id}`, { method: 'PUT', body: JSON.stringify(spec) }),
   delete: (id) => request(`/templates/${id}`, { method: 'DELETE' }),
 };
 

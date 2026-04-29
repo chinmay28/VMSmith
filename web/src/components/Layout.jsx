@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom';
-import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText } from 'lucide-react';
+import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText, FileCode } from 'lucide-react';
 import mascot from '../assets/mascot.png';
 
 const navItems = [
-  { to: '/',       icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/vms',    icon: Server,          label: 'Machines' },
-  { to: '/images', icon: HardDrive,       label: 'Images' },
-  { to: '/logs',   icon: ScrollText,      label: 'Logs' },
+  { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/vms',       icon: Server,          label: 'Machines' },
+  { to: '/images',    icon: HardDrive,       label: 'Images' },
+  { to: '/templates', icon: FileCode,        label: 'Templates' },
+  { to: '/logs',      icon: ScrollText,      label: 'Logs' },
 ];
 
 export default function Layout({ children }) {

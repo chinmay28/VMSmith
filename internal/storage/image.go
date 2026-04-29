@@ -112,6 +112,31 @@ func (m *Manager) DeleteTemplate(id string) error {
 	return m.store.DeleteTemplate(id)
 }
 
+// UpdateTemplate replaces an existing template's mutable fields. The provided
+// template must carry the ID of the record to update; CreatedAt is preserved
+// and UpdatedAt is refreshed.
+func (m *Manager) UpdateTemplate(tpl *types.VMTemplate) (*types.VMTemplate, error) {
+	if tpl == nil || strings.TrimSpace(tpl.ID) == "" {
+		return nil, fmt.Errorf("template id is required")
+	}
+	existing, err := m.store.GetTemplate(tpl.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	tpl.Name = strings.TrimSpace(tpl.Name)
+	tpl.Image = strings.TrimSpace(tpl.Image)
+	tpl.Description = strings.TrimSpace(tpl.Description)
+	tpl.DefaultUser = strings.TrimSpace(tpl.DefaultUser)
+	tpl.CreatedAt = existing.CreatedAt
+	tpl.UpdatedAt = time.Now()
+
+	if err := m.store.PutTemplate(tpl); err != nil {
+		return nil, err
+	}
+	return tpl, nil
+}
+
 // DeleteImage removes an image from disk and metadata.
 func (m *Manager) DeleteImage(id string) error {
 	img, err := m.store.GetImage(id)

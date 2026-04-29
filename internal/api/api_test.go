@@ -504,6 +504,135 @@ func TestCreateVM_WithMissingTemplate(t *testing.T) {
 	}
 }
 
+func TestUpdateTemplate(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	createResp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":   "edit-me",
+		"image":  "ubuntu-22.04",
+		"cpus":   2,
+		"ram_mb": 2048,
+		"tags":   []string{"dev"},
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", createResp.StatusCode)
+	}
+	var created types.VMTemplate
+	decodeJSON(t, createResp, &created)
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/templates/"+created.ID, jsonBody(t, map[string]any{
+		"name":         "edited",
+		"image":        "rocky-9.qcow2",
+		"cpus":         4,
+		"ram_mb":       4096,
+		"disk_gb":      40,
+		"description":  "updated",
+		"default_user": "admin",
+		"tags":         []string{"prod", "web"},
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /templates: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status = %d, want 200", resp.StatusCode)
+	}
+
+	var updated types.VMTemplate
+	decodeJSON(t, resp, &updated)
+	if updated.ID != created.ID {
+		t.Fatalf("id changed: got %q, want %q", updated.ID, created.ID)
+	}
+	if updated.Name != "edited" || updated.Image != "rocky-9.qcow2" {
+		t.Fatalf("update missed: %+v", updated)
+	}
+	if updated.CPUs != 4 || updated.RAMMB != 4096 || updated.DiskGB != 40 {
+		t.Fatalf("resources missed: %+v", updated)
+	}
+	if updated.Description != "updated" || updated.DefaultUser != "admin" {
+		t.Fatalf("metadata missed: %+v", updated)
+	}
+	if strings.Join(updated.Tags, ",") != "prod,web" {
+		t.Fatalf("tags = %v", updated.Tags)
+	}
+	if !updated.UpdatedAt.After(created.UpdatedAt) {
+		t.Fatalf("updated_at not refreshed: created=%v updated=%v", created.UpdatedAt, updated.UpdatedAt)
+	}
+}
+
+func TestUpdateTemplate_NotFound(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/templates/tmpl-missing", jsonBody(t, map[string]any{
+		"name":  "any",
+		"image": "img.qcow2",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestUpdateTemplate_DuplicateName(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	for _, name := range []string{"alpha", "beta"} {
+		resp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+			"name":  name,
+			"image": "img.qcow2",
+		}))
+		if err != nil {
+			t.Fatalf("seed POST: %v", err)
+		}
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("seed %q status = %d", name, resp.StatusCode)
+		}
+	}
+
+	listResp, _ := http.Get(ts.URL + "/api/v1/templates")
+	var list []*types.VMTemplate
+	decodeJSON(t, listResp, &list)
+	var betaID string
+	for _, tpl := range list {
+		if tpl.Name == "beta" {
+			betaID = tpl.ID
+			break
+		}
+	}
+	if betaID == "" {
+		t.Fatalf("could not find seeded beta template; list = %+v", list)
+	}
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/templates/"+betaID, jsonBody(t, map[string]any{
+		"name":  "alpha",
+		"image": "img.qcow2",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+
+	// Renaming the same template to its own name should succeed.
+	reqSame, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/templates/"+betaID, jsonBody(t, map[string]any{
+		"name":  "beta",
+		"image": "img.qcow2",
+	}))
+	reqSame.Header.Set("Content-Type", "application/json")
+	respSame, _ := http.DefaultClient.Do(reqSame)
+	if respSame.StatusCode != http.StatusOK {
+		t.Fatalf("self-rename status = %d, want 200", respSame.StatusCode)
+	}
+}
+
 func TestCreateVM_QuotaExceeded_MaxVMs(t *testing.T) {
 	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
 		cfg.Quotas.MaxVMs = 1
@@ -513,10 +642,10 @@ func TestCreateVM_QuotaExceeded_MaxVMs(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}, State: types.VMStateRunning})
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
-		Name:  "quota-vm",
-		Image: "ubuntu",
-		CPUs:  2,
-		RAMMB: 2048,
+		Name:   "quota-vm",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
 		DiskGB: 20,
 	}))
 	if resp.StatusCode != http.StatusTooManyRequests {

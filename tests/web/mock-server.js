@@ -147,6 +147,63 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/images" && method === "GET") return json(res, 200, [...images.values()]);
   if (p === "/api/v1/templates" && method === "GET") return json(res, 200, [...templates.values()]);
+  if (p === "/api/v1/templates" && method === "POST") {
+    const body = await parseBody(req);
+    if (!body.name) return json(res, 400, { error: "name is required" });
+    if (!body.image) return json(res, 400, { error: "image is required" });
+    for (const t of templates.values()) {
+      if (t.name === body.name) return json(res, 400, { error: `template name ${body.name} already exists` });
+    }
+    const now = new Date().toISOString();
+    const tpl = {
+      id: `tmpl-${Date.now()}`,
+      name: body.name,
+      image: body.image,
+      cpus: body.cpus || 0,
+      ram_mb: body.ram_mb || 0,
+      disk_gb: body.disk_gb || 0,
+      description: body.description || "",
+      tags: body.tags || [],
+      default_user: body.default_user || "",
+      networks: body.networks || [],
+      created_at: now,
+      updated_at: now,
+    };
+    templates.set(tpl.id, tpl);
+    return json(res, 201, tpl);
+  }
+  if ((m = p.match(/^\/api\/v1\/templates\/([^/]+)$/)) && method === "PUT") {
+    const existing = templates.get(m[1]);
+    if (!existing) return json(res, 404, { error: "template not found" });
+    const body = await parseBody(req);
+    if (!body.name) return json(res, 400, { error: "name is required" });
+    if (!body.image) return json(res, 400, { error: "image is required" });
+    for (const t of templates.values()) {
+      if (t.id !== existing.id && t.name === body.name) {
+        return json(res, 400, { error: `template name ${body.name} already exists` });
+      }
+    }
+    const updated = {
+      ...existing,
+      name: body.name,
+      image: body.image,
+      cpus: body.cpus || 0,
+      ram_mb: body.ram_mb || 0,
+      disk_gb: body.disk_gb || 0,
+      description: body.description || "",
+      tags: body.tags || [],
+      default_user: body.default_user || "",
+      networks: body.networks || [],
+      updated_at: new Date().toISOString(),
+    };
+    templates.set(existing.id, updated);
+    return json(res, 200, updated);
+  }
+  if ((m = p.match(/^\/api\/v1\/templates\/([^/]+)$/)) && method === "DELETE") {
+    if (!templates.has(m[1])) return json(res, 404, { error: "template not found" });
+    templates.delete(m[1]);
+    res.writeHead(204); return res.end();
+  }
   if (p === "/api/v1/logs" && method === "GET") {
     const entries = [
       { ts: new Date().toISOString(), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },

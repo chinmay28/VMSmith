@@ -110,3 +110,70 @@ func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// UpdateTemplate handles PUT /api/v1/templates/{templateID}.
+func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "templateID")
+	if strings.TrimSpace(id) == "" {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", "template id is required")
+		return
+	}
+
+	existing, err := s.storageMgr.GetTemplate(id)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusNotFound), apiErr)
+		return
+	}
+
+	var req createTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+
+	if err := validateTemplateRequest(req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	if tags, err := normalizeTags(req.Tags); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		req.Tags = tags
+	}
+
+	all, err := s.storageMgr.ListTemplates()
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+	others := make([]*types.VMTemplate, 0, len(all))
+	for _, t := range all {
+		if t == nil || t.ID == existing.ID {
+			continue
+		}
+		others = append(others, t)
+	}
+	if err := validateUniqueTemplateName(req.Name, others); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	updated := req.toTemplate()
+	updated.ID = existing.ID
+
+	tpl, err := s.storageMgr.UpdateTemplate(updated)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, tpl)
+}
