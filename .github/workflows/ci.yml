@@ -51,7 +51,7 @@ jobs:
       - name: Run unit tests
         run: |
           go test -v -race -count=1 -coverprofile=unit-coverage.out \
-            ./internal/store/... ./internal/config/... ./internal/vm/... ./internal/cli/... ./internal/storage/... ./internal/network/... ./internal/logger/... \
+            ./internal/store/... ./internal/config/... ./internal/vm/... ./internal/cli/... ./internal/storage/... ./internal/network/... ./internal/logger/... ./internal/metrics/... ./internal/events/... \
             2>&1 | tee unit-test-output.txt
 
       - name: Run API integration tests

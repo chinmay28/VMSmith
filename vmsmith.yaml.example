@@ -45,3 +45,10 @@ quotas:
   max_total_ram_mb: 0     # aggregate RAM cap across all VMs
   max_total_disk_gb: 0    # aggregate disk cap across all VMs
   max_snapshots_per_vm: 0 # 0 = unlimited. if set, auto-deletes oldest when exceeded
+
+metrics:
+  enabled: true           # set to false to disable the in-process VM metrics sampler
+  sample_interval: 10     # seconds between libvirt bulk-stats polls; minimum recommended: 5
+  history_size: 360       # samples per VM kept in memory (~1 hour at 10 s interval)
+  scrape_listen: ""       # optional separate listen address for GET /metrics Prometheus endpoint
+                          # e.g. "127.0.0.1:9101"; empty = serve on the main daemon port without auth
