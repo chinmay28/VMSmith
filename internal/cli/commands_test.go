@@ -36,6 +36,12 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
+// sliceResetter is the interface implemented by pflag's StringSlice/StringArray
+// values; Replace atomically swaps the entire slice so it can be cleared.
+type sliceResetter interface {
+	Replace([]string) error
+}
+
 // resetAllFlags restores every flag in the command tree to its default value so
 // repeated Execute() calls in the same test process don't leak state between
 // invocations (cobra/pflag keep both the flag value and Changed bit otherwise).
@@ -44,7 +50,10 @@ func resetAllFlags(cmd *cobra.Command) {
 		fs.VisitAll(func(f *pflag.Flag) {
 			switch f.Value.Type() {
 			case "stringSlice", "stringArray":
-				_ = f.Value.Set("")
+				// Set("") appends rather than clears; use Replace to empty the slice.
+				if sr, ok := f.Value.(sliceResetter); ok {
+					_ = sr.Replace(nil)
+				}
 			default:
 				_ = fs.Set(f.Name, f.DefValue)
 			}
