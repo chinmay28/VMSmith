@@ -466,6 +466,7 @@ curl http://localhost:8080/api/v1/templates
 Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
 Interactive API docs: `/api/docs`
 Machine-readable schema: [docs/openapi.yaml](docs/openapi.yaml) and `/api/openapi.yaml`
+Frontend API types can be regenerated from that schema with `cd web && npm run generate:api`.
 
 Production deployment guide: [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
 
