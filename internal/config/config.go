@@ -15,6 +15,7 @@ type Config struct {
 	Network  NetworkConfig  `yaml:"network"`
 	Defaults DefaultsConfig `yaml:"defaults"`
 	Quotas   QuotasConfig   `yaml:"quotas"`
+	Metrics  MetricsConfig  `yaml:"metrics"`
 }
 
 type DaemonConfig struct {
@@ -86,6 +87,19 @@ type QuotasConfig struct {
 	MaxSnapshotsPerVM int `yaml:"max_snapshots_per_vm"`
 }
 
+// MetricsConfig controls the in-process VM resource metrics sampler.
+type MetricsConfig struct {
+	// Enabled controls whether the metrics sampler runs (default true).
+	Enabled bool `yaml:"enabled"`
+	// SampleInterval is the number of seconds between libvirt bulk-stats polls (default 10).
+	SampleInterval int `yaml:"sample_interval"`
+	// HistorySize is the number of samples to retain per VM in the in-memory ring buffer (default 360, ~1 hour at 10 s).
+	HistorySize int `yaml:"history_size"`
+	// ScrapeListen is an optional separate listen address for the Prometheus /metrics endpoint.
+	// When empty the /metrics endpoint is served on the main daemon port.
+	ScrapeListen string `yaml:"scrape_listen"`
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 // Storage paths are placed under /var/lib/vmsmith/ so that the libvirt-qemu
 // system user can access them without requiring home-directory traversal.
@@ -130,6 +144,11 @@ func DefaultConfig() *Config {
 			SSHUser: "ubuntu",
 		},
 		Quotas: QuotasConfig{},
+		Metrics: MetricsConfig{
+			Enabled:        true,
+			SampleInterval: 10,
+			HistorySize:    360,
+		},
 	}
 }
 
