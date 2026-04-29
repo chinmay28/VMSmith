@@ -8,6 +8,7 @@ import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
 import { normalizeSpec, safeArray } from '../utils/normalize';
+import Activity from './Activity';
 
 export default function VMDetail() {
   const { id } = useParams();
@@ -21,6 +22,7 @@ export default function VMDetail() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCloneModal, setShowCloneModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   const startMut  = useMutation(vms.start);
   const stopMut   = useMutation(vms.stop);
@@ -84,6 +86,22 @@ export default function VMDetail() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 mb-4 border-b border-steel-800/60">
+        <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} testId="tab-overview">
+          Overview
+        </TabButton>
+        <TabButton active={activeTab === 'activity'} onClick={() => setActiveTab('activity')} testId="tab-activity">
+          Activity
+        </TabButton>
+      </div>
+
+      {activeTab === 'activity' ? (
+        <div className="min-h-[300px]" data-testid="vm-detail-activity">
+          <Activity vmId={id} embedded />
+        </div>
+      ) : (
+      <>
       {/* Info grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
         <InfoCard label="IP Address" value={vm.ip || 'Not assigned'} mono testId="vm-detail-ip" />
@@ -162,6 +180,8 @@ export default function VMDetail() {
           <Download size={14} /> Export as Image
         </button>
       </div>
+      </>
+      )}
 
       {/* Modals */}
       <EditVMModal vm={vm} open={showEditModal} onClose={() => setShowEditModal(false)} onUpdated={refresh} />
@@ -179,6 +199,23 @@ function InfoCard({ label, value, mono, testId }) {
       <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
       <p className={`text-sm text-steel-200 mt-0.5 ${mono ? 'font-mono' : ''}`} data-testid={testId}>{value}</p>
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+        active
+          ? 'border-forge-500 text-forge-300'
+          : 'border-transparent text-steel-400 hover:text-steel-200'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

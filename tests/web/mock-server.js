@@ -221,6 +221,25 @@ const server = http.createServer(async (req, res) => {
     if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
     return json(res, 200, { entries: filtered, total }, { "X-Total-Count": String(total) });
   }
+  if (p === "/api/v1/events" && method === "GET") {
+    const allEvents = [
+      { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", message: "VM 'web-server-prod' started", created_at: new Date(Date.now() - 30_000).toISOString() },
+      { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", message: "VM 'web-server-prod' created", created_at: new Date(Date.now() - 60_000).toISOString() },
+      { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
+    ];
+    const vmFilter = (url.searchParams.get("vm_id") || "").trim();
+    const sourceFilter = (url.searchParams.get("source") || "").trim();
+    const severityFilter = (url.searchParams.get("severity") || "").trim();
+    const typeFilter = (url.searchParams.get("type") || "").trim();
+    let filtered = allEvents.filter(e =>
+      (!vmFilter || e.vm_id === vmFilter) &&
+      (!sourceFilter || e.source === sourceFilter) &&
+      (!severityFilter || e.severity === severityFilter) &&
+      (!typeFilter || e.type === typeFilter)
+    );
+    const total = filtered.length;
+    return json(res, 200, filtered, { "X-Total-Count": String(total) });
+  }
   if (p === "/api/v1/host/interfaces" && method === "GET") {
     return json(res, 200, [
       { name: "eth0", ips: ["10.21.100.101/24"], mac: "52:54:00:00:00:01", is_up: true, is_physical: true },

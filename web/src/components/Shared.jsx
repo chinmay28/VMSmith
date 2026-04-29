@@ -20,6 +20,20 @@ export function StatusBadge({ state }) {
   );
 }
 
+// --- Severity Badge ---
+const severityStyles = {
+  error: 'badge-error',
+  warn:  'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-900/40 text-amber-300 border border-amber-700/30',
+  info:  'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-blue-900/40 text-blue-300 border border-blue-700/30',
+};
+
+const severityDefault = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-steel-800/60 text-steel-400 border border-steel-700/30';
+
+export function SeverityBadge({ severity }) {
+  const className = severityStyles[severity] || severityDefault;
+  return <span className={className}>{severity || 'info'}</span>;
+}
+
 // --- Page Header ---
 export function PageHeader({ title, subtitle, actions }) {
   return (

@@ -47,4 +47,5 @@ func init() {
 	rootCmd.AddCommand(portCmd)
 	rootCmd.AddCommand(netCmd)
 	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(eventsCmd)
 }
