@@ -40,6 +40,7 @@ type Daemon struct {
 	portFwd        *network.PortForwarder
 	metricsManager metrics.Manager
 	eventBus       *events.EventBus
+	retention      *events.Retention
 	apiServer      *api.Server
 	server         *http.Server
 	metricsSrv     *http.Server // optional separate Prometheus scrape server
@@ -141,6 +142,16 @@ func New(cfg *config.Config) (*Daemon, error) {
 	eventBus := events.New(s)
 	logger.Info("daemon", "event bus initialised")
 
+	// Optional retention loop for the events bucket.
+	var retention *events.Retention
+	if cfg.Events.MaxRecords > 0 && cfg.Events.RetentionInterval > 0 {
+		retention = events.NewRetention(s, cfg.Events.MaxRecords,
+			time.Duration(cfg.Events.RetentionInterval)*time.Second, eventBus)
+		logger.Info("daemon", "events retention loop configured",
+			"max_records", fmt.Sprintf("%d", cfg.Events.MaxRecords),
+			"interval_sec", fmt.Sprintf("%d", cfg.Events.RetentionInterval))
+	}
+
 	apiServer := api.NewServerWithMetrics(vmMgr, storageMgr, portFwd, s, cfg, web.Handler(), metricsMgr)
 	apiServer.SetEventBus(eventBus)
 
@@ -161,6 +172,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		portFwd:        portFwd,
 		metricsManager: metricsMgr,
 		eventBus:       eventBus,
+		retention:      retention,
 		apiServer:      apiServer,
 		server:         server,
 	}
@@ -196,6 +208,17 @@ func (d *Daemon) Run() error {
 	if d.eventBus != nil {
 		d.eventBus.Start()
 		logger.Info("daemon", "event bus started")
+		evt := events.NewSystemEvent("daemon.started", "info", "vmsmith daemon started")
+		evt.Attributes = map[string]string{
+			"listen": d.cfg.Daemon.Listen,
+			"tls":    strconv.FormatBool(d.cfg.Daemon.TLSEnabled()),
+		}
+		d.eventBus.Publish(evt)
+	}
+
+	// Start retention loop.
+	if d.retention != nil {
+		go d.retention.Run(ctx)
 	}
 
 	// Start metrics sampler.
@@ -236,6 +259,12 @@ func (d *Daemon) Run() error {
 	case err := <-errCh:
 		logger.Error("daemon", "HTTP server error", "error", err.Error())
 		return err
+	}
+
+	// Emit shutdown event before tearing things down so it's persisted before
+	// the bus is stopped in closeResources().
+	if d.eventBus != nil {
+		d.eventBus.Publish(events.NewSystemEvent("daemon.shutdown", "info", "vmsmith daemon shutting down"))
 	}
 
 	// Graceful shutdown with timeout.

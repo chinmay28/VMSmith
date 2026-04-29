@@ -52,3 +52,7 @@ metrics:
   history_size: 360       # samples per VM kept in memory (~1 hour at 10 s interval)
   scrape_listen: ""       # optional separate listen address for GET /metrics Prometheus endpoint
                           # e.g. "127.0.0.1:9101"; empty = serve on the main daemon port without auth
+
+events:
+  max_records: 50000        # cap on persisted events; 0 disables the retention sweep entirely
+  retention_interval: 60    # seconds between retention sweeps; 0 disables the sweep entirely

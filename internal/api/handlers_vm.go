@@ -114,6 +114,11 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("vm.created", vm.ID, fmt.Sprintf("VM %q created", vm.Name), map[string]string{
+		"name":  vm.Name,
+		"image": spec.Image,
+	})
+
 	writeJSON(w, http.StatusCreated, vm)
 }
 
@@ -190,6 +195,9 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
+	s.publishAppEvent("vm.updated", vm.ID, fmt.Sprintf("VM %q updated", vm.Name), map[string]string{
+		"name": vm.Name,
+	})
 	writeJSON(w, http.StatusOK, vm)
 }
 
@@ -293,6 +301,11 @@ func (s *Server) CloneVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("vm.cloned", cloned.ID, fmt.Sprintf("VM %q cloned to %q", id, cloned.Name), map[string]string{
+		"name":      cloned.Name,
+		"source_id": id,
+	})
+
 	writeJSON(w, http.StatusCreated, cloned)
 }
 
@@ -304,6 +317,7 @@ func (s *Server) DeleteVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
+	s.publishAppEvent("vm.deleted", id, fmt.Sprintf("VM %q deleted", id), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -315,6 +329,7 @@ func (s *Server) StartVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
+	s.publishAppEvent("vm.start_requested", id, fmt.Sprintf("VM %q start requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
 }
 
@@ -326,6 +341,7 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
+	s.publishAppEvent("vm.stop_requested", id, fmt.Sprintf("VM %q stop requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 

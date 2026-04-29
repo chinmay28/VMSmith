@@ -16,6 +16,7 @@ type Config struct {
 	Defaults DefaultsConfig `yaml:"defaults"`
 	Quotas   QuotasConfig   `yaml:"quotas"`
 	Metrics  MetricsConfig  `yaml:"metrics"`
+	Events   EventsConfig   `yaml:"events"`
 }
 
 type DaemonConfig struct {
@@ -87,6 +88,18 @@ type QuotasConfig struct {
 	MaxSnapshotsPerVM int `yaml:"max_snapshots_per_vm"`
 }
 
+// EventsConfig controls the in-process event bus and persistence.
+type EventsConfig struct {
+	// MaxRecords caps the number of persisted events.  When the count
+	// exceeds this value the retention loop deletes the oldest events
+	// until it falls back below the cap.  Default 50000.  Zero disables
+	// retention (events accumulate indefinitely).
+	MaxRecords int `yaml:"max_records"`
+	// RetentionInterval is the number of seconds between retention sweeps.
+	// Default 60.  Zero disables the retention loop.
+	RetentionInterval int `yaml:"retention_interval"`
+}
+
 // MetricsConfig controls the in-process VM resource metrics sampler.
 type MetricsConfig struct {
 	// Enabled controls whether the metrics sampler runs (default true).
@@ -148,6 +161,10 @@ func DefaultConfig() *Config {
 			Enabled:        true,
 			SampleInterval: 10,
 			HistorySize:    360,
+		},
+		Events: EventsConfig{
+			MaxRecords:        50000,
+			RetentionInterval: 60,
 		},
 	}
 }
