@@ -23,14 +23,12 @@ func apiKeyAuth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authz := strings.TrimSpace(r.Header.Get("Authorization"))
-			if !strings.HasPrefix(authz, "Bearer ") {
+			token := extractAPIKey(r)
+			if token == "" {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "missing bearer token", Code: "unauthorized", Message: "missing bearer token"})
 				return
 			}
-
-			token := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
-			if token == "" || !matchesAnyAPIKey(token, keys) {
+			if !matchesAnyAPIKey(token, keys) {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "invalid api key", Code: "unauthorized", Message: "invalid api key"})
 				return
 			}
@@ -38,6 +36,18 @@ func apiKeyAuth(cfg config.AuthConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// extractAPIKey pulls the API key from either the Authorization header
+// ("Bearer <token>") or the api_key query parameter.  The query-param
+// fallback exists for browser clients that cannot set custom headers
+// (e.g. EventSource for the /events/stream SSE endpoint).
+func extractAPIKey(r *http.Request) string {
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(authz, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+	}
+	return strings.TrimSpace(r.URL.Query().Get("api_key"))
 }
 
 func matchesAnyAPIKey(token string, keys []string) bool {

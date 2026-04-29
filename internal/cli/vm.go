@@ -2,12 +2,15 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -398,6 +401,275 @@ var vmInfoCmd = &cobra.Command{
 	},
 }
 
+// vmStatsCmd implements "vmsmith vm stats <id> [--watch] [--fields cpu,mem,disk,net]".
+// The daemon holds the in-memory ring buffer for metrics, so this command
+// calls the REST API rather than directly using the VM manager.
+var vmStatsCmd = &cobra.Command{
+	Use:   "stats <id>",
+	Short: "Show resource metrics for a VM",
+	Long: `Print the latest metric sample and 5-minute averages for a VM.
+
+The metrics data lives in the running daemon's in-memory ring buffer, so the
+daemon must be running and metrics must be enabled (daemon.metrics.enabled: true).
+
+Use --watch to poll every sample interval and redraw the table in place.
+Use --fields to limit output to specific metric groups (cpu, mem, disk, net).
+
+Example:
+  vmsmith vm stats vm-12345
+  vmsmith vm stats vm-12345 --watch
+  vmsmith vm stats vm-12345 --fields cpu,mem`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vmID := args[0]
+		watch, _ := cmd.Flags().GetBool("watch")
+		fieldsStr, _ := cmd.Flags().GetString("fields")
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		if apiURL == "" {
+			cfg, err := config.Load(cfgFile)
+			if err == nil {
+				apiURL = "http://" + cfg.Daemon.Listen
+			} else {
+				apiURL = "http://localhost:8080"
+			}
+		}
+
+		logger.Info("cli", "vm stats", "id", vmID, "watch", fmt.Sprintf("%t", watch))
+
+		client := &http.Client{Timeout: 10 * time.Second}
+
+		printStats := func() error {
+			url := fmt.Sprintf("%s/api/v1/vms/%s/stats", strings.TrimRight(apiURL, "/"), vmID)
+			if fieldsStr != "" {
+				url += "?fields=" + fieldsStr
+			}
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+			if err != nil {
+				return fmt.Errorf("building request: %w", err)
+			}
+			if apiKey != "" {
+				req.Header.Set("Authorization", "Bearer "+apiKey)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return fmt.Errorf("calling daemon API: %w", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusServiceUnavailable {
+				return fmt.Errorf("metrics are disabled on the daemon (daemon.metrics.enabled: false)")
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("VM %q not found", vmID)
+			}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("daemon returned HTTP %d", resp.StatusCode)
+			}
+
+			var snap types.VMStatsSnapshot
+			if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+				return fmt.Errorf("decoding response: %w", err)
+			}
+
+			printStatsSnapshot(snap, fieldsStr)
+			return nil
+		}
+
+		if !watch {
+			return printStats()
+		}
+
+		// Watch mode: poll every interval and redraw.
+		for {
+			// Clear screen.
+			fmt.Print("\033[2J\033[H")
+			fmt.Printf("vmsmith vm stats %s  [refreshing every ~10s — Ctrl-C to quit]\n\n", vmID)
+			if err := printStats(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			time.Sleep(10 * time.Second)
+		}
+	},
+}
+
+// printStatsSnapshot renders a VMStatsSnapshot to stdout.
+func printStatsSnapshot(snap types.VMStatsSnapshot, fieldsFilter string) {
+	fields := parseStatsFields(fieldsFilter)
+	showAll := len(fields) == 0
+
+	fmt.Printf("VM:     %s\n", snap.VMID)
+	fmt.Printf("State:  %s\n", snap.State)
+	if snap.LastSampledAt != nil {
+		fmt.Printf("Sampled: %s\n", snap.LastSampledAt.Local().Format("2006-01-02 15:04:05"))
+	}
+	fmt.Println()
+
+	if snap.Current == nil {
+		fmt.Println("No metrics collected yet.")
+		fmt.Println("The VM may be newly created or not yet sampled.")
+		return
+	}
+
+	// Compute 5-minute averages from history.
+	fiveMinAgo := time.Now().Add(-5 * time.Minute)
+	var recentSamples []types.MetricSample
+	for _, s := range snap.History {
+		if s.Timestamp.After(fiveMinAgo) {
+			recentSamples = append(recentSamples, s)
+		}
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "METRIC\tCURRENT\t5-MIN AVG")
+
+	cur := snap.Current
+
+	if showAll || fields["cpu"] {
+		curStr, avgStr := fmtFloat(cur.CPUPercent, "%.1f%%"), avgFloatStr(recentSamples, "cpu")
+		fmt.Fprintf(w, "CPU %%\t%s\t%s\n", curStr, avgStr)
+	}
+	if showAll || fields["mem"] {
+		curMem, avgMem := fmtUint64(cur.MemUsedMB, "%d MB"), avgUint64Str(recentSamples, "mem_used")
+		curAvail, avgAvail := fmtUint64(cur.MemAvailMB, "%d MB"), avgUint64Str(recentSamples, "mem_avail")
+		fmt.Fprintf(w, "Mem Used\t%s\t%s\n", curMem, avgMem)
+		fmt.Fprintf(w, "Mem Avail\t%s\t%s\n", curAvail, avgAvail)
+	}
+	if showAll || fields["disk"] {
+		curRd, avgRd := fmtBps(cur.DiskReadBps), avgBpsStr(recentSamples, "disk_rd")
+		curWr, avgWr := fmtBps(cur.DiskWriteBps), avgBpsStr(recentSamples, "disk_wr")
+		fmt.Fprintf(w, "Disk Read\t%s\t%s\n", curRd, avgRd)
+		fmt.Fprintf(w, "Disk Write\t%s\t%s\n", curWr, avgWr)
+	}
+	if showAll || fields["net"] {
+		curRx, avgRx := fmtBps(cur.NetRxBps), avgBpsStr(recentSamples, "net_rx")
+		curTx, avgTx := fmtBps(cur.NetTxBps), avgBpsStr(recentSamples, "net_tx")
+		fmt.Fprintf(w, "Net RX\t%s\t%s\n", curRx, avgRx)
+		fmt.Fprintf(w, "Net TX\t%s\t%s\n", curTx, avgTx)
+	}
+	w.Flush()
+
+	fmt.Printf("\n%d samples in history (interval %ds, capacity %d)\n",
+		len(snap.History), snap.IntervalSeconds, snap.HistorySize)
+}
+
+func parseStatsFields(s string) map[string]bool {
+	out := make(map[string]bool)
+	for _, f := range strings.Split(s, ",") {
+		f = strings.TrimSpace(strings.ToLower(f))
+		if f != "" {
+			out[f] = true
+		}
+	}
+	return out
+}
+
+func fmtFloat(v *float64, format string) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf(format, *v)
+}
+
+func fmtUint64(v *uint64, format string) string {
+	if v == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf(format, *v)
+}
+
+func fmtBps(v *uint64) string {
+	if v == nil {
+		return "n/a"
+	}
+	bps := *v
+	switch {
+	case bps >= 1<<30:
+		return fmt.Sprintf("%.1f GB/s", float64(bps)/float64(1<<30))
+	case bps >= 1<<20:
+		return fmt.Sprintf("%.1f MB/s", float64(bps)/float64(1<<20))
+	case bps >= 1<<10:
+		return fmt.Sprintf("%.1f KB/s", float64(bps)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B/s", bps)
+	}
+}
+
+// Average helpers for the 5-min summary column.
+
+func avgFloatStr(samples []types.MetricSample, field string) string {
+	var sum float64
+	var n int
+	for _, s := range samples {
+		var v *float64
+		switch field {
+		case "cpu":
+			v = s.CPUPercent
+		}
+		if v != nil {
+			sum += *v
+			n++
+		}
+	}
+	if n == 0 {
+		return "n/a"
+	}
+	switch field {
+	case "cpu":
+		return fmt.Sprintf("%.1f%%", sum/float64(n))
+	}
+	return fmt.Sprintf("%.1f", sum/float64(n))
+}
+
+func avgUint64Str(samples []types.MetricSample, field string) string {
+	var sum uint64
+	var n int
+	for _, s := range samples {
+		var v *uint64
+		switch field {
+		case "mem_used":
+			v = s.MemUsedMB
+		case "mem_avail":
+			v = s.MemAvailMB
+		}
+		if v != nil {
+			sum += *v
+			n++
+		}
+	}
+	if n == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d MB", sum/uint64(n))
+}
+
+func avgBpsStr(samples []types.MetricSample, field string) string {
+	var sum uint64
+	var n int
+	for _, s := range samples {
+		var v *uint64
+		switch field {
+		case "disk_rd":
+			v = s.DiskReadBps
+		case "disk_wr":
+			v = s.DiskWriteBps
+		case "net_rx":
+			v = s.NetRxBps
+		case "net_tx":
+			v = s.NetTxBps
+		}
+		if v != nil {
+			sum += *v
+			n++
+		}
+	}
+	if n == 0 {
+		return "n/a"
+	}
+	avg := sum / uint64(n)
+	return fmtBps(&avg)
+}
+
 func init() {
 	vmCreateCmd.Flags().String("image", "", "base image name or absolute path to a .qcow2 file (required)")
 	vmCreateCmd.Flags().Int("cpus", 0, "number of vCPUs (default from config)")
@@ -448,6 +720,10 @@ Examples:
 	vmListCmd.Flags().Int("limit", 0, "maximum number of VMs to show (0 = no limit)")
 	vmListCmd.Flags().Int("offset", 0, "number of VMs to skip before printing results")
 
+	vmStatsCmd.Flags().Bool("watch", false, "poll every ~10s and refresh the table in place (Ctrl-C to quit)")
+	vmStatsCmd.Flags().String("fields", "", "comma-separated metric groups to show: cpu, mem, disk, net (default: all)")
+	vmStatsCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
+
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmCloneCmd)
 	vmCmd.AddCommand(vmEditCmd)
@@ -456,6 +732,7 @@ Examples:
 	vmCmd.AddCommand(vmStopCmd)
 	vmCmd.AddCommand(vmDeleteCmd)
 	vmCmd.AddCommand(vmInfoCmd)
+	vmCmd.AddCommand(vmStatsCmd)
 }
 
 // vmManagerOverride can be set in tests to bypass libvirt.

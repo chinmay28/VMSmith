@@ -514,10 +514,10 @@ func TestCreateVM_QuotaExceeded_MaxVMs(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}, State: types.VMStateRunning})
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
-		Name:  "quota-vm",
-		Image: "ubuntu",
-		CPUs:  2,
-		RAMMB: 2048,
+		Name:   "quota-vm",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
 		DiskGB: 20,
 	}))
 	if resp.StatusCode != http.StatusTooManyRequests {
@@ -3047,6 +3047,44 @@ func TestAPIAuthEnabledAllowsValidBearerToken(t *testing.T) {
 	}
 }
 
+// TestAPIAuthAllowsAPIKeyQueryParam verifies that browser clients (e.g. SSE
+// EventSource) which cannot set custom headers can authenticate via
+// ?api_key=… instead of an Authorization header.
+func TestAPIAuthAllowsAPIKeyQueryParam(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?api_key=secret-key")
+	if err != nil {
+		t.Fatalf("GET with api_key query: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with valid api_key query", resp.StatusCode)
+	}
+}
+
+func TestAPIAuthRejectsInvalidAPIKeyQueryParam(t *testing.T) {
+	ts, _, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Daemon.Auth.Enabled = true
+		cfg.Daemon.Auth.APIKeys = []string{"secret-key"}
+	})
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?api_key=wrong-key")
+	if err != nil {
+		t.Fatalf("GET with bad api_key: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "unauthorized")
+}
+
 func TestWebHandlerNotProtectedByAPIAuth(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -3121,9 +3159,17 @@ func TestListEvents_WithDataAndFilters(t *testing.T) {
 
 	now := time.Now().Truncate(time.Millisecond)
 
-	s.PutEvent(&types.Event{ID: "evt-1", VMID: "vm-1", Type: "vm_started", CreatedAt: now.Add(-10 * time.Minute)})
-	s.PutEvent(&types.Event{ID: "evt-2", VMID: "vm-2", Type: "vm_stopped", CreatedAt: now.Add(-5 * time.Minute)})
-	s.PutEvent(&types.Event{ID: "evt-3", VMID: "vm-1", Type: "vm_deleted", CreatedAt: now.Add(-1 * time.Minute)})
+	// Use AppendEvent (the modern path) so events are visible to
+	// ListEventsFiltered, which only walks the uint64-keyed bucket.
+	if _, err := s.AppendEvent(&types.Event{VMID: "vm-1", Type: "vm_started", OccurredAt: now.Add(-10 * time.Minute)}); err != nil {
+		t.Fatalf("AppendEvent 1: %v", err)
+	}
+	if _, err := s.AppendEvent(&types.Event{VMID: "vm-2", Type: "vm_stopped", OccurredAt: now.Add(-5 * time.Minute)}); err != nil {
+		t.Fatalf("AppendEvent 2: %v", err)
+	}
+	if _, err := s.AppendEvent(&types.Event{VMID: "vm-1", Type: "vm_deleted", OccurredAt: now.Add(-1 * time.Minute)}); err != nil {
+		t.Fatalf("AppendEvent 3: %v", err)
+	}
 
 	// Test all
 	resp, err := http.Get(ts.URL + "/api/v1/events")
@@ -3138,8 +3184,9 @@ func TestListEvents_WithDataAndFilters(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(events))
 	}
-	if events[0].ID != "evt-3" || events[2].ID != "evt-1" {
-		t.Errorf("expected descending sort order")
+	// AppendEvent assigns IDs "1", "2", "3" in order; cursor walks newest first.
+	if events[0].ID != "3" || events[2].ID != "1" {
+		t.Errorf("expected descending sort order, got %q ... %q", events[0].ID, events[2].ID)
 	}
 
 	// Test vm_id filter
@@ -3168,8 +3215,8 @@ func TestListEvents_WithDataAndFilters(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events since %s, got %d", sinceStr, len(events))
 	}
-	if events[0].ID != "evt-3" || events[1].ID != "evt-2" {
-		t.Errorf("expected evt-3 and evt-2")
+	if events[0].ID != "3" || events[1].ID != "2" {
+		t.Errorf("expected ids 3 and 2, got %q and %q", events[0].ID, events[1].ID)
 	}
 }
 
