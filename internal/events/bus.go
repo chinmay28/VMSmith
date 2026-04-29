@@ -7,6 +7,7 @@ package events
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
@@ -14,8 +15,8 @@ import (
 )
 
 const (
-	subscriberBufSize  = 64
-	publishBufSize     = 256
+	subscriberBufSize   = 64
+	publishBufSize      = 256
 	dropWarnIntervalSec = 60
 )
 
@@ -33,6 +34,7 @@ type EventBus struct {
 
 	mu          sync.RWMutex
 	subscribers map[string]*subscriber
+	subSeq      atomic.Uint64 // monotonic counter to disambiguate caller-supplied names
 
 	dropWarnings sync.Map // name -> time.Time of last drop warning
 
@@ -88,20 +90,27 @@ func (b *EventBus) Publish(evt *types.Event) {
 }
 
 // Subscribe registers a subscriber and returns a channel that receives events
-// plus a cancel function to deregister.  name must be unique per subscriber.
+// plus a cancel function to deregister.
+//
+// The supplied name is used only for log messages.  Internally each subscriber
+// gets a unique key (name + monotonic counter) so that two callers passing the
+// same name (e.g. two browser tabs behind the same NAT IP, both subscribing as
+// "sse-1.2.3.4") never collide and silently leak channels.
 func (b *EventBus) Subscribe(name string) (<-chan *types.Event, func()) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	seq := b.subSeq.Add(1)
+	uniqueKey := fmt.Sprintf("%s#%d", name, seq)
 
+	b.mu.Lock()
 	sub := &subscriber{
-		name: name,
+		name: uniqueKey,
 		ch:   make(chan *types.Event, subscriberBufSize),
 	}
-	b.subscribers[name] = sub
+	b.subscribers[uniqueKey] = sub
+	b.mu.Unlock()
 
 	cancel := func() {
 		b.mu.Lock()
-		delete(b.subscribers, name)
+		delete(b.subscribers, uniqueKey)
 		b.mu.Unlock()
 		// Drain to unblock any sender currently holding the lock in fanOut.
 		for len(sub.ch) > 0 {

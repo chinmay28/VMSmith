@@ -166,6 +166,38 @@ func TestBusStopDrains(t *testing.T) {
 	}
 }
 
+// TestBusSubscribeDuplicateNamesDoNotCollide guards against the bug where two
+// callers passing the same name (e.g. two browser tabs subscribing as
+// "sse-1.2.3.4") silently overwrote each other in the subscribers map and
+// leaked the first channel.  Both subscribers must receive the event.
+func TestBusSubscribeDuplicateNamesDoNotCollide(t *testing.T) {
+	store := &mockStore{}
+	bus := New(store)
+	bus.Start()
+	defer bus.Stop()
+
+	// Same supplied name twice — must not collide internally.
+	ch1, cancel1 := bus.Subscribe("sse-127.0.0.1")
+	defer cancel1()
+	ch2, cancel2 := bus.Subscribe("sse-127.0.0.1")
+	defer cancel2()
+
+	bus.Publish(&types.Event{Type: "vm.created"})
+
+	recv := func(ch <-chan *types.Event, label string) {
+		select {
+		case evt := <-ch:
+			if evt.Type != "vm.created" {
+				t.Errorf("%s: expected vm.created, got %s", label, evt.Type)
+			}
+		case <-time.After(time.Second):
+			t.Errorf("%s: timeout — second subscriber did not receive event (collision regression)", label)
+		}
+	}
+	recv(ch1, "first")
+	recv(ch2, "second")
+}
+
 func TestBusOccurredAtSet(t *testing.T) {
 	store := &mockStore{}
 	bus := New(store)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -225,6 +226,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		}
 		vms = filtered
 	}
+
+	// Sort by ID so pagination is deterministic across backends.
+	// LibvirtManager already returns VMs in bbolt key order (which is by ID),
+	// but MockManager iterates a Go map, so without an explicit sort the order
+	// is non-deterministic and pagination tests flake.
+	sort.Slice(vms, func(i, j int) bool { return vms[i].ID < vms[j].ID })
 
 	total := len(vms)
 	pagination := parsePagination(r)

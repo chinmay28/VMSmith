@@ -13,6 +13,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
+	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -64,6 +65,7 @@ type tokenBucket struct {
 type Store interface {
 	ListEvents() ([]*types.Event, error)
 	ListEventsAfterSeq(afterSeq uint64, limit int) ([]*types.Event, error)
+	ListEventsFiltered(filter store.EventFilter) ([]*types.Event, int, error)
 }
 
 // NewServer creates a new API server with default body-size limits.

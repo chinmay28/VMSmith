@@ -127,7 +127,8 @@ func New(cfg *config.Config) (*Daemon, error) {
 		} else {
 			sampleInterval := time.Duration(cfg.Metrics.SampleInterval) * time.Second
 			histSize := cfg.Metrics.HistorySize
-			metricsMgr = metrics.NewLibvirtMetricsManager(metricsConn, sampleInterval, histSize)
+			resolver := newStoreNameResolver(s)
+			metricsMgr = metrics.NewLibvirtMetricsManager(metricsConn, resolver, sampleInterval, histSize)
 			logger.Info("daemon", "metrics sampler initialised",
 				"interval_seconds", fmt.Sprintf("%d", cfg.Metrics.SampleInterval),
 				"history_size", fmt.Sprintf("%d", histSize))

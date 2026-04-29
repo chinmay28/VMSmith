@@ -18,39 +18,101 @@ const statsBitmask = libvirt.DOMAIN_STATS_STATE |
 	libvirt.DOMAIN_STATS_INTERFACE |
 	libvirt.DOMAIN_STATS_BLOCK
 
+// stalePruneInterval is how long a VM may be missing from the sampler
+// output before its ring buffer and prev-counters are evicted.
+const stalePruneInterval = 5 * time.Minute
+
+// NameToIDFunc translates a libvirt domain name to a vmsmith VM ID.
+// Returns ("", false) when the name is unknown.
+//
+// The metrics sampler indexes its rings by VM ID so that the API/CLI (which
+// only know the VM ID) can look samples up without knowing the libvirt domain
+// name (which is the user-supplied VM Name).  Callers are expected to back
+// this with a small cache; see store.NameToIDFunc for the default impl.
+type NameToIDFunc func(name string) (string, bool)
+
 // prevCounters holds the counter values from the previous sample for a VM.
 // Used to compute per-second rates from cumulative libvirt counters.
 type prevCounters struct {
-	sampleTime    time.Time
-	cpuTimeNs     uint64 // cumulative CPU nanoseconds (cpu.time)
-	numVcpus      int    // number of active vCPUs at sample time
-	diskRdBytes   uint64 // cumulative disk read bytes (sum across devices)
-	diskWrBytes   uint64 // cumulative disk write bytes
-	netRxBytes    uint64 // cumulative net receive bytes (sum across ifaces)
-	netTxBytes    uint64 // cumulative net transmit bytes
-	hasCPU        bool
-	hasDisk       bool
-	hasNet        bool
+	sampleTime  time.Time
+	cpuTimeNs   uint64 // cumulative CPU nanoseconds (cpu.time)
+	numVcpus    int    // number of active vCPUs at sample time
+	diskRdBytes uint64 // cumulative disk read bytes (sum across devices)
+	diskWrBytes uint64 // cumulative disk write bytes
+	netRxBytes  uint64 // cumulative net receive bytes (sum across ifaces)
+	netTxBytes  uint64 // cumulative net transmit bytes
+	hasCPU      bool
+	hasDisk     bool
+	hasNet      bool
+}
+
+// domainSample is a libvirt-agnostic snapshot of a single domain's stats.
+// Used internally to make the per-domain rate math testable without libvirt.
+type domainSample struct {
+	Name  string
+	State string
+
+	HasCPU    bool
+	CPUTimeNs uint64
+	NumVcpus  int
+
+	HasBalloon       bool
+	MemRSSKiB        uint64
+	MemCurrentKiB    uint64
+	MemAvailableKiB  uint64
+	MemUnusedKiB     uint64
+	BalloonRssSet    bool
+	BalloonCurSet    bool
+	BalloonAvailSet  bool
+	BalloonUnusedSet bool
+
+	HasDisk     bool
+	DiskRdBytes uint64
+	DiskWrBytes uint64
+
+	HasNet     bool
+	NetRxBytes uint64
+	NetTxBytes uint64
+}
+
+// domainStatsProvider returns a libvirt-agnostic snapshot of all active
+// domain stats.  The libvirt-backed implementation wraps GetAllDomainStats;
+// tests can substitute a synthetic provider that feeds counter sequences.
+type domainStatsProvider interface {
+	GetAllDomainStats() ([]domainSample, error)
 }
 
 // LibvirtMetricsManager implements Manager using libvirt's bulk stats API.
 type LibvirtMetricsManager struct {
-	conn     *libvirt.Connect
+	provider domainStatsProvider
+	resolver NameToIDFunc
 	interval time.Duration
 	histSize int
 
-	mu       sync.RWMutex
-	rings    map[string]*ring     // vmName -> ring
-	states   map[string]string    // vmName -> state string
-	vmNames  map[string]string    // libvirt domain name -> vmsmith VM ID
-	prev     map[string]*prevCounters // vmName -> previous counters
+	mu      sync.RWMutex
+	rings   map[string]*ring         // vmID -> ring
+	states  map[string]string        // vmID -> state string
+	vmNames map[string]string        // libvirt domain name -> vmsmith VM ID
+	prev    map[string]*prevCounters // vmID -> previous counters
 
 	stopCh chan struct{}
 	doneCh chan struct{}
+	now    func() time.Time // overridable for tests
 }
 
 // NewLibvirtMetricsManager creates a new metrics manager backed by libvirt.
-func NewLibvirtMetricsManager(conn *libvirt.Connect, interval time.Duration, histSize int) *LibvirtMetricsManager {
+//
+// resolver translates libvirt domain names into vmsmith VM IDs; it may be nil
+// (in which case rings are keyed by domain name and the API/CLI lookup will
+// fail to find samples for VMs whose ID differs from their name).
+func NewLibvirtMetricsManager(conn *libvirt.Connect, resolver NameToIDFunc, interval time.Duration, histSize int) *LibvirtMetricsManager {
+	provider := &libvirtProvider{conn: conn}
+	return newManagerForProvider(provider, resolver, interval, histSize)
+}
+
+// newManagerForProvider is the test-friendly constructor; it accepts any
+// domainStatsProvider so unit tests can inject synthetic counter sequences.
+func newManagerForProvider(provider domainStatsProvider, resolver NameToIDFunc, interval time.Duration, histSize int) *LibvirtMetricsManager {
 	if interval <= 0 {
 		interval = 10 * time.Second
 	}
@@ -58,7 +120,8 @@ func NewLibvirtMetricsManager(conn *libvirt.Connect, interval time.Duration, his
 		histSize = 360
 	}
 	return &LibvirtMetricsManager{
-		conn:     conn,
+		provider: provider,
+		resolver: resolver,
 		interval: interval,
 		histSize: histSize,
 		rings:    make(map[string]*ring),
@@ -67,7 +130,17 @@ func NewLibvirtMetricsManager(conn *libvirt.Connect, interval time.Duration, his
 		prev:     make(map[string]*prevCounters),
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
+		now:      time.Now,
 	}
+}
+
+// SetResolver updates the name-to-ID resolver after construction.
+// Useful when the daemon wires the metrics sampler before the store is fully
+// initialised.
+func (m *LibvirtMetricsManager) SetResolver(resolver NameToIDFunc) {
+	m.mu.Lock()
+	m.resolver = resolver
+	m.mu.Unlock()
 }
 
 // Start launches the background sampling goroutine.
@@ -84,9 +157,7 @@ func (m *LibvirtMetricsManager) Stop() error {
 }
 
 // Snapshot returns the current metrics snapshot for a VM identified by vmID.
-// vmID is the vmsmith VM ID (e.g. "vm-1741234567890123"); it is matched against
-// the domain name stored in libvirt (which vmsmith sets to the VM name/ID).
-// Returns nil when no samples have been collected yet.
+// Returns (nil, nil) when no samples have been collected yet.
 func (m *LibvirtMetricsManager) Snapshot(vmID string) (*types.VMStatsSnapshot, error) {
 	m.mu.RLock()
 	r, ok := m.rings[vmID]
@@ -139,206 +210,310 @@ func (m *LibvirtMetricsManager) run(ctx context.Context) {
 	}
 }
 
-// sample calls libvirt's bulk stats API and updates per-VM rings.
+// sample fetches a fresh round of domain stats and feeds them to processSamples.
 func (m *LibvirtMetricsManager) sample() {
-	now := time.Now()
-
-	statsSlice, err := m.conn.GetAllDomainStats(
-		nil, // nil = all domains
-		statsBitmask,
-		libvirt.CONNECT_GET_ALL_DOMAINS_STATS_ACTIVE,
-	)
+	samples, err := m.provider.GetAllDomainStats()
 	if err != nil {
 		logger.Warn("metrics", "GetAllDomainStats failed", "error", err.Error())
 		return
 	}
+	m.processSamples(samples, m.now())
+}
 
-	// Collect the set of domain names we saw this round for stale-ring pruning.
-	seenDomains := make(map[string]struct{}, len(statsSlice))
-
+// processSamples updates per-VM rings from a slice of domain samples and
+// prunes stale entries.  Pure logic — tested directly with synthetic input.
+func (m *LibvirtMetricsManager) processSamples(samples []domainSample, now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	resolver := m.resolver
+	seen := make(map[string]struct{}, len(samples))
+
+	for i := range samples {
+		ds := &samples[i]
+		vmID, ok := m.resolveVMID(resolver, ds.Name)
+		if !ok {
+			// No mapping → skip.  Without a vmID we cannot service /stats
+			// queries, and indexing by name would re-introduce the bug
+			// reviewers flagged.
+			continue
+		}
+		seen[vmID] = struct{}{}
+		m.vmNames[ds.Name] = vmID
+		m.recordSample(vmID, ds, now)
+	}
+
+	m.prune(seen, now)
+}
+
+// resolveVMID returns the vmID for a libvirt domain name.  It first consults
+// the cache (vmNames), then falls back to the resolver, and finally falls
+// back to assuming the domain name *is* the VM ID (back-compat — some unit
+// tests seed the manager directly without going through libvirt).
+func (m *LibvirtMetricsManager) resolveVMID(resolver NameToIDFunc, name string) (string, bool) {
+	if id, ok := m.vmNames[name]; ok {
+		return id, true
+	}
+	if resolver != nil {
+		if id, ok := resolver(name); ok {
+			return id, true
+		}
+		return "", false
+	}
+	// No resolver wired — last resort, key by name.  This matches the legacy
+	// behaviour for the (uncommon) case where the daemon is started without
+	// a store-backed resolver.
+	return name, true
+}
+
+// recordSample applies one domain sample to the per-VM ring/state/prev maps.
+// Caller must hold m.mu.
+func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now time.Time) {
+	state := ds.State
+	if state == "" {
+		state = "unknown"
+	}
+
+	if _, ok := m.rings[vmID]; !ok {
+		m.rings[vmID] = newRing(m.histSize)
+	}
+	m.states[vmID] = state
+
+	prev := m.prev[vmID]
+	sample := types.MetricSample{Timestamp: now}
+
+	// --- CPU % ---
+	if ds.HasCPU {
+		numVcpus := ds.NumVcpus
+		if numVcpus <= 0 {
+			numVcpus = 1
+		}
+		if prev != nil && prev.hasCPU {
+			dtNs := now.Sub(prev.sampleTime).Nanoseconds()
+			if dtNs > 0 {
+				deltaCPU := int64(ds.CPUTimeNs) - int64(prev.cpuTimeNs)
+				if deltaCPU >= 0 {
+					cpuPct := (float64(deltaCPU) / float64(dtNs) / float64(numVcpus)) * 100.0
+					if cpuPct < 0 {
+						cpuPct = 0
+					}
+					if cpuPct > 100.0 {
+						cpuPct = 100.0
+					}
+					sample.CPUPercent = &cpuPct
+				}
+				// negative delta → counter reset → leave nil
+			}
+		}
+		if prev == nil {
+			prev = &prevCounters{}
+			m.prev[vmID] = prev
+		}
+		prev.cpuTimeNs = ds.CPUTimeNs
+		prev.numVcpus = numVcpus
+		prev.hasCPU = true
+	}
+
+	// --- Memory ---
+	if ds.HasBalloon {
+		if ds.BalloonRssSet && ds.MemRSSKiB > 0 {
+			mb := ds.MemRSSKiB / 1024
+			sample.MemUsedMB = &mb
+		} else if ds.BalloonCurSet && ds.MemCurrentKiB > 0 {
+			mb := ds.MemCurrentKiB / 1024
+			sample.MemUsedMB = &mb
+		}
+		if ds.BalloonAvailSet && ds.BalloonUnusedSet {
+			if ds.MemAvailableKiB >= ds.MemUnusedKiB {
+				mb := (ds.MemAvailableKiB - ds.MemUnusedKiB) / 1024
+				sample.MemAvailMB = &mb
+			}
+		}
+	}
+
+	// --- Disk I/O rates ---
+	if ds.HasDisk {
+		if prev != nil && prev.hasDisk {
+			dtSec := now.Sub(prev.sampleTime).Seconds()
+			if dtSec > 0 {
+				deltaRd := int64(ds.DiskRdBytes) - int64(prev.diskRdBytes)
+				deltaWr := int64(ds.DiskWrBytes) - int64(prev.diskWrBytes)
+				if deltaRd >= 0 {
+					bps := uint64(float64(deltaRd) / dtSec)
+					sample.DiskReadBps = &bps
+				}
+				if deltaWr >= 0 {
+					bps := uint64(float64(deltaWr) / dtSec)
+					sample.DiskWriteBps = &bps
+				}
+			}
+		}
+		if prev == nil {
+			prev = &prevCounters{}
+			m.prev[vmID] = prev
+		}
+		prev.diskRdBytes = ds.DiskRdBytes
+		prev.diskWrBytes = ds.DiskWrBytes
+		prev.hasDisk = true
+	}
+
+	// --- Network I/O rates ---
+	if ds.HasNet {
+		if prev != nil && prev.hasNet {
+			dtSec := now.Sub(prev.sampleTime).Seconds()
+			if dtSec > 0 {
+				deltaRx := int64(ds.NetRxBytes) - int64(prev.netRxBytes)
+				deltaTx := int64(ds.NetTxBytes) - int64(prev.netTxBytes)
+				if deltaRx >= 0 {
+					bps := uint64(float64(deltaRx) / dtSec)
+					sample.NetRxBps = &bps
+				}
+				if deltaTx >= 0 {
+					bps := uint64(float64(deltaTx) / dtSec)
+					sample.NetTxBps = &bps
+				}
+			}
+		}
+		if prev == nil {
+			prev = &prevCounters{}
+			m.prev[vmID] = prev
+		}
+		prev.netRxBytes = ds.NetRxBytes
+		prev.netTxBytes = ds.NetTxBytes
+		prev.hasNet = true
+	}
+
+	// Stamp sample time after all deltas are computed.
+	if prev != nil {
+		prev.sampleTime = now
+	}
+
+	m.rings[vmID].push(sample)
+}
+
+// prune evicts rings/state/prev for VMs not seen in the last sample round
+// when their newest sample is older than stalePruneInterval.
+// Caller must hold m.mu.
+func (m *LibvirtMetricsManager) prune(seen map[string]struct{}, now time.Time) {
+	for vmID, r := range m.rings {
+		if _, ok := seen[vmID]; ok {
+			continue
+		}
+		latest := r.latest()
+		if latest == nil || now.Sub(latest.Timestamp) > stalePruneInterval {
+			delete(m.rings, vmID)
+			delete(m.states, vmID)
+			delete(m.prev, vmID)
+		}
+	}
+	// Also prune the name → ID cache for any name whose vmID has been evicted.
+	for name, vmID := range m.vmNames {
+		if _, ok := m.rings[vmID]; !ok {
+			delete(m.vmNames, name)
+		}
+	}
+}
+
+// libvirtProvider wraps a *libvirt.Connect into a domainStatsProvider.
+type libvirtProvider struct {
+	conn *libvirt.Connect
+}
+
+func (p *libvirtProvider) GetAllDomainStats() ([]domainSample, error) {
+	statsSlice, err := p.conn.GetAllDomainStats(
+		nil,
+		statsBitmask,
+		libvirt.CONNECT_GET_ALL_DOMAINS_STATS_ACTIVE,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		for i := range statsSlice {
+			if statsSlice[i].Domain != nil {
+				statsSlice[i].Domain.Free()
+			}
+		}
+	}()
+
+	out := make([]domainSample, 0, len(statsSlice))
 	for i := range statsSlice {
 		ds := &statsSlice[i]
 		if ds.Domain == nil {
 			continue
 		}
-
-		domName, err := ds.Domain.GetName()
+		name, err := ds.Domain.GetName()
 		if err != nil {
 			continue
 		}
-		seenDomains[domName] = struct{}{}
+		s := domainSample{Name: name}
 
-		// Determine state string.
-		stateStr := "unknown"
 		if ds.State != nil && ds.State.StateSet {
-			stateStr = domainStateString(int(ds.State.State))
+			s.State = domainStateString(int(ds.State.State))
+		} else {
+			s.State = "unknown"
 		}
 
-		// Ensure ring exists.
-		if _, ok := m.rings[domName]; !ok {
-			m.rings[domName] = newRing(m.histSize)
-		}
-		m.states[domName] = stateStr
-
-		// Build metric sample.
-		sample := types.MetricSample{Timestamp: now}
-		prev := m.prev[domName]
-
-		// --- CPU % ---
 		if ds.Cpu != nil && ds.Cpu.TimeSet {
-			numVcpus := len(ds.Vcpu)
-			if numVcpus == 0 {
-				numVcpus = 1
+			s.HasCPU = true
+			s.CPUTimeNs = ds.Cpu.Time
+			s.NumVcpus = len(ds.Vcpu)
+			if s.NumVcpus == 0 {
+				s.NumVcpus = 1
 			}
-			if prev != nil && prev.hasCPU {
-				dtNs := now.Sub(prev.sampleTime).Nanoseconds()
-				if dtNs > 0 {
-					deltaCPU := int64(ds.Cpu.Time) - int64(prev.cpuTimeNs)
-					if deltaCPU >= 0 {
-						// cpu% = delta_ns / dt_ns / vcpus * 100
-						cpuPct := (float64(deltaCPU) / float64(dtNs) / float64(numVcpus)) * 100.0
-						// Clamp to [0, 100]
-						if cpuPct < 0 {
-							cpuPct = 0
-						}
-						if cpuPct > 100.0 {
-							cpuPct = 100.0
-						}
-						sample.CPUPercent = &cpuPct
-					}
-					// negative delta → counter reset → nil (no rate)
-				}
-			}
-			// Update prev counters (always update for next round).
-			if prev == nil {
-				prev = &prevCounters{}
-				m.prev[domName] = prev
-			}
-			prev.cpuTimeNs = ds.Cpu.Time
-			prev.numVcpus = numVcpus
-			prev.hasCPU = true
 		}
 
-		// --- Memory ---
 		if ds.Balloon != nil {
-			// MemUsedMB: prefer balloon.rss (RSS from guest kernel), fall back to balloon.current (allocated MB).
-			if ds.Balloon.RssSet && ds.Balloon.Rss > 0 {
-				mb := ds.Balloon.Rss / 1024 // libvirt reports in KiB
-				sample.MemUsedMB = &mb
-			} else if ds.Balloon.CurrentSet && ds.Balloon.Current > 0 {
-				mb := ds.Balloon.Current / 1024
-				sample.MemUsedMB = &mb
-			}
-			// MemAvailMB: balloon.available - balloon.unused (guest-agent dependent).
-			if ds.Balloon.AvailableSet && ds.Balloon.UnusedSet {
-				if ds.Balloon.Available >= ds.Balloon.Unused {
-					mb := (ds.Balloon.Available - ds.Balloon.Unused) / 1024
-					sample.MemAvailMB = &mb
-				}
-			}
+			s.HasBalloon = true
+			s.BalloonRssSet = ds.Balloon.RssSet
+			s.MemRSSKiB = ds.Balloon.Rss
+			s.BalloonCurSet = ds.Balloon.CurrentSet
+			s.MemCurrentKiB = ds.Balloon.Current
+			s.BalloonAvailSet = ds.Balloon.AvailableSet
+			s.MemAvailableKiB = ds.Balloon.Available
+			s.BalloonUnusedSet = ds.Balloon.UnusedSet
+			s.MemUnusedKiB = ds.Balloon.Unused
 		}
 
-		// --- Disk I/O rates ---
-		var totalRdBytes, totalWrBytes uint64
-		hasDiskData := false
+		var totalRd, totalWr uint64
+		hasDisk := false
 		for _, blk := range ds.Block {
 			if blk.RdBytesSet {
-				totalRdBytes += blk.RdBytes
-				hasDiskData = true
+				totalRd += blk.RdBytes
+				hasDisk = true
 			}
 			if blk.WrBytesSet {
-				totalWrBytes += blk.WrBytes
-				hasDiskData = true
+				totalWr += blk.WrBytes
+				hasDisk = true
 			}
 		}
-		if hasDiskData {
-			if prev != nil && prev.hasDisk {
-				dtSec := now.Sub(prev.sampleTime).Seconds()
-				if dtSec > 0 {
-					deltaRd := int64(totalRdBytes) - int64(prev.diskRdBytes)
-					deltaWr := int64(totalWrBytes) - int64(prev.diskWrBytes)
-					if deltaRd >= 0 {
-						bps := uint64(float64(deltaRd) / dtSec)
-						sample.DiskReadBps = &bps
-					}
-					if deltaWr >= 0 {
-						bps := uint64(float64(deltaWr) / dtSec)
-						sample.DiskWriteBps = &bps
-					}
-				}
-			}
-			if prev == nil {
-				prev = &prevCounters{}
-				m.prev[domName] = prev
-			}
-			prev.diskRdBytes = totalRdBytes
-			prev.diskWrBytes = totalWrBytes
-			prev.hasDisk = true
+		if hasDisk {
+			s.HasDisk = true
+			s.DiskRdBytes = totalRd
+			s.DiskWrBytes = totalWr
 		}
 
-		// --- Network I/O rates ---
-		var totalRxBytes, totalTxBytes uint64
-		hasNetData := false
+		var totalRx, totalTx uint64
+		hasNet := false
 		for _, iface := range ds.Net {
 			if iface.RxBytesSet {
-				totalRxBytes += iface.RxBytes
-				hasNetData = true
+				totalRx += iface.RxBytes
+				hasNet = true
 			}
 			if iface.TxBytesSet {
-				totalTxBytes += iface.TxBytes
-				hasNetData = true
+				totalTx += iface.TxBytes
+				hasNet = true
 			}
 		}
-		if hasNetData {
-			if prev != nil && prev.hasNet {
-				dtSec := now.Sub(prev.sampleTime).Seconds()
-				if dtSec > 0 {
-					deltaRx := int64(totalRxBytes) - int64(prev.netRxBytes)
-					deltaTx := int64(totalTxBytes) - int64(prev.netTxBytes)
-					if deltaRx >= 0 {
-						bps := uint64(float64(deltaRx) / dtSec)
-						sample.NetRxBps = &bps
-					}
-					if deltaTx >= 0 {
-						bps := uint64(float64(deltaTx) / dtSec)
-						sample.NetTxBps = &bps
-					}
-				}
-			}
-			if prev == nil {
-				prev = &prevCounters{}
-				m.prev[domName] = prev
-			}
-			prev.netRxBytes = totalRxBytes
-			prev.netTxBytes = totalTxBytes
-			prev.hasNet = true
+		if hasNet {
+			s.HasNet = true
+			s.NetRxBytes = totalRx
+			s.NetTxBytes = totalTx
 		}
 
-		// Stamp sample time after all deltas are computed.
-		if prev != nil {
-			prev.sampleTime = now
-		}
-
-		m.rings[domName].push(sample)
+		out = append(out, s)
 	}
-
-	// Prune rings for VMs that have not been seen for >5 minutes.
-	pruneThreshold := 5 * time.Minute
-	for domName, r := range m.rings {
-		if _, seen := seenDomains[domName]; seen {
-			continue
-		}
-		latest := r.latest()
-		if latest == nil || now.Sub(latest.Timestamp) > pruneThreshold {
-			delete(m.rings, domName)
-			delete(m.states, domName)
-			delete(m.prev, domName)
-			delete(m.vmNames, domName)
-		}
-	}
+	return out, nil
 }
 
 // domainStateString converts a libvirt domain state integer to a readable string.

@@ -139,6 +139,31 @@ func projectSamples(in []types.MetricSample, fields map[string]bool) []types.Met
 	return out
 }
 
+// escapePromLabel escapes a string for use as a Prometheus text-format label
+// value.  The format requires only three escapes: backslash, double quote,
+// and newline.  Other bytes (including non-ASCII UTF-8) are passed through
+// unchanged — Prometheus accepts arbitrary UTF-8 in label values.
+func escapePromLabel(s string) string {
+	if !strings.ContainsAny(s, "\\\"\n") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // PrometheusMetrics handles GET /metrics and returns Prometheus text-format metrics.
 // This endpoint is exempt from auth and rate limiting; it is served directly by
 // the chi router outside the /api/v1 group.
@@ -182,7 +207,7 @@ func (s *Server) PrometheusMetrics(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cur := snap.Current
-		labels := fmt.Sprintf(`vm_id=%q,vm_name=%q`, v.ID, v.Name)
+		labels := fmt.Sprintf(`vm_id="%s",vm_name="%s"`, escapePromLabel(v.ID), escapePromLabel(v.Name))
 
 		if cur.CPUPercent != nil {
 			fmt.Fprintf(w, "vmsmith_vm_cpu_percent{%s} %g\n", labels, *cur.CPUPercent)

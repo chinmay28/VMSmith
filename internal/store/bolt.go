@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 	bolt "go.etcd.io/bbolt"
@@ -253,15 +254,19 @@ func (s *Store) AppendEvent(event *types.Event) (uint64, error) {
 }
 
 // EventFilter controls which events ListEventsFiltered returns.
+//
+// Since may be either a time.Time (lower bound on OccurredAt) or a uint64
+// sequence ID (lower bound on event sequence, exclusive).  Zero values are
+// treated as no bound.
 type EventFilter struct {
-	VMID       string
-	Type       string
-	Source     string
-	Severity   string
-	Since      interface{} // time.Time or uint64 seq; zero/0 = no lower bound
-	UntilSeq   uint64     // exclusive upper bound on seq ID; 0 = no upper bound
-	Page       int
-	PerPage    int
+	VMID     string
+	Type     string
+	Source   string
+	Severity string
+	Since    interface{} // time.Time or uint64 seq; zero/0 = no lower bound
+	UntilSeq uint64      // exclusive upper bound on seq ID; 0 = no upper bound
+	Page     int
+	PerPage  int
 }
 
 // ListEventsFiltered returns events matching filter, ordered newest-first.
@@ -302,9 +307,8 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 			}
 			seq := decodeSeqKey(k)
 
-			// Enforce Since (as seq ID if uint64, time if time.Time).
-			// We handle time.Time Since in the application filter below.
-			// For seq-based Since: stop if seq < sinceSeq.
+			// Seq-based Since: stop walking once we drop below sinceSeq
+			// (because the cursor walks newest → oldest).
 			if sinceSeq, ok := filter.Since.(uint64); ok && sinceSeq > 0 {
 				if seq <= sinceSeq {
 					break
@@ -329,10 +333,15 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 			if filter.Severity != "" && evt.Severity != filter.Severity {
 				continue
 			}
-			// Time-based Since filter.
-			if sinceTime, ok := filter.Since.(interface{ IsZero() bool }); ok {
-				type timer interface{ IsZero() bool; Before(interface{}) bool }
-				_ = sinceTime
+			// Time-based Since: filter individual events by OccurredAt.
+			if sinceTime, ok := filter.Since.(time.Time); ok && !sinceTime.IsZero() {
+				ts := evt.OccurredAt
+				if ts.IsZero() {
+					ts = evt.CreatedAt
+				}
+				if !ts.After(sinceTime) {
+					continue
+				}
 			}
 
 			all = append(all, &evt)

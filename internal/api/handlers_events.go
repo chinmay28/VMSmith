@@ -3,12 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/events"
+	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -54,60 +54,27 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 	pagination := parsePagination(r)
 
-	allEvents, err := s.store.ListEvents()
+	filter := store.EventFilter{
+		VMID:     vmID,
+		Type:     evtType,
+		Source:   source,
+		Severity: severity,
+		UntilSeq: untilSeq,
+		Page:     pagination.Page,
+		PerPage:  pagination.PerPage,
+	}
+	if !sinceTime.IsZero() {
+		filter.Since = sinceTime
+	}
+
+	filtered, total, err := s.store.ListEventsFiltered(filter)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err)
 		return
 	}
-
-	filtered := make([]*types.Event, 0, len(allEvents))
-	for _, e := range allEvents {
-		if vmID != "" && e.VMID != vmID {
-			continue
-		}
-		if evtType != "" && e.Type != evtType {
-			continue
-		}
-		if source != "" && e.Source != source {
-			continue
-		}
-		if severity != "" && e.Severity != severity {
-			continue
-		}
-		if !sinceTime.IsZero() {
-			ts := e.OccurredAt
-			if ts.IsZero() {
-				ts = e.CreatedAt
-			}
-			if ts.Before(sinceTime) {
-				continue
-			}
-		}
-		if untilSeq > 0 {
-			if seq, parseErr := strconv.ParseUint(e.ID, 10, 64); parseErr == nil {
-				if seq >= untilSeq {
-					continue
-				}
-			}
-		}
-		filtered = append(filtered, e)
+	if filtered == nil {
+		filtered = []*types.Event{}
 	}
-
-	// Sort descending by occurred_at (newest first).
-	sort.Slice(filtered, func(i, j int) bool {
-		ti := filtered[i].OccurredAt
-		if ti.IsZero() {
-			ti = filtered[i].CreatedAt
-		}
-		tj := filtered[j].OccurredAt
-		if tj.IsZero() {
-			tj = filtered[j].CreatedAt
-		}
-		return ti.After(tj)
-	})
-
-	total := len(filtered)
-	filtered = paginateSlice(filtered, pagination.Page, pagination.PerPage)
 	setTotalCountHeader(w, total)
 	writeJSON(w, http.StatusOK, filtered)
 }

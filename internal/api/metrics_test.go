@@ -528,6 +528,25 @@ func TestPrometheusMetrics_Enabled(t *testing.T) {
 	}
 }
 
+func TestEscapePromLabel(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"simple", "simple"},
+		{"vm-1234", "vm-1234"},
+		{`with "quote"`, `with \"quote\"`},
+		{`back\slash`, `back\\slash`},
+		{"new\nline", `new\nline`},
+		{`mix"\` + "\n" + `end`, `mix\"\\\nend`},
+	}
+	for _, c := range cases {
+		got := escapePromLabel(c.in)
+		if got != c.want {
+			t.Errorf("escapePromLabel(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func containsStr(s, substr string) bool {
 	if len(substr) == 0 {
 		return true
