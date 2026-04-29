@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -2717,6 +2718,88 @@ func TestAPIRoutes_ContentType_JSON(t *testing.T) {
 	ct := resp.Header.Get("Content-Type")
 	if !strings.Contains(ct, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json for API routes", ct)
+	}
+}
+
+func TestSwaggerUIRouteServesHTML(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/docs")
+	if err != nil {
+		t.Fatalf("GET /api/docs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "/api/openapi.yaml") {
+		t.Fatalf("swagger UI body missing spec URL")
+	}
+	if !strings.Contains(bodyStr, "/api/docs/swagger-ui.css") || !strings.Contains(bodyStr, "/api/docs/swagger-ui-bundle.js") {
+		t.Fatalf("swagger UI body missing embedded asset URLs")
+	}
+}
+
+func TestSwaggerUIAssetRouteServesEmbeddedBundle(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/docs/swagger-ui.css")
+	if err != nil {
+		t.Fatalf("GET /api/docs/swagger-ui.css: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Fatalf("Content-Type = %q, want text/css", ct)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), ".swagger-ui") {
+		t.Fatalf("embedded swagger css body missing expected content")
+	}
+}
+
+func TestOpenAPISpecRouteServesYAML(t *testing.T) {
+	ts, cleanup := testServerWithWeb(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/openapi.yaml")
+	if err != nil {
+		t.Fatalf("GET /api/openapi.yaml: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "yaml") && !strings.Contains(ct, "text/plain") {
+		t.Fatalf("Content-Type = %q, want yaml-ish content type", ct)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), "openapi: 3.0") {
+		t.Fatalf("spec response missing OpenAPI version")
 	}
 }
 
