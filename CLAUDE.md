@@ -74,7 +74,8 @@ vmsmith/
 │   ├── quota.go                 # Quota usage response types
 │   └── errors.go                # Typed API errors
 ├── web/                         # React source (separate npm project)
-│   ├── src/api/client.js        # REST API client (vms, snapshots, images, ports, host, logs)
+│   ├── src/api/client.ts        # OpenAPI-backed REST API client wrapper (vms, snapshots, images, ports, host, logs)
+│   ├── src/api/generated/       # Generated OpenAPI TypeScript schema (`npm run generate:api`)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
 │   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList also supports bulk-select start/stop/delete UI using existing per-VM endpoints; ImageList includes upload progress UI for image imports)
@@ -144,6 +145,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make deb` | Build a Debian package at `bin/packages/*.deb` from the release binary, config, and systemd unit |
 | `make dev-api` | Build Go backend and start daemon on :8080 |
 | `make dev-web` | Start Vite dev server on :3000 (proxies /api → :8080) |
+| `cd web && npm run generate:api` | Regenerate the frontend API types from `docs/openapi.yaml` |
 
 **Important build requirement:** `CGO_ENABLED=1` is mandatory — the libvirt Go bindings use cgo.
 
