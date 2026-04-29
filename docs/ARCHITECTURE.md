@@ -74,10 +74,13 @@ vmsmith/
 │       ├── embed.go                 # go:embed dist/*
 │       └── dist/                    # Built SPA (gitignored; built by `make build`)
 ├── pkg/types/
-│   ├── vm.go                        # VM, VMSpec, VMState
+│   ├── vm.go                        # VM, VMSpec, VMUpdateSpec, VMState
 │   ├── snapshot.go                  # Snapshot
 │   ├── image.go                     # Image
 │   ├── network.go                   # NetworkAttachment, PortForward, HostInterface
+│   ├── template.go                  # VMTemplate
+│   ├── quota.go                     # Quota usage response types
+│   ├── event.go                     # Event (system / VM lifecycle audit log)
 │   └── errors.go                    # Typed API errors
 ├── web/                             # React source
 │   ├── src/api/client.js            # REST API client (vms, snapshots, images, ports, host, logs)
@@ -396,11 +399,12 @@ All endpoints are prefixed `/api/v1/`.
 
 | Method | Path                                     | Description                   |
 |--------|------------------------------------------|-------------------------------|
-| GET    | /vms                                     | List all VMs                  |
-| POST   | /vms                                     | Create a new VM               |
+| GET    | /vms                                     | List all VMs (`?tag=`, `?status=`, `?page=`, `?per_page=`) |
+| POST   | /vms                                     | Create a new VM (accepts `template_id` for default merge) |
 | GET    | /vms/{id}                                | Get VM details                |
-| PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk/IP) |
-| GET    | /quotas/usage                             | Current quota allocation vs configured limits |
+| PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk/IP/tags) |
+| POST   | /vms/{id}/clone                          | Clone a VM (copies disk, generates new MAC + IP reservation) |
+| POST   | /vms/bulk                                | Bulk start/stop/delete across multiple VM IDs |
 | POST   | /vms/{id}/start                          | Start a stopped VM            |
 | POST   | /vms/{id}/stop                           | Stop a running VM             |
 | DELETE | /vms/{id}                                | Delete a VM                   |
@@ -408,18 +412,26 @@ All endpoints are prefixed `/api/v1/`.
 | POST   | /vms/{id}/snapshots                      | Create snapshot               |
 | POST   | /vms/{id}/snapshots/{name}/restore       | Restore snapshot              |
 | DELETE | /vms/{id}/snapshots/{name}               | Delete snapshot               |
-| GET    | /images                                  | List images                   |
+| GET    | /images                                  | List images (`?page=`, `?per_page=`) |
 | POST   | /images                                  | Create image from VM disk     |
 | POST   | /images/upload                           | Upload qcow2 file             |
 | DELETE | /images/{id}                             | Delete image                  |
 | GET    | /images/{id}/download                    | Download image file           |
+| GET    | /templates                               | List VM templates             |
+| POST   | /templates                               | Create a VM template          |
+| DELETE | /templates/{id}                          | Delete a VM template          |
 | GET    | /vms/{id}/ports                          | List port forwards            |
 | POST   | /vms/{id}/ports                          | Add port forward              |
 | DELETE | /vms/{id}/ports/{portId}                 | Remove port forward           |
 | GET    | /host/interfaces                         | List host network interfaces  |
+| GET    | /host/stats                              | Host CPU/RAM/disk usage and VM count |
+| GET    | /quotas/usage                            | Current quota allocation vs configured limits |
+| GET    | /events                                  | Query lifecycle/audit events (`?vm_id=`, `?since=`, pagination); see Phase 4.2 of the roadmap for streaming + filter expansion |
 | GET    | /logs                                    | Query structured log entries  |
 
 The `/logs` endpoint supports query parameters: `level` (min level: debug/info/warn/error), `limit` (max entries, capped at 2000), `since` (RFC3339Nano timestamp), `source` (daemon/api/cli).
+
+The `/events` endpoint returns events from the `events` bucket in reverse-chronological order. Query parameters: `vm_id` (exact match), `since` (RFC3339Nano timestamp), `page`, `per_page`. The full event schema (sources, severity, attributes, actor) and `GET /events/stream` (SSE) are tracked in Phase 4.2 of the roadmap.
 
 ---
 
@@ -514,7 +526,11 @@ quotas:
 |----------------|----------------------------|------------------------------|
 | `vms`          | VM ID                      | JSON `types.VM`              |
 | `images`       | image ID                   | JSON `types.Image`           |
+| `snapshots`    | `{vmID}/{name}`            | JSON `types.Snapshot`        |
+| `templates`    | template ID                | JSON `types.VMTemplate`      |
 | `port_forwards`| `{vmID}/{hostPort}`        | JSON `types.PortForward`     |
+| `events`       | event ID                   | JSON `types.Event` (lifecycle/audit log; see Phase 4.2 for indexing + retention) |
+| `config`       | config key                 | JSON daemon-managed runtime state |
 
 ---
 
@@ -589,9 +605,11 @@ make test-all         # everything
 
 ## Future Enhancements
 
-- **KubeVirt backend** — `KubeVirtVMManager` behind the same interface
+Active feature work — including VM-level metrics, the event bus / SSE / webhook subsystem, browser-based VNC + serial console, and the cron-style scheduler — is tracked in [`ROADMAP.md`](ROADMAP.md) (Phases 4.1, 4.2, 5.1, 5.2). VM templates already shipped (`/api/v1/templates`).
+
+Longer-horizon items not yet promoted to the roadmap:
+
+- **KubeVirt backend** — `KubeVirtVMManager` behind the same `vm.Manager` interface
 - **Second NAT networks** — create per-VM isolated private subnets
-- **VNC/SPICE proxy** — browser-accessible console via the web GUI
-- **VM templates** — named resource presets ("small", "medium", "large")
 - **OCI image support** — pull cloud images from container registries
-- **Cluster mode** — multiple VM Smith hosts with shared image catalog
+- **Cluster mode** — multiple VM Smith hosts with shared image catalog (early sketch in roadmap Phase 5.5)
