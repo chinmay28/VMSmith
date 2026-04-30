@@ -37,6 +37,10 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("snapshot.created", vmID, "snapshot "+req.Name+" created", map[string]string{
+		"snapshot": req.Name,
+	})
+
 	writeJSON(w, http.StatusCreated, snap)
 }
 
@@ -73,6 +77,10 @@ func (s *Server) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("snapshot.restored", vmID, "snapshot "+snapName+" restored", map[string]string{
+		"snapshot": snapName,
+	})
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
 }
 
@@ -86,6 +94,10 @@ func (s *Server) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+
+	s.publishAppEvent("snapshot.deleted", vmID, "snapshot "+snapName+" deleted", map[string]string{
+		"snapshot": snapName,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

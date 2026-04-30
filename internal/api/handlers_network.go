@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +60,13 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("port_forward.added", vmID,
+		"port forward added", map[string]string{
+			"host_port":  fmt.Sprintf("%d", req.HostPort),
+			"guest_port": fmt.Sprintf("%d", req.GuestPort),
+			"protocol":   string(req.Protocol),
+		})
+
 	writeJSON(w, http.StatusCreated, pf)
 }
 
@@ -78,6 +86,7 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 
 // RemovePort handles DELETE /api/v1/vms/{vmID}/ports/{portID}
 func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
 	portID := chi.URLParam(r, "portID")
 
 	if err := s.portFwd.Remove(portID); err != nil {
@@ -85,6 +94,11 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+
+	s.publishAppEvent("port_forward.removed", vmID,
+		"port forward "+portID+" removed", map[string]string{
+			"port_id": portID,
+		})
 
 	w.WriteHeader(http.StatusNoContent)
 }

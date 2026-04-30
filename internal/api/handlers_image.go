@@ -48,6 +48,11 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishAppEvent("image.created", vm.ID, "image "+img.Name+" created from VM "+vm.Name, map[string]string{
+		"image_id":   img.ID,
+		"image_name": img.Name,
+	})
+
 	writeJSON(w, http.StatusCreated, img)
 }
 
@@ -79,6 +84,9 @@ func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+	s.publishAppEvent("image.deleted", "", "image "+id+" deleted", map[string]string{
+		"image_id": id,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -149,6 +157,11 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+
+	s.publishAppEvent("image.uploaded", "", "image "+img.Name+" uploaded", map[string]string{
+		"image_id":   img.ID,
+		"image_name": img.Name,
+	})
 
 	writeJSON(w, http.StatusCreated, img)
 }
