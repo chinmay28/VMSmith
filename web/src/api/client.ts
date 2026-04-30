@@ -74,6 +74,10 @@ export const vms = {
   start: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/start', { params: { path: { vmID: id } } })),
   stop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/stop', { params: { path: { vmID: id } } })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
+  stats: (id: string, { since = '', fields = '' }: { since?: string; fields?: string } = {}) =>
+    unwrap(apiClient.GET('/vms/{vmID}/stats', {
+      params: { path: { vmID: id }, query: { since: since || undefined, fields: fields || undefined } as any },
+    })),
 };
 
 // --- Snapshots ---

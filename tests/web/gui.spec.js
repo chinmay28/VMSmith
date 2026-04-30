@@ -356,6 +356,63 @@ test.describe("VM Detail", () => {
 });
 
 // ============================================================
+// VM Detail — Metrics Tab
+// ============================================================
+test.describe("VM Detail Metrics", () => {
+  test("metrics tab renders current sample for running VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    await expect(page.getByTestId("vm-detail-metrics")).toBeVisible();
+    await expect(page.getByTestId("metrics-table")).toBeVisible();
+
+    // The mock seeds CPU 35% on the most recent sample (10 + 5*5).
+    await expect(page.getByTestId("metric-cpu-current")).toHaveText("35.0%");
+    await expect(page.getByTestId("metric-mem-used-current")).toContainText("MB");
+    await expect(page.getByTestId("metric-net-rx-current")).toContainText("/s");
+
+    // 5-min average column populated from history.
+    await expect(page.getByTestId("metric-cpu-avg")).not.toHaveText("n/a");
+  });
+
+  test("metrics tab shows history meta and last-sampled timestamp", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    await expect(page.getByTestId("metrics-history-meta")).toContainText("samples");
+    await expect(page.getByTestId("metrics-history-meta")).toContainText("10s interval");
+    await expect(page.getByTestId("metrics-state")).toHaveText("running");
+  });
+
+  test("metrics tab shows empty state when VM is stopped", async ({ page }) => {
+    await page.goto(BASE_URL);
+    // db-server is seeded as stopped in mock-server.js
+    await page.getByTestId("vm-row-db-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    await expect(page.getByTestId("vm-detail-metrics")).toBeVisible();
+    // Stopped VM has no current sample → table is hidden, EmptyState message shown.
+    await expect(page.getByTestId("metrics-table")).not.toBeVisible();
+    await expect(page.getByTestId("vm-detail-metrics")).toContainText(/not running|metrics resume/i);
+  });
+
+  test("metrics tab is independent of overview and activity", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    await expect(page.getByTestId("vm-detail-metrics")).toBeVisible();
+    await expect(page.getByTestId("vm-detail-ip")).not.toBeVisible();
+
+    await page.getByTestId("tab-overview").click();
+    await expect(page.getByTestId("vm-detail-ip")).toBeVisible();
+    await expect(page.getByTestId("vm-detail-metrics")).not.toBeVisible();
+  });
+});
+
+// ============================================================
 // Images
 // ============================================================
 test.describe("Images", () => {

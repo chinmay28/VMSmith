@@ -267,6 +267,57 @@ async function main() {
 
     await page.close();
 
+    // ================== VM Detail Metrics Tests ==================
+    console.log("\nVM Detail Metrics:");
+
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(500);
+    await page.locator('[data-testid="vm-row-web-server"]').click();
+    await page.waitForTimeout(500);
+
+    await runTest("metrics tab renders current sample for running VM", async (p) => {
+      await p.locator('[data-testid="tab-metrics"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "vm-detail-metrics");
+      await assertVisible(p, "metrics-table");
+      // Mock seeds the most-recent sample at CPU 35% (10 + 5*5).
+      await assertText(p, "metric-cpu-current", "35.0%");
+      await assertText(p, "metric-mem-used-current", "MB");
+      await assertText(p, "metric-net-rx-current", "/s");
+      await assertText(p, "metrics-state", "running");
+    }, page);
+
+    await runTest("metrics tab history meta shows interval", async (p) => {
+      await assertText(p, "metrics-history-meta", "samples");
+      await assertText(p, "metrics-history-meta", "10s interval");
+    }, page);
+
+    await runTest("metrics tab is independent of overview", async (p) => {
+      await p.locator('[data-testid="tab-overview"]').click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "vm-detail-ip");
+      await assertNotVisible(p, "vm-detail-metrics");
+    }, page);
+
+    await page.close();
+
+    // Stopped-VM empty state on its own page so prior state doesn't bleed in.
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(500);
+    await page.locator('[data-testid="vm-row-db-server"]').click();
+    await page.waitForTimeout(500);
+
+    await runTest("metrics tab shows empty state for stopped VM", async (p) => {
+      await p.locator('[data-testid="tab-metrics"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "vm-detail-metrics");
+      await assertNotVisible(p, "metrics-table");
+    }, page);
+
+    await page.close();
+
     // ================== Images Tests ==================
     console.log("\nImages:");
 
