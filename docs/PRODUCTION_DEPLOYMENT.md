@@ -130,6 +130,12 @@ quotas:
   max_total_cpus: 0
   max_total_ram_mb: 0
   max_total_disk_gb: 0
+
+metrics:
+  enabled: true
+  sample_interval: 10
+  history_size: 360
+  scrape_listen: "127.0.0.1:9101"   # optional: isolate Prometheus scraping from the main API listener
 ```
 
 Create the log directory:
@@ -141,9 +147,27 @@ sudo chmod 0755 /var/log/vmsmith
 
 Binding to `127.0.0.1` is the key production choice here: only the reverse proxy should be publicly reachable.
 
+If you enable `metrics.scrape_listen`, VMSmith also serves `GET /metrics` on that separate listener in Prometheus text format. This is useful when you want scraping isolated from the main API port or you do not want your reverse proxy in the metrics path.
+
 ---
 
 ## 5. Install a systemd unit
+
+### Optional: Prometheus scrape config
+
+If you run Prometheus on the same host, add a scrape job like this:
+
+```yaml
+scrape_configs:
+  - job_name: vmsmith
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["127.0.0.1:9101"]
+```
+
+If you leave `metrics.scrape_listen` empty, scrape the main daemon listener instead, for example `127.0.0.1:8080`.
+
+The endpoint exports the latest in-memory per-VM gauges such as CPU percent, memory used, disk throughput, and network throughput. Long-term retention and dashboarding should live in Prometheus or Grafana rather than inside VMSmith itself.
 
 Create `/etc/systemd/system/vmsmith.service`:
 

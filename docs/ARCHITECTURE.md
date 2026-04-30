@@ -53,6 +53,10 @@ vmsmith/
 │   │   └── daemon.go                # vmsmith daemon start
 │   ├── config/config.go             # Config struct, DefaultConfig(), EnsureDirs()
 │   ├── daemon/daemon.go             # HTTP server, libvirt connect, signal handling, logger init
+│   ├── metrics/
+│   │   ├── collector.go             # libvirt bulk-stats sampler + rate math
+│   │   ├── metrics.go               # metrics Manager interface + mock
+│   │   └── ring.go                  # fixed-size in-memory history ring per VM
 │   ├── logger/
 │   │   └── logger.go                # Structured logger: ring buffer, levels, file output
 │   ├── network/
@@ -81,6 +85,7 @@ vmsmith/
 │   ├── template.go                  # VMTemplate
 │   ├── quota.go                     # Quota usage response types
 │   ├── event.go                     # Event (system / VM lifecycle audit log)
+│   ├── metrics.go                   # MetricSample, VMStatsSnapshot
 │   └── errors.go                    # Typed API errors
 ├── web/                             # React source
 │   ├── src/api/client.js            # REST API client (vms, snapshots, images, ports, host, logs)
@@ -328,7 +333,51 @@ vmsmith vm create db01 --image ubuntu \
 
 ---
 
-### 4. Logging
+### 4. Metrics
+
+VM Smith collects per-VM resource metrics in-process via `internal/metrics/`. The daemon polls libvirt's bulk stats API on a fixed interval, converts cumulative counters into rates, and stores the results in bounded in-memory rings keyed by VM ID.
+
+**Sampling pipeline:**
+
+1. `LibvirtMetricsManager` calls `GetAllDomainStats` on the configured interval (default 10 s).
+2. A short-lived resolver maps libvirt domain names back to VMSmith VM IDs so the API and CLI can look metrics up by stable VM ID.
+3. Each sample records point-in-time values for CPU, memory, disk throughput, and network throughput.
+4. Cumulative libvirt counters are converted into per-second rates by diffing against the previous sample for the same VM.
+5. Samples are pushed into a fixed-size ring buffer per VM (default 360 samples, about 1 hour at 10 s).
+6. Rings and previous-counter state are pruned when a VM disappears from sampling output for long enough, so deleted or long-stopped VMs do not accumulate unbounded memory.
+
+**Metric contract (`pkg/types/metrics.go`):**
+
+- `MetricSample` uses pointer fields for every metric so `nil` means "unavailable" rather than zero.
+- This matters for first-sample rate math, stopped VMs, and guests without the qemu guest agent.
+- `VMStatsSnapshot` returns `current`, bounded `history`, `last_sampled_at`, and the sampler's configured interval/history size.
+
+**Rate math and missing data:**
+
+- CPU percent is derived from cumulative CPU time across active vCPUs.
+- Disk and network values are emitted as bytes/sec by summing libvirt's per-device counters, then dividing the delta by wall-clock elapsed time.
+- Counter resets or missing prior samples produce `nil` for that datapoint instead of a misleading spike.
+- Memory availability depends on guest-agent-backed balloon stats. If the guest does not expose them, memory pressure fields stay `nil`.
+
+**Persistence model:**
+
+- Metrics history is intentionally in-memory only today. It is optimized for recent troubleshooting, live UI views, and lightweight CLI/API reads.
+- The REST API freezes the last known history for stopped VMs instead of backfilling synthetic zeros.
+- This keeps the implementation simple while avoiding a local TSDB dependency.
+
+**API and scrape surfaces:**
+
+- `GET /api/v1/vms/{id}/stats` returns the latest snapshot plus bounded history, with optional `since` and `fields` projection filters.
+- `GET /metrics` emits Prometheus text-format gauges for the latest per-VM values.
+- `metrics.scrape_listen` can expose `/metrics` on a separate listener when operators want scraping isolated from the main API port.
+
+**Prometheus integration:**
+
+The current `/metrics` endpoint exposes the latest in-memory values only, labeled by `vm_id` and `vm_name`. Prometheus is the intended durable-history layer: scrape VMSmith periodically, then use Prometheus or Grafana for long retention, alerting, and dashboards beyond the daemon's in-memory ring.
+
+---
+
+### 5. Logging
 
 VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to both a file and an in-memory ring buffer. The ring buffer is drained by `GET /api/v1/logs` to power the web GUI log viewer.
 
@@ -381,7 +430,7 @@ VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to b
 
 ---
 
-### 5. Daemon Mode
+### 6. Daemon Mode
 
 `vmsmith daemon start` (`internal/daemon/daemon.go`):
 
@@ -393,9 +442,9 @@ VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to b
 
 ---
 
-### 6. REST API
+### 7. REST API
 
-All endpoints are prefixed `/api/v1/`.
+Most endpoints are prefixed `/api/v1/`. The Prometheus scrape endpoint is served separately at `/metrics`.
 
 | Method | Path                                     | Description                   |
 |--------|------------------------------------------|-------------------------------|
@@ -403,6 +452,7 @@ All endpoints are prefixed `/api/v1/`.
 | POST   | /vms                                     | Create a new VM (accepts `template_id` for default merge) |
 | GET    | /vms/{id}                                | Get VM details                |
 | PATCH  | /vms/{id}                                | Update VM resources (CPU/RAM/disk/IP/tags) |
+| GET    | /vms/{id}/stats                          | Latest VM metrics snapshot + bounded history (`?since=`, `?fields=cpu,mem,disk,net`) |
 | POST   | /vms/{id}/clone                          | Clone a VM (copies disk, generates new MAC + IP reservation) |
 | POST   | /vms/bulk                                | Bulk start/stop/delete across multiple VM IDs |
 | POST   | /vms/{id}/start                          | Start a stopped VM            |
@@ -428,14 +478,17 @@ All endpoints are prefixed `/api/v1/`.
 | GET    | /quotas/usage                            | Current quota allocation vs configured limits |
 | GET    | /events                                  | Query lifecycle/audit events (`?vm_id=`, `?since=`, pagination); see Phase 4.2 of the roadmap for streaming + filter expansion |
 | GET    | /logs                                    | Query structured log entries  |
+| GET    | /metrics                                 | Prometheus scrape endpoint for latest per-VM gauges (served outside `/api/v1`) |
 
 The `/logs` endpoint supports query parameters: `level` (min level: debug/info/warn/error), `limit` (max entries, capped at 2000), `since` (RFC3339Nano timestamp), `source` (daemon/api/cli).
 
 The `/events` endpoint returns events from the `events` bucket in reverse-chronological order. Query parameters: `vm_id` (exact match), `since` (RFC3339Nano timestamp), `page`, `per_page`. The full event schema (sources, severity, attributes, actor) and `GET /events/stream` (SSE) are tracked in Phase 4.2 of the roadmap.
 
+The `/metrics` endpoint emits Prometheus text-format gauges for the latest in-memory VM metrics. Each series is labeled with `vm_id` and `vm_name`; unavailable fields are omitted rather than emitted as zero.
+
 ---
 
-### 7. Web GUI
+### 8. Web GUI
 
 The React SPA is embedded into the binary via `go:embed dist/*`. The same port serves both the API and the GUI.
 
@@ -481,7 +534,7 @@ make dev-web   # Vite dev server on :3000, proxies /api/* → :8080
 
 ---
 
-### 8. Configuration
+### 9. Configuration
 
 File: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
 
@@ -516,11 +569,17 @@ quotas:
   max_total_cpus: 0
   max_total_ram_mb: 0
   max_total_disk_gb: 0
+
+metrics:
+  enabled: true
+  sample_interval: 10
+  history_size: 360
+  scrape_listen: ""      # optional separate listener for GET /metrics
 ```
 
 ---
 
-### 9. Data Model (bbolt)
+### 10. Data Model (bbolt)
 
 | Bucket         | Key                        | Value                        |
 |----------------|----------------------------|------------------------------|
