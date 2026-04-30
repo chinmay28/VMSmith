@@ -1,10 +1,16 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
+import { useEventStream } from '../hooks/useEventStream';
+import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls, LiveIndicator } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
+
+const VM_LIFECYCLE_TYPES = new Set([
+  'vm.created', 'vm.cloned', 'vm.deleted', 'vm.updated',
+  'vm.started', 'vm.stopped', 'vm.crashed', 'vm.shutdown',
+]);
 
 const DEFAULT_PER_PAGE = 25;
 
@@ -20,8 +26,14 @@ export default function VMList() {
   const { data: vmResponse, loading, error, refresh } = useFetch(
     () => vms.list({ tag: tagFilter, page, perPage }),
     [tagFilter, page, perPage],
-    5000,
+    30000,
   );
+  const handleEvent = useCallback((evt) => {
+    if (evt?.type && VM_LIFECYCLE_TYPES.has(evt.type)) {
+      refresh();
+    }
+  }, [refresh]);
+  const { status: liveStatus } = useEventStream({ onEvent: handleEvent });
   const navigate = useNavigate();
   const vmList = normalizeVMList(vmResponse);
   const totalVMs = vmResponse?.meta?.totalCount ?? vmList.length;
@@ -68,9 +80,12 @@ export default function VMList() {
         title="Machines"
         subtitle={`${totalVMs} total`}
         actions={
-          <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-vm">
-            <Plus size={15} /> New Machine
-          </button>
+          <>
+            <LiveIndicator status={liveStatus} />
+            <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-vm">
+              <Plus size={15} /> New Machine
+            </button>
+          </>
         }
       />
 

@@ -1,8 +1,10 @@
+import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'lucide-react';
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
-import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
+import { useEventStream } from '../hooks/useEventStream';
+import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState, LiveIndicator } from '../components/Shared';
 import { listData, normalizeVMList } from '../utils/normalize';
 
 function totalCount(response) {
@@ -12,12 +14,31 @@ function totalCount(response) {
   return response?.data?.length ?? 0;
 }
 
+// Event types whose arrival should immediately refresh dashboard counters.
+const VM_LIFECYCLE_TYPES = new Set([
+  'vm.created', 'vm.cloned', 'vm.deleted', 'vm.updated',
+  'vm.started', 'vm.stopped', 'vm.crashed', 'vm.shutdown',
+]);
+const IMAGE_TYPES = new Set(['image.uploaded', 'image.created', 'image.deleted']);
+
 export default function Dashboard() {
-  const { data: vmResponse, loading: vmLoading, error: vmError } = useFetch(() => vms.list(), [], 5000);
-  const { data: imageResponse, loading: imgLoading } = useFetch(() => imagesApi.list(), [], 10000);
-  const { data: quotaUsage, loading: quotaLoading } = useFetch(() => quotasApi.usage(), [], 5000);
+  const { data: vmResponse, loading: vmLoading, error: vmError, refresh: refreshVMs } = useFetch(() => vms.list(), [], 30000);
+  const { data: imageResponse, loading: imgLoading, refresh: refreshImages } = useFetch(() => imagesApi.list(), [], 30000);
+  const { data: quotaUsage, loading: quotaLoading, refresh: refreshQuotas } = useFetch(() => quotasApi.usage(), [], 30000);
   const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
   const navigate = useNavigate();
+
+  const handleEvent = useCallback((evt) => {
+    if (!evt?.type) return;
+    if (VM_LIFECYCLE_TYPES.has(evt.type)) {
+      refreshVMs();
+      refreshQuotas();
+    } else if (IMAGE_TYPES.has(evt.type)) {
+      refreshImages();
+    }
+  }, [refreshVMs, refreshImages, refreshQuotas]);
+
+  const { status: liveStatus } = useEventStream({ onEvent: handleEvent });
 
   const vmList = normalizeVMList(vmResponse);
   const imageList = listData(imageResponse);
@@ -33,9 +54,12 @@ export default function Dashboard() {
         title="Dashboard"
         subtitle="System overview"
         actions={
-          <button className="btn-primary" onClick={() => navigate('/vms?create=1')}>
-            <Plus size={15} /> New Machine
-          </button>
+          <>
+            <LiveIndicator status={liveStatus} />
+            <button className="btn-primary" onClick={() => navigate('/vms?create=1')}>
+              <Plus size={15} /> New Machine
+            </button>
+          </>
         }
       />
 

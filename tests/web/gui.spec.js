@@ -496,6 +496,48 @@ test.describe("Activity", () => {
 });
 
 // ============================================================
+// Live indicator (useEventStream hook)
+// ============================================================
+test.describe("Live Indicator", () => {
+  test("dashboard shows live indicator that reaches the live state", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const indicator = page.getByTestId("live-indicator");
+    await expect(indicator).toBeVisible();
+    await expect.poll(
+      async () => indicator.getAttribute("data-status"),
+      { timeout: 5000 },
+    ).toBe("live");
+    await expect(indicator).toContainText("live");
+  });
+
+  test("VM list shows live indicator", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms`);
+    const indicator = page.getByTestId("live-indicator");
+    await expect(indicator).toBeVisible();
+    await expect.poll(
+      async () => indicator.getAttribute("data-status"),
+      { timeout: 5000 },
+    ).toBe("live");
+  });
+
+  test("indicator falls back to polling when SSE returns 410", async ({ page }) => {
+    await page.route("**/api/v1/events/stream*", async (route) => {
+      await route.fulfill({
+        status: 410,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "event_stream_replay_window_exceeded", message: "too far behind" }),
+      });
+    });
+    await page.goto(BASE_URL);
+    const indicator = page.getByTestId("live-indicator");
+    await expect.poll(
+      async () => indicator.getAttribute("data-status"),
+      { timeout: 8000 },
+    ).toMatch(/reconnecting|fallback/);
+  });
+});
+
+// ============================================================
 // Full E2E lifecycle test
 // ============================================================
 test.describe("Full Lifecycle", () => {
