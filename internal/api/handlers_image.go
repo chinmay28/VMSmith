@@ -110,14 +110,13 @@ func (s *Server) UploadImage(w http.ResponseWriter, r *http.Request) {
 
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
-		// Derive name from filename, strip extension.
-		// Use i >= 0 so that a filename like ".qcow2" (no stem) yields an
-		// empty name, triggering the "image name is required" error below.
-		name = header.Filename
-		if i := strings.LastIndex(name, "."); i >= 0 {
-			name = name[:i]
+		// Derive name from filename, strip extension. A filename like ".qcow2"
+		// should yield an empty name so the required-name validation below fires.
+		filename := strings.TrimSpace(header.Filename)
+		if ext := filepath.Ext(filename); ext != "" {
+			filename = strings.TrimSpace(strings.TrimSuffix(filename, ext))
 		}
-		name = strings.TrimSpace(name)
+		name = filename
 	}
 	if name == "" {
 		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_image", "image name is required"))
