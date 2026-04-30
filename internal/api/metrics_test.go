@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -544,6 +545,321 @@ func TestEscapePromLabel(t *testing.T) {
 		if got != c.want {
 			t.Errorf("escapePromLabel(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// --- GET /api/v1/vms/stats/top tests ---
+
+func TestGetTopVMs_MetricsDisabled(t *testing.T) {
+	ts, _, cleanup := testServerWithMetrics(t, nil)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Code != "metrics_disabled" {
+		t.Errorf("code = %q, want %q", errResp.Code, "metrics_disabled")
+	}
+}
+
+func TestGetTopVMs_OrdersByCPUDesc(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	now := time.Now()
+	for i, c := range []struct {
+		id   string
+		name string
+		cpu  float64
+	}{
+		{"vm-a", "alpha", 10.0},
+		{"vm-b", "bravo", 80.0},
+		{"vm-c", "charlie", 50.0},
+	} {
+		v := seedTestVM(t, mockMgr, c.id, c.name, types.VMStateRunning)
+		cpu := c.cpu
+		m.seed(v.ID, types.MetricSample{
+			Timestamp:  now.Add(time.Duration(i) * time.Second),
+			CPUPercent: &cpu,
+		})
+		m.setState(v.ID, "running")
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu&limit=10")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Metric != "cpu" {
+		t.Errorf("metric = %q, want cpu", body.Metric)
+	}
+	if body.Limit != 10 {
+		t.Errorf("limit = %d, want 10", body.Limit)
+	}
+	if len(body.Items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(body.Items))
+	}
+	want := []string{"vm-b", "vm-c", "vm-a"}
+	for i, w := range want {
+		if body.Items[i].VMID != w {
+			t.Errorf("items[%d].VMID = %q, want %q (full order: %+v)", i, body.Items[i].VMID, w, body.Items)
+		}
+	}
+	if body.Items[0].Value != 80.0 {
+		t.Errorf("top value = %v, want 80.0", body.Items[0].Value)
+	}
+	if body.Items[0].Sample == nil || body.Items[0].Sample.CPUPercent == nil {
+		t.Error("expected sample with CPUPercent on top item")
+	}
+}
+
+func TestGetTopVMs_LimitTruncates(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		v := seedTestVM(t, mockMgr, fmt.Sprintf("vm-%d", i), fmt.Sprintf("vm-%d", i), types.VMStateRunning)
+		cpu := float64(i)
+		m.seed(v.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu&limit=3")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 3 {
+		t.Fatalf("len(items) = %d, want 3 (limit)", len(body.Items))
+	}
+	if body.Items[0].Value < body.Items[2].Value {
+		t.Errorf("items not in descending order: %+v", body.Items)
+	}
+}
+
+func TestGetTopVMs_DefaultsCpuAndLimit(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	for i := 0; i < 8; i++ {
+		v := seedTestVM(t, mockMgr, fmt.Sprintf("vm-d%d", i), fmt.Sprintf("d%d", i), types.VMStateRunning)
+		cpu := float64(i)
+		m.seed(v.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Metric != "cpu" {
+		t.Errorf("metric = %q, want cpu (default)", body.Metric)
+	}
+	if body.Limit != 5 {
+		t.Errorf("limit = %d, want 5 (default)", body.Limit)
+	}
+	if len(body.Items) != 5 {
+		t.Errorf("len(items) = %d, want 5", len(body.Items))
+	}
+}
+
+func TestGetTopVMs_SkipsRunningOnlyByDefault(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	vRun := seedTestVM(t, mockMgr, "vm-run", "running-vm", types.VMStateRunning)
+	vStop := seedTestVM(t, mockMgr, "vm-stop", "stopped-vm", types.VMStateStopped)
+
+	cpu := 20.0
+	m.seed(vRun.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+	cpu2 := 99.0
+	m.seed(vStop.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu2})
+
+	// Default state filter excludes the stopped VM even though it has a higher
+	// (frozen) CPU sample.
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 1 || body.Items[0].VMID != vRun.ID {
+		t.Errorf("expected only running VM, got %+v", body.Items)
+	}
+
+	// state=all surfaces both.
+	resp2, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu&state=all")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp2.Body.Close()
+	var bodyAll TopVMResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&bodyAll); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(bodyAll.Items) != 2 {
+		t.Errorf("state=all len(items) = %d, want 2", len(bodyAll.Items))
+	}
+	if bodyAll.Items[0].VMID != vStop.ID {
+		t.Errorf("state=all top = %q, want %q (highest CPU)", bodyAll.Items[0].VMID, vStop.ID)
+	}
+}
+
+func TestGetTopVMs_SkipsVMsWithoutMetric(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	// VM with mem but no net.
+	v1 := seedTestVM(t, mockMgr, "vm-mem", "mem-only", types.VMStateRunning)
+	mem := uint64(1024)
+	m.seed(v1.ID, types.MetricSample{Timestamp: time.Now(), MemUsedMB: &mem})
+
+	// VM with net.
+	v2 := seedTestVM(t, mockMgr, "vm-net", "net-vm", types.VMStateRunning)
+	rx := uint64(500_000)
+	m.seed(v2.ID, types.MetricSample{Timestamp: time.Now(), NetRxBps: &rx})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=net_rx")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 1 || body.Items[0].VMID != v2.ID {
+		t.Errorf("expected only net-vm in net_rx response, got %+v", body.Items)
+	}
+}
+
+func TestGetTopVMs_InvalidMetric(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, _, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=bogus")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Code != "invalid_metric" {
+		t.Errorf("code = %q, want invalid_metric", errResp.Code)
+	}
+}
+
+func TestGetTopVMs_InvalidLimit(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, _, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	for _, raw := range []string{"0", "-1", "abc", "9999"} {
+		resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu&limit=" + raw)
+		if err != nil {
+			t.Fatalf("GET (%s): %v", raw, err)
+		}
+		body := errorResponse{}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("limit=%q status = %d, want 400", raw, resp.StatusCode)
+		}
+		if body.Code != "invalid_limit" {
+			t.Errorf("limit=%q code = %q, want invalid_limit", raw, body.Code)
+		}
+	}
+}
+
+func TestGetTopVMs_InvalidState(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, _, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu&state=paused")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Code != "invalid_state" {
+		t.Errorf("code = %q, want invalid_state", errResp.Code)
+	}
+}
+
+func TestGetTopVMs_EmptyWhenNoVMs(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, _, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/stats/top?metric=cpu")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body TopVMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 0 {
+		t.Errorf("len(items) = %d, want 0", len(body.Items))
 	}
 }
 

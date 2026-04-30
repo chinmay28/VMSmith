@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -493,6 +494,119 @@ Example:
 	},
 }
 
+// topMetricLabels maps the API ?metric= keys to human-readable column headers
+// and a formatter that turns the API's float64 value back into a units-aware
+// display string. Keep these aligned with the server's topMetricExtractors.
+var topMetricLabels = map[string]struct {
+	header string
+	format func(v float64) string
+}{
+	"cpu":        {header: "CPU%", format: func(v float64) string { return fmt.Sprintf("%.1f%%", v) }},
+	"mem":        {header: "MEM(MB)", format: func(v float64) string { return fmt.Sprintf("%.0f MB", v) }},
+	"disk_read":  {header: "DISK RD", format: func(v float64) string { u := uint64(v); return fmtBps(&u) }},
+	"disk_write": {header: "DISK WR", format: func(v float64) string { u := uint64(v); return fmtBps(&u) }},
+	"net_rx":     {header: "NET RX", format: func(v float64) string { u := uint64(v); return fmtBps(&u) }},
+	"net_tx":     {header: "NET TX", format: func(v float64) string { u := uint64(v); return fmtBps(&u) }},
+}
+
+var vmTopCmd = &cobra.Command{
+	Use:   "top",
+	Short: "Show top VMs by metric (CPU, memory, disk, network)",
+	Long: `Print a leaderboard of running VMs ranked by the given metric.
+
+Metrics are read from the daemon's in-memory ring buffer, so the daemon must be
+running with daemon.metrics.enabled: true. VMs without a current sample for the
+requested metric are skipped.
+
+Supported metrics: cpu, mem, disk_read, disk_write, net_rx, net_tx.
+
+Example:
+  vmsmith vm top
+  vmsmith vm top --metric mem --limit 10
+  vmsmith vm top --metric net_rx --state all`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		metric, _ := cmd.Flags().GetString("metric")
+		limit, _ := cmd.Flags().GetInt("limit")
+		state, _ := cmd.Flags().GetString("state")
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		if apiURL == "" {
+			cfg, err := config.Load(cfgFile)
+			if err == nil {
+				apiURL = "http://" + cfg.Daemon.Listen
+			} else {
+				apiURL = "http://localhost:8080"
+			}
+		}
+
+		if _, ok := topMetricLabels[metric]; !ok {
+			return fmt.Errorf("unsupported metric %q (allowed: cpu, mem, disk_read, disk_write, net_rx, net_tx)", metric)
+		}
+		if limit < 1 {
+			return fmt.Errorf("--limit must be >= 1")
+		}
+
+		logger.Info("cli", "vm top", "metric", metric, "limit", fmt.Sprintf("%d", limit), "state", state)
+
+		url := fmt.Sprintf("%s/api/v1/vms/stats/top?metric=%s&limit=%d&state=%s",
+			strings.TrimRight(apiURL, "/"), metric, limit, state)
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("building request: %w", err)
+		}
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("calling daemon API: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return fmt.Errorf("metrics are disabled on the daemon (daemon.metrics.enabled: false)")
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("daemon returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var body struct {
+			Metric string `json:"metric"`
+			Limit  int    `json:"limit"`
+			State  string `json:"state"`
+			Items  []struct {
+				VMID  string  `json:"vm_id"`
+				Name  string  `json:"name"`
+				State string  `json:"state"`
+				Value float64 `json:"value"`
+			} `json:"items"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+
+		fmt.Printf("Top %d VMs by %s (state=%s)\n\n", body.Limit, body.Metric, body.State)
+		if len(body.Items) == 0 {
+			fmt.Println("No VMs reported a sample for the requested metric.")
+			return nil
+		}
+
+		label := topMetricLabels[body.Metric]
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "RANK\tNAME\tID\tSTATE\t%s\n", label.header)
+		for i, it := range body.Items {
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
+				i+1, it.Name, it.VMID, it.State, label.format(it.Value))
+		}
+		w.Flush()
+		return nil
+	},
+}
+
 // printStatsSnapshot renders a VMStatsSnapshot to stdout.
 func printStatsSnapshot(snap types.VMStatsSnapshot, fieldsFilter string) {
 	fields := parseStatsFields(fieldsFilter)
@@ -724,6 +838,11 @@ Examples:
 	vmStatsCmd.Flags().String("fields", "", "comma-separated metric groups to show: cpu, mem, disk, net (default: all)")
 	vmStatsCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
 
+	vmTopCmd.Flags().String("metric", "cpu", "metric to rank by: cpu, mem, disk_read, disk_write, net_rx, net_tx")
+	vmTopCmd.Flags().Int("limit", 5, "number of VMs to list (1-100)")
+	vmTopCmd.Flags().String("state", "running", "VM state filter: running or all")
+	vmTopCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
+
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmCloneCmd)
 	vmCmd.AddCommand(vmEditCmd)
@@ -733,6 +852,7 @@ Examples:
 	vmCmd.AddCommand(vmDeleteCmd)
 	vmCmd.AddCommand(vmInfoCmd)
 	vmCmd.AddCommand(vmStatsCmd)
+	vmCmd.AddCommand(vmTopCmd)
 }
 
 // vmManagerOverride can be set in tests to bypass libvirt.

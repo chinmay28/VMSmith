@@ -1,11 +1,33 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database } from 'lucide-react';
+import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database, TrendingUp } from 'lucide-react';
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
 import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState, LiveIndicator } from '../components/Shared';
 import { listData, normalizeVMList } from '../utils/normalize';
+
+const TOP_METRICS = [
+  { value: 'cpu', label: 'CPU', format: (v) => `${v.toFixed(1)}%` },
+  { value: 'mem', label: 'Memory', format: (v) => `${Math.round(v).toLocaleString()} MB` },
+  { value: 'disk_read', label: 'Disk Read', format: (v) => formatBps(v) },
+  { value: 'disk_write', label: 'Disk Write', format: (v) => formatBps(v) },
+  { value: 'net_rx', label: 'Net RX', format: (v) => formatBps(v) },
+  { value: 'net_tx', label: 'Net TX', format: (v) => formatBps(v) },
+];
+
+function formatBps(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B/s';
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  let current = value;
+  let i = 0;
+  while (current >= 1024 && i < units.length - 1) {
+    current /= 1024;
+    i += 1;
+  }
+  const decimals = current >= 10 || i === 0 ? 0 : 1;
+  return `${current.toFixed(decimals)} ${units[i]}`;
+}
 
 function totalCount(response) {
   if (Array.isArray(response)) return response.length;
@@ -22,10 +44,16 @@ const VM_LIFECYCLE_TYPES = new Set([
 const IMAGE_TYPES = new Set(['image.uploaded', 'image.created', 'image.deleted']);
 
 export default function Dashboard() {
+  const [topMetric, setTopMetric] = useState('cpu');
   const { data: vmResponse, loading: vmLoading, error: vmError, refresh: refreshVMs } = useFetch(() => vms.list(), [], 30000);
   const { data: imageResponse, loading: imgLoading, refresh: refreshImages } = useFetch(() => imagesApi.list(), [], 30000);
   const { data: quotaUsage, loading: quotaLoading, refresh: refreshQuotas } = useFetch(() => quotasApi.usage(), [], 30000);
   const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
+  const { data: topVMsResponse, loading: topLoading, error: topError } = useFetch(
+    () => vms.top({ metric: topMetric, limit: 5 }),
+    [topMetric],
+    10000,
+  );
   const navigate = useNavigate();
 
   const handleEvent = useCallback((evt) => {
@@ -83,6 +111,15 @@ export default function Dashboard() {
         <QuotaCard label="RAM allocated" resource={quotaUsage?.ram_mb} unit="MB" icon={MemoryStick} loading={quotaLoading} />
         <QuotaCard label="Disk allocated" resource={quotaUsage?.disk_gb} unit="GB" icon={Database} loading={quotaLoading} />
       </div>
+
+      <TopVMsCard
+        metric={topMetric}
+        onMetricChange={setTopMetric}
+        response={topVMsResponse}
+        loading={topLoading}
+        error={topError}
+        onSelectVM={(id) => navigate(`/vms/${id}`)}
+      />
 
       <div className="card">
         <div className="px-4 py-3 border-b border-steel-800/40">
@@ -179,6 +216,73 @@ function HostUsageCard({ label, resource, icon: Icon, loading, formatValue, form
       </div>
       <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
       <p className="text-xs text-steel-500 mt-1">{subtitle}</p>
+    </div>
+  );
+}
+
+function TopVMsCard({ metric, onMetricChange, response, loading, error, onSelectVM }) {
+  const items = Array.isArray(response?.items) ? response.items : [];
+  const config = TOP_METRICS.find(m => m.value === metric) ?? TOP_METRICS[0];
+
+  return (
+    <div className="card mb-6" data-testid="top-vms-card">
+      <div className="px-4 py-3 border-b border-steel-800/40 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={14} className="text-steel-500" />
+          <h2 className="text-sm font-display font-semibold text-steel-300">Top 5 Machines by {config.label}</h2>
+        </div>
+        <select
+          className="bg-steel-900 border border-steel-800/60 rounded text-xs text-steel-200 px-2 py-1 font-mono"
+          value={metric}
+          onChange={(e) => onMetricChange(e.target.value)}
+          aria-label="Top VMs metric selector"
+          data-testid="top-vms-metric"
+        >
+          {TOP_METRICS.map(m => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {error && <div className="p-4"><ErrorBanner message={error} /></div>}
+
+      {loading && !response ? (
+        <div className="flex justify-center py-6"><Spinner size={16} /></div>
+      ) : items.length === 0 ? (
+        <div className="px-4 py-6 text-center text-xs text-steel-500" data-testid="top-vms-empty">
+          No samples yet for {config.label.toLowerCase()}.
+        </div>
+      ) : (
+        <table className="w-full" data-testid="top-vms-table">
+          <thead>
+            <tr className="border-b border-steel-800/40">
+              <th className="table-header table-cell w-10">#</th>
+              <th className="table-header table-cell">Name</th>
+              <th className="table-header table-cell">Status</th>
+              <th className="table-header table-cell text-right">{config.label}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, idx) => (
+              <tr
+                key={item.vm_id}
+                className="cursor-pointer hover:bg-steel-800/30 transition-colors"
+                onClick={() => onSelectVM(item.vm_id)}
+                data-testid={`top-vm-row-${item.name}`}
+              >
+                <td className="table-cell text-xs font-mono text-steel-500">{idx + 1}</td>
+                <td className="table-cell">
+                  <span className="font-mono text-steel-100 text-sm">{item.name}</span>
+                </td>
+                <td className="table-cell"><StatusBadge state={item.state} /></td>
+                <td className="table-cell text-right font-mono text-sm text-steel-200">
+                  {config.format(Number(item.value) || 0)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

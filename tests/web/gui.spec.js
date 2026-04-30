@@ -86,6 +86,41 @@ test.describe("Dashboard", () => {
     // Should show VM detail
     await expect(page.getByTestId("vm-detail-name")).toHaveText("web-server");
   });
+
+  test("shows top VMs leaderboard and switches metrics", async ({ page }) => {
+    await page.goto(BASE_URL);
+
+    const card = page.getByTestId("top-vms-card");
+    await expect(card).toBeVisible();
+
+    // Default metric is CPU; the seeded running VM ("web-server") should appear.
+    await expect(page.getByTestId("top-vms-table")).toBeVisible();
+    await expect(page.getByTestId("top-vm-row-web-server")).toBeVisible();
+
+    // Switch metric to memory and verify the table re-renders.
+    await page.getByTestId("top-vms-metric").selectOption("mem");
+    await expect(page.getByTestId("top-vms-table")).toBeVisible();
+    await expect(page.getByTestId("top-vm-row-web-server")).toBeVisible();
+  });
+
+  test("clicking a top-VM row navigates to its detail page", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("top-vm-row-web-server").click();
+    await expect(page.getByTestId("vm-detail-name")).toHaveText("web-server");
+  });
+
+  test("shows empty-state message when no VMs reported metrics", async ({ page }) => {
+    await page.route("**/api/v1/vms/stats/top*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metric: "cpu", limit: 5, state: "running", items: [] }),
+      });
+    });
+
+    await page.goto(BASE_URL);
+    await expect(page.getByTestId("top-vms-empty")).toContainText("No samples yet");
+  });
 });
 
 // ============================================================

@@ -76,6 +76,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/stats/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Top VMs by metric
+         * @description Returns the top-N VMs ranked by the requested metric, sorted descending.
+         *     Values are taken from each VM's most recent in-memory metric sample;
+         *     VMs without a sample for the requested metric are skipped. Returns 503
+         *     when metrics collection is disabled.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Which metric to rank by. */
+                    metric?: "cpu" | "mem" | "disk_read" | "disk_write" | "net_rx" | "net_tx";
+                    limit?: number;
+                    /** @description Limit to running VMs (default) or include all VMs. */
+                    state?: "running" | "all";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Top VMs ranked by metric */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TopVMResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/bulk": {
         parameters: {
             query?: never;
@@ -1259,6 +1310,40 @@ export interface components {
         BulkVMActionResponse: {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
+        };
+        MetricSample: {
+            /** Format: date-time */
+            timestamp: string;
+            /** Format: double */
+            cpu_percent?: number | null;
+            /** Format: int64 */
+            mem_used_mb?: number | null;
+            /** Format: int64 */
+            mem_avail_mb?: number | null;
+            /** Format: int64 */
+            disk_read_bps?: number | null;
+            /** Format: int64 */
+            disk_write_bps?: number | null;
+            /** Format: int64 */
+            net_rx_bps?: number | null;
+            /** Format: int64 */
+            net_tx_bps?: number | null;
+        };
+        TopVMItem: {
+            vm_id: string;
+            name: string;
+            state: string;
+            /** Format: double */
+            value: number;
+            sample?: components["schemas"]["MetricSample"];
+        };
+        TopVMResponse: {
+            /** @enum {string} */
+            metric: "cpu" | "mem" | "disk_read" | "disk_write" | "net_rx" | "net_tx";
+            limit: number;
+            /** @enum {string} */
+            state: "running" | "all";
+            items: components["schemas"]["TopVMItem"][];
         };
         Snapshot: {
             id: string;

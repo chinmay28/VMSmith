@@ -89,6 +89,36 @@ const server = http.createServer(async (req, res) => {
     const list = [...vms.values()];
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
   }
+  if (p === "/api/v1/vms/stats/top" && method === "GET") {
+    const metric = url.searchParams.get("metric") || "cpu";
+    const limit = Math.max(1, parseInt(url.searchParams.get("limit") || "5", 10) || 5);
+    const state = url.searchParams.get("state") || "running";
+    const list = [...vms.values()].filter(v => state === "all" || v.state === "running");
+    // Synthesize a deterministic value per VM based on name length and metric
+    // so the dashboard shows a stable, ranked leaderboard in mock tests.
+    const seedFor = (name) => {
+      let h = 0;
+      for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      return h;
+    };
+    const metricValue = (vm) => {
+      const seed = seedFor(vm.name);
+      switch (metric) {
+        case "cpu": return (seed % 100) + (seed % 10) / 10;
+        case "mem": return (seed % 4096) + 256;
+        case "disk_read":
+        case "disk_write":
+        case "net_rx":
+        case "net_tx": return seed % 5_000_000;
+        default: return seed % 100;
+      }
+    };
+    const items = list.map(vm => ({
+      vm_id: vm.id, name: vm.name, state: vm.state, value: metricValue(vm),
+    }));
+    items.sort((a, b) => b.value - a.value || (a.vm_id < b.vm_id ? -1 : 1));
+    return json(res, 200, { metric, limit, state, items: items.slice(0, limit) });
+  }
   if (p === "/api/v1/vms" && method === "POST") {
     const spec = await parseBody(req);
     const vm = createVM(spec);
