@@ -121,6 +121,50 @@ async function main() {
 
     await page.close();
 
+    // ----- Top VMs leaderboard -----
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(1000);
+
+    await runTest("renders top VMs leaderboard", async (p) => {
+      await assertVisible(p, "top-vms-card");
+      await assertVisible(p, "top-vms-table");
+      await assertVisible(p, "top-vm-row-web-server");
+    }, page);
+
+    await runTest("changing the metric reloads the leaderboard", async (p) => {
+      await p.locator('[data-testid="top-vms-metric"]').selectOption("mem");
+      await p.waitForTimeout(500);
+      await assertVisible(p, "top-vms-table");
+      await assertVisible(p, "top-vm-row-web-server");
+    }, page);
+
+    await runTest("clicking a top-VM row opens its detail page", async (p) => {
+      await p.locator('[data-testid="top-vm-row-web-server"]').click();
+      await p.waitForTimeout(500);
+      await assertText(p, "vm-detail-name", "web-server");
+    }, page);
+
+    await page.close();
+
+    // Empty leaderboard state — intercept the endpoint and return zero items.
+    page = await context.newPage();
+    await page.route("**/api/v1/vms/stats/top*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ metric: "cpu", limit: 5, state: "running", items: [] }),
+      });
+    });
+    await page.goto(BASE);
+    await page.waitForTimeout(1000);
+
+    await runTest("shows empty state when no VMs reported metrics", async (p) => {
+      await assertVisible(p, "top-vms-empty");
+    }, page);
+
+    await page.close();
+
     page = await context.newPage();
     await page.route("**/api/v1/vms*", async (route) => {
       await route.fulfill({

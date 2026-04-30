@@ -71,6 +71,50 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/stats/top:
+    get:
+      tags: [VMs]
+      summary: Top VMs by metric
+      description: |
+        Returns the top-N VMs ranked by the requested metric, sorted descending.
+        Values are taken from each VM's most recent in-memory metric sample;
+        VMs without a sample for the requested metric are skipped. Returns 503
+        when metrics collection is disabled.
+      parameters:
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [cpu, mem, disk_read, disk_write, net_rx, net_tx]
+            default: cpu
+          description: Which metric to rank by.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 5
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [running, all]
+            default: running
+          description: Limit to running VMs (default) or include all VMs.
+      responses:
+        '200':
+          description: Top VMs ranked by metric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopVMResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/bulk:
     post:
       tags: [VMs]
@@ -945,6 +989,72 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
+    MetricSample:
+      type: object
+      required: [timestamp]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        cpu_percent:
+          type: number
+          format: double
+          nullable: true
+        mem_used_mb:
+          type: integer
+          format: int64
+          nullable: true
+        mem_avail_mb:
+          type: integer
+          format: int64
+          nullable: true
+        disk_read_bps:
+          type: integer
+          format: int64
+          nullable: true
+        disk_write_bps:
+          type: integer
+          format: int64
+          nullable: true
+        net_rx_bps:
+          type: integer
+          format: int64
+          nullable: true
+        net_tx_bps:
+          type: integer
+          format: int64
+          nullable: true
+    TopVMItem:
+      type: object
+      required: [vm_id, name, state, value]
+      properties:
+        vm_id:
+          type: string
+        name:
+          type: string
+        state:
+          type: string
+        value:
+          type: number
+          format: double
+        sample:
+          $ref: '#/components/schemas/MetricSample'
+    TopVMResponse:
+      type: object
+      required: [metric, limit, state, items]
+      properties:
+        metric:
+          type: string
+          enum: [cpu, mem, disk_read, disk_write, net_rx, net_tx]
+        limit:
+          type: integer
+        state:
+          type: string
+          enum: [running, all]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopVMItem'
     Snapshot:
       type: object
       required: [id, vm_id, name, created_at]

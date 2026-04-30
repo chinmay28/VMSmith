@@ -169,6 +169,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Post("/", s.withRequestBodyLimit(s.CreateVM))
 			r.Get("/", s.ListVMs)
 			r.Post("/bulk", s.withRequestBodyLimit(s.BulkVMAction))
+			r.Get("/stats/top", s.GetTopVMs)
 			r.Route("/{vmID}", func(r chi.Router) {
 				r.Get("/", s.GetVM)
 				r.Post("/clone", s.withRequestBodyLimit(s.CloneVM))

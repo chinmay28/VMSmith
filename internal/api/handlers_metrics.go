@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,6 +164,177 @@ func escapePromLabel(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// TopVMItem is one entry in a top-N response from GetTopVMs.
+type TopVMItem struct {
+	VMID   string              `json:"vm_id"`
+	Name   string              `json:"name"`
+	State  string              `json:"state"`
+	Value  float64             `json:"value"`
+	Sample *types.MetricSample `json:"sample,omitempty"`
+}
+
+// TopVMResponse is the response body for GET /api/v1/vms/stats/top.
+type TopVMResponse struct {
+	Metric string      `json:"metric"`
+	Limit  int         `json:"limit"`
+	State  string      `json:"state"`
+	Items  []TopVMItem `json:"items"`
+}
+
+// metricExtractor pulls a numeric value out of a MetricSample.
+// Returns ok=false when the sample lacks the requested field.
+type metricExtractor func(s *types.MetricSample) (float64, bool)
+
+var topMetricExtractors = map[string]metricExtractor{
+	"cpu": func(s *types.MetricSample) (float64, bool) {
+		if s.CPUPercent == nil {
+			return 0, false
+		}
+		return *s.CPUPercent, true
+	},
+	"mem": func(s *types.MetricSample) (float64, bool) {
+		if s.MemUsedMB == nil {
+			return 0, false
+		}
+		return float64(*s.MemUsedMB), true
+	},
+	"disk_read": func(s *types.MetricSample) (float64, bool) {
+		if s.DiskReadBps == nil {
+			return 0, false
+		}
+		return float64(*s.DiskReadBps), true
+	},
+	"disk_write": func(s *types.MetricSample) (float64, bool) {
+		if s.DiskWriteBps == nil {
+			return 0, false
+		}
+		return float64(*s.DiskWriteBps), true
+	},
+	"net_rx": func(s *types.MetricSample) (float64, bool) {
+		if s.NetRxBps == nil {
+			return 0, false
+		}
+		return float64(*s.NetRxBps), true
+	},
+	"net_tx": func(s *types.MetricSample) (float64, bool) {
+		if s.NetTxBps == nil {
+			return 0, false
+		}
+		return float64(*s.NetTxBps), true
+	},
+}
+
+// supportedTopMetrics lists the accepted ?metric= values, ordered for stable
+// error messages.
+var supportedTopMetrics = []string{"cpu", "mem", "disk_read", "disk_write", "net_rx", "net_tx"}
+
+const (
+	defaultTopLimit = 5
+	maxTopLimit     = 100
+)
+
+// GetTopVMs handles GET /api/v1/vms/stats/top.
+//
+// Query params:
+//   - ?metric=<name>  — required: cpu | mem | disk_read | disk_write | net_rx | net_tx
+//   - ?limit=<n>      — optional: 1..100 (default 5)
+//   - ?state=<s>      — optional: running (default) | all
+//
+// Returns 503 when metrics are disabled, 400 for invalid params, 200 with the
+// top-N items sorted by metric value descending. Items missing the requested
+// metric (or whose VM has no current sample) are skipped.
+func (s *Server) GetTopVMs(w http.ResponseWriter, r *http.Request) {
+	if s.metricsManager == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "metrics_disabled",
+			"metrics collection is disabled; enable daemon.metrics.enabled in config")
+		return
+	}
+
+	q := r.URL.Query()
+
+	metric := strings.TrimSpace(strings.ToLower(q.Get("metric")))
+	if metric == "" {
+		metric = "cpu"
+	}
+	extractor, ok := topMetricExtractors[metric]
+	if !ok {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_metric",
+			"metric must be one of: "+strings.Join(supportedTopMetrics, ", "))
+		return
+	}
+
+	limit := defaultTopLimit
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxTopLimit {
+			writeErrorCode(w, http.StatusBadRequest, "invalid_limit",
+				fmt.Sprintf("limit must be an integer between 1 and %d", maxTopLimit))
+			return
+		}
+		limit = n
+	}
+
+	state := strings.TrimSpace(strings.ToLower(q.Get("state")))
+	if state == "" {
+		state = "running"
+	}
+	if state != "running" && state != "all" {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_state",
+			"state must be 'running' or 'all'")
+		return
+	}
+
+	vms, err := s.vmManager.List(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			types.NewAPIError("internal_error", "failed to list VMs"))
+		return
+	}
+
+	items := make([]TopVMItem, 0, len(vms))
+	for _, v := range vms {
+		if state == "running" && v.State != types.VMStateRunning {
+			continue
+		}
+		snap, err := s.metricsManager.Snapshot(v.ID)
+		if err != nil || snap == nil || snap.Current == nil {
+			continue
+		}
+		val, ok := extractor(snap.Current)
+		if !ok {
+			continue
+		}
+		// Copy the sample so the caller cannot mutate the live ring entry.
+		sample := *snap.Current
+		items = append(items, TopVMItem{
+			VMID:   v.ID,
+			Name:   v.Name,
+			State:  string(v.State),
+			Value:  val,
+			Sample: &sample,
+		})
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Value != items[j].Value {
+			return items[i].Value > items[j].Value
+		}
+		// Deterministic tiebreaker on VM ID so the response is stable.
+		return items[i].VMID < items[j].VMID
+	})
+
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	writeJSON(w, http.StatusOK, TopVMResponse{
+		Metric: metric,
+		Limit:  limit,
+		State:  state,
+		Items:  items,
+	})
 }
 
 // PrometheusMetrics handles GET /metrics and returns Prometheus text-format metrics.

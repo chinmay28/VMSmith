@@ -78,6 +78,8 @@ export const vms = {
     unwrap(apiClient.GET('/vms/{vmID}/stats', {
       params: { path: { vmID: id }, query: { since: since || undefined, fields: fields || undefined } as any },
     })),
+  top: ({ metric = 'cpu', limit = 5, state = 'running' }: { metric?: 'cpu' | 'mem' | 'disk_read' | 'disk_write' | 'net_rx' | 'net_tx'; limit?: number; state?: 'running' | 'all' } = {}) =>
+    unwrap(apiClient.GET('/vms/stats/top', { params: { query: { metric, limit, state } } })),
 };
 
 // --- Snapshots ---

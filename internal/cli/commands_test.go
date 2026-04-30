@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1415,5 +1417,108 @@ func TestCLI_DaemonStatus_NotRunning(t *testing.T) {
 	}
 	if !strings.Contains(out, "vmSmith daemon is not running") {
 		t.Fatalf("expected not-running output, got %q", out)
+	}
+}
+
+// =====================================================
+// vm top tests (CLI hits a fake daemon /api/v1/vms/stats/top)
+// =====================================================
+
+func TestCLI_VMTop_RendersLeaderboard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/vms/stats/top" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("metric") != "cpu" {
+			t.Errorf("metric = %q, want cpu", q.Get("metric"))
+		}
+		if q.Get("limit") != "3" {
+			t.Errorf("limit = %q, want 3", q.Get("limit"))
+		}
+		if q.Get("state") != "running" {
+			t.Errorf("state = %q, want running", q.Get("state"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"metric":"cpu","limit":3,"state":"running",
+			"items":[
+				{"vm_id":"vm-a","name":"alpha","state":"running","value":80.0},
+				{"vm_id":"vm-b","name":"bravo","state":"running","value":40.0}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	out, err := runCLI("vm", "top", "--api-url", srv.URL, "--limit", "3")
+	if err != nil {
+		t.Fatalf("vm top: %v", err)
+	}
+	for _, want := range []string{"alpha", "vm-a", "80.0%", "bravo", "vm-b", "Top 3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCLI_VMTop_EmptyMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"metric":"cpu","limit":5,"state":"running","items":[]}`))
+	}))
+	defer srv.Close()
+
+	out, err := runCLI("vm", "top", "--api-url", srv.URL)
+	if err != nil {
+		t.Fatalf("vm top: %v", err)
+	}
+	if !strings.Contains(out, "No VMs reported a sample") {
+		t.Errorf("expected empty message, got %q", out)
+	}
+}
+
+func TestCLI_VMTop_RejectsUnsupportedMetric(t *testing.T) {
+	_, err := runCLI("vm", "top", "--metric", "bogus", "--api-url", "http://invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid metric")
+	}
+	if !strings.Contains(err.Error(), "unsupported metric") {
+		t.Errorf("error = %v, want unsupported metric", err)
+	}
+}
+
+func TestCLI_VMTop_PropagatesDaemonDisabled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"code":"metrics_disabled"}`))
+	}))
+	defer srv.Close()
+
+	_, err := runCLI("vm", "top", "--api-url", srv.URL)
+	if err == nil {
+		t.Fatal("expected error when daemon reports metrics_disabled")
+	}
+	if !strings.Contains(err.Error(), "metrics are disabled") {
+		t.Errorf("error = %v, want 'metrics are disabled' message", err)
+	}
+}
+
+func TestCLI_VMTop_FormatsByteRates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"metric":"net_rx","limit":5,"state":"running",
+			"items":[{"vm_id":"vm-x","name":"xray","state":"running","value":2097152}]
+		}`))
+	}))
+	defer srv.Close()
+
+	out, err := runCLI("vm", "top", "--metric", "net_rx", "--api-url", srv.URL)
+	if err != nil {
+		t.Fatalf("vm top: %v", err)
+	}
+	if !strings.Contains(out, "MB/s") {
+		t.Errorf("expected MB/s output for byte rate, got:\n%s", out)
 	}
 }
