@@ -215,6 +215,46 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/stats:
+    get:
+      tags: [VMs]
+      summary: Get VM resource metrics
+      description: |
+        Returns the most recent metric sample plus the in-memory history ring
+        for a VM. History is ordered oldest-first. Metric fields are nullable —
+        a missing CPU/mem/disk/net field means the daemon has no value for that
+        metric (e.g., counter reset, guest agent unavailable, or the first
+        sample after boot has no prior counter to derive a rate from).
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - name: since
+          in: query
+          required: false
+          description: RFC 3339 timestamp; truncate history to samples after this time.
+          schema:
+            type: string
+            format: date-time
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated projection (any of `cpu`, `mem`, `disk`, `net`).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: VM stats snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VMStatsSnapshot'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/snapshots:
     get:
       tags: [Snapshots]
@@ -1129,6 +1169,80 @@ components:
           type: string
         fields:
           $ref: '#/components/schemas/LogField'
+    MetricSample:
+      type: object
+      required: [timestamp]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        cpu_percent:
+          type: number
+          format: double
+          nullable: true
+          description: CPU utilisation percent across all vCPUs (null when unavailable).
+        mem_used_mb:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        mem_avail_mb:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: Available memory reported by the guest agent (null without it).
+        disk_read_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        disk_write_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        net_rx_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        net_tx_bps:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+    VMStatsSnapshot:
+      type: object
+      required: [vm_id, state, history, interval_seconds, history_size]
+      properties:
+        vm_id:
+          type: string
+        state:
+          type: string
+          description: VM state at the time of the response (running, stopped, ...).
+        last_sampled_at:
+          type: string
+          format: date-time
+          nullable: true
+        current:
+          allOf:
+            - $ref: '#/components/schemas/MetricSample'
+          nullable: true
+          description: Most recent sample (mirrors the last entry in `history`).
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricSample'
+          description: Sample history, oldest first.
+        interval_seconds:
+          type: integer
+          minimum: 0
+          description: Configured sample interval in seconds.
+        history_size:
+          type: integer
+          minimum: 0
+          description: Configured ring buffer capacity (max samples retained).
     Event:
       type: object
       required: [id, type, source, severity, message, occurred_at]

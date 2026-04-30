@@ -91,6 +91,9 @@ export default function VMDetail() {
         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} testId="tab-overview">
           Overview
         </TabButton>
+        <TabButton active={activeTab === 'metrics'} onClick={() => setActiveTab('metrics')} testId="tab-metrics">
+          Metrics
+        </TabButton>
         <TabButton active={activeTab === 'activity'} onClick={() => setActiveTab('activity')} testId="tab-activity">
           Activity
         </TabButton>
@@ -99,6 +102,10 @@ export default function VMDetail() {
       {activeTab === 'activity' ? (
         <div className="min-h-[300px]" data-testid="vm-detail-activity">
           <Activity vmId={id} embedded />
+        </div>
+      ) : activeTab === 'metrics' ? (
+        <div className="min-h-[300px]" data-testid="vm-detail-metrics">
+          <VMMetrics vmId={id} />
         </div>
       ) : (
       <>
@@ -615,4 +622,107 @@ function ExportImageModal({ vmId, open, onClose }) {
       )}
     </Modal>
   );
+}
+
+// --- VM Metrics ---
+function VMMetrics({ vmId }) {
+  const { data: snap, loading, error } = useFetch(() => vms.stats(vmId), [vmId], 10000);
+
+  if (loading && !snap) return <div className="flex justify-center py-10"><Spinner size={20} /></div>;
+  if (error) return <ErrorBanner message={error} />;
+  if (!snap) return null;
+
+  const cur = snap.current || null;
+  const history = safeArray(snap.history);
+
+  // Compute 5-minute averages from history.
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+  const recent = history.filter((s) => {
+    const ts = s?.timestamp ? Date.parse(s.timestamp) : NaN;
+    return Number.isFinite(ts) && ts >= fiveMinAgo;
+  });
+
+  const avgFloat = (field) => {
+    let sum = 0, n = 0;
+    for (const s of recent) {
+      const v = s?.[field];
+      if (typeof v === 'number') { sum += v; n += 1; }
+    }
+    return n === 0 ? null : sum / n;
+  };
+  const avgInt = avgFloat;
+
+  const lastSampled = snap.last_sampled_at ? new Date(snap.last_sampled_at).toLocaleString() : '—';
+
+  return (
+    <div className="space-y-4" data-testid="vm-metrics-content">
+      <div className="grid grid-cols-3 gap-3">
+        <InfoCard label="State" value={snap.state || '—'} testId="metrics-state" />
+        <InfoCard label="Last Sampled" value={lastSampled} testId="metrics-last-sampled" />
+        <InfoCard label="History" value={`${history.length}/${snap.history_size || 0} samples · ${snap.interval_seconds || 0}s interval`} testId="metrics-history-meta" />
+      </div>
+
+      {!cur ? (
+        <EmptyState
+          title="No metrics yet"
+          description={
+            snap.state === 'running'
+              ? 'No samples collected yet. The first sample appears within one interval.'
+              : 'VM is not running — metrics resume after start.'
+          }
+        />
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
+            <h2 className="text-sm font-display font-semibold text-steel-300">Resource Utilization</h2>
+            <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">refreshing every 10s</span>
+          </div>
+          <table className="w-full text-sm" data-testid="metrics-table">
+            <thead className="text-left text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500 border-b border-steel-800/40">
+              <tr>
+                <th className="px-4 py-2">Metric</th>
+                <th className="px-4 py-2">Current</th>
+                <th className="px-4 py-2">5-min avg</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-steel-800/40">
+              <MetricRow label="CPU %" testId="metric-cpu" cur={fmtPercent(cur.cpu_percent)} avg={fmtPercent(avgFloat('cpu_percent'))} />
+              <MetricRow label="Memory used" testId="metric-mem-used" cur={fmtMB(cur.mem_used_mb)} avg={fmtMB(avgInt('mem_used_mb'))} />
+              <MetricRow label="Memory available" testId="metric-mem-avail" cur={fmtMB(cur.mem_avail_mb)} avg={fmtMB(avgInt('mem_avail_mb'))} />
+              <MetricRow label="Disk read" testId="metric-disk-read" cur={fmtBps(cur.disk_read_bps)} avg={fmtBps(avgInt('disk_read_bps'))} />
+              <MetricRow label="Disk write" testId="metric-disk-write" cur={fmtBps(cur.disk_write_bps)} avg={fmtBps(avgInt('disk_write_bps'))} />
+              <MetricRow label="Network RX" testId="metric-net-rx" cur={fmtBps(cur.net_rx_bps)} avg={fmtBps(avgInt('net_rx_bps'))} />
+              <MetricRow label="Network TX" testId="metric-net-tx" cur={fmtBps(cur.net_tx_bps)} avg={fmtBps(avgInt('net_tx_bps'))} />
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricRow({ label, cur, avg, testId }) {
+  return (
+    <tr data-testid={testId}>
+      <td className="px-4 py-2 text-steel-300">{label}</td>
+      <td className="px-4 py-2 font-mono text-steel-100" data-testid={`${testId}-current`}>{cur}</td>
+      <td className="px-4 py-2 font-mono text-steel-400" data-testid={`${testId}-avg`}>{avg}</td>
+    </tr>
+  );
+}
+
+function fmtPercent(v) {
+  return typeof v === 'number' ? `${v.toFixed(1)}%` : 'n/a';
+}
+
+function fmtMB(v) {
+  return typeof v === 'number' ? `${Math.round(v).toLocaleString()} MB` : 'n/a';
+}
+
+function fmtBps(v) {
+  if (typeof v !== 'number') return 'n/a';
+  if (v >= 1 << 30) return `${(v / (1 << 30)).toFixed(1)} GB/s`;
+  if (v >= 1 << 20) return `${(v / (1 << 20)).toFixed(1)} MB/s`;
+  if (v >= 1 << 10) return `${(v / (1 << 10)).toFixed(1)} KB/s`;
+  return `${Math.round(v)} B/s`;
 }

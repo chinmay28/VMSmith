@@ -342,6 +342,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get VM resource metrics
+         * @description Returns the most recent metric sample plus the in-memory history ring
+         *     for a VM. History is ordered oldest-first. Metric fields are nullable —
+         *     a missing CPU/mem/disk/net field means the daemon has no value for that
+         *     metric (e.g., counter reset, guest agent unavailable, or the first
+         *     sample after boot has no prior counter to derive a rate from).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description RFC 3339 timestamp; truncate history to samples after this time. */
+                    since?: string;
+                    /** @description Comma-separated projection (any of `cpu`, `mem`, `disk`, `net`). */
+                    fields?: string;
+                };
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM stats snapshot */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VMStatsSnapshot"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/snapshots": {
         parameters: {
             query?: never;
@@ -1317,6 +1371,45 @@ export interface components {
             source?: string;
             msg?: string;
             fields?: components["schemas"]["LogField"];
+        };
+        MetricSample: {
+            /** Format: date-time */
+            timestamp: string;
+            /**
+             * Format: double
+             * @description CPU utilisation percent across all vCPUs (null when unavailable).
+             */
+            cpu_percent?: number | null;
+            /** Format: int64 */
+            mem_used_mb?: number | null;
+            /**
+             * Format: int64
+             * @description Available memory reported by the guest agent (null without it).
+             */
+            mem_avail_mb?: number | null;
+            /** Format: int64 */
+            disk_read_bps?: number | null;
+            /** Format: int64 */
+            disk_write_bps?: number | null;
+            /** Format: int64 */
+            net_rx_bps?: number | null;
+            /** Format: int64 */
+            net_tx_bps?: number | null;
+        };
+        VMStatsSnapshot: {
+            vm_id: string;
+            /** @description VM state at the time of the response (running, stopped, ...). */
+            state: string;
+            /** Format: date-time */
+            last_sampled_at?: string | null;
+            /** @description Most recent sample (mirrors the last entry in `history`). */
+            current?: components["schemas"]["MetricSample"] | null;
+            /** @description Sample history, oldest first. */
+            history: components["schemas"]["MetricSample"][];
+            /** @description Configured sample interval in seconds. */
+            interval_seconds: number;
+            /** @description Configured ring buffer capacity (max samples retained). */
+            history_size: number;
         };
         Event: {
             /** @description Stringified monotonic uint64 assigned by the EventBus. */

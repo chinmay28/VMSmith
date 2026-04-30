@@ -151,6 +151,42 @@ const server = http.createServer(async (req, res) => {
     vm.ip = "";
     return json(res, 200, vm);
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/stats$/)) && method === "GET") {
+    const vmId = m[1];
+    const vm = vms.get(vmId);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: `vm "${vmId}" not found` });
+    const intervalSeconds = 10;
+    const historySize = 360;
+    const now = Date.now();
+    // Synthesize a deterministic 6-sample history so tests don't rely on
+    // wall-clock values. Sample N is `now - (5-N)*interval` so the most
+    // recent sample is `now`. Stopped VMs return frozen history with no
+    // `current` to mirror the daemon's stale-sample behavior.
+    const history = [];
+    for (let i = 0; i < 6; i++) {
+      const ts = new Date(now - (5 - i) * intervalSeconds * 1000).toISOString();
+      history.push({
+        timestamp: ts,
+        cpu_percent: 10 + i * 5,
+        mem_used_mb: 512 + i * 16,
+        mem_avail_mb: 1024 - i * 16,
+        disk_read_bps: 1024 * (i + 1),
+        disk_write_bps: 2048 * (i + 1),
+        net_rx_bps: 4096 * (i + 1),
+        net_tx_bps: 8192 * (i + 1),
+      });
+    }
+    const current = vm.state === "running" ? history[history.length - 1] : null;
+    return json(res, 200, {
+      vm_id: vmId,
+      state: vm.state,
+      last_sampled_at: history[history.length - 1].timestamp,
+      current,
+      history,
+      interval_seconds: intervalSeconds,
+      history_size: historySize,
+    });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
     return json(res, 200, snapshots.get(m[1]) || []);
   }
