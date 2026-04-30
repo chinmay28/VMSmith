@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -28,6 +29,30 @@ type LibvirtManager struct {
 	lifecycleCallbackID int
 	lifecycleRegistered bool
 	lifecycleStopCh     chan struct{}
+	eventBus            *events.EventBus
+}
+
+// SetEventBus wires an event bus so the manager can emit system events for
+// failure modes that would otherwise only surface as warnings (e.g. DHCP
+// range exhaustion).  Safe to call before or after Create/Clone; nil is
+// treated as "no bus configured" and no events are emitted.
+func (m *LibvirtManager) SetEventBus(bus *events.EventBus) {
+	m.eventBus = bus
+}
+
+// emitDHCPExhausted publishes a `dhcp.exhausted` system event when the NAT
+// network's DHCP range cannot satisfy a static-IP reservation.  No-op when
+// no event bus is configured.
+func (m *LibvirtManager) emitDHCPExhausted(vmName, reason string) {
+	if m.eventBus == nil {
+		return
+	}
+	m.eventBus.Publish(events.NewSystemEventWithAttrs(
+		"dhcp.exhausted",
+		types.EventSeverityWarn,
+		"DHCP range exhausted; falling back to dynamic IP assignment for "+vmName,
+		map[string]string{"vm_name": vmName, "reason": reason},
+	))
 }
 
 // NewLibvirtManager creates a new libvirt-backed VM manager.
@@ -137,6 +162,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		} else {
 			logger.Warn("daemon", "DHCP range exhausted; falling back to dynamic IP assignment",
 				"vm", spec.Name, "error", err.Error())
+			m.emitDHCPExhausted(spec.Name, err.Error())
 		}
 	}
 
@@ -288,6 +314,7 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 		} else {
 			logger.Warn("daemon", "DHCP range exhausted for clone; falling back to dynamic IP assignment",
 				"vm", clonedSpec.Name, "error", err.Error())
+			m.emitDHCPExhausted(clonedSpec.Name, err.Error())
 		}
 	}
 

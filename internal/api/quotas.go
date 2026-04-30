@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -85,16 +86,27 @@ func (s *Server) enforceUpdateQuotas(ctx context.Context, current *types.VM, pat
 
 func (s *Server) validateQuotaUsage(usage quotaUsage) error {
 	if limit := s.quotas.MaxVMs; limit > 0 && usage.VMs > limit {
-		return types.NewAPIError("quota_exceeded", fmt.Sprintf("VM quota exceeded: %d configured, limit is %d", usage.VMs, limit))
+		return s.quotaExceeded("max_vms", usage.VMs, limit, fmt.Sprintf("VM quota exceeded: %d configured, limit is %d", usage.VMs, limit))
 	}
 	if limit := s.quotas.MaxTotalCPUs; limit > 0 && usage.CPUs > limit {
-		return types.NewAPIError("quota_exceeded", fmt.Sprintf("CPU quota exceeded: %d configured, limit is %d", usage.CPUs, limit))
+		return s.quotaExceeded("max_total_cpus", usage.CPUs, limit, fmt.Sprintf("CPU quota exceeded: %d configured, limit is %d", usage.CPUs, limit))
 	}
 	if limit := s.quotas.MaxTotalRAMMB; limit > 0 && usage.RAMMB > limit {
-		return types.NewAPIError("quota_exceeded", fmt.Sprintf("RAM quota exceeded: %d MB configured, limit is %d MB", usage.RAMMB, limit))
+		return s.quotaExceeded("max_total_ram_mb", usage.RAMMB, limit, fmt.Sprintf("RAM quota exceeded: %d MB configured, limit is %d MB", usage.RAMMB, limit))
 	}
 	if limit := s.quotas.MaxTotalDiskGB; limit > 0 && usage.DiskGB > limit {
-		return types.NewAPIError("quota_exceeded", fmt.Sprintf("disk quota exceeded: %d GB configured, limit is %d GB", usage.DiskGB, limit))
+		return s.quotaExceeded("max_total_disk_gb", usage.DiskGB, limit, fmt.Sprintf("disk quota exceeded: %d GB configured, limit is %d GB", usage.DiskGB, limit))
 	}
 	return nil
+}
+
+// quotaExceeded builds the API error and also emits a `quota.exceeded`
+// system event so operators see quota breaches in the events stream/timeline.
+func (s *Server) quotaExceeded(field string, attempted, limit int, message string) error {
+	s.publishSystemEvent("quota.exceeded", types.EventSeverityWarn, message, map[string]string{
+		"field":     field,
+		"attempted": strconv.Itoa(attempted),
+		"limit":     strconv.Itoa(limit),
+	})
+	return types.NewAPIError("quota_exceeded", message)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/internal/web"
+	"github.com/vmsmith/vmsmith/pkg/types"
 	"libvirt.org/go/libvirt"
 )
 
@@ -85,13 +86,13 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 	logger.Info("daemon", "store opened", "path", cfg.Storage.DBPath)
 
-	var vmMgr vm.Manager
-	vmMgr, err = vm.NewLibvirtManager(cfg, s)
+	libvirtMgr, err := vm.NewLibvirtManager(cfg, s)
 	if err != nil {
 		s.Close()
 		logger.Error("daemon", "connecting to libvirt failed", "error", err.Error())
 		return nil, fmt.Errorf("connecting to libvirt: %w", err)
 	}
+	var vmMgr vm.Manager = libvirtMgr
 	logger.Info("daemon", "connected to libvirt", "uri", cfg.Libvirt.URI)
 
 	// Set up the NAT network.
@@ -110,9 +111,22 @@ func New(cfg *config.Config) (*Daemon, error) {
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
 
+	// Create event bus backed by the store.  Create early so we can emit
+	// system events for failures during the rest of startup (e.g. partial
+	// port-forward restore).  Start() is called from Run().
+	eventBus := events.New(s)
+	logger.Info("daemon", "event bus initialised")
+	libvirtMgr.SetEventBus(eventBus)
+
 	// Restore port forwarding rules.
 	if err := portFwd.RestoreAll(); err != nil {
 		logger.Warn("daemon", "failed to restore some port forwards", "error", err.Error())
+		eventBus.Publish(events.NewSystemEventWithAttrs(
+			"port_forward.restore_failed",
+			types.EventSeverityWarn,
+			"failed to restore one or more port forwards on daemon startup",
+			map[string]string{"error": err.Error()},
+		))
 	} else {
 		logger.Info("daemon", "port forwarding rules restored")
 	}
@@ -137,10 +151,6 @@ func New(cfg *config.Config) (*Daemon, error) {
 	} else {
 		logger.Info("daemon", "metrics collection disabled by config")
 	}
-
-	// Create event bus backed by the store.
-	eventBus := events.New(s)
-	logger.Info("daemon", "event bus initialised")
 
 	// Optional retention loop for the events bucket.
 	var retention *events.Retention

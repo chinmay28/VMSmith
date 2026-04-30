@@ -135,11 +135,17 @@ func NewAppEvent(evtType, vmID, message string, attrs map[string]string) *types.
 
 // NewSystemEvent is a convenience constructor for system-source events.
 func NewSystemEvent(evtType, severity, message string) *types.Event {
+	return NewSystemEventWithAttrs(evtType, severity, message, nil)
+}
+
+// NewSystemEventWithAttrs constructs a system-source event with attributes.
+func NewSystemEventWithAttrs(evtType, severity, message string, attrs map[string]string) *types.Event {
 	return &types.Event{
 		Type:       evtType,
 		Source:     types.EventSourceSystem,
 		Severity:   severity,
 		Message:    message,
+		Attributes: attrs,
 		OccurredAt: time.Now(),
 	}
 }
