@@ -221,6 +221,27 @@ const server = http.createServer(async (req, res) => {
     if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
     return json(res, 200, { entries: filtered, total }, { "X-Total-Count": String(total) });
   }
+  if (p === "/api/v1/events/stream" && method === "GET") {
+    // Mock SSE stream: emit a couple of canned events then keep the connection
+    // open with a comment heartbeat so the frontend's onopen → STATE_LIVE
+    // transition fires deterministically.
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    const liveEvents = [
+      { id: "100", type: "vm.started", source: "libvirt", severity: "info", vm_id: "vm-1", message: "started", occurred_at: new Date().toISOString() },
+      { id: "101", type: "vm.created", source: "app",     severity: "info", vm_id: "vm-2", message: "created", occurred_at: new Date().toISOString() },
+    ];
+    for (const evt of liveEvents) {
+      res.write(`id: ${evt.id}\nevent: ${evt.type}\ndata: ${JSON.stringify(evt)}\n\n`);
+    }
+    const hb = setInterval(() => res.write(": keepalive\n\n"), 1000);
+    req.on("close", () => clearInterval(hb));
+    return;
+  }
   if (p === "/api/v1/events" && method === "GET") {
     const allEvents = [
       { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", message: "VM 'web-server-prod' started", created_at: new Date(Date.now() - 30_000).toISOString() },

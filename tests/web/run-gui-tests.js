@@ -312,6 +312,35 @@ async function main() {
 
     await page.close();
 
+    // ================== Live Indicator ==================
+    console.log("\nLive Indicator:");
+
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(500);
+
+    await runTest("dashboard live indicator reaches live state", async (p) => {
+      const indicator = p.locator('[data-testid="live-indicator"]');
+      await indicator.waitFor({ state: "visible", timeout: 5000 });
+      // Wait until the SSE onopen handler fires.
+      let status = "";
+      for (let i = 0; i < 50; i++) {
+        status = await indicator.getAttribute("data-status");
+        if (status === "live") break;
+        await p.waitForTimeout(100);
+      }
+      await assert(status === "live", `expected status=live, got ${status}`);
+    }, page);
+
+    await runTest("VM list live indicator is wired", async (p) => {
+      await p.locator('[data-testid="nav-vms"]').click();
+      await p.waitForTimeout(500);
+      const indicator = p.locator('[data-testid="live-indicator"]');
+      await indicator.waitFor({ state: "visible", timeout: 5000 });
+    }, page);
+
+    await page.close();
+
     // ================== Full Lifecycle E2E ==================
     console.log("\nFull Lifecycle E2E:");
 

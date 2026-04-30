@@ -1,4 +1,5 @@
-import { X, Inbox } from 'lucide-react';
+import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot } from 'lucide-react';
+import { STATE_LIVE, STATE_RECONNECTING, STATE_FALLBACK } from '../hooks/useEventStream.js';
 
 // --- Status Badge ---
 const stateStyles = {
@@ -102,6 +103,40 @@ export function StatCard({ label, value, icon: Icon, accent, testId }) {
       </div>
       <p className="font-display font-bold text-2xl text-steel-100" data-testid={testId}>{value}</p>
     </div>
+  );
+}
+
+// --- Live Indicator ---
+// Compact pill that surfaces the current useEventStream connection state so
+// operators can tell when the page is actually live vs. polling or stale.
+export function LiveIndicator({ status }) {
+  let className = 'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border inline-flex items-center gap-1';
+  let label;
+  let Icon;
+
+  if (status === STATE_LIVE) {
+    className += ' bg-emerald-900/40 text-emerald-300 border-emerald-700/30';
+    label = 'live';
+    Icon = Radio;
+  } else if (status === STATE_RECONNECTING) {
+    className += ' bg-amber-900/40 text-amber-300 border-amber-700/30';
+    label = 'reconnecting';
+    Icon = RotateCcw;
+  } else if (status === STATE_FALLBACK) {
+    className += ' bg-blue-900/40 text-blue-300 border-blue-700/30';
+    label = 'polling';
+    Icon = WifiOff;
+  } else {
+    className += ' bg-steel-800/60 text-steel-400 border-steel-700/30';
+    label = status || 'offline';
+    Icon = CircleDot;
+  }
+
+  return (
+    <span className={className} data-testid="live-indicator" data-status={status || 'closed'}>
+      <Icon size={10} />
+      {label}
+    </span>
   );
 }
 
