@@ -182,3 +182,12 @@ func (s *Server) publishAppEvent(evtType, vmID, message string, attrs map[string
 	}
 	s.eventBus.Publish(events.NewAppEvent(evtType, vmID, message, attrs))
 }
+
+// publishSystemEvent is a helper for API handlers to emit system-source events.
+// It is a no-op when no bus is wired.
+func (s *Server) publishSystemEvent(evtType, severity, message string, attrs map[string]string) {
+	if s.eventBus == nil {
+		return
+	}
+	s.eventBus.Publish(events.NewSystemEventWithAttrs(evtType, severity, message, attrs))
+}

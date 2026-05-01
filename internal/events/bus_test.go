@@ -198,6 +198,37 @@ func TestBusSubscribeDuplicateNamesDoNotCollide(t *testing.T) {
 	recv(ch2, "second")
 }
 
+func TestNewSystemEventWithAttrs(t *testing.T) {
+	evt := NewSystemEventWithAttrs("port_forward.restore_failed", types.EventSeverityWarn,
+		"failed to restore", map[string]string{"error": "iptables not found"})
+
+	if evt.Type != "port_forward.restore_failed" {
+		t.Errorf("Type = %q, want port_forward.restore_failed", evt.Type)
+	}
+	if evt.Source != types.EventSourceSystem {
+		t.Errorf("Source = %q, want %q", evt.Source, types.EventSourceSystem)
+	}
+	if evt.Severity != types.EventSeverityWarn {
+		t.Errorf("Severity = %q, want warn", evt.Severity)
+	}
+	if evt.Attributes["error"] != "iptables not found" {
+		t.Errorf("attributes.error = %q, want iptables not found", evt.Attributes["error"])
+	}
+	if evt.OccurredAt.IsZero() {
+		t.Error("OccurredAt should be set")
+	}
+}
+
+func TestNewSystemEvent_NoAttrs(t *testing.T) {
+	evt := NewSystemEvent("daemon.shutdown", types.EventSeverityInfo, "shutting down")
+	if evt.Source != types.EventSourceSystem {
+		t.Errorf("Source = %q, want %q", evt.Source, types.EventSourceSystem)
+	}
+	if evt.Attributes != nil {
+		t.Errorf("expected nil Attributes, got %+v", evt.Attributes)
+	}
+}
+
 func TestBusOccurredAtSet(t *testing.T) {
 	store := &mockStore{}
 	bus := New(store)
