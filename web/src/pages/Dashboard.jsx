@@ -84,6 +84,15 @@ export default function Dashboard() {
         actions={
           <>
             <LiveIndicator status={liveStatus} />
+            {Number.isFinite(hostStats?.event_stream_connections) && hostStats.event_stream_connections > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border bg-steel-800/60 text-steel-300 border-steel-700/30"
+                title="Active /api/v1/events/stream consumers"
+                data-testid="sse-connection-count"
+              >
+                {hostStats.event_stream_connections} sse
+              </span>
+            )}
             <button className="btn-primary" onClick={() => navigate('/vms?create=1')}>
               <Plus size={15} /> New Machine
             </button>

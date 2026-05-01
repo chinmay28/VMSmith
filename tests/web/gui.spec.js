@@ -627,6 +627,14 @@ test.describe("Live Indicator", () => {
       { timeout: 8000 },
     ).toMatch(/reconnecting|fallback/);
   });
+
+  test("dashboard shows SSE connection count when host_stats reports >0 consumers", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const sseBadge = page.getByTestId("sse-connection-count");
+    // The mock-server reports event_stream_connections=2.
+    await expect(sseBadge).toBeVisible();
+    await expect(sseBadge).toContainText("sse");
+  });
 });
 
 // ============================================================

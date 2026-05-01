@@ -201,6 +201,7 @@ async function runTest(name, fn) {
           ram: { used: 4 * 1024 * 1024 * 1024, total: 8 * 1024 * 1024 * 1024, available: 4 * 1024 * 1024 * 1024 },
           disk: { used: 20 * 1024 * 1024 * 1024, total: 100 * 1024 * 1024 * 1024, available: 80 * 1024 * 1024 * 1024 },
           vm_count: 3,
+          event_stream_connections: 0,
         }),
       });
     });

@@ -434,6 +434,15 @@ async function main() {
       await indicator.waitFor({ state: "visible", timeout: 5000 });
     }, page);
 
+    await runTest("dashboard exposes SSE connection-count badge from host_stats", async (p) => {
+      await p.locator('[data-testid="nav-dashboard"]').click();
+      await p.waitForTimeout(500);
+      const badge = p.locator('[data-testid="sse-connection-count"]');
+      await badge.waitFor({ state: "visible", timeout: 5000 });
+      const text = (await badge.textContent()) || "";
+      await assert(/\d+\s*sse/i.test(text), `expected "<n> sse" badge, got "${text.trim()}"`);
+    }, page);
+
     await page.close();
 
     // ================== Full Lifecycle E2E ==================

@@ -92,6 +92,11 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	const sseReplayLimit = 1000
 
+	// Track this handler in the active SSE connection count for as long as
+	// it is running (covers replay overflow path and post-write disconnects).
+	s.eventStreamConns.Add(1)
+	defer s.eventStreamConns.Add(-1)
+
 	sw := newSSEWriter(w)
 	if sw == nil {
 		return // newSSEWriter already wrote 500

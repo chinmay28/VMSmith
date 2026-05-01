@@ -333,6 +333,15 @@ const server = http.createServer(async (req, res) => {
       { name: "eth1", ips: ["192.168.1.16/24"], mac: "52:54:00:00:00:02", is_up: true, is_physical: true },
     ]);
   }
+  if (p === "/api/v1/host/stats" && method === "GET") {
+    return json(res, 200, {
+      vm_count: vms.length,
+      cpu: { used: 12, total: 100, available: 88, percentage: 12 },
+      ram: { used: 4 * 1024 * 1024 * 1024, total: 8 * 1024 * 1024 * 1024, available: 4 * 1024 * 1024 * 1024, percentage: 50 },
+      disk: { used: 20 * 1024 * 1024 * 1024, total: 100 * 1024 * 1024 * 1024, available: 80 * 1024 * 1024 * 1024, percentage: 20 },
+      event_stream_connections: 2,
+    });
+  }
 
   // Serve the real built SPA when available, otherwise fall back to the lightweight test HTML.
   if (!p.startsWith("/api/")) {
