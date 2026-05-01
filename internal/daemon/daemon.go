@@ -220,6 +220,15 @@ func (d *Daemon) Run() error {
 	if d.eventBus != nil {
 		d.eventBus.Start()
 		logger.Info("daemon", "event bus started")
+
+		// Start the VM state persister consumer before publishing any libvirt
+		// events.  It subscribes to the bus and applies `vm.*` state changes
+		// to bbolt, replacing the previous in-callback store.PutVM write so
+		// the libvirt event loop never contends on a store transaction.
+		persister := vm.NewVMStatePersister(d.eventBus, d.store)
+		go persister.Run(ctx)
+		logger.Info("daemon", "vm state persister started")
+
 		evt := events.NewSystemEvent("daemon.started", "info", "vmsmith daemon started")
 		evt.Attributes = map[string]string{
 			"listen": d.cfg.Daemon.Listen,

@@ -73,6 +73,12 @@ func (m *LibvirtManager) stopLifecycleMonitor() {
 	}
 }
 
+// handleLifecycleEvent translates a libvirt domain lifecycle callback into a
+// typed Event and publishes it to the bus.  State persistence is intentionally
+// kept out of this goroutine — a separate consumer (StartVMStatePersister)
+// subscribes to the libvirt-source stream and applies the state mutation to
+// bbolt.  This decouples the libvirt event loop from the store transaction so
+// a slow or contended bbolt write can never stall libvirt callbacks.
 func (m *LibvirtManager) handleLifecycleEvent(dom *libvirt.Domain, event *libvirt.DomainEventLifecycle) {
 	if dom == nil || event == nil {
 		return
@@ -93,47 +99,40 @@ func (m *LibvirtManager) handleLifecycleEvent(dom *libvirt.Domain, event *libvir
 		return
 	}
 
-	vmRecord.State = lifecycleEventToVMState(event)
-	vmRecord.UpdatedAt = time.Now()
-	if err := m.store.PutVM(vmRecord); err != nil {
-		logger.Warn("daemon", "failed to persist lifecycle event state", "vm", name, "event", event.String(), "error", err.Error())
+	state := lifecycleEventToVMState(event)
+	evtType, severity := lifecycleEventToTypeAndSeverity(event)
+
+	logger.Info("daemon", "vm lifecycle event received",
+		"vm", name, "event", event.String(), "type", evtType, "state", string(state))
+
+	if m.eventBus == nil {
+		// Bus not wired (test harness or early-startup path): fall back to
+		// directly persisting the state change so the daemon never silently
+		// loses a libvirt-driven state transition.  This preserves the
+		// pre-refactor behavior for callers that haven't migrated yet.
+		vmRecord.State = state
+		vmRecord.UpdatedAt = time.Now()
+		if err := m.store.PutVM(vmRecord); err != nil {
+			logger.Warn("daemon", "failed to persist lifecycle event state (no bus)",
+				"vm", name, "event", event.String(), "error", err.Error())
+		}
 		return
 	}
 
-	// Map libvirt event to readable string
-	var eventType string
-	switch event.Event {
-	case libvirt.DOMAIN_EVENT_DEFINED:
-		eventType = "vm_defined"
-	case libvirt.DOMAIN_EVENT_UNDEFINED:
-		eventType = "vm_undefined"
-	case libvirt.DOMAIN_EVENT_STARTED:
-		eventType = "vm_started"
-	case libvirt.DOMAIN_EVENT_SUSPENDED, libvirt.DOMAIN_EVENT_PMSUSPENDED:
-		eventType = "vm_suspended"
-	case libvirt.DOMAIN_EVENT_RESUMED:
-		eventType = "vm_resumed"
-	case libvirt.DOMAIN_EVENT_STOPPED, libvirt.DOMAIN_EVENT_SHUTDOWN:
-		eventType = "vm_stopped"
-	case libvirt.DOMAIN_EVENT_CRASHED:
-		eventType = "vm_crashed"
-	default:
-		eventType = fmt.Sprintf("vm_lifecycle_%d", event.Event)
-	}
-
-	// Persist event record
-	evt := &types.Event{
-		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
-		VMID:      vmRecord.ID,
-		Type:      eventType,
-		Message:   fmt.Sprintf("VM %s state changed to %s", name, string(vmRecord.State)),
-		CreatedAt: time.Now(),
-	}
-	if err := m.store.PutEvent(evt); err != nil {
-		logger.Warn("daemon", "failed to persist event log", "vm", name, "error", err.Error())
-	}
-
-	logger.Info("daemon", "vm lifecycle event received", "vm", name, "event", event.String(), "state", string(vmRecord.State))
+	m.eventBus.Publish(&types.Event{
+		Type:     evtType,
+		Source:   types.EventSourceLibvirt,
+		VMID:     vmRecord.ID,
+		Severity: severity,
+		Message:  fmt.Sprintf("VM %s state changed to %s", name, string(state)),
+		Attributes: map[string]string{
+			"vm_name":         name,
+			"state":           string(state),
+			"libvirt_event":   event.String(),
+			"libvirt_event_n": fmt.Sprintf("%d", event.Event),
+		},
+		OccurredAt: time.Now(),
+	})
 }
 
 func (m *LibvirtManager) findStoredVMByName(name string) (*types.VM, error) {
@@ -167,3 +166,33 @@ func lifecycleEventToVMState(event *libvirt.DomainEventLifecycle) types.VMState 
 		return types.VMStateUnknown
 	}
 }
+
+// lifecycleEventToTypeAndSeverity maps a libvirt lifecycle code to a stable
+// dotted event-type string and severity.  Crashes are reported at "error"
+// severity so dashboards / alerting can distinguish them from clean stops.
+func lifecycleEventToTypeAndSeverity(event *libvirt.DomainEventLifecycle) (string, string) {
+	if event == nil {
+		return "vm.lifecycle_unknown", types.EventSeverityInfo
+	}
+	switch event.Event {
+	case libvirt.DOMAIN_EVENT_DEFINED:
+		return "vm.defined", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_UNDEFINED:
+		return "vm.undefined", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_STARTED:
+		return "vm.started", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_SUSPENDED, libvirt.DOMAIN_EVENT_PMSUSPENDED:
+		return "vm.suspended", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_RESUMED:
+		return "vm.resumed", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_STOPPED:
+		return "vm.stopped", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_SHUTDOWN:
+		return "vm.shutdown", types.EventSeverityInfo
+	case libvirt.DOMAIN_EVENT_CRASHED:
+		return "vm.crashed", types.EventSeverityError
+	default:
+		return fmt.Sprintf("vm.lifecycle_%d", event.Event), types.EventSeverityInfo
+	}
+}
+
