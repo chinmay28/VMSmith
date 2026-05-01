@@ -196,6 +196,12 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 				// VM metrics
 				r.Get("/stats", s.GetVMStats)
+				r.With(func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Del("Content-Type") // SSE sets its own
+						next.ServeHTTP(w, r)
+					})
+				}).Get("/stats/stream", s.StreamVMStats)
 
 				// Port forwards
 				r.Route("/ports", func(r chi.Router) {

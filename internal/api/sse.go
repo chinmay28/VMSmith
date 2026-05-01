@@ -9,28 +9,29 @@ import (
 const sseHeartbeatInterval = 30 * time.Second
 
 // sseWriter wraps an http.ResponseWriter to write Server-Sent Event frames.
-// It requires the underlying ResponseWriter to implement http.Flusher.
+// Flushing is delegated to an http.ResponseController so middleware that
+// wraps the ResponseWriter (and exposes Unwrap) does not break streaming.
 type sseWriter struct {
-	w http.ResponseWriter
-	f http.Flusher
+	w  http.ResponseWriter
+	rc *http.ResponseController
 }
 
 // newSSEWriter sets the required SSE response headers and returns a writer.
-// Returns nil (and writes a 500) if the ResponseWriter doesn't support flushing.
+// Returns nil (and writes a 500) if flushing is not supported on this writer.
 func newSSEWriter(w http.ResponseWriter) *sseWriter {
-	f, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return nil
-	}
+	rc := http.NewResponseController(w)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache, no-transform")
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no") // disables nginx response buffering
 	w.WriteHeader(http.StatusOK)
-	f.Flush()
-	return &sseWriter{w: w, f: f}
+	if err := rc.Flush(); err != nil {
+		// Status is already committed; nothing useful to send back.  Return
+		// nil so the caller exits its loop.
+		return nil
+	}
+	return &sseWriter{w: w, rc: rc}
 }
 
 // WriteEvent sends a named SSE frame with the given id and JSON-encoded data.
@@ -41,8 +42,7 @@ func (s *sseWriter) WriteEvent(id, name, data string) error {
 	if err != nil {
 		return err
 	}
-	s.f.Flush()
-	return nil
+	return s.rc.Flush()
 }
 
 // WriteComment sends a keepalive comment frame (": keepalive\n\n").
@@ -52,8 +52,7 @@ func (s *sseWriter) WriteComment(comment string) error {
 	if err != nil {
 		return err
 	}
-	s.f.Flush()
-	return nil
+	return s.rc.Flush()
 }
 
 // Heartbeat sends a keepalive comment.

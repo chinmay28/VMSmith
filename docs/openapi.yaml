@@ -299,6 +299,34 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/stats/stream:
+    get:
+      tags: [VMs]
+      summary: Stream VM resource metrics (SSE)
+      description: |
+        Server-Sent Events stream of `MetricSample` frames.  Each new sample
+        produced by the metrics collector is delivered as one `vm.stats`
+        event whose `data` field is a JSON-encoded `MetricSample` and whose
+        `id` is the sample's unix-nanosecond timestamp.  Clients should
+        seed history with `GET /vms/{vmID}/stats` before subscribing —
+        the stream provides no replay.  A `: keepalive` comment frame is
+        sent every 30 seconds.  The stream closes when the client
+        disconnects, the VM is deleted, or the daemon shuts down.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/snapshots:
     get:
       tags: [Snapshots]
