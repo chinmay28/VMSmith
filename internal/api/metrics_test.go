@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -441,6 +444,216 @@ func TestGetVMStats_StoppedVMReturnsFrozenHistory(t *testing.T) {
 	}
 	if len(snap.History) == 0 {
 		t.Error("expected frozen history samples for stopped VM")
+	}
+}
+
+// --- GET /api/v1/vms/{id}/stats/stream (SSE) tests ---
+
+// sseFrame represents one parsed Server-Sent Events frame.
+type sseFrame struct {
+	id    string
+	event string
+	data  string
+}
+
+// readSSEFrame consumes lines from r until it parses one full SSE frame
+// (a sequence of `id:`/`event:`/`data:` lines terminated by a blank line)
+// or returns the underlying error. Comment-only frames (`: keepalive`)
+// are skipped.
+func readSSEFrame(r *bufio.Reader) (*sseFrame, error) {
+	var f sseFrame
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			// End of frame.
+			if f.id == "" && f.event == "" && f.data == "" {
+				// Comment-only frame; keep reading.
+				continue
+			}
+			return &f, nil
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		if strings.HasPrefix(line, "id:") {
+			f.id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		} else if strings.HasPrefix(line, "event:") {
+			f.event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		} else if strings.HasPrefix(line, "data:") {
+			f.data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+	}
+}
+
+func TestStreamVMStats_MetricsDisabled(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithMetrics(t, nil)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-disabled", "stream-disabled", types.VMStateRunning)
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Code != "metrics_disabled" {
+		t.Errorf("code = %q, want metrics_disabled", errResp.Code)
+	}
+}
+
+func TestStreamVMStats_VMNotFound(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, _, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-missing/stats/stream")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Code != "resource_not_found" {
+		t.Errorf("code = %q, want resource_not_found", errResp.Code)
+	}
+}
+
+func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-ok", "stream-ok", types.VMStateRunning)
+	m.setState(v.ID, "running")
+
+	cpu0 := 12.5
+	initial := types.MetricSample{Timestamp: time.Now().Add(-1 * time.Second), CPUPercent: &cpu0}
+	m.seed(v.ID, initial)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	br := bufio.NewReader(resp.Body)
+
+	// Initial frame should be the seeded sample.
+	first, err := readSSEFrame(br)
+	if err != nil {
+		t.Fatalf("read first frame: %v", err)
+	}
+	if first.event != "vm.stats" {
+		t.Errorf("first frame event = %q, want vm.stats", first.event)
+	}
+	var sample types.MetricSample
+	if err := json.Unmarshal([]byte(first.data), &sample); err != nil {
+		t.Fatalf("unmarshal first: %v (data=%q)", err, first.data)
+	}
+	if sample.CPUPercent == nil || *sample.CPUPercent != cpu0 {
+		t.Errorf("first sample cpu = %v, want %v", sample.CPUPercent, cpu0)
+	}
+
+	// Seed a newer sample; the stream should deliver it on the next poll.
+	cpu1 := 84.0
+	newer := types.MetricSample{Timestamp: time.Now().Add(2 * time.Second), CPUPercent: &cpu1}
+	m.seed(v.ID, newer)
+
+	second, err := readSSEFrame(br)
+	if err != nil {
+		t.Fatalf("read second frame: %v", err)
+	}
+	var sample2 types.MetricSample
+	if err := json.Unmarshal([]byte(second.data), &sample2); err != nil {
+		t.Fatalf("unmarshal second: %v", err)
+	}
+	if sample2.CPUPercent == nil || *sample2.CPUPercent != cpu1 {
+		t.Errorf("second sample cpu = %v, want %v", sample2.CPUPercent, cpu1)
+	}
+	if second.id == first.id {
+		t.Errorf("expected distinct event IDs, got both = %q", first.id)
+	}
+}
+
+func TestStreamVMStats_ClosesOnVMDelete(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-del", "stream-del", types.VMStateRunning)
+	cpu := 10.0
+	m.seed(v.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	br := bufio.NewReader(resp.Body)
+	if _, err := readSSEFrame(br); err != nil {
+		t.Fatalf("read initial frame: %v", err)
+	}
+
+	// Removing the VM from the manager should cause the stream to close
+	// on the next poll tick.
+	if err := mockMgr.Delete(context.Background(), v.ID); err != nil {
+		t.Fatalf("delete vm: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := readSSEFrame(br)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected stream to close after VM delete, got next frame")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not close within 5s after VM delete")
 	}
 }
 

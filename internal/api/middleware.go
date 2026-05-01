@@ -83,6 +83,13 @@ func (r *responseRecorder) Flush() {
 	}
 }
 
+// Unwrap returns the underlying ResponseWriter so http.ResponseController
+// can reach Flusher / Hijacker on it (used by SSE handlers that drive the
+// stream via http.NewResponseController).
+func (r *responseRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 // requestLogger is a chi-compatible middleware that logs every HTTP request
 // and its response to the structured logger.
 func requestLogger(next http.Handler) http.Handler {

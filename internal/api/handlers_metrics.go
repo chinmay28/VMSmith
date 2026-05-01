@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -97,6 +98,106 @@ func (s *Server) GetVMStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// streamSampleInterval is the cadence at which StreamVMStats polls Snapshot
+// for new samples.  It runs faster than the default 10s sampling interval so
+// new samples are delivered to subscribers within ~1s of being produced.
+const streamSampleInterval = 1 * time.Second
+
+// StreamVMStats handles GET /api/v1/vms/{vmID}/stats/stream (SSE).
+//
+// Each new MetricSample is delivered as a single SSE frame whose data field
+// is the JSON-encoded sample.  The event id is a unix-nanosecond timestamp
+// so clients can resume after a reconnect with Last-Event-ID, though replay
+// is not supported by the in-memory metrics ring (the REST `/stats` endpoint
+// provides initial backfill).  A 30s heartbeat comment defeats proxy idle
+// timeouts.
+//
+// Returns:
+//   - 503 metrics_disabled when the metrics manager is not wired
+//   - 404 resource_not_found when the VM is unknown
+//   - 200 with `text/event-stream` otherwise
+//
+// The stream ends when the client disconnects, the request context is
+// cancelled (e.g., daemon shutdown), or the VM is deleted from the store.
+func (s *Server) StreamVMStats(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
+
+	if s.metricsManager == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "metrics_disabled",
+			"metrics collection is disabled; enable daemon.metrics.enabled in config")
+		return
+	}
+
+	if _, err := s.vmManager.Get(r.Context(), vmID); err != nil {
+		writeAPIError(w, http.StatusNotFound, types.NewAPIError("resource_not_found",
+			fmt.Sprintf("vm %q not found", vmID)))
+		return
+	}
+
+	sw := newSSEWriter(w)
+	if sw == nil {
+		return
+	}
+
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeat.Stop()
+
+	poll := time.NewTicker(streamSampleInterval)
+	defer poll.Stop()
+
+	var lastSent time.Time
+
+	// Send an initial frame from the most recent sample (if any) so clients
+	// receive something immediately on connect rather than waiting for the
+	// next poll tick.
+	if snap, err := s.metricsManager.Snapshot(vmID); err == nil && snap != nil && snap.Current != nil {
+		if writeStatsFrame(sw, snap.Current) != nil {
+			return
+		}
+		lastSent = snap.Current.Timestamp
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			if err := sw.Heartbeat(); err != nil {
+				return
+			}
+		case <-poll.C:
+			// Verify the VM still exists; closing the stream on delete keeps
+			// stale subscribers from holding state for vanished VMs.
+			if _, err := s.vmManager.Get(r.Context(), vmID); err != nil {
+				return
+			}
+
+			snap, err := s.metricsManager.Snapshot(vmID)
+			if err != nil || snap == nil || snap.Current == nil {
+				continue
+			}
+			if !snap.Current.Timestamp.After(lastSent) {
+				continue
+			}
+			if writeStatsFrame(sw, snap.Current) != nil {
+				return
+			}
+			lastSent = snap.Current.Timestamp
+		}
+	}
+}
+
+// writeStatsFrame marshals a MetricSample and writes one SSE frame using the
+// sample timestamp's unix-nanos as the event id.
+func writeStatsFrame(sw *sseWriter, sample *types.MetricSample) error {
+	data, err := json.Marshal(sample)
+	if err != nil {
+		return err
+	}
+	id := strconv.FormatInt(sample.Timestamp.UnixNano(), 10)
+	return sw.WriteEvent(id, "vm.stats", string(data))
 }
 
 // parseFieldsParam parses a comma-separated fields parameter into a set.
