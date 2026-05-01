@@ -377,7 +377,121 @@ The current `/metrics` endpoint exposes the latest in-memory values only, labele
 
 ---
 
-### 5. Logging
+### 5. Event System
+
+VM Smith ships an in-process event bus that captures every state-changing action — libvirt lifecycle callbacks, API/CLI mutations, and daemon internals — and exposes them to operators via REST, SSE, and the web GUI's Activity page. The implementation lives in `internal/events/`, the persistence layer lives in `internal/store/bolt.go`, and the wire types live in `pkg/types/event.go`.
+
+**Event taxonomy** (three sources, one bus):
+
+| Source | Origin | Examples |
+|---|---|---|
+| `libvirt` | `DomainEventLifecycleRegister` callback in `internal/vm/events.go` | `vm.started`, `vm.stopped`, `vm.crashed`, `vm.shutdown`, `vm.suspended`, `vm.resumed` |
+| `app` | API/CLI mutating handlers, post-success | `vm.created`, `vm.updated`, `vm.cloned`, `vm.deleted`, `vm.start_requested`, `vm.stop_requested`, `snapshot.created`, `snapshot.restored`, `snapshot.deleted`, `image.uploaded`, `image.created`, `image.deleted`, `port_forward.added`, `port_forward.removed` |
+| `system` | Daemon internals (`internal/daemon/`, `internal/api/quotas.go`, `internal/events/retention.go`) | `daemon.started`, `daemon.shutdown`, `quota.exceeded`, `dhcp.exhausted`, `events.retention_pruned` |
+
+**Event record (`pkg/types/event.go`):**
+
+```go
+type Event struct {
+    ID         string            `json:"id"`           // stringified uint64 from EventBus
+    Type       string            `json:"type"`         // dotted form: "vm.started", "image.uploaded"
+    Source     string            `json:"source"`       // libvirt | app | system
+    VMID       string            `json:"vm_id,omitempty"`
+    ResourceID string            `json:"resource_id,omitempty"`
+    Severity   string            `json:"severity"`     // info | warn | error
+    Message    string            `json:"message"`
+    Attributes map[string]string `json:"attributes,omitempty"`
+    Actor      string            `json:"actor,omitempty"`
+    OccurredAt time.Time         `json:"occurred_at"`
+    CreatedAt  time.Time         `json:"created_at,omitempty"` // backward-compat mirror of OccurredAt
+}
+```
+
+`EventSchemaVersion = 1` is exported so future webhook consumers can detect breaking changes without sniffing fields. The `Source` and `Severity` enum values are also exported as `EventSourceLibvirt`/`EventSeverityInfo` style constants.
+
+**EventBus (`internal/events/bus.go`):**
+
+A single goroutine serializes ID assignment, persistence, and fan-out. Producers call `EventBus.Publish(evt)` from any goroutine; consumers register via `Subscribe(name) (<-chan *Event, cancel)`.
+
+- `publishCh` is a `256`-deep buffered channel. If a producer outruns the bus the publish is **dropped with a warning** rather than blocking (relevant: the libvirt callback goroutine must not stall on a slow store).
+- Each subscriber gets a `64`-deep channel. If a consumer drains too slowly the bus drops events for that subscriber and rate-limits the warning to once per 60 s per subscriber name.
+- `Subscribe` appends a monotonic counter to the caller-supplied name (`"sse-1.2.3.4#42"`) so two callers passing the same name (e.g. two SSE clients behind the same NAT IP) never collide.
+- The bus stamps `OccurredAt` (and a backward-compat `CreatedAt` mirror) when the producer left them zero.
+- Persistence happens **before** fan-out. If the store call returns an error the event is still fanned out with a `transient-<ts>` ID so live consumers see it, and a warning is logged.
+
+Helpers `events.NewAppEvent(type, vmID, message, attrs)` and `events.NewSystemEvent(type, severity, message)` (plus `NewSystemEventWithAttrs`) hand-build events with the right defaults so handler code stays a single line.
+
+**Persistence layout (`internal/store/bolt.go`, `events` bucket):**
+
+- `Store.AppendEvent(evt)` calls bbolt's per-bucket `NextSequence` to assign a monotonic `uint64`, encodes it big-endian as the bucket key, and writes the event. Big-endian encoding makes the natural cursor walk produce events in chronological order.
+- The legacy `Store.PutEvent` (string `evt-<unix-nano>` keys) is retained for backward compatibility with old data already on disk. Keys with `len != 8` are simply skipped during normal scans.
+- `Store.ListEventsFiltered(filter)` walks the cursor newest → oldest, applies a server-side filter (`VMID`, `Type`, `Source`, `Severity`, `Since` — either RFC3339 timestamp or seq cursor — `UntilSeq`), and paginates. It returns the filtered slice plus a total-match count for `X-Total-Count`.
+- `Store.ListEventsAfterSeq(afterSeq, limit)` walks chronologically forward from `afterSeq+1`. Used by the SSE replay path on reconnect.
+- `Store.PruneEvents(maxRecords)` deletes the oldest events until the count is at or below `maxRecords`. Capped at 5 000 deletions per call so a backlog cannot stall the writer.
+- `Store.PruneEventsByAge(maxAge)` walks forward and deletes everything older than `now-maxAge`, stopping at the first non-stale entry. Same 5 000-per-sweep cap.
+
+**Retention loop (`internal/events/retention.go`):**
+
+`Retention.Run(ctx)` ticks at `daemon.events.retention_interval` (default 60 s), running both the count-based and age-based sweeps. A non-positive interval, or both `max_records` and `max_age` non-positive, disables the loop. Each non-empty sweep emits a `system.events.retention_pruned` info event with deletion counts in attributes — the events stream is therefore self-describing about its own retention.
+
+**REST API (`internal/api/handlers_events.go`):**
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/events` | Filtered, paginated list. Query params: `vm_id`, `type`, `source`, `severity`, `since` (RFC3339 timestamp), `until` (uint64 seq cursor), `page`, `per_page`. Returns newest-first. Responds with `X-Total-Count`. |
+| `GET /api/v1/events/stream` | SSE feed (see below). |
+
+**SSE protocol (`GET /api/v1/events/stream`):**
+
+- Frame format: standard SSE — `id: <seq>\nevent: <type>\ndata: <json>\n\n`. The `id` is the event's `uint64` sequence ID so the browser's `EventSource.lastEventId` (or a custom client's `Last-Event-ID` header) can resume after a reconnect.
+- **Replay rules**: on connect the handler reads `Last-Event-ID` (header) or `?since=<seq>` (query param fallback for environments that strip the header — e.g. Authorization-replacing EventSource polyfills) and replays events with `seq > since` from the store. Replay is capped at **1 000 events**; if the gap is bigger, the handler responds **`410 Gone`** with code `event_stream_replay_window_exceeded`. The client should then fetch `GET /api/v1/events` paginated to catch up.
+- **Live tail**: after replay the handler subscribes to the bus and forwards each event as a frame.
+- **Heartbeat**: every 30 s the handler writes a `: keepalive` SSE comment to keep idle proxies from closing the connection.
+- **Backpressure**: a slow client whose 64-deep channel fills up will start losing live events (logged once per minute), but its connection stays open and continues to receive heartbeats. Clients that care about gap-free delivery should reconnect with `Last-Event-ID` after any gap is detected.
+- **Connection observability**: the active SSE consumer count is exposed on `GET /api/v1/host/stats` as `event_stream_connections`.
+
+**CLI (`internal/cli/events.go`):**
+
+- `vmsmith events list [--vm-id ...] [--type ...] [--source ...] [--severity ...] [--since ...] [--limit N]` — paginated REST query.
+- `vmsmith events follow [--filter ...]` — opens the SSE stream and tails new events to stdout, with reconnect on idle errors. Equivalent to `tail -F` for the event log.
+
+**Webhook contract (planned, see roadmap 4.2.15-17):**
+
+The webhook subsystem is not yet implemented, but the wire shape is fixed by the same `types.Event` JSON above. When it lands, each delivery will:
+
+- `POST` the JSON `Event` body to the configured target URL.
+- Sign the request with `X-VMSmith-Signature: sha256=<hex>`, computed as `HMAC-SHA256(secret, body)`.
+- Include `X-VMSmith-Event-Id`, `X-VMSmith-Event-Type`, and `X-VMSmith-Schema-Version: 1` headers so receivers can dedupe, route, and version-gate without parsing the body.
+- Retry with exponential backoff and jitter (1 s / 5 s / 30 s / 2 m / 10 m). After the final failure the bus emits a `webhook.delivery_failed` system event so delivery health is itself observable on the events stream.
+- Reject SSRF targets (loopback, link-local, 169.254.169.254, the VM NAT range) unless explicitly allowed via `daemon.webhooks.allowed_hosts`.
+
+A 6-line bash example for verifying a webhook signature:
+
+```bash
+# Verify a webhook signature server-side.  $SECRET is the per-webhook secret
+# configured at registration; $BODY is the raw request body; $SIG is the value
+# of the X-VMSmith-Signature header (with the "sha256=" prefix stripped).
+expected="$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex \
+  | awk '{print $2}')"
+[[ "$expected" == "$SIG" ]] || { echo "bad signature" >&2; exit 1; }
+```
+
+**Wiring into the daemon (`internal/daemon/daemon.go`):**
+
+The bus is constructed against the bbolt store, started with `bus.Start()`, and stopped during shutdown. Long-lived consumers (the `VMStatePersister` for libvirt → store sync, the SSE handler) all subscribe through it. The startup sequence emits `daemon.started`; the shutdown handler publishes `daemon.shutdown` before closing the bus so the final frame is delivered to in-flight SSE clients.
+
+**Configuration (`vmsmith.yaml.example`):**
+
+```yaml
+events:
+  max_records: 50000        # cap on persisted events; 0 disables count-based pruning
+  max_age_seconds: 2592000  # delete events older than this many seconds (default 30 days); 0 disables age-based pruning
+  retention_interval: 60    # seconds between retention sweeps; 0 disables the sweep entirely
+```
+
+---
+
+### 6. Logging
 
 VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to both a file and an in-memory ring buffer. The ring buffer is drained by `GET /api/v1/logs` to power the web GUI log viewer.
 
@@ -430,7 +544,7 @@ VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to b
 
 ---
 
-### 6. Daemon Mode
+### 7. Daemon Mode
 
 `vmsmith daemon start` (`internal/daemon/daemon.go`):
 
@@ -442,7 +556,7 @@ VM Smith uses a structured logger (`internal/logger/logger.go`) that writes to b
 
 ---
 
-### 7. REST API
+### 8. REST API
 
 Most endpoints are prefixed `/api/v1/`. The Prometheus scrape endpoint is served separately at `/metrics`.
 
@@ -476,19 +590,20 @@ Most endpoints are prefixed `/api/v1/`. The Prometheus scrape endpoint is served
 | GET    | /host/interfaces                         | List host network interfaces  |
 | GET    | /host/stats                              | Host CPU/RAM/disk usage and VM count |
 | GET    | /quotas/usage                            | Current quota allocation vs configured limits |
-| GET    | /events                                  | Query lifecycle/audit events (`?vm_id=`, `?since=`, pagination); see Phase 4.2 of the roadmap for streaming + filter expansion |
+| GET    | /events                                  | Query lifecycle/audit events (`?vm_id=`, `?type=`, `?source=`, `?severity=`, `?since=`, `?until=`, pagination). See Section 5 for the full event schema and SSE protocol |
+| GET    | /events/stream                           | SSE feed of new events with `Last-Event-ID` replay (see Section 5) |
 | GET    | /logs                                    | Query structured log entries  |
 | GET    | /metrics                                 | Prometheus scrape endpoint for latest per-VM gauges (served outside `/api/v1`) |
 
 The `/logs` endpoint supports query parameters: `level` (min level: debug/info/warn/error), `limit` (max entries, capped at 2000), `since` (RFC3339Nano timestamp), `source` (daemon/api/cli).
 
-The `/events` endpoint returns events from the `events` bucket in reverse-chronological order. Query parameters: `vm_id` (exact match), `since` (RFC3339Nano timestamp), `page`, `per_page`. The full event schema (sources, severity, attributes, actor) and `GET /events/stream` (SSE) are tracked in Phase 4.2 of the roadmap.
+The `/events` REST endpoint returns events from the `events` bucket in reverse-chronological order with server-side filtering and `X-Total-Count` pagination. The companion SSE feed at `/events/stream` ships replay-on-reconnect via `Last-Event-ID`, 30-second heartbeats, a 1 000-event replay window (older clients are sent `410 Gone` and should re-paginate via `/events`), and an in-flight consumer count surfaced through `host/stats`. See **Section 5 (Event System)** for the full bus, persistence, retention, SSE protocol, and webhook contract.
 
 The `/metrics` endpoint emits Prometheus text-format gauges for the latest in-memory VM metrics. Each series is labeled with `vm_id` and `vm_name`; unavailable fields are omitted rather than emitted as zero.
 
 ---
 
-### 8. Web GUI
+### 9. Web GUI
 
 The React SPA is embedded into the binary via `go:embed dist/*`. The same port serves both the API and the GUI.
 
@@ -534,7 +649,7 @@ make dev-web   # Vite dev server on :3000, proxies /api/* → :8080
 
 ---
 
-### 9. Configuration
+### 10. Configuration
 
 File: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
 
@@ -579,7 +694,7 @@ metrics:
 
 ---
 
-### 10. Data Model (bbolt)
+### 11. Data Model (bbolt)
 
 | Bucket         | Key                        | Value                        |
 |----------------|----------------------------|------------------------------|
@@ -588,7 +703,7 @@ metrics:
 | `snapshots`    | `{vmID}/{name}`            | JSON `types.Snapshot`        |
 | `templates`    | template ID                | JSON `types.VMTemplate`      |
 | `port_forwards`| `{vmID}/{hostPort}`        | JSON `types.PortForward`     |
-| `events`       | event ID                   | JSON `types.Event` (lifecycle/audit log; see Phase 4.2 for indexing + retention) |
+| `events`       | big-endian `uint64` seq    | JSON `types.Event` (lifecycle / audit log; see Section 5 for the event bus, retention, and SSE protocol) |
 | `config`       | config key                 | JSON daemon-managed runtime state |
 
 ---
@@ -664,7 +779,7 @@ make test-all         # everything
 
 ## Future Enhancements
 
-Active feature work — including VM-level metrics, the event bus / SSE / webhook subsystem, browser-based VNC + serial console, and the cron-style scheduler — is tracked in [`ROADMAP.md`](ROADMAP.md) (Phases 4.1, 4.2, 5.1, 5.2). VM templates already shipped (`/api/v1/templates`).
+Active feature work — including additional VM-level metrics polish, the event-bus webhook subsystem, browser-based VNC + serial console, and the cron-style scheduler — is tracked in [`ROADMAP.md`](ROADMAP.md) (Phases 4.1, 4.2, 5.1, 5.2). VM templates and the in-process event bus / SSE feed have shipped (see Section 5 above and `/api/v1/events`, `/api/v1/events/stream`).
 
 Longer-horizon items not yet promoted to the roadmap:
 
