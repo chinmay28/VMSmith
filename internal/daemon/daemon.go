@@ -144,11 +144,13 @@ func New(cfg *config.Config) (*Daemon, error) {
 
 	// Optional retention loop for the events bucket.
 	var retention *events.Retention
-	if cfg.Events.MaxRecords > 0 && cfg.Events.RetentionInterval > 0 {
-		retention = events.NewRetention(s, cfg.Events.MaxRecords,
+	if (cfg.Events.MaxRecords > 0 || cfg.Events.MaxAgeSeconds > 0) && cfg.Events.RetentionInterval > 0 {
+		maxAge := time.Duration(cfg.Events.MaxAgeSeconds) * time.Second
+		retention = events.NewRetention(s, cfg.Events.MaxRecords, maxAge,
 			time.Duration(cfg.Events.RetentionInterval)*time.Second, eventBus)
 		logger.Info("daemon", "events retention loop configured",
 			"max_records", fmt.Sprintf("%d", cfg.Events.MaxRecords),
+			"max_age_seconds", fmt.Sprintf("%d", cfg.Events.MaxAgeSeconds),
 			"interval_sec", fmt.Sprintf("%d", cfg.Events.RetentionInterval))
 	}
 

@@ -93,8 +93,13 @@ type EventsConfig struct {
 	// MaxRecords caps the number of persisted events.  When the count
 	// exceeds this value the retention loop deletes the oldest events
 	// until it falls back below the cap.  Default 50000.  Zero disables
-	// retention (events accumulate indefinitely).
+	// count-based retention.
 	MaxRecords int `yaml:"max_records"`
+	// MaxAgeSeconds caps the age of persisted events.  Events whose
+	// OccurredAt timestamp is older than (now - max_age) are deleted on
+	// each retention sweep.  Default 2592000 (30 days).  Zero disables
+	// age-based retention.
+	MaxAgeSeconds int `yaml:"max_age_seconds"`
 	// RetentionInterval is the number of seconds between retention sweeps.
 	// Default 60.  Zero disables the retention loop.
 	RetentionInterval int `yaml:"retention_interval"`
@@ -164,6 +169,7 @@ func DefaultConfig() *Config {
 		},
 		Events: EventsConfig{
 			MaxRecords:        50000,
+			MaxAgeSeconds:     30 * 24 * 60 * 60, // 30 days
 			RetentionInterval: 60,
 		},
 	}
