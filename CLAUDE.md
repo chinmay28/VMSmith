@@ -406,7 +406,7 @@ Key config fields:
 
 ## REST API Reference (Quick)
 
-Most API routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md`.
+Most API routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md` (the event bus, SSE protocol, retention, and webhook contract are documented in Section 5 "Event System").
 
 Additional docs routes:
 - `GET /api/docs` — embedded Swagger UI for the REST API

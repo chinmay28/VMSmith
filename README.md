@@ -18,16 +18,16 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 ## Roadmap progress
 
 <!-- progress:start -->
-**Overall:** 91 / 138 tasks complete (65.9%)
+**Overall:** 96 / 138 tasks complete (69.6%)
 
-`▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░` 65.9%
+`▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░` 69.6%
 
 | Phase | Title | Done | Total | % |
 | ----- | ----- | ---- | ----- | - |
 | 1 | Foundation & Quality (Week 1-2) | 17 | 18 | 94.4% |
 | 2 | Core Feature Additions (Week 3-5) | 19 | 21 | 90.5% |
 | 3 | Operational Excellence (Week 5-8) | 18 | 19 | 94.7% |
-| 4 | Monitoring & Observability (Week 7-10) | 21 | 32 | 65.6% |
+| 4 | Monitoring & Observability (Week 7-10) | 26 | 32 | 81.2% |
 | 5 | Advanced Features (Week 10+) | 5 | 36 | 13.9% |
 | 6 | Developer & Community (Ongoing) | 11 | 12 | 91.7% |
 
@@ -486,7 +486,7 @@ curl -X POST http://localhost:8080/api/v1/templates \
 curl http://localhost:8080/api/v1/templates
 ```
 
-Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#5-rest-api)
+Full API reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#8-rest-api). For the in-process event bus, SSE protocol, retention, and webhook contract see [Section 5: Event System](docs/ARCHITECTURE.md#5-event-system).
 Interactive API docs: `/api/docs`
 Machine-readable schema: [docs/openapi.yaml](docs/openapi.yaml) and `/api/openapi.yaml`
 Frontend API types can be regenerated from that schema with `cd web && npm run generate:api`.
