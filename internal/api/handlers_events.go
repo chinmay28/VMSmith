@@ -97,6 +97,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		return // newSSEWriter already wrote 500
 	}
 
+	release := s.trackSSEConnection()
+	defer release()
+
 	// Determine replay starting point from Last-Event-ID or ?since= (uint64).
 	var afterSeq uint64
 	if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {

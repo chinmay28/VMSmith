@@ -49,13 +49,16 @@ func TestCollectHostStats(t *testing.T) {
 		return nil
 	}
 
-	stats, err := collectHostStats(context.Background(), "/tmp/vmsmith", 7)
+	stats, err := collectHostStats(context.Background(), "/tmp/vmsmith", 7, 3)
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}
 
 	if stats.VMCount != 7 {
 		t.Fatalf("VMCount = %d, want 7", stats.VMCount)
+	}
+	if stats.ActiveSSEStreams != 3 {
+		t.Fatalf("ActiveSSEStreams = %d, want 3", stats.ActiveSSEStreams)
 	}
 	if stats.CPU.Percentage != 33 || stats.CPU.Used != 33 || stats.CPU.Total != 100 {
 		t.Fatalf("unexpected CPU stats: %+v", stats.CPU)
@@ -129,7 +132,7 @@ func TestCollectHostStatsFallsBackToParentDir(t *testing.T) {
 		return nil
 	}
 
-	_, err := collectHostStats(context.Background(), missing, 0)
+	_, err := collectHostStats(context.Background(), missing, 0, 0)
 	if err != nil {
 		t.Fatalf("collectHostStats: %v", err)
 	}

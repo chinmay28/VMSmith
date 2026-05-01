@@ -201,6 +201,7 @@ async function runTest(name, fn) {
           ram: { used: 4 * 1024 * 1024 * 1024, total: 8 * 1024 * 1024 * 1024, available: 4 * 1024 * 1024 * 1024 },
           disk: { used: 20 * 1024 * 1024 * 1024, total: 100 * 1024 * 1024 * 1024, available: 80 * 1024 * 1024 * 1024 },
           vm_count: 3,
+          active_sse_streams: 2,
         }),
       });
     });
@@ -224,6 +225,15 @@ async function runTest(name, fn) {
       await expectVisible(page.getByText('broken-spec-vm'), 'dashboard did not render the VM row');
       if (pageErrors.length > 0) {
         throw new Error(`unexpected page errors: ${pageErrors.join(' | ')}`);
+      }
+    });
+
+    await runTest('dashboard renders active SSE stream count from host stats', async () => {
+      await page.goto(BASE, { waitUntil: 'networkidle' });
+      await expectVisible(page.getByTestId('active-sse-streams'), 'active SSE stream indicator not visible');
+      const text = await page.getByTestId('active-sse-streams').innerText();
+      if (!/2 streams/.test(text)) {
+        throw new Error(`active SSE indicator text = ${JSON.stringify(text)}, expected "2 streams"`);
       }
     });
 

@@ -84,6 +84,15 @@ export default function Dashboard() {
         actions={
           <>
             <LiveIndicator status={liveStatus} />
+            {hostStats?.active_sse_streams > 0 && (
+              <span
+                className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500"
+                title="Open Server-Sent Events streams (events + metrics)"
+                data-testid="active-sse-streams"
+              >
+                {hostStats.active_sse_streams} stream{hostStats.active_sse_streams === 1 ? '' : 's'}
+              </span>
+            )}
             <button className="btn-primary" onClick={() => navigate('/vms?create=1')}>
               <Plus size={15} /> New Machine
             </button>

@@ -24,8 +24,9 @@ type HostResourceUsageSummary struct {
 
 // HostStats describes top-level host capacity and utilization for the dashboard.
 type HostStats struct {
-	VMCount int                      `json:"vm_count"`
-	CPU     HostResourceUsageSummary `json:"cpu"`
-	RAM     HostResourceUsageSummary `json:"ram"`
-	Disk    HostResourceUsageSummary `json:"disk"`
+	VMCount          int                      `json:"vm_count"`
+	CPU              HostResourceUsageSummary `json:"cpu"`
+	RAM              HostResourceUsageSummary `json:"ram"`
+	Disk             HostResourceUsageSummary `json:"disk"`
+	ActiveSSEStreams int64                    `json:"active_sse_streams"`
 }

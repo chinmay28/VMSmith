@@ -47,6 +47,28 @@ type Server struct {
 	rateLimiter          *ipRateLimiter
 	inflight             sync.WaitGroup
 	shuttingDown         atomic.Bool
+	sseConnections       atomic.Int64
+}
+
+// trackSSEConnection increments the active-SSE-connection counter and returns
+// a release function the caller must invoke when the connection ends.  The
+// counter is surfaced on GET /api/v1/host/stats so operators can see how many
+// long-lived event/metrics streams are currently active.
+func (s *Server) trackSSEConnection() (release func()) {
+	s.sseConnections.Add(1)
+	released := false
+	return func() {
+		if released {
+			return
+		}
+		released = true
+		s.sseConnections.Add(-1)
+	}
+}
+
+// ActiveSSEConnections returns the current count of open SSE streams.
+func (s *Server) ActiveSSEConnections() int64 {
+	return s.sseConnections.Load()
 }
 
 type ipRateLimiter struct {

@@ -17,7 +17,7 @@ func (s *Server) GetHostStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := collectHostStats(r.Context(), s.hostStatsPath, len(vms))
+	stats, err := collectHostStats(r.Context(), s.hostStatsPath, len(vms), s.ActiveSSEConnections())
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			writeAPIError(w, http.StatusRequestTimeout, types.NewAPIError("request_timeout", "request timed out"))

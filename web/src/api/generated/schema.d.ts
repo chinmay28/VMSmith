@@ -1431,6 +1431,8 @@ export interface components {
             cpu: components["schemas"]["HostResourceUsageSummary"];
             ram: components["schemas"]["HostResourceUsageSummary"];
             disk: components["schemas"]["HostResourceUsageSummary"];
+            /** @description Number of currently-open Server-Sent Events streams (events + future metrics streams). */
+            active_sse_streams: number;
         };
         QuotaUsageSummary: {
             used: number;

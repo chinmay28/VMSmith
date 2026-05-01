@@ -1221,7 +1221,7 @@ components:
           type: integer
     HostStats:
       type: object
-      required: [vm_count, cpu, ram, disk]
+      required: [vm_count, cpu, ram, disk, active_sse_streams]
       properties:
         vm_count:
           type: integer
@@ -1231,6 +1231,10 @@ components:
           $ref: '#/components/schemas/HostResourceUsageSummary'
         disk:
           $ref: '#/components/schemas/HostResourceUsageSummary'
+        active_sse_streams:
+          type: integer
+          format: int64
+          description: Number of currently-open Server-Sent Events streams (events + future metrics streams).
     QuotaUsageSummary:
       type: object
       required: [used]

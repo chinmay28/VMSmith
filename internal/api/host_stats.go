@@ -91,7 +91,7 @@ func percent(used, total uint64) int {
 	return int(math.Round((float64(used) / float64(total)) * 100))
 }
 
-func collectHostStats(ctx context.Context, storagePath string, vmCount int) (*types.HostStats, error) {
+func collectHostStats(ctx context.Context, storagePath string, vmCount int, activeSSEStreams int64) (*types.HostStats, error) {
 	first, err := readCPUSample()
 	if err != nil {
 		return nil, err
@@ -147,7 +147,8 @@ func collectHostStats(ctx context.Context, storagePath string, vmCount int) (*ty
 	}
 
 	return &types.HostStats{
-		VMCount: vmCount,
+		VMCount:          vmCount,
+		ActiveSSEStreams: activeSSEStreams,
 		CPU: types.HostResourceUsageSummary{
 			Used:       uint64(usedCPUPercent),
 			Total:      100,

@@ -74,6 +74,15 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Flush forwards to the underlying ResponseWriter when it implements
+// http.Flusher.  This preserves SSE streaming through the request-logging
+// middleware.
+func (r *responseRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // requestLogger is a chi-compatible middleware that logs every HTTP request
 // and its response to the structured logger.
 func requestLogger(next http.Handler) http.Handler {
