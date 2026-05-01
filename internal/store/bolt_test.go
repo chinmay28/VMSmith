@@ -497,3 +497,49 @@ func TestPruneEventsByAge_StopsAtFirstFresh(t *testing.T) {
 		t.Errorf("count=%d, want 2", count)
 	}
 }
+
+// --- Webhook tests ---
+
+func TestPutGetListDeleteWebhook(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	wh := &types.Webhook{
+		ID:        "wh-1",
+		URL:       "https://example.com/hook",
+		Secret:    "topsecret",
+		Active:    true,
+		CreatedAt: time.Now().UTC().Truncate(time.Millisecond),
+	}
+	if err := s.PutWebhook(wh); err != nil {
+		t.Fatalf("PutWebhook: %v", err)
+	}
+
+	got, err := s.GetWebhook("wh-1")
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if got.URL != wh.URL || got.Secret != wh.Secret || !got.Active {
+		t.Fatalf("round-trip mismatch: %+v vs %+v", got, wh)
+	}
+
+	hooks, err := s.ListWebhooks()
+	if err != nil {
+		t.Fatalf("ListWebhooks: %v", err)
+	}
+	if len(hooks) != 1 || hooks[0].ID != "wh-1" {
+		t.Fatalf("ListWebhooks = %+v, want one webhook with ID wh-1", hooks)
+	}
+
+	if err := s.DeleteWebhook("wh-1"); err != nil {
+		t.Fatalf("DeleteWebhook: %v", err)
+	}
+
+	if _, err := s.GetWebhook("wh-1"); err == nil {
+		t.Fatalf("expected not-found after DeleteWebhook")
+	}
+	hooks, _ = s.ListWebhooks()
+	if len(hooks) != 0 {
+		t.Fatalf("ListWebhooks after delete = %d, want 0", len(hooks))
+	}
+}

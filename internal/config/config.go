@@ -17,6 +17,7 @@ type Config struct {
 	Quotas   QuotasConfig   `yaml:"quotas"`
 	Metrics  MetricsConfig  `yaml:"metrics"`
 	Events   EventsConfig   `yaml:"events"`
+	Webhooks WebhooksConfig `yaml:"webhooks"`
 }
 
 type DaemonConfig struct {
@@ -103,6 +104,15 @@ type EventsConfig struct {
 	// RetentionInterval is the number of seconds between retention sweeps.
 	// Default 60.  Zero disables the retention loop.
 	RetentionInterval int `yaml:"retention_interval"`
+}
+
+// WebhooksConfig controls the outbound webhook delivery subsystem.
+type WebhooksConfig struct {
+	// AllowedHosts is a case-insensitive set of hostnames that bypass the
+	// SSRF deny-list (loopback, link-local, 169.254.169.254 metadata,
+	// VM NAT range).  Intended for test setups; production deployments
+	// should leave this empty.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // MetricsConfig controls the in-process VM resource metrics sampler.

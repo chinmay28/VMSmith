@@ -48,4 +48,5 @@ func init() {
 	rootCmd.AddCommand(netCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(eventsCmd)
+	rootCmd.AddCommand(webhookCmd)
 }

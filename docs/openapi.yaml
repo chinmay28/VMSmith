@@ -682,6 +682,74 @@ paths:
                 $ref: '#/components/schemas/QuotaUsage'
         default:
           $ref: '#/components/responses/APIError'
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List registered webhooks (secrets redacted)
+      responses:
+        '200':
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Webhook'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Webhooks]
+      summary: Register a new webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookCreateRequest'
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+        '400':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /webhooks/{webhookID}:
+    parameters:
+      - name: webhookID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Webhooks]
+      summary: Get a single webhook (secret redacted)
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /logs:
     get:
       tags: [Logs]
@@ -1275,6 +1343,49 @@ components:
           $ref: '#/components/schemas/QuotaUsageSummary'
         disk_gb:
           $ref: '#/components/schemas/QuotaUsageSummary'
+    Webhook:
+      type: object
+      required: [id, url, active, created_at]
+      properties:
+        id:
+          type: string
+          example: "wh-1741234567890123"
+        url:
+          type: string
+          format: uri
+          example: "https://example.com/hook"
+        event_types:
+          type: array
+          items:
+            type: string
+          description: Optional event-type filter list (exact match or "prefix.*" glob). Empty = all events.
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        last_delivery_at:
+          type: string
+          format: date-time
+        last_status:
+          type: integer
+          description: HTTP status of the most recent successful delivery; 0 if last attempt failed.
+        last_error:
+          type: string
+    WebhookCreateRequest:
+      type: object
+      required: [url, secret]
+      properties:
+        url:
+          type: string
+          format: uri
+        secret:
+          type: string
+          description: HMAC-SHA256 signing secret. Never returned in responses.
+        event_types:
+          type: array
+          items:
+            type: string
     LogField:
       type: object
       additionalProperties:

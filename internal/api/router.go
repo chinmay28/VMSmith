@@ -48,6 +48,8 @@ type Server struct {
 	inflight             sync.WaitGroup
 	shuttingDown         atomic.Bool
 	eventStreamConns     atomic.Int64
+	webhookStore         WebhookStore
+	webhookManager       WebhookRegistrar
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -235,6 +237,14 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 		// Quotas / allocation overview
 		r.Get("/quotas/usage", s.GetQuotaUsage)
+
+		// Webhook subscriptions
+		r.Route("/webhooks", func(r chi.Router) {
+			r.Get("/", s.ListWebhooks)
+			r.Post("/", s.withRequestBodyLimit(s.CreateWebhook))
+			r.Get("/{webhookID}", s.GetWebhook)
+			r.Delete("/{webhookID}", s.DeleteWebhook)
+		})
 	})
 
 	// Prometheus metrics endpoint — served without auth, outside /api/v1.

@@ -9,4 +9,5 @@ const (
 	BucketPortForwards = "port_forwards"
 	BucketConfig       = "config"
 	BucketEvents       = "events"
+	BucketWebhooks     = "webhooks"
 )
