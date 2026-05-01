@@ -369,3 +369,131 @@ func TestEventCRUD(t *testing.T) {
 		t.Fatalf("ListEvents returned %d items, want 2", len(events))
 	}
 }
+
+func TestPruneEventsByAge(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	old := &types.Event{Type: "vm.started", Message: "old", OccurredAt: now.Add(-48 * time.Hour)}
+	mid := &types.Event{Type: "vm.stopped", Message: "mid", OccurredAt: now.Add(-25 * time.Hour)}
+	fresh := &types.Event{Type: "vm.created", Message: "fresh", OccurredAt: now.Add(-1 * time.Hour)}
+
+	for _, evt := range []*types.Event{old, mid, fresh} {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	// Cutoff = now - 24h: should delete old + mid (both older than 24h), keep fresh.
+	deleted, err := s.PruneEventsByAge(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneEventsByAge: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("PruneEventsByAge deleted=%d, want 2", deleted)
+	}
+
+	count, err := s.CountEvents()
+	if err != nil {
+		t.Fatalf("CountEvents: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("after prune: count=%d, want 1", count)
+	}
+
+	got, _, err := s.ListEventsFiltered(EventFilter{})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if len(got) != 1 || got[0].Message != "fresh" {
+		t.Fatalf("expected only the fresh event to survive, got %+v", got)
+	}
+}
+
+func TestPruneEventsByAge_ZeroDisables(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	stale := &types.Event{Type: "vm.started", OccurredAt: time.Now().Add(-365 * 24 * time.Hour)}
+	if _, err := s.AppendEvent(stale); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	deleted, err := s.PruneEventsByAge(0)
+	if err != nil {
+		t.Fatalf("PruneEventsByAge(0): %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("expected zero deletes when maxAge=0, got %d", deleted)
+	}
+
+	deleted, err = s.PruneEventsByAge(-1 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneEventsByAge(negative): %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("expected zero deletes when maxAge<0, got %d", deleted)
+	}
+}
+
+func TestPruneEventsByAge_KeepsAllWhenAllFresh(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		evt := &types.Event{Type: "vm.heartbeat", OccurredAt: now.Add(-time.Duration(i) * time.Minute)}
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	deleted, err := s.PruneEventsByAge(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneEventsByAge: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("expected no deletes when all events fresh, got %d", deleted)
+	}
+
+	count, _ := s.CountEvents()
+	if count != 5 {
+		t.Errorf("count=%d, want 5", count)
+	}
+}
+
+func TestPruneEventsByAge_StopsAtFirstFresh(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	// Mix: stale, stale, fresh, stale (out of order timestamps but in append order).
+	// Pruning walks chronologically by sequence ID and stops at first fresh
+	// event.  The trailing stale entry should NOT be deleted.
+	events := []*types.Event{
+		{Type: "a", OccurredAt: now.Add(-5 * time.Hour)},
+		{Type: "b", OccurredAt: now.Add(-4 * time.Hour)},
+		{Type: "c", OccurredAt: now.Add(-1 * time.Minute)}, // fresh
+		{Type: "d", OccurredAt: now.Add(-3 * time.Hour)},   // stale by clock, but inserted after fresh
+	}
+	for _, evt := range events {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	deleted, err := s.PruneEventsByAge(2 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneEventsByAge: %v", err)
+	}
+	// Only the first two stale events should be deleted; the walk stops at "c".
+	if deleted != 2 {
+		t.Errorf("PruneEventsByAge deleted=%d, want 2", deleted)
+	}
+
+	count, _ := s.CountEvents()
+	if count != 2 {
+		t.Errorf("count=%d, want 2", count)
+	}
+}

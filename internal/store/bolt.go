@@ -457,6 +457,57 @@ func (s *Store) PruneEvents(maxRecords int) (int, error) {
 	return deleted, err
 }
 
+// PruneEventsByAge deletes uint64-keyed events whose OccurredAt timestamp is
+// older than (now - maxAge).  Returns the number of events deleted.  A
+// non-positive maxAge disables the sweep (returns 0, nil).  At most 5000
+// events are deleted per call so a backlog cannot stall the writer.
+func (s *Store) PruneEventsByAge(maxAge time.Duration) (int, error) {
+	if maxAge <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().Add(-maxAge)
+	deleted := 0
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketEvents))
+
+		// Walk in chronological (forward) order.  Stop as soon as we hit an
+		// event newer than the cutoff — events written by AppendEvent share
+		// monotonic sequence IDs whose order matches insertion time, so we
+		// never need to walk past the first non-stale entry.
+		const maxPerSweep = 5000
+		var staleKeys [][]byte
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(k) != 8 {
+				continue
+			}
+			var evt types.Event
+			if err := json.Unmarshal(v, &evt); err != nil {
+				// Skip un-parseable entries rather than abort the sweep.
+				continue
+			}
+			if evt.OccurredAt.IsZero() || evt.OccurredAt.After(cutoff) {
+				break
+			}
+			cp := make([]byte, 8)
+			copy(cp, k)
+			staleKeys = append(staleKeys, cp)
+			if len(staleKeys) >= maxPerSweep {
+				break
+			}
+		}
+
+		for _, k := range staleKeys {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+			deleted++
+		}
+		return nil
+	})
+	return deleted, err
+}
+
 // ListEvents returns all events (legacy API — includes both string-keyed and
 // uint64-keyed events).  New code should use ListEventsFiltered instead.
 func (s *Store) ListEvents() ([]*types.Event, error) {

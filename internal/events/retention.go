@@ -10,32 +10,42 @@ import (
 // PruneStore is the persistence interface the retention loop requires.
 type PruneStore interface {
 	PruneEvents(maxRecords int) (int, error)
+	PruneEventsByAge(maxAge time.Duration) (int, error)
 }
 
 // Retention runs a periodic loop that deletes old events from the store
-// once they exceed maxRecords.
+// once they exceed maxRecords or are older than maxAge.
 type Retention struct {
 	store      PruneStore
 	maxRecords int
+	maxAge     time.Duration
 	interval   time.Duration
 	bus        *EventBus
 }
 
 // NewRetention constructs a retention loop.  bus may be nil, in which case
 // pruning still runs but no system events are emitted on each sweep.
-func NewRetention(store PruneStore, maxRecords int, interval time.Duration, bus *EventBus) *Retention {
+//
+// maxRecords <= 0 disables count-based pruning.  maxAge <= 0 disables
+// age-based pruning.  When both are disabled the loop never starts.
+func NewRetention(store PruneStore, maxRecords int, maxAge, interval time.Duration, bus *EventBus) *Retention {
 	return &Retention{
 		store:      store,
 		maxRecords: maxRecords,
+		maxAge:     maxAge,
 		interval:   interval,
 		bus:        bus,
 	}
 }
 
 // Run blocks until ctx is cancelled, sweeping at the configured interval.
-// A maxRecords or interval <= 0 disables the loop entirely (Run returns immediately).
+// A non-positive interval, or both maxRecords and maxAge non-positive,
+// disables the loop entirely (Run returns immediately).
 func (r *Retention) Run(ctx context.Context) {
-	if r.maxRecords <= 0 || r.interval <= 0 {
+	if r.interval <= 0 {
+		return
+	}
+	if r.maxRecords <= 0 && r.maxAge <= 0 {
 		return
 	}
 	ticker := time.NewTicker(r.interval)
@@ -55,21 +65,45 @@ func (r *Retention) Run(ctx context.Context) {
 }
 
 func (r *Retention) sweep() {
-	deleted, err := r.store.PruneEvents(r.maxRecords)
-	if err != nil {
-		logger.Warn("events", "retention sweep failed", "error", err.Error())
+	var deletedRecords, deletedAge int
+
+	if r.maxRecords > 0 {
+		n, err := r.store.PruneEvents(r.maxRecords)
+		if err != nil {
+			logger.Warn("events", "retention sweep failed", "phase", "max_records", "error", err.Error())
+		} else {
+			deletedRecords = n
+		}
+	}
+
+	if r.maxAge > 0 {
+		n, err := r.store.PruneEventsByAge(r.maxAge)
+		if err != nil {
+			logger.Warn("events", "retention sweep failed", "phase", "max_age", "error", err.Error())
+		} else {
+			deletedAge = n
+		}
+	}
+
+	total := deletedRecords + deletedAge
+	if total == 0 {
 		return
 	}
-	if deleted == 0 {
-		return
-	}
-	logger.Info("events", "retention sweep deleted events", "deleted", itoa(deleted), "max_records", itoa(r.maxRecords))
+	logger.Info("events", "retention sweep deleted events",
+		"deleted", itoa(total),
+		"deleted_max_records", itoa(deletedRecords),
+		"deleted_max_age", itoa(deletedAge),
+		"max_records", itoa(r.maxRecords),
+		"max_age_seconds", itoa(int(r.maxAge/time.Second)))
 	if r.bus != nil {
 		evt := NewSystemEvent("events.retention_pruned", "info",
 			"events retention sweep deleted old events")
 		evt.Attributes = map[string]string{
-			"deleted":     itoa(deleted),
-			"max_records": itoa(r.maxRecords),
+			"deleted":             itoa(total),
+			"deleted_max_records": itoa(deletedRecords),
+			"deleted_max_age":     itoa(deletedAge),
+			"max_records":         itoa(r.maxRecords),
+			"max_age_seconds":     itoa(int(r.maxAge / time.Second)),
 		}
 		r.bus.Publish(evt)
 	}

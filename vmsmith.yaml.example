@@ -54,5 +54,6 @@ metrics:
                           # e.g. "127.0.0.1:9101"; empty = serve on the main daemon port without auth
 
 events:
-  max_records: 50000        # cap on persisted events; 0 disables the retention sweep entirely
+  max_records: 50000        # cap on persisted events; 0 disables count-based pruning
+  max_age_seconds: 2592000  # delete events older than this many seconds (default 30 days); 0 disables age-based pruning
   retention_interval: 60    # seconds between retention sweeps; 0 disables the sweep entirely
