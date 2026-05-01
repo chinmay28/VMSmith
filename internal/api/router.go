@@ -47,6 +47,14 @@ type Server struct {
 	rateLimiter          *ipRateLimiter
 	inflight             sync.WaitGroup
 	shuttingDown         atomic.Bool
+	eventStreamConns     atomic.Int64
+}
+
+// EventStreamConnections returns the number of in-flight SSE clients on
+// /api/v1/events/stream.  Surfaced via host_stats so operators can see
+// consumer pressure and detect stuck clients.
+func (s *Server) EventStreamConnections() int64 {
+	return s.eventStreamConns.Load()
 }
 
 type ipRateLimiter struct {

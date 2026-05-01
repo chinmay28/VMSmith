@@ -1221,7 +1221,7 @@ components:
           type: integer
     HostStats:
       type: object
-      required: [vm_count, cpu, ram, disk]
+      required: [vm_count, cpu, ram, disk, event_stream_connections]
       properties:
         vm_count:
           type: integer
@@ -1231,6 +1231,13 @@ components:
           $ref: '#/components/schemas/HostResourceUsageSummary'
         disk:
           $ref: '#/components/schemas/HostResourceUsageSummary'
+        event_stream_connections:
+          type: integer
+          format: int64
+          description: |
+            Number of in-flight Server-Sent Event clients on
+            `/api/v1/events/stream`.  Useful for spotting consumer pressure
+            and stuck SSE connections.
     QuotaUsageSummary:
       type: object
       required: [used]

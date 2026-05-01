@@ -27,5 +27,6 @@ func (s *Server) GetHostStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stats.EventStreamConnections = s.eventStreamConns.Load()
 	writeJSON(w, http.StatusOK, stats)
 }

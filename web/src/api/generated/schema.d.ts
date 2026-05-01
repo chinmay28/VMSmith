@@ -1431,6 +1431,14 @@ export interface components {
             cpu: components["schemas"]["HostResourceUsageSummary"];
             ram: components["schemas"]["HostResourceUsageSummary"];
             disk: components["schemas"]["HostResourceUsageSummary"];
+            /**
+             * Format: int64
+             * @description Number of in-flight Server-Sent Event clients on
+             *     `/api/v1/events/stream`.  Useful for spotting consumer pressure
+             *     and stuck SSE connections.
+             *
+             */
+            event_stream_connections: number;
         };
         QuotaUsageSummary: {
             used: number;
