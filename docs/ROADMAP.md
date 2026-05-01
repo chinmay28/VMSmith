@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
 > **Last updated:** 2026-04-30
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, and OpenAPI tooling are now complete; the main remaining gaps are deeper cloning coverage, VM metrics streaming/charts, advanced operations, and long-tail production polish.
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are libvirt clone implementation, VM metrics streaming/charts, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -68,7 +68,7 @@ Currently the only way to duplicate a VM is export-to-image then create-from-ima
 | 2.1.4 | Add `POST /api/v1/vms/{id}/clone` endpoint | S | ✅ Done — API now exposes VM cloning with request validation, duplicate-name checks, typed error responses, and handler coverage for success/not-found/error cases |
 | 2.1.5 | Add `vmsmith vm clone <id> --name <name>` CLI command | S | ✅ Done — CLI now supports `vmsmith vm clone <id> --name <name>` with test coverage and updated docs |
 | 2.1.6 | Add "Clone" button to VMDetail page in frontend | S | ✅ Done — VM detail now offers a clone action modal that posts the new VM name to `POST /api/v1/vms/{id}/clone` and redirects to the cloned VM on success |
-| 2.1.7 | Add integration + E2E tests | M | |
+| 2.1.7 | Add integration + E2E tests | M | ✅ Done — API handler coverage for `POST /api/v1/vms/{id}/clone` lives in `internal/api/api_test.go`, and the Playwright mock GUI suite exercises the VM detail clone modal redirect flow in `tests/web/gui.spec.js` |
 
 ### 2.2 VM Tags & Metadata
 
@@ -375,7 +375,7 @@ Outbound payloads include a top-level `schema_version: 1` so downstream consumer
 | 4.2.8 | Retention loop (every 60s) honoring `daemon.events.max_records` (default 50_000) and `daemon.events.max_age` (default 720h); cap deletes per sweep at 5000; emit `system` event when retention drops events | S | ✅ Done — `internal/events/retention.go` now drives both `Store.PruneEvents(maxRecords)` and `Store.PruneEventsByAge(maxAge)` on every tick (default 30 days via `daemon.events.max_age_seconds`), each capped at 5000 deletes per sweep, and a single `events.retention_pruned` system event reports per-phase counts |
 | 4.2.9 | Extend `GET /api/v1/events` with `?type=`, `?source=`, `?severity=`, `?until=<id>` filters (in addition to the existing `?vm_id=`, `?since=`, page / per_page), align replies to use `since`/`until` IDs alongside the current `since` timestamp, ensure same auth + rate-limit as other API routes | M | ✅ Done — event listing now supports the additional filters and `until` cursor alongside pagination |
 | 4.2.10 | `GET /api/v1/events/stream` SSE endpoint: `Last-Event-ID` header support, `?since=` query fallback, 30s heartbeat, `daemon.events.sse_replay_limit` (default 1000), 410 with `event_stream_replay_window_exceeded` on overflow, `?api_key=` query auth fallback for browser EventSource. New `internal/api/sse.go` helper for headers / heartbeat / `http.Flusher` plumbing. Track active connection count and surface it in `host_stats` | L | ✅ Done in part — SSE replay, heartbeat, overflow handling, and EventSource auth fallback are implemented; connection-count host stats remain future polish |
-| 4.2.11 | Frontend: `web/src/hooks/useEventStream.js` — opens `EventSource`, handles reconnect with `Last-Event-ID`, falls back to polling on 410 / network error for 30s, exposes connection state. Replace polling on Dashboard and VMList with the hook; add a small "live" indicator | M | Reconnect uses exponential backoff; tests in `tests/web/` with mock SSE server |
+| 4.2.11 | Frontend: `web/src/hooks/useEventStream.js` — opens `EventSource`, handles reconnect with `Last-Event-ID`, falls back to polling on 410 / network error for 30s, exposes connection state. Replace polling on Dashboard and VMList with the hook; add a small "live" indicator | M | ✅ Done — `web/src/hooks/useEventStream.js` now drives the Dashboard and VM list live refresh path, surfaces the shared live-status pill, and the Playwright suite covers the live indicator plus 410 fallback behavior in `tests/web/gui.spec.js` |
 | 4.2.12 | Frontend: "Activity" tab on VMDetail showing reverse-chronological event timeline filtered by `vm_id`, infinite scroll via `until=<id>` | M | ✅ Done — `web/src/pages/VMDetail.jsx` adds an Activity tab that embeds the timeline with `vm_id` pre-filtered. Pagination is page-based (Prev/Next + per-page selector); `until=<id>` infinite scroll deferred until 4.2.10 ships |
 | 4.2.13 | Frontend: top-level "Activity" page with filter chips (type / severity / source) and date-range picker, deep links via query params | M | ✅ Done — `web/src/pages/Activity.jsx` lists events with VM / source / severity / type filters; filters are mirrored to URL search params for deep links |
 | 4.2.14 | CLI: `vmsmith events list [--vm <id>] [--type <t>] [--source <s>] [--severity <sev>] [--since <duration|id>] [--limit <n>]` (one-shot REST query) and `vmsmith events follow [--vm <id>] [--type <t>]` (SSE, prints events as they arrive, exits on Ctrl-C) | M | ✅ Done — `vmsmith events list` and `vmsmith events follow` are both shipped in `internal/cli/events.go`. `events follow` opens an SSE stream against `/api/v1/events/stream`, applies `--vm/--type/--source/--severity` filters client-side, reconnects with `Last-Event-ID` + `?since=` on transient errors, exits cleanly on Ctrl-C, and treats 401/410 as fatal so the user gets a clear error |
@@ -702,8 +702,8 @@ With the initial platform hardening work mostly done, the next highest-value roa
 | Priority | Area | Key Tasks | Why |
 |----------|------|-----------|-----|
 | **P0** | VM Resource Metrics | 4.1.5 – 4.1.8, 4.1.10 – 4.1.11 | REST stats + CLI are in place, but live streaming, charts, dashboard rollups, and docs polish still remain |
-| **P1** | Events | 4.2.7 – 4.2.11 | Core event API/UI shipped; remaining work is deeper system-event coverage, connection observability, and broader live updates |
-| **P1** | VM Cloning | 2.1.2, 2.1.7 | Main clone flows ship today, but the libvirt implementation and deeper integration/E2E coverage remain the last notable gaps |
+| **P1** | Events | 4.2.7 – 4.2.10 | Core event API/UI shipped; remaining work is deeper system-event coverage, connection observability, and broader live updates |
+| **P1** | VM Cloning | 2.1.2 | Main clone flows ship today, but the libvirt implementation is still the last notable product gap |
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
