@@ -6,7 +6,10 @@ import {
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState } from '../components/Shared';
+import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
+import { buildChartData } from '../hooks/vmStatsHelpers.js';
+import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator } from '../components/Shared';
+import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
 import Activity from './Activity';
 
@@ -659,16 +662,15 @@ function ExportImageModal({ vmId, open, onClose }) {
 
 // --- VM Metrics ---
 function VMMetrics({ vmId }) {
-  const { data: snap, loading, error } = useFetch(() => vms.stats(vmId), [vmId], 10000);
+  const { snapshot: snap, history, current: cur, status, error } = useVMStats(vmId);
 
-  if (loading && !snap) return <div className="flex justify-center py-10"><Spinner size={20} /></div>;
-  if (error) return <ErrorBanner message={error} />;
+  if (status === STATS_STATE_LOADING && !snap) return <div className="flex justify-center py-10"><Spinner size={20} /></div>;
+  if (status === STATS_STATE_ERROR && error) return <ErrorBanner message={error} />;
   if (!snap) return null;
 
-  const cur = snap.current || null;
-  const history = safeArray(snap.history);
-
-  // Compute 5-minute averages from history.
+  // Compute 5-minute averages from the (rolling) history. This grows live as
+  // new samples arrive over the SSE stream, so the average is always anchored
+  // to the most recent window.
   const fiveMinAgo = Date.now() - 5 * 60 * 1000;
   const recent = history.filter((s) => {
     const ts = s?.timestamp ? Date.parse(s.timestamp) : NaN;
@@ -705,34 +707,69 @@ function VMMetrics({ vmId }) {
           }
         />
       ) : (
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
-            <h2 className="text-sm font-display font-semibold text-steel-300">Resource Utilization</h2>
-            <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">refreshing every 10s</span>
+        <>
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
+              <h2 className="text-sm font-display font-semibold text-steel-300">Resource Utilization</h2>
+              <div className="flex items-center gap-3">
+                <LiveIndicator status={status} />
+                <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500" data-testid="metrics-live-status">{status}</span>
+              </div>
+            </div>
+            <table className="w-full text-sm" data-testid="metrics-table">
+              <thead className="text-left text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500 border-b border-steel-800/40">
+                <tr>
+                  <th className="px-4 py-2">Metric</th>
+                  <th className="px-4 py-2">Current</th>
+                  <th className="px-4 py-2">5-min avg</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-steel-800/40">
+                <MetricRow label="CPU %" testId="metric-cpu" cur={fmtPercent(cur.cpu_percent)} avg={fmtPercent(avgFloat('cpu_percent'))} />
+                <MetricRow label="Memory used" testId="metric-mem-used" cur={fmtMB(cur.mem_used_mb)} avg={fmtMB(avgInt('mem_used_mb'))} />
+                <MetricRow label="Memory available" testId="metric-mem-avail" cur={fmtMB(cur.mem_avail_mb)} avg={fmtMB(avgInt('mem_avail_mb'))} />
+                <MetricRow label="Disk read" testId="metric-disk-read" cur={fmtBps(cur.disk_read_bps)} avg={fmtBps(avgInt('disk_read_bps'))} />
+                <MetricRow label="Disk write" testId="metric-disk-write" cur={fmtBps(cur.disk_write_bps)} avg={fmtBps(avgInt('disk_write_bps'))} />
+                <MetricRow label="Network RX" testId="metric-net-rx" cur={fmtBps(cur.net_rx_bps)} avg={fmtBps(avgInt('net_rx_bps'))} />
+                <MetricRow label="Network TX" testId="metric-net-tx" cur={fmtBps(cur.net_tx_bps)} avg={fmtBps(avgInt('net_tx_bps'))} />
+              </tbody>
+            </table>
           </div>
-          <table className="w-full text-sm" data-testid="metrics-table">
-            <thead className="text-left text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500 border-b border-steel-800/40">
-              <tr>
-                <th className="px-4 py-2">Metric</th>
-                <th className="px-4 py-2">Current</th>
-                <th className="px-4 py-2">5-min avg</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-steel-800/40">
-              <MetricRow label="CPU %" testId="metric-cpu" cur={fmtPercent(cur.cpu_percent)} avg={fmtPercent(avgFloat('cpu_percent'))} />
-              <MetricRow label="Memory used" testId="metric-mem-used" cur={fmtMB(cur.mem_used_mb)} avg={fmtMB(avgInt('mem_used_mb'))} />
-              <MetricRow label="Memory available" testId="metric-mem-avail" cur={fmtMB(cur.mem_avail_mb)} avg={fmtMB(avgInt('mem_avail_mb'))} />
-              <MetricRow label="Disk read" testId="metric-disk-read" cur={fmtBps(cur.disk_read_bps)} avg={fmtBps(avgInt('disk_read_bps'))} />
-              <MetricRow label="Disk write" testId="metric-disk-write" cur={fmtBps(cur.disk_write_bps)} avg={fmtBps(avgInt('disk_write_bps'))} />
-              <MetricRow label="Network RX" testId="metric-net-rx" cur={fmtBps(cur.net_rx_bps)} avg={fmtBps(avgInt('net_rx_bps'))} />
-              <MetricRow label="Network TX" testId="metric-net-tx" cur={fmtBps(cur.net_tx_bps)} avg={fmtBps(avgInt('net_tx_bps'))} />
-            </tbody>
-          </table>
-        </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <MetricChart
+              title="CPU"
+              series={[{ label: 'CPU %', color: '#38bdf8', format: 'percent' }]}
+              data={buildChartData(history, ['cpu_percent'])}
+            />
+            <MetricChart
+              title="Memory"
+              series={[{ label: 'Used MB', color: '#a78bfa', format: 'mb' }]}
+              data={buildChartData(history, ['mem_used_mb'])}
+            />
+            <MetricChart
+              title="Disk I/O"
+              series={[
+                { label: 'Read', color: '#34d399', format: 'bps' },
+                { label: 'Write', color: '#f59e0b', format: 'bps' },
+              ]}
+              data={buildChartData(history, ['disk_read_bps', 'disk_write_bps'])}
+            />
+            <MetricChart
+              title="Network"
+              series={[
+                { label: 'RX', color: '#60a5fa', format: 'bps' },
+                { label: 'TX', color: '#f472b6', format: 'bps' },
+              ]}
+              data={buildChartData(history, ['net_rx_bps', 'net_tx_bps'])}
+            />
+          </div>
+        </>
       )}
     </div>
   );
 }
+
 
 function MetricRow({ label, cur, avg, testId }) {
   return (

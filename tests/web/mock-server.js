@@ -225,6 +225,54 @@ const server = http.createServer(async (req, res) => {
       history_size: historySize,
     });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/stats\/stream$/)) && method === "GET") {
+    const vmId = m[1];
+    const vm = vms.get(vmId);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: `vm "${vmId}" not found` });
+    if (vm.state !== "running") {
+      // Mirror the daemon: stream still opens but no samples are emitted while
+      // the VM is not running. The frontend should show the empty state.
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      });
+      const hb = setInterval(() => res.write(": keepalive\n\n"), 1000);
+      req.on("close", () => clearInterval(hb));
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    let counter = 0;
+    const writeFrame = () => {
+      // First frame mirrors the REST-seeded current sample (cpu_percent 35%
+      // = 10 + 5*5). Subsequent frames bump each metric so the chart and the
+      // 5-min average advance over time, but tests asserting the seeded
+      // baseline still see "35.0%" on initial load.
+      const sample = {
+        timestamp: new Date().toISOString(),
+        cpu_percent: 35 + counter,
+        mem_used_mb: 600 + counter * 4,
+        mem_avail_mb: 900 - counter * 4,
+        disk_read_bps: 8192 * (counter + 1),
+        disk_write_bps: 4096 * (counter + 1),
+        net_rx_bps: 32768 * (counter + 1),
+        net_tx_bps: 16384 * (counter + 1),
+      };
+      counter += 1;
+      const id = String(Date.now());
+      res.write(`id: ${id}\nevent: vm.stats\ndata: ${JSON.stringify(sample)}\n\n`);
+    };
+    writeFrame();
+    const tick = setInterval(writeFrame, 600);
+    const hb = setInterval(() => res.write(": keepalive\n\n"), 1500);
+    req.on("close", () => { clearInterval(tick); clearInterval(hb); });
+    return;
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
     return json(res, 200, snapshots.get(m[1]) || []);
   }
