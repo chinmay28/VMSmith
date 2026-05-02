@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-04-28
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host dashboard stats, and frontend pagination are now complete; the main remaining gaps are cloning, VM-level metrics, events/notifications, OpenAPI tooling, and advanced operations features. Phase 4.1, 4.2, 5.1, and 5.2 refined 2026-04-28 to capture the partial implementations already in tree and to flesh out the missing architecture.
+> **Last updated:** 2026-05-02
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host dashboard stats, frontend pagination, VM cloning foundations, and OpenAPI tooling are now complete. The main remaining gaps are VM-level metrics, event streaming/timelines/notifications, advanced console and scheduling features, and a few follow-up test/docs tasks. Phase 4.1, 4.2, 5.1, and 5.2 were refined 2026-04-28 to capture the partial implementations already in tree and to flesh out the missing architecture.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -701,14 +701,14 @@ With the initial platform hardening work mostly done, the next highest-value roa
 
 | Priority | Area | Key Tasks | Why |
 |----------|------|-----------|-----|
-| **P0** | VM Cloning | 2.1.1 – 2.1.7 | The biggest day-to-day workflow gap still called out in the roadmap |
-| **P0** | Events | 4.2.1 – 4.2.5 | Lifecycle visibility and notifications remain missing across API and UI |
-| **P1** | VM Resource Metrics | 4.1.1 – 4.1.3, 4.1.5 | Host stats are in place, but VM-level CPU/RAM/disk/network visibility is still absent |
-| **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | A spec plus Swagger UI/client generation would make the API easier to consume safely |
-| **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
-| **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
-| **P3** | OVA Import/Export | 5.3.1 – 5.3.3 | Helpful interoperability feature, but less urgent than core ops gaps |
+| **P0** | VM Resource Metrics | 4.1.1 – 4.1.11 | Host stats are in place, but VM-level CPU/RAM/disk/network visibility is still the biggest observability gap |
+| **P0** | Events & Notifications | 4.2.4 – 4.2.10 | Lifecycle persistence exists, but real-time streaming, VM timelines, and operator notifications are still missing |
+| **P1** | Clone follow-up coverage | 2.1.7 | Core clone flows are shipped; the main remaining work is integration + E2E confidence |
+| **P1** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
+| **P2** | Scheduled Operations | 5.2.1 – 5.2.5 | Useful automation once observability and lifecycle features are in place |
+| **P2** | OVA Import/Export | 5.3.1 – 5.3.3 | Helpful interoperability feature, but less urgent than core ops gaps |
 | **P3** | Multi-Host Management | 5.5.1 – 5.5.4 | Still a long-term architecture track rather than near-term delivery |
+| **P3** | Demo assets | 6.3.4 | Nice for adoption, but lower leverage than the remaining product gaps |
 
 ---
 
