@@ -163,6 +163,11 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "stopped"; return json(res, 200, { status: "stopped" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/restart$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (vm) { vm.state = "running"; return json(res, 200, { status: "restarted" }); }
+    return json(res, 404, { error: "not found" });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
     const source = vms.get(m[1]);
     if (!source) return json(res, 404, { error: "not found" });

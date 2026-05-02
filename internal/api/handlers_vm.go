@@ -345,6 +345,19 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
+// RestartVM handles POST /api/v1/vms/{vmID}/restart.  It performs a graceful
+// stop followed by a start; if the VM is already stopped it just starts.
+func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.Restart(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.restart_requested", id, fmt.Sprintf("VM %q restart requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
+}
+
 // BulkVMAction handles POST /api/v1/vms/bulk.
 func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 	var req bulkVMActionRequest

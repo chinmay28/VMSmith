@@ -24,9 +24,10 @@ export default function VMDetail() {
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
-  const startMut  = useMutation(vms.start);
-  const stopMut   = useMutation(vms.stop);
-  const deleteMut = useMutation(vms.delete);
+  const startMut   = useMutation(vms.start);
+  const stopMut    = useMutation(vms.stop);
+  const restartMut = useMutation(vms.restart);
+  const deleteMut  = useMutation(vms.delete);
 
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
   if (error) return <ErrorBanner message={error} />;
@@ -72,6 +73,11 @@ export default function VMDetail() {
           {vm.state === 'running' && (
             <button className="btn-secondary" onClick={() => { stopMut.execute(id).then(refresh); }} data-testid="btn-stop">
               <Square size={14} /> Stop
+            </button>
+          )}
+          {vm.state === 'running' && (
+            <button className="btn-secondary" onClick={() => { restartMut.execute(id).then(refresh); }} data-testid="btn-restart" title="Graceful stop and start">
+              <RotateCcw size={14} /> Restart
             </button>
           )}
           <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">

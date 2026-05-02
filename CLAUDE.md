@@ -420,6 +420,7 @@ POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
+POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
 DELETE /vms/{id}                       Delete VM
 GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot

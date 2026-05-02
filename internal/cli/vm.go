@@ -215,6 +215,30 @@ var vmStopCmd = &cobra.Command{
 	},
 }
 
+var vmRestartCmd = &cobra.Command{
+	Use:   "restart <id>",
+	Short: "Restart a VM (graceful stop, then start)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm restart", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm restart: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.Restart(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm restart failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "restart", "id", id)
+		fmt.Printf("VM %s restarted\n", id)
+		return nil
+	},
+}
+
 var vmDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a VM and its resources",
@@ -849,6 +873,7 @@ Examples:
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmStartCmd)
 	vmCmd.AddCommand(vmStopCmd)
+	vmCmd.AddCommand(vmRestartCmd)
 	vmCmd.AddCommand(vmDeleteCmd)
 	vmCmd.AddCommand(vmInfoCmd)
 	vmCmd.AddCommand(vmStatsCmd)

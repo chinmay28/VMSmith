@@ -1695,6 +1695,44 @@ func TestDeleteVM_Error(t *testing.T) {
 	}
 }
 
+func TestRestartVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-restart", Name: "rebooter", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-restart/restart", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	got, _ := mockMgr.Get(nil, "vm-restart")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestRestartVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.RestartErr = types.ErrTest
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-x/restart", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
 func TestStartVM_Error(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

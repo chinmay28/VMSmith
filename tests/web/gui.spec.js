@@ -276,6 +276,19 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
   });
 
+  test("restart running VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Restart button is only shown while running.
+    await expect(page.getByTestId("btn-restart")).toBeVisible();
+    await page.getByTestId("btn-restart").click();
+
+    // After restart the VM should still be running.
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+    await expect(page.getByTestId("btn-restart")).toBeVisible();
+  });
+
   test("create snapshot", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
