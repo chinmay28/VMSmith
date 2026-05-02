@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-04-30
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, and OpenAPI tooling are now complete; the main remaining gaps are deeper cloning coverage, VM metrics streaming/charts, advanced operations, and long-tail production polish.
+> **Last updated:** 2026-05-02
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, and OpenAPI tooling are now complete; the main remaining gaps are the libvirt-backed clone implementation, VM metrics charting polish, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -68,7 +68,7 @@ Currently the only way to duplicate a VM is export-to-image then create-from-ima
 | 2.1.4 | Add `POST /api/v1/vms/{id}/clone` endpoint | S | ✅ Done — API now exposes VM cloning with request validation, duplicate-name checks, typed error responses, and handler coverage for success/not-found/error cases |
 | 2.1.5 | Add `vmsmith vm clone <id> --name <name>` CLI command | S | ✅ Done — CLI now supports `vmsmith vm clone <id> --name <name>` with test coverage and updated docs |
 | 2.1.6 | Add "Clone" button to VMDetail page in frontend | S | ✅ Done — VM detail now offers a clone action modal that posts the new VM name to `POST /api/v1/vms/{id}/clone` and redirects to the cloned VM on success |
-| 2.1.7 | Add integration + E2E tests | M | |
+| 2.1.7 | Add integration + E2E tests | M | ✅ Done — clone coverage now spans API integration tests in `internal/api/api_test.go` plus the VM-detail clone flow in `tests/web/gui.spec.js`, including the redirect to the newly created machine |
 
 ### 2.2 VM Tags & Metadata
 
@@ -731,7 +731,7 @@ With the initial platform hardening work mostly done, the next highest-value roa
 |----------|------|-----------|-----|
 | **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus, the leaderboard, the CLI, and the live uPlot charts on VMDetail are all shipped; only the deeper unit/integration/E2E coverage in 4.1.10 (counter-reset edge cases, real-VM stress test) remains |
 | **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, and Activity views are shipped; the biggest remaining work is webhook delivery plus the last bit of frontend/live-update polish |
-| **P1** | VM Cloning | 2.1.2, 2.1.7 | Main clone flows ship today, but the libvirt implementation and deeper integration/E2E coverage remain the last notable gaps |
+| **P1** | VM Cloning | 2.1.2 | Main clone flows and their integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
