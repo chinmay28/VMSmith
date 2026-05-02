@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -68,7 +69,7 @@ type Store interface {
 type Manager struct {
 	store        Store
 	bus          *events.EventBus
-	httpClient   *http.Client
+	httpTimeout  time.Duration
 	allowedHosts []string
 
 	mu        sync.Mutex
@@ -81,6 +82,9 @@ type Manager struct {
 	// Test hooks.
 	resolveIPs func(string) ([]net.IP, error)
 	backoff    []time.Duration
+	// disableJitter skips the random jitter on retries so tests are
+	// deterministic.
+	disableJitter bool
 }
 
 // Config carries operator-tunable knobs.
@@ -103,7 +107,7 @@ func NewManager(store Store, bus *events.EventBus, cfg Config) *Manager {
 	return &Manager{
 		store:        store,
 		bus:          bus,
-		httpClient:   &http.Client{Timeout: timeout},
+		httpTimeout:  timeout,
 		allowedHosts: cfg.AllowedHosts,
 		workers:      make(map[string]*worker),
 		backoff:      defaultBackoff,
@@ -296,26 +300,40 @@ func (w *worker) deliver(ctx context.Context, evt *types.Event) {
 		return
 	}
 
-	target, err := validateTarget(w.hook.URL, w.mgr.allowedHosts, w.mgr.resolveIPs)
+	target, verifiedIPs, err := validateTarget(w.hook.URL, w.mgr.allowedHosts, w.mgr.resolveIPs)
 	if err != nil {
 		w.recordFailure(evt, err.Error(), -1)
 		return
 	}
+
+	// Build a one-shot HTTP client whose dialer is pinned to the IPs we just
+	// verified.  This closes the DNS-rebinding window between validation and
+	// connect: even if the upstream resolver is hostile and switches to a
+	// blocked IP at connect time, the dialer refuses anything outside the
+	// verified set.  When the host bypassed the check via allowedHosts,
+	// verifiedIPs is nil and we trust the system resolver.
+	client := w.mgr.clientForDelivery(verifiedIPs)
 
 	attempts := len(w.mgr.backoff) + 1
 	var lastErr error
 	var lastStatus int
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
+			delay := w.mgr.backoff[i-1]
+			if !w.mgr.disableJitter {
+				// Add up to 25% positive jitter so multiple webhooks targeting a
+				// flaky receiver don't retry in lockstep.
+				delay += time.Duration(rand.Int63n(int64(delay/4) + 1))
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-w.stopped:
 				return
-			case <-time.After(w.mgr.backoff[i-1]):
+			case <-time.After(delay):
 			}
 		}
-		status, err := w.send(ctx, target.String(), body, evt)
+		status, err := w.send(ctx, client, target.String(), body, evt)
 		lastStatus = status
 		if err == nil && status >= 200 && status < 300 {
 			w.recordSuccess(status)
@@ -335,7 +353,7 @@ func (w *worker) deliver(ctx context.Context, evt *types.Event) {
 	w.recordFailure(evt, msg, lastStatus)
 }
 
-func (w *worker) send(ctx context.Context, url string, body []byte, evt *types.Event) (int, error) {
+func (w *worker) send(ctx context.Context, client *http.Client, url string, body []byte, evt *types.Event) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
@@ -347,12 +365,54 @@ func (w *worker) send(ctx context.Context, url string, body []byte, evt *types.E
 	req.Header.Set(HeaderEventType, evt.Type)
 	req.Header.Set(HeaderSchemaVersion, strconv.Itoa(types.EventSchemaVersion))
 
-	resp, err := w.mgr.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode, nil
+}
+
+// clientForDelivery returns an http.Client whose dialer refuses to connect to
+// any IP outside the supplied set.  Pass nil to allow the default resolver
+// (used only when validateTarget bypassed the deny-list via allowedHosts).
+func (m *Manager) clientForDelivery(verifiedIPs []net.IP) *http.Client {
+	if len(verifiedIPs) == 0 {
+		return &http.Client{Timeout: m.httpTimeout}
+	}
+	allowed := make(map[string]struct{}, len(verifiedIPs))
+	for _, ip := range verifiedIPs {
+		allowed[ip.String()] = struct{}{}
+	}
+	dialer := &net.Dialer{Timeout: m.httpTimeout}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				// Re-resolve and pick the first verified address.
+				resolved, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+				if err != nil {
+					return nil, err
+				}
+				for _, candidate := range resolved {
+					if _, ok := allowed[candidate.String()]; ok {
+						return dialer.DialContext(ctx, network, net.JoinHostPort(candidate.String(), port))
+					}
+				}
+				return nil, ErrSSRFBlocked
+			}
+			if _, ok := allowed[ip.String()]; !ok {
+				return nil, ErrSSRFBlocked
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+	return &http.Client{Timeout: m.httpTimeout, Transport: transport}
 }
 
 func (w *worker) recordSuccess(status int) {

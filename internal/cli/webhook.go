@@ -132,11 +132,11 @@ var webhookListCmd = &cobra.Command{
 			if h.LastStatus != 0 {
 				lastStatus = fmt.Sprintf("%d", h.LastStatus)
 			}
-			types := "(all)"
+			etypes := "(all)"
 			if len(h.EventTypes) > 0 {
-				types = strings.Join(h.EventTypes, ",")
+				etypes = strings.Join(h.EventTypes, ",")
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, types, lastStatus, h.LastError)
+			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, etypes, lastStatus, h.LastError)
 		}
 		return tw.Flush()
 	},

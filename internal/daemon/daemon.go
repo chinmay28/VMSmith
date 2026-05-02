@@ -239,6 +239,18 @@ func (d *Daemon) Run() error {
 		go persister.Run(ctx)
 		logger.Info("daemon", "vm state persister started")
 
+		// Start the webhook delivery subsystem before publishing daemon.started
+		// so any webhook configured for daemon.started or system.* receives the
+		// boot event.  The bus has no replay buffer, so subscribers added after
+		// publish would miss it on every restart.
+		if d.webhookMgr != nil {
+			if err := d.webhookMgr.Start(ctx); err != nil {
+				logger.Warn("daemon", "webhook manager failed to start", "error", err.Error())
+			} else {
+				logger.Info("daemon", "webhook manager started")
+			}
+		}
+
 		evt := events.NewSystemEvent("daemon.started", "info", "vmsmith daemon started")
 		evt.Attributes = map[string]string{
 			"listen": d.cfg.Daemon.Listen,
@@ -250,16 +262,6 @@ func (d *Daemon) Run() error {
 	// Start retention loop.
 	if d.retention != nil {
 		go d.retention.Run(ctx)
-	}
-
-	// Start the webhook delivery subsystem.  Each registered, active webhook
-	// gets a goroutine that subscribes to the bus and delivers matching events.
-	if d.webhookMgr != nil {
-		if err := d.webhookMgr.Start(ctx); err != nil {
-			logger.Warn("daemon", "webhook manager failed to start", "error", err.Error())
-		} else {
-			logger.Info("daemon", "webhook manager started")
-		}
 	}
 
 	// Start metrics sampler.

@@ -45,22 +45,28 @@ func defaultDenyCIDRs() []*net.IPNet {
 //
 // resolveIPs is overridable in tests; production callers should pass
 // net.LookupIP.
-func validateTarget(rawURL string, allowedHosts []string, resolveIPs func(string) ([]net.IP, error)) (*url.URL, error) {
+//
+// The returned []net.IP is the set of resolved-and-verified addresses.  Callers
+// should pin the subsequent HTTP connect to this set (see pinnedDialer) to
+// close the DNS-rebinding window between validation and connect.  Returns nil
+// for the IP slice when the host bypassed the check via allowedHosts; in that
+// case the caller intentionally trusts whatever the system resolver returns.
+func validateTarget(rawURL string, allowedHosts []string, resolveIPs func(string) ([]net.IP, error)) (*url.URL, []net.IP, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, ErrInvalidScheme
+		return nil, nil, ErrInvalidScheme
 	}
 	if u.Host == "" {
-		return nil, errors.New("webhook URL is missing host")
+		return nil, nil, errors.New("webhook URL is missing host")
 	}
 
 	host := u.Hostname()
 	for _, h := range allowedHosts {
 		if strings.EqualFold(strings.TrimSpace(h), host) {
-			return u, nil
+			return u, nil, nil
 		}
 	}
 
@@ -69,19 +75,19 @@ func validateTarget(rawURL string, allowedHosts []string, resolveIPs func(string
 	}
 	ips, err := resolveIPs(host)
 	if err != nil || len(ips) == 0 {
-		return nil, errors.New("webhook target host did not resolve")
+		return nil, nil, errors.New("webhook target host did not resolve")
 	}
 
 	deny := defaultDenyCIDRs()
 	for _, ip := range ips {
 		if ip.IsUnspecified() || ip.IsMulticast() {
-			return nil, ErrSSRFBlocked
+			return nil, nil, ErrSSRFBlocked
 		}
 		for _, n := range deny {
 			if n.Contains(ip) {
-				return nil, ErrSSRFBlocked
+				return nil, nil, ErrSSRFBlocked
 			}
 		}
 	}
-	return u, nil
+	return u, ips, nil
 }

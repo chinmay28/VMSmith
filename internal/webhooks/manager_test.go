@@ -110,6 +110,7 @@ func newTestManager(t *testing.T, store *memStore, bus *events.EventBus, allowed
 	// Test-only: shrink the retry schedule so failed-delivery tests finish quickly.
 	m.backoff = []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}
 	m.resolveIPs = allowAllResolver
+	m.disableJitter = true
 	return m
 }
 
@@ -296,6 +297,22 @@ func TestManager_FiltersByEventType(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := atomic.LoadInt32(&hits); got != 2 {
 		t.Fatalf("delivered %d events, want 2 (filter mismatch)", got)
+	}
+}
+
+// TestManager_PinnedDialerBlocksUnverifiedIP demonstrates that the per-delivery
+// http.Client refuses to connect to any IP that wasn't returned by the SSRF
+// validation step.  This is the DNS-rebinding window the original review
+// flagged as overstated.
+func TestManager_PinnedDialerBlocksUnverifiedIP(t *testing.T) {
+	mgr := NewManager(nil, nil, Config{HTTPTimeout: time.Second})
+	verified := []net.IP{net.ParseIP("203.0.113.10")}
+	client := mgr.clientForDelivery(verified)
+
+	// Try to connect to 127.0.0.1 directly — not in the verified set, should fail.
+	_, err := client.Get("http://127.0.0.1:1/")
+	if err == nil || !strings.Contains(err.Error(), ErrSSRFBlocked.Error()) {
+		t.Fatalf("expected ErrSSRFBlocked, got %v", err)
 	}
 }
 
