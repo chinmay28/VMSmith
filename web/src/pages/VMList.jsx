@@ -378,7 +378,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -436,6 +436,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
     if (!spec.nat_static_ip) delete spec.nat_static_ip;
     if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (!spec.template_id) delete spec.template_id;
+    if (!spec.auto_start) delete spec.auto_start;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -593,6 +594,26 @@ function CreateVMModal({ open, onClose, onCreated }) {
                     <input className="input font-mono" placeholder="ssh-rsa AAAA…" value={form.ssh_pub_key} onChange={update('ssh_pub_key')} data-testid="input-vm-ssh-key" />
                   </div>
                 </div>
+              </div>
+
+              {/* Lifecycle */}
+              <div>
+                <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider mb-3">Lifecycle</h3>
+                <label className="flex items-start gap-3 p-3 rounded border border-steel-700/40 bg-steel-900/40 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={!!form.auto_start}
+                    onChange={(e) => setForm(f => ({ ...f, auto_start: e.target.checked }))}
+                    data-testid="input-vm-auto-start"
+                  />
+                  <span className="text-xs">
+                    <span className="text-steel-200 font-medium">Auto-start at daemon boot</span>
+                    <span className="block text-steel-500 mt-1">
+                      The daemon will start this VM automatically when vmsmith starts up.
+                    </span>
+                  </span>
+                </label>
               </div>
 
               {/* Primary NAT network */}

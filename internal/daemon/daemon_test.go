@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"net/http"
@@ -9,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 func TestServeUsesHTTPWithoutTLS(t *testing.T) {
@@ -263,4 +267,84 @@ func TestCloseResourcesJoinsCleanupErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "closing store: store boom") {
 		t.Fatalf("joined error missing store failure: %v", err)
 	}
+}
+
+// noopEventStore is a minimal events.Store for daemon tests; it accepts
+// every append and assigns an incrementing sequence.
+type noopEventStore struct {
+	seq uint64
+}
+
+func (s *noopEventStore) AppendEvent(evt *types.Event) (uint64, error) {
+	s.seq++
+	return s.seq, nil
+}
+
+func TestRunAutoStartSweepStartsOnlyMarkedStoppedVMs(t *testing.T) {
+	mgr := vm.NewMockManager()
+
+	// Three VMs:
+	//   off-marked  → AutoStart=true, state=stopped → should be started
+	//   on-marked   → AutoStart=true, state=running → already running, skip
+	//   off-plain   → AutoStart=false              → ignore entirely
+	mgr.SeedVM(&types.VM{
+		ID:   "off-marked",
+		Name: "off-marked",
+		Spec: types.VMSpec{Name: "off-marked", AutoStart: true},
+		State: types.VMStateStopped,
+	})
+	mgr.SeedVM(&types.VM{
+		ID:   "on-marked",
+		Name: "on-marked",
+		Spec: types.VMSpec{Name: "on-marked", AutoStart: true},
+		State: types.VMStateRunning,
+	})
+	mgr.SeedVM(&types.VM{
+		ID:   "off-plain",
+		Name: "off-plain",
+		Spec: types.VMSpec{Name: "off-plain", AutoStart: false},
+		State: types.VMStateStopped,
+	})
+
+	bus := events.New(&noopEventStore{})
+	bus.Start()
+	defer bus.Stop()
+
+	d := &Daemon{vmManager: mgr, eventBus: bus}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.runAutoStartSweep(ctx)
+
+	got, err := mgr.Get(ctx, "off-marked")
+	if err != nil {
+		t.Fatalf("Get off-marked: %v", err)
+	}
+	if got.State != types.VMStateRunning {
+		t.Fatalf("off-marked State = %q, want running (auto-start should have flipped it)", got.State)
+	}
+	plain, _ := mgr.Get(ctx, "off-plain")
+	if plain.State != types.VMStateStopped {
+		t.Fatalf("off-plain State = %q, want stopped (no AutoStart flag)", plain.State)
+	}
+}
+
+func TestRunAutoStartSweepReportsFailures(t *testing.T) {
+	mgr := vm.NewMockManager()
+	mgr.SeedVM(&types.VM{
+		ID:   "boom",
+		Name: "boom",
+		Spec: types.VMSpec{Name: "boom", AutoStart: true},
+		State: types.VMStateStopped,
+	})
+	mgr.StartErr = errors.New("libvirt: simulated boot failure")
+
+	bus := events.New(&noopEventStore{})
+	bus.Start()
+	defer bus.Stop()
+
+	d := &Daemon{vmManager: mgr, eventBus: bus}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.runAutoStartSweep(ctx) // must not panic
 }

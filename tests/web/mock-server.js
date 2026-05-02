@@ -56,7 +56,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [] },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [], auto_start: !!spec.auto_start },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -146,6 +146,9 @@ const server = http.createServer(async (req, res) => {
       const ipStr = body.nat_static_ip.replace(/\/\d+$/, "");
       vm.spec.nat_static_ip = `${ipStr}/24`;
       vm.ip = ipStr;
+    }
+    if (typeof body.auto_start === "boolean") {
+      vm.spec.auto_start = body.auto_start;
     }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);

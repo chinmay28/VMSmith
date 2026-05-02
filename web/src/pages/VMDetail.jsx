@@ -122,6 +122,11 @@ export default function VMDetail() {
           value={vm.ip ? `ssh ${sshUser}@${vm.ip}` : `user: ${sshUser}`}
           mono
         />
+        <InfoCard
+          label="Auto-start at boot"
+          value={spec.auto_start ? 'On' : 'Off'}
+          testId="vm-detail-auto-start"
+        />
       </div>
 
       {/* Attached Networks */}
@@ -294,6 +299,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
   const [natIP, setNatIP] = useState('');
+  const [autoStart, setAutoStart] = useState(false);
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
   const spec = normalizeSpec(vm.spec);
   const currentCpus = Number.isFinite(spec.cpus) ? spec.cpus : 0;
@@ -314,6 +320,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     setDescription(vm.description || '');
     setTags(safeArray(vm.tags).join(', '));
     setNatIP(currentIP);
+    setAutoStart(!!spec.auto_start);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -333,6 +340,10 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     const trimmedIP = natIP.trim();
     if (trimmedIP && trimmedIP !== currentIP) {
       patch.nat_static_ip = trimmedIP.includes('/') ? trimmedIP : `${trimmedIP}/24`;
+    }
+
+    if (autoStart !== !!spec.auto_start) {
+      patch.auto_start = autoStart;
     }
 
     if (Object.keys(patch).length === 0) { onClose(); return; }
@@ -419,6 +430,22 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
             current: {currentIP || 'not assigned'} · plain IP or CIDR (e.g. 192.168.100.50)
           </p>
         </div>
+
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="input-edit-auto-start"
+            className="mt-1"
+            checked={autoStart}
+            onChange={(e) => setAutoStart(e.target.checked)}
+          />
+          <span className="text-xs">
+            <span className="text-steel-200 font-medium">Auto-start at daemon boot</span>
+            <span className="block text-steel-500 mt-1">
+              The daemon will start this VM automatically when vmsmith starts up.
+            </span>
+          </span>
+        </label>
 
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 

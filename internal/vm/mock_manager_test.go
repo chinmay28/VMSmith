@@ -362,6 +362,43 @@ func TestMockManager_Update_NoChange(t *testing.T) {
 	}
 }
 
+func TestMockManager_Update_AutoStart(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "autostart", AutoStart: false})
+	if vm.Spec.AutoStart {
+		t.Fatalf("initial AutoStart = true, want false")
+	}
+
+	enable := true
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{AutoStart: &enable})
+	if err != nil {
+		t.Fatalf("Update enable AutoStart: %v", err)
+	}
+	if !updated.Spec.AutoStart {
+		t.Fatalf("AutoStart = false after enable, want true")
+	}
+
+	disable := false
+	updated, err = m.Update(ctx, vm.ID, types.VMUpdateSpec{AutoStart: &disable})
+	if err != nil {
+		t.Fatalf("Update disable AutoStart: %v", err)
+	}
+	if updated.Spec.AutoStart {
+		t.Fatalf("AutoStart = true after disable, want false")
+	}
+
+	// nil pointer means "no change" — leave the flag alone.
+	updated, err = m.Update(ctx, vm.ID, types.VMUpdateSpec{Description: "still off"})
+	if err != nil {
+		t.Fatalf("Update description: %v", err)
+	}
+	if updated.Spec.AutoStart {
+		t.Fatalf("AutoStart got flipped on a nil-AutoStart patch")
+	}
+}
+
 func TestMockManager_SeedVM(t *testing.T) {
 	m := NewMockManager()
 

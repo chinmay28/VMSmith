@@ -1265,6 +1265,8 @@ export interface components {
             networks?: components["schemas"]["NetworkAttachment"][];
             nat_static_ip?: string;
             nat_gateway?: string;
+            /** @description When true, the daemon starts this VM automatically at boot. */
+            auto_start?: boolean;
         };
         VMUpdateSpec: {
             cpus?: number;
@@ -1274,6 +1276,8 @@ export interface components {
             tags?: string[];
             nat_static_ip?: string;
             nat_gateway?: string;
+            /** @description Toggle auto-start at daemon boot. Omit to leave unchanged. */
+            auto_start?: boolean | null;
         };
         VM: {
             id: string;

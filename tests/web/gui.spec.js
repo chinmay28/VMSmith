@@ -161,6 +161,7 @@ test.describe("VM List", () => {
     // Advanced-only fields should now be visible
     await expect(page.getByTestId("input-vm-ssh-key")).toBeVisible();
     await expect(page.getByTestId("input-vm-default-user")).toBeVisible();
+    await expect(page.getByTestId("input-vm-auto-start")).toBeVisible();
     await expect(page.getByTestId("btn-add-network")).toBeVisible();
   });
 
@@ -349,6 +350,25 @@ test.describe("VM Detail", () => {
 
     // Modal closes after submit
     await expect(page.getByTestId("input-edit-nat-ip")).not.toBeVisible();
+  });
+
+  test("auto-start checkbox surfaces and toggles in edit modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Detail summary shows the current Auto-start state.
+    await expect(page.getByTestId("vm-detail-auto-start")).toContainText(/On|Off/);
+
+    await page.getByTestId("btn-edit-vm").click();
+
+    const cb = page.getByTestId("input-edit-auto-start");
+    await expect(cb).toBeVisible();
+
+    // Flip it on, save, and confirm the summary card now reads "On".
+    await cb.check();
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("input-edit-auto-start")).not.toBeVisible();
+    await expect(page.getByTestId("vm-detail-auto-start")).toContainText("On");
   });
 
   test("cancel edit closes modal without changes", async ({ page }) => {

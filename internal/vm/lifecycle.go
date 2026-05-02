@@ -518,8 +518,27 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// Resolve AutoStart change. nil pointer means "no change".
+	newAutoStart := storedVM.Spec.AutoStart
+	autoStartChanged := false
+	if patch.AutoStart != nil && *patch.AutoStart != storedVM.Spec.AutoStart {
+		newAutoStart = *patch.AutoStart
+		autoStartChanged = true
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged {
+		return storedVM, nil
+	}
+
+	// AutoStart-only change is a metadata flip — no need to stop/restart the VM
+	// or regenerate any libvirt artifacts.
+	if autoStartChanged && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged {
+		storedVM.Spec.AutoStart = newAutoStart
+		storedVM.UpdatedAt = time.Now()
+		if err := m.store.PutVM(storedVM); err != nil {
+			return nil, fmt.Errorf("storing updated VM: %w", err)
+		}
 		return storedVM, nil
 	}
 
@@ -611,6 +630,9 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		if newIPHost, _, _ := net.ParseCIDR(newNatStaticIP); newIPHost != nil {
 			storedVM.IP = newIPHost.String()
 		}
+	}
+	if autoStartChanged {
+		storedVM.Spec.AutoStart = newAutoStart
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {

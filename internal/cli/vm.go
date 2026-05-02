@@ -44,6 +44,7 @@ var vmCreateCmd = &cobra.Command{
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
+		autoStart, _ := cmd.Flags().GetBool("auto-start")
 
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
@@ -77,6 +78,7 @@ var vmCreateCmd = &cobra.Command{
 			Networks:      networks,
 			NatStaticIP:   natIP,
 			NatGateway:    natGW,
+			AutoStart:     autoStart,
 		}
 
 		result, err := mgr.Create(context.Background(), spec)
@@ -101,6 +103,9 @@ var vmCreateCmd = &cobra.Command{
 		}
 		if displayIP != "" {
 			fmt.Printf("  IP:    %s\n", displayIP)
+		}
+		if result.Spec.AutoStart {
+			fmt.Printf("  Auto-start on daemon boot: true\n")
 		}
 		if len(spec.Networks) > 0 {
 			fmt.Printf("  Extra networks: %d attached\n", len(spec.Networks))
@@ -295,9 +300,11 @@ var vmEditCmd = &cobra.Command{
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
+		autoStartChanged := cmd.Flags().Changed("auto-start")
+		autoStart, _ := cmd.Flags().GetBool("auto-start")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, or --tag")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, or --auto-start")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -321,6 +328,10 @@ var vmEditCmd = &cobra.Command{
 		}
 		if cmd.Flags().Changed("tag") {
 			patch.Tags = normalizeTagsForCLI(tags)
+		}
+		if autoStartChanged {
+			val := autoStart
+			patch.AutoStart = &val
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -348,6 +359,7 @@ var vmEditCmd = &cobra.Command{
 		if result.IP != "" {
 			fmt.Printf("  IP:    %s\n", result.IP)
 		}
+		fmt.Printf("  Auto-start: %t\n", result.Spec.AutoStart)
 		return nil
 	},
 }
@@ -397,6 +409,7 @@ var vmInfoCmd = &cobra.Command{
 			fmt.Printf("SSH:          ssh %s@%s\n", sshUser, v.IP)
 		}
 		fmt.Printf("Disk Path:    %s\n", v.DiskPath)
+		fmt.Printf("Auto-start:   %t\n", v.Spec.AutoStart)
 		fmt.Printf("Created:      %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
 		return nil
 	},
@@ -794,6 +807,7 @@ func init() {
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
+	vmCreateCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
 	vmCreateCmd.Flags().String("nat-gw", "",
@@ -823,6 +837,7 @@ Examples:
 	vmEditCmd.Flags().StringSlice("tag", nil, "replace VM tags with the provided values (repeatable)")
 	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
+	vmEditCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
