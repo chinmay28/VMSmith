@@ -105,7 +105,7 @@ async function main() {
     await runTest("shows stats on load", async (p) => {
       await assertText(p, "stat-total", "2");
       await assertText(p, "stat-running", "1");
-      await assertText(p, "stat-images", "1");
+      await assertText(p, "stat-images", "2");
     }, page);
 
     await runTest("displays seeded VMs in table", async (p) => {
@@ -399,6 +399,32 @@ async function main() {
     await runTest("lists images with details", async (p) => {
       await assertVisible(p, "image-table");
       await assertVisible(p, "image-row-ubuntu-base");
+    }, page);
+
+    await runTest("renders description and tag badges", async (p) => {
+      await assertVisible(p, "image-description-ubuntu-base");
+      await assertVisible(p, "image-tags-ubuntu-base");
+    }, page);
+
+    await runTest("filters images by tag chip", async (p) => {
+      await p.locator('[data-testid="image-tag-filter-rocky"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "image-row-rocky-experimental");
+      await assertNotVisible(p, "image-row-ubuntu-base");
+      await p.locator('[data-testid="image-tag-filter-all"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "image-row-ubuntu-base");
+    }, page);
+
+    await runTest("edit modal updates description and tags", async (p) => {
+      await p.locator('[data-testid="btn-edit-image-rocky-experimental"]').click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "edit-image-modal");
+      await p.locator('[data-testid="edit-image-description"]').fill("Promoted to release candidate");
+      await p.locator('[data-testid="edit-image-tags"]').fill("rocky,rc");
+      await p.locator('[data-testid="btn-save-image"]').click();
+      await p.waitForTimeout(500);
+      await assertNotVisible(p, "edit-image-modal");
     }, page);
 
     await page.close();

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,8 @@ import (
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
+	validatepkg "github.com/vmsmith/vmsmith/internal/validate"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 var imageCmd = &cobra.Command{
@@ -26,11 +29,13 @@ var imageListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
+		tagFilter, _ := cmd.Flags().GetString("tag")
+		tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
-		logger.Info("cli", "image list")
+		logger.Info("cli", "image list", "tag", tagFilter)
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
 			logger.Error("cli", "image list: failed to init storage manager", "error", err.Error())
@@ -43,6 +48,9 @@ var imageListCmd = &cobra.Command{
 			logger.Error("cli", "image list failed", "error", err.Error())
 			return err
 		}
+		if tagFilter != "" {
+			imgs = filterImagesByTag(imgs, tagFilter)
+		}
 		sort.SliceStable(imgs, func(i, j int) bool {
 			if !imgs[i].CreatedAt.Equal(imgs[j].CreatedAt) {
 				return imgs[i].CreatedAt.Before(imgs[j].CreatedAt)
@@ -53,10 +61,11 @@ var imageListCmd = &cobra.Command{
 		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tSIZE\tFORMAT\tCREATED")
+		fmt.Fprintln(w, "ID\tNAME\tSIZE\tFORMAT\tTAGS\tCREATED")
 		for _, img := range imgs {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				img.ID, img.Name, humanSize(img.SizeBytes), img.Format,
+				strings.Join(img.Tags, ","),
 				img.CreatedAt.Format("2006-01-02 15:04:05"))
 		}
 		w.Flush()
@@ -71,6 +80,12 @@ var imageCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
 		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+		tags, _ := cmd.Flags().GetStringArray("tag")
+		normalizedTags, err := validatepkg.NormalizeTags(tags)
+		if err != nil {
+			return err
+		}
 		logger.Info("cli", "image create", "vm_id", vmID, "name", name)
 
 		vmMgr, vmCleanup, err := newVMManager()
@@ -95,7 +110,10 @@ var imageCreateCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Creating image %q from VM %s (this may take a while)...\n", name, vm.Name)
-		img, err := storageMgr.CreateImage(vm.DiskPath, name, vm.ID)
+		img, err := storageMgr.CreateImage(vm.DiskPath, name, vm.ID, storage.CreateImageOptions{
+			Description: description,
+			Tags:        normalizedTags,
+		})
 		if err != nil {
 			logger.Error("cli", "image create failed", "vm_id", vmID, "name", name, "error", err.Error())
 			return err
@@ -103,8 +121,87 @@ var imageCreateCmd = &cobra.Command{
 
 		logger.Info("cli", "image created", "id", img.ID, "name", img.Name, "size", humanSize(img.SizeBytes))
 		fmt.Printf("Image created: %s (%s)\n", img.Name, humanSize(img.SizeBytes))
+		if img.Description != "" {
+			fmt.Printf("Description: %s\n", img.Description)
+		}
+		if len(img.Tags) > 0 {
+			fmt.Printf("Tags: %s\n", strings.Join(img.Tags, ", "))
+		}
 		return nil
 	},
+}
+
+var imageEditCmd = &cobra.Command{
+	Use:   "edit <image-id>",
+	Short: "Edit image description or tags",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		descriptionChanged := cmd.Flags().Changed("description")
+		tagsChanged := cmd.Flags().Changed("tag")
+		if !descriptionChanged && !tagsChanged {
+			return fmt.Errorf("nothing to update: pass --description and/or --tag")
+		}
+
+		patch := types.ImageUpdateSpec{}
+		if descriptionChanged {
+			patch.Description = strings.TrimSpace(mustGetString(cmd, "description"))
+		}
+		if tagsChanged {
+			rawTags, _ := cmd.Flags().GetStringArray("tag")
+			tags, err := validatepkg.NormalizeTags(rawTags)
+			if err != nil {
+				return err
+			}
+			if tags == nil {
+				tags = []string{}
+			}
+			patch.Tags = tags
+		}
+
+		mgr, cleanup, err := newStorageManager()
+		if err != nil {
+			logger.Error("cli", "image edit: failed to init storage manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		img, err := mgr.UpdateImage(id, patch)
+		if err != nil {
+			logger.Error("cli", "image edit failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "image updated", "id", img.ID, "name", img.Name)
+		fmt.Printf("Image %s updated\n", img.ID)
+		if img.Description != "" {
+			fmt.Printf("Description: %s\n", img.Description)
+		}
+		fmt.Printf("Tags: %s\n", strings.Join(img.Tags, ", "))
+		return nil
+	},
+}
+
+func mustGetString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
+}
+
+// filterImagesByTag returns only images whose tag list contains tag
+// (case-insensitive). The slice is filtered in-place.
+func filterImagesByTag(imgs []*types.Image, tag string) []*types.Image {
+	out := imgs[:0]
+	for _, img := range imgs {
+		if img == nil {
+			continue
+		}
+		for _, t := range img.Tags {
+			if strings.EqualFold(t, tag) {
+				out = append(out, img)
+				break
+			}
+		}
+	}
+	return out
 }
 
 var imagePushCmd = &cobra.Command{
@@ -185,12 +282,19 @@ var imageDeleteCmd = &cobra.Command{
 func init() {
 	imageCreateCmd.Flags().String("name", "", "image name (required)")
 	imageCreateCmd.MarkFlagRequired("name")
+	imageCreateCmd.Flags().String("description", "", "human-readable description")
+	imageCreateCmd.Flags().StringArray("tag", nil, "tag (repeatable)")
 
 	imageListCmd.Flags().Int("limit", 0, "maximum number of images to show (0 = no limit)")
 	imageListCmd.Flags().Int("offset", 0, "number of images to skip before printing results")
+	imageListCmd.Flags().String("tag", "", "filter to images carrying this tag")
+
+	imageEditCmd.Flags().String("description", "", "new description (omit to leave unchanged; empty value cannot clear the field)")
+	imageEditCmd.Flags().StringArray("tag", nil, "tag value (repeatable; provide --tag with no value or omit any --tag to leave tags unchanged; pass --tag '' once to clear)")
 
 	imageCmd.AddCommand(imageListCmd)
 	imageCmd.AddCommand(imageCreateCmd)
+	imageCmd.AddCommand(imageEditCmd)
 	imageCmd.AddCommand(imagePushCmd)
 	imageCmd.AddCommand(imagePullCmd)
 	imageCmd.AddCommand(imageDeleteCmd)

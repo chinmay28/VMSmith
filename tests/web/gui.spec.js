@@ -15,10 +15,10 @@ test.describe("Dashboard", () => {
   test("shows stats and VM table on load", async ({ page }) => {
     await page.goto(BASE_URL);
 
-    // Stats should show seeded data (2 VMs, 1 image)
+    // Stats should show seeded data (2 VMs, 2 images)
     await expect(page.getByTestId("stat-total")).toHaveText("2");
     await expect(page.getByTestId("stat-running")).toHaveText("1");
-    await expect(page.getByTestId("stat-images")).toHaveText("1");
+    await expect(page.getByTestId("stat-images")).toHaveText("2");
   });
 
   test("uses pagination metadata for totals", async ({ page }) => {
@@ -564,6 +564,53 @@ test.describe("Images", () => {
     const table = page.getByTestId("image-table");
     await expect(table).toBeVisible();
     await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+  });
+
+  test("renders description and tag badges from seeded image", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Seeded image carries description "Stock Ubuntu cloud image" and tags "ubuntu" + "stable".
+    await expect(page.getByTestId("image-description-ubuntu-base")).toContainText("Stock Ubuntu");
+    const tags = page.getByTestId("image-tags-ubuntu-base");
+    await expect(tags).toContainText("ubuntu");
+    await expect(tags).toContainText("stable");
+  });
+
+  test("filters images by tag chip", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Both seeded images should be visible at first.
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Filter to ubuntu — rocky row drops out.
+    await page.getByTestId("image-tag-filter-ubuntu").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+
+    // Reset.
+    await page.getByTestId("image-tag-filter-all").click();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+  });
+
+  test("edit modal updates description and tags", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("btn-edit-image-rocky-experimental").click();
+    await expect(page.getByTestId("edit-image-modal")).toBeVisible();
+
+    await page.getByTestId("edit-image-description").fill("Promoted to release candidate");
+    await page.getByTestId("edit-image-tags").fill("rocky,rc");
+    await page.getByTestId("btn-save-image").click();
+
+    await expect(page.getByTestId("edit-image-modal")).not.toBeVisible();
+    await expect(page.getByTestId("image-description-rocky-experimental")).toContainText("release candidate");
+    const tags = page.getByTestId("image-tags-rocky-experimental");
+    await expect(tags).toContainText("rocky");
+    await expect(tags).toContainText("rc");
   });
 });
 
