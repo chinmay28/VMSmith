@@ -252,6 +252,44 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
   });
 
+  test("shows VM activity timeline in the detail tab", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-activity").click();
+
+    await expect(page.getByTestId("vm-detail-activity")).toBeVisible();
+    await expect(page.getByTestId("activity-table")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).not.toBeVisible();
+  });
+
+  test("shows empty activity state when the selected VM has no events", async ({ page }) => {
+    await page.route("**/api/v1/events?*", async (route) => {
+      const url = route.request().url();
+      if (url.includes("vm_id=vm-1")) {
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "X-Total-Count": "0",
+          },
+          body: JSON.stringify([]),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("tab-activity").click();
+
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByText("No lifecycle events for this VM.")).toBeVisible();
+  });
+
   test("stop running VM", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
