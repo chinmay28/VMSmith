@@ -18,16 +18,16 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 ## Roadmap progress
 
 <!-- progress:start -->
-**Overall:** 97 / 139 tasks complete (69.8%)
+**Overall:** 99 / 140 tasks complete (70.7%)
 
-`▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░` 69.8%
+`▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░` 70.7%
 
 | Phase | Title | Done | Total | % |
 | ----- | ----- | ---- | ----- | - |
 | 1 | Foundation & Quality (Week 1-2) | 17 | 18 | 94.4% |
-| 2 | Core Feature Additions (Week 3-5) | 20 | 22 | 90.9% |
+| 2 | Core Feature Additions (Week 3-5) | 21 | 23 | 91.3% |
 | 3 | Operational Excellence (Week 5-8) | 18 | 19 | 94.7% |
-| 4 | Monitoring & Observability (Week 7-10) | 26 | 32 | 81.2% |
+| 4 | Monitoring & Observability (Week 7-10) | 27 | 32 | 84.4% |
 | 5 | Advanced Features (Week 10+) | 5 | 36 | 13.9% |
 | 6 | Developer & Community (Ongoing) | 11 | 12 | 91.7% |
 

@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|delete (including bulk `start|stop --all [--tag]` helpers)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|restart|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
@@ -414,14 +414,14 @@ Additional docs routes:
 
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
-POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks, auto_start; VM names must be unique, 1-64 chars, alphanumeric/hyphen). When `auto_start=true`, the daemon will start this VM automatically at boot via the auto-start sweep.
+POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks, auto_start, locked; VM names must be unique, 1-64 chars, alphanumeric/hyphen). When `auto_start=true`, the daemon will start this VM automatically at boot via the auto-start sweep. When `locked=true`, the VM is delete-protected; deletion returns HTTP 409 `vm_locked`.
 GET    /vms/{id}                       Get VM
 POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }`; validates the new name and returns the cloned VM in stopped state)
-PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway, auto_start — zero/empty ignored; `auto_start` uses a `*bool` so omit it to keep the current value; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
+PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway, auto_start, locked — zero/empty ignored; `auto_start` and `locked` use `*bool` so omit them to keep the current value; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
-DELETE /vms/{id}                       Delete VM
+DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
 GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot

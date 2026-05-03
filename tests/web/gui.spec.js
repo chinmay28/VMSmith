@@ -384,6 +384,29 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-auto-start")).toContainText("On");
   });
 
+  test("locked checkbox toggles delete-protection in edit modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Detail summary shows the current Locked state.
+    await expect(page.getByTestId("vm-detail-locked")).toContainText(/Locked|Unlocked/);
+
+    await page.getByTestId("btn-edit-vm").click();
+
+    const cb = page.getByTestId("input-edit-locked");
+    await expect(cb).toBeVisible();
+
+    // Flip it on, save, and confirm the summary card now reads "Locked".
+    await cb.check();
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("input-edit-locked")).not.toBeVisible();
+    await expect(page.getByTestId("vm-detail-locked")).toContainText("Locked");
+
+    // Locked badge appears next to the name in the VM list.
+    await page.goto(BASE_URL);
+    await expect(page.getByTestId("badge-locked-web-server")).toBeVisible();
+  });
+
   test("cancel edit closes modal without changes", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

@@ -45,6 +45,7 @@ var vmCreateCmd = &cobra.Command{
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
+		locked, _ := cmd.Flags().GetBool("locked")
 
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
@@ -79,6 +80,7 @@ var vmCreateCmd = &cobra.Command{
 			NatStaticIP:   natIP,
 			NatGateway:    natGW,
 			AutoStart:     autoStart,
+			Locked:        locked,
 		}
 
 		result, err := mgr.Create(context.Background(), spec)
@@ -106,6 +108,9 @@ var vmCreateCmd = &cobra.Command{
 		}
 		if result.Spec.AutoStart {
 			fmt.Printf("  Auto-start on daemon boot: true\n")
+		}
+		if result.Spec.Locked {
+			fmt.Printf("  Locked (delete-protected): true\n")
 		}
 		if len(spec.Networks) > 0 {
 			fmt.Printf("  Extra networks: %d attached\n", len(spec.Networks))
@@ -326,9 +331,11 @@ var vmEditCmd = &cobra.Command{
 		natGW, _ := cmd.Flags().GetString("nat-gw")
 		autoStartChanged := cmd.Flags().Changed("auto-start")
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
+		lockedChanged := cmd.Flags().Changed("locked")
+		locked, _ := cmd.Flags().GetBool("locked")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, or --auto-start")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, or --locked")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -357,6 +364,10 @@ var vmEditCmd = &cobra.Command{
 			val := autoStart
 			patch.AutoStart = &val
 		}
+		if lockedChanged {
+			val := locked
+			patch.Locked = &val
+		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
 		if err != nil {
@@ -384,6 +395,7 @@ var vmEditCmd = &cobra.Command{
 			fmt.Printf("  IP:    %s\n", result.IP)
 		}
 		fmt.Printf("  Auto-start: %t\n", result.Spec.AutoStart)
+		fmt.Printf("  Locked:    %t\n", result.Spec.Locked)
 		return nil
 	},
 }
@@ -434,9 +446,56 @@ var vmInfoCmd = &cobra.Command{
 		}
 		fmt.Printf("Disk Path:    %s\n", v.DiskPath)
 		fmt.Printf("Auto-start:   %t\n", v.Spec.AutoStart)
+		fmt.Printf("Locked:       %t\n", v.Spec.Locked)
 		fmt.Printf("Created:      %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
 		return nil
 	},
+}
+
+// vmLockCmd implements "vmsmith vm lock <id>" — toggles the delete-protection
+// flag on. Locked VMs reject Delete with HTTP 409 / API error code "vm_locked".
+var vmLockCmd = &cobra.Command{
+	Use:   "lock <id>",
+	Short: "Lock a VM to prevent accidental deletion",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setVMLocked(args[0], true)
+	},
+}
+
+// vmUnlockCmd implements "vmsmith vm unlock <id>" — clears the delete-protection
+// flag so the VM can be removed.
+var vmUnlockCmd = &cobra.Command{
+	Use:   "unlock <id>",
+	Short: "Unlock a VM (allow deletion again)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setVMLocked(args[0], false)
+	},
+}
+
+func setVMLocked(id string, locked bool) error {
+	logger.Info("cli", "vm lock", "id", id, "locked", fmt.Sprintf("%t", locked))
+	mgr, cleanup, err := newVMManager()
+	if err != nil {
+		logger.Error("cli", "vm lock: failed to init VM manager", "error", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	val := locked
+	result, err := mgr.Update(context.Background(), id, types.VMUpdateSpec{Locked: &val})
+	if err != nil {
+		logger.Error("cli", "vm lock failed", "id", id, "error", err.Error())
+		return fmt.Errorf("toggling VM lock: %w", err)
+	}
+
+	verb := "unlocked"
+	if locked {
+		verb = "locked"
+	}
+	fmt.Printf("VM %s %s.\n", result.Name, verb)
+	return nil
 }
 
 // vmStatsCmd implements "vmsmith vm stats <id> [--watch] [--fields cpu,mem,disk,net]".
@@ -832,6 +891,7 @@ func init() {
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
 	vmCreateCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
+	vmCreateCmd.Flags().Bool("locked", false, "lock the VM (delete-protected) on create")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
 	vmCreateCmd.Flags().String("nat-gw", "",
@@ -862,6 +922,7 @@ Examples:
 	vmEditCmd.Flags().String("nat-ip", "", "new static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24)")
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 	vmEditCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
+	vmEditCmd.Flags().Bool("locked", false, "set delete-protected status (true to lock, false to unlock)")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
@@ -893,6 +954,8 @@ Examples:
 	vmCmd.AddCommand(vmInfoCmd)
 	vmCmd.AddCommand(vmStatsCmd)
 	vmCmd.AddCommand(vmTopCmd)
+	vmCmd.AddCommand(vmLockCmd)
+	vmCmd.AddCommand(vmUnlockCmd)
 }
 
 // vmManagerOverride can be set in tests to bypass libvirt.

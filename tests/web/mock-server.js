@@ -56,7 +56,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [], auto_start: !!spec.auto_start },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -150,10 +150,17 @@ const server = http.createServer(async (req, res) => {
     if (typeof body.auto_start === "boolean") {
       vm.spec.auto_start = body.auto_start;
     }
+    if (typeof body.locked === "boolean") {
+      vm.spec.locked = body.locked;
+    }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)$/)) && method === "DELETE") {
+    const vm = vms.get(m[1]);
+    if (vm && vm.spec && vm.spec.locked) {
+      return json(res, 409, { code: "vm_locked", message: "vm is locked; unlock it before deleting" });
+    }
     vms.delete(m[1]); res.writeHead(204); return res.end();
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/start$/)) && method === "POST") {

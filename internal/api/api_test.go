@@ -1112,6 +1112,98 @@ func TestUpdateVM_AutoStartToggle(t *testing.T) {
 	}
 }
 
+func TestCreateVM_LockedFlag(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "born-locked",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
+		Locked: true,
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if !created.Spec.Locked {
+		t.Fatalf("Spec.Locked = false, want true (round-trip should preserve the flag)")
+	}
+}
+
+func TestUpdateVM_LockToggle(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:   "vm-lk",
+		Name: "lockable",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, Locked: false},
+	})
+
+	enable := true
+	patch := types.VMUpdateSpec{Locked: &enable}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-lk", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if !updated.Spec.Locked {
+		t.Fatalf("Locked = false after enable patch, want true")
+	}
+
+	disable := false
+	patch = types.VMUpdateSpec{Locked: &disable}
+	req2, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-lk", jsonBody(t, patch))
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, _ := http.DefaultClient.Do(req2)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("disable status = %d, want 200", resp2.StatusCode)
+	}
+	decodeJSON(t, resp2, &updated)
+	if updated.Spec.Locked {
+		t.Fatalf("Locked = true after disable patch, want false")
+	}
+}
+
+func TestDeleteVM_Locked_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:   "vm-lockdel",
+		Name: "important",
+		Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskGB: 10, Locked: true},
+	})
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-lockdel", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (vm_locked)", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "vm_locked" {
+		t.Fatalf("error code = %q, want vm_locked", apiErr.Code)
+	}
+
+	// VM should still be there.
+	if _, err := mockMgr.Get(context.Background(), "vm-lockdel"); err != nil {
+		t.Fatalf("VM gone after rejected delete: %v", err)
+	}
+}
+
 func TestUpdateVM_DiskGrow(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
