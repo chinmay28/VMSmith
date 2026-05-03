@@ -426,9 +426,10 @@ GET    /vms/{id}/snapshots             List snapshots
 POST   /vms/{id}/snapshots             Create snapshot
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
-GET    /images                         List images (`?page=<n>&per_page=<n>`; returns `X-Total-Count`); CLI also supports local `--limit` / `--offset` pagination on `vmsmith image list`
-POST   /images                         Create image from VM
-POST   /images/upload                  Upload qcow2 file (multipart)
+GET    /images                         List images (`?page=<n>&per_page=<n>`; `?tag=<tag>` filters case-insensitively; returns `X-Total-Count`); CLI also supports local `--limit` / `--offset` and `--tag` filters on `vmsmith image list`
+POST   /images                         Create image from VM (`vm_id`, `name`, optional `description`, optional `tags[]`)
+POST   /images/upload                  Upload qcow2 file (multipart `file` + `name` + optional `description` + repeated `tags` form fields, or a single comma-separated `tags` value)
+PATCH  /images/{id}                    Update image `description` and/or `tags`. Empty description = no change; nil tags = no change; `[]` clears tags.
 DELETE /images/{id}                    Delete image
 GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards

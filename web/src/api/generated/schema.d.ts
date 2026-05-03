@@ -808,6 +808,8 @@ export interface paths {
                 query?: {
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
+                    /** @description Filter to images carrying this tag (case-insensitive). */
+                    tag?: string;
                 };
                 header?: never;
                 path?: never;
@@ -888,6 +890,10 @@ export interface paths {
                         file: string;
                         /** @description Optional display name override. */
                         name?: string;
+                        /** @description Optional human-readable description. */
+                        description?: string;
+                        /** @description Optional tags. Repeat the form field per tag, or pass a single comma-separated value. */
+                        tags?: string[];
                     };
                 };
             };
@@ -948,7 +954,37 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update image description and/or tags */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    imageID: components["parameters"]["ImageID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateImageRequest"];
+                };
+            };
+            responses: {
+                /** @description Image updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Image"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         trace?: never;
     };
     "/images/{imageID}/download": {
@@ -1208,6 +1244,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List registered webhooks (secrets redacted) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Webhook list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"][];
+                    };
+                };
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        /** Register a new webhook */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["WebhookCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Webhook created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{webhookID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhookID: string;
+            };
+            cookie?: never;
+        };
+        /** Get a single webhook (secret redacted) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Webhook */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a webhook */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/logs": {
         parameters: {
             query?: never;
@@ -1453,12 +1617,24 @@ export interface components {
             size_bytes: number;
             format: string;
             source_vm?: string;
+            description?: string;
+            tags?: string[];
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         CreateImageRequest: {
             vm_id: string;
             name: string;
+            description?: string;
+            tags?: string[];
+        };
+        UpdateImageRequest: {
+            /** @description New description. An empty string is treated as "no change". */
+            description?: string;
+            /** @description Replacement tag set. A null/omitted field leaves tags unchanged; an empty array clears all tags. */
+            tags?: string[];
         };
         VMTemplate: {
             id: string;
@@ -1525,6 +1701,32 @@ export interface components {
             cpus: components["schemas"]["QuotaUsageSummary"];
             ram_mb: components["schemas"]["QuotaUsageSummary"];
             disk_gb: components["schemas"]["QuotaUsageSummary"];
+        };
+        Webhook: {
+            /** @example wh-1741234567890123 */
+            id: string;
+            /**
+             * Format: uri
+             * @example https://example.com/hook
+             */
+            url: string;
+            /** @description Optional event-type filter list (exact match or "prefix.*" glob). Empty = all events. */
+            event_types?: string[];
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_delivery_at?: string;
+            /** @description HTTP status of the most recent successful delivery; 0 if last attempt failed. */
+            last_status?: number;
+            last_error?: string;
+        };
+        WebhookCreateRequest: {
+            /** Format: uri */
+            url: string;
+            /** @description HMAC-SHA256 signing secret. Never returned in responses. */
+            secret: string;
+            event_types?: string[];
         };
         LogField: {
             [key: string]: string;

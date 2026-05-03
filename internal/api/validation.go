@@ -144,6 +144,15 @@ func validateUniqueTemplateName(name string, templates []*types.VMTemplate) erro
 	return validatepkg.ValidateUniqueTemplateName(name, templates)
 }
 
+// validateImageDescription enforces a 1024-char cap on free-form image
+// descriptions. Empty strings are allowed (treated as "not provided").
+func validateImageDescription(description string) error {
+	if len(description) > 1024 {
+		return types.NewAPIError("invalid_spec", "description must be 1024 characters or fewer")
+	}
+	return nil
+}
+
 func validateUploadedImage(filename string, data []byte) error {
 	trimmedName := strings.TrimSpace(filename)
 	if trimmedName == "" {

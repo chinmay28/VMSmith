@@ -483,6 +483,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: tag
+          schema:
+            type: string
+          description: Filter to images carrying this tag (case-insensitive).
       responses:
         '200':
           description: Image list
@@ -539,6 +544,14 @@ paths:
                 name:
                   type: string
                   description: Optional display name override.
+                description:
+                  type: string
+                  description: Optional human-readable description.
+                tags:
+                  type: array
+                  description: Optional tags. Repeat the form field per tag, or pass a single comma-separated value.
+                  items:
+                    type: string
       responses:
         '201':
           description: Image uploaded
@@ -555,6 +568,32 @@ paths:
         default:
           $ref: '#/components/responses/APIError'
   /images/{imageID}:
+    patch:
+      tags: [Images]
+      summary: Update image description and/or tags
+      parameters:
+        - $ref: '#/components/parameters/ImageID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateImageRequest'
+      responses:
+        '200':
+          description: Image updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Image'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
     delete:
       tags: [Images]
       summary: Delete an image
@@ -1202,7 +1241,16 @@ components:
           type: string
         source_vm:
           type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
     CreateImageRequest:
@@ -1213,6 +1261,23 @@ components:
           type: string
         name:
           type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    UpdateImageRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: New description. An empty string is treated as "no change".
+        tags:
+          type: array
+          description: Replacement tag set. A null/omitted field leaves tags unchanged; an empty array clears all tags.
+          items:
+            type: string
     VMTemplate:
       type: object
       required: [id, name, image, created_at, updated_at]

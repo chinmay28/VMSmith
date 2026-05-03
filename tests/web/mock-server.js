@@ -23,7 +23,15 @@ function seed() {
   ]);
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
-    size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id, created_at: new Date().toISOString(),
+    size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id,
+    description: "Stock Ubuntu cloud image", tags: ["ubuntu", "stable"],
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  });
+  images.set("img-2", {
+    id: "img-2", name: "rocky-experimental", path: "/images/rocky-experimental.qcow2",
+    size_bytes: 2147483648, format: "qcow2",
+    description: "Lab build", tags: ["rocky", "experimental"],
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   });
   templates.set("tmpl-1", {
     id: "tmpl-1",
@@ -302,8 +310,37 @@ const server = http.createServer(async (req, res) => {
     return json(res, 201, pf);
   }
   if (p === "/api/v1/images" && method === "GET") {
-    const list = [...images.values()];
+    let list = [...images.values()];
+    const tag = (url.searchParams.get("tag") || "").trim().toLowerCase();
+    if (tag) {
+      list = list.filter(img => (img.tags || []).some(t => String(t).toLowerCase() === tag));
+    }
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
+  {
+    const m = p.match(/^\/api\/v1\/images\/([^/]+)$/);
+    if (m && method === "PATCH") {
+      const id = decodeURIComponent(m[1]);
+      const img = images.get(id);
+      if (!img) return json(res, 404, { code: "resource_not_found", error: "image not found" });
+      const body = await parseBody(req);
+      if (typeof body.description === "string") {
+        const trimmed = body.description.trim();
+        if (trimmed.length > 1024) {
+          return json(res, 400, { code: "invalid_spec", error: "description must be 1024 characters or fewer" });
+        }
+        if (trimmed && trimmed !== (img.description || "")) {
+          img.description = trimmed;
+        }
+      }
+      if (Array.isArray(body.tags)) {
+        const tags = [...new Set(body.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean))].sort();
+        img.tags = tags;
+      }
+      img.updated_at = new Date().toISOString();
+      images.set(id, img);
+      return json(res, 200, img);
+    }
   }
   if (p === "/api/v1/templates" && method === "GET") {
     const list = [...templates.values()];

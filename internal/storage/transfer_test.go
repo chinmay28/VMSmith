@@ -141,7 +141,7 @@ func TestFindImageByName_Found(t *testing.T) {
 	mgr := newTestStorageManager(t)
 
 	// Import an image first
-	_, err := mgr.ImportImage("test-image", []byte("data"))
+	_, err := mgr.ImportImage("test-image", []byte("data"), CreateImageOptions{})
 	if err != nil {
 		t.Fatalf("ImportImage: %v", err)
 	}
