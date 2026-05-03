@@ -57,3 +57,10 @@ events:
   max_records: 50000        # cap on persisted events; 0 disables count-based pruning
   max_age_seconds: 2592000  # delete events older than this many seconds (default 30 days); 0 disables age-based pruning
   retention_interval: 60    # seconds between retention sweeps; 0 disables the sweep entirely
+
+webhooks:
+  # Hostnames in this list bypass the SSRF deny-list (loopback, link-local,
+  # 169.254.169.254 metadata, VM NAT range).  Use only for local development
+  # or controlled test environments — production deployments should leave
+  # this empty.
+  allowed_hosts: []

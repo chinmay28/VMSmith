@@ -27,6 +27,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/internal/web"
+	"github.com/vmsmith/vmsmith/internal/webhooks"
 	"github.com/vmsmith/vmsmith/pkg/types"
 	"libvirt.org/go/libvirt"
 )
@@ -42,6 +43,7 @@ type Daemon struct {
 	metricsManager metrics.Manager
 	eventBus       *events.EventBus
 	retention      *events.Retention
+	webhookMgr     *webhooks.Manager
 	apiServer      *api.Server
 	server         *http.Server
 	metricsSrv     *http.Server // optional separate Prometheus scrape server
@@ -167,6 +169,13 @@ func New(cfg *config.Config) (*Daemon, error) {
 	apiServer := api.NewServerWithMetrics(vmMgr, storageMgr, portFwd, s, cfg, web.Handler(), metricsMgr)
 	apiServer.SetEventBus(eventBus)
 
+	// Webhook subsystem.  Always wire so the API surface is available; if no
+	// webhooks are registered the manager simply has no workers.
+	webhookMgr := webhooks.NewManager(s, eventBus, webhooks.Config{
+		AllowedHosts: cfg.Webhooks.AllowedHosts,
+	})
+	apiServer.SetWebhookSubsystem(s, webhookMgr)
+
 	server := &http.Server{
 		Addr:    cfg.Daemon.Listen,
 		Handler: apiServer,
@@ -185,6 +194,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		metricsManager: metricsMgr,
 		eventBus:       eventBus,
 		retention:      retention,
+		webhookMgr:     webhookMgr,
 		apiServer:      apiServer,
 		server:         server,
 	}
@@ -228,6 +238,18 @@ func (d *Daemon) Run() error {
 		persister := vm.NewVMStatePersister(d.eventBus, d.store)
 		go persister.Run(ctx)
 		logger.Info("daemon", "vm state persister started")
+
+		// Start the webhook delivery subsystem before publishing daemon.started
+		// so any webhook configured for daemon.started or system.* receives the
+		// boot event.  The bus has no replay buffer, so subscribers added after
+		// publish would miss it on every restart.
+		if d.webhookMgr != nil {
+			if err := d.webhookMgr.Start(ctx); err != nil {
+				logger.Warn("daemon", "webhook manager failed to start", "error", err.Error())
+			} else {
+				logger.Info("daemon", "webhook manager started")
+			}
+		}
 
 		evt := events.NewSystemEvent("daemon.started", "info", "vmsmith daemon started")
 		evt.Attributes = map[string]string{
@@ -469,6 +491,12 @@ func autoCertTLSConfig(cfg *config.Config) *tls.Config {
 
 func (d *Daemon) closeResources() error {
 	var errs []error
+
+	// Stop the webhook manager before the bus so its workers drain on a
+	// quiescent queue and don't try to publish onto a stopped bus.
+	if d.webhookMgr != nil {
+		d.webhookMgr.Stop()
+	}
 
 	// Stop event bus (drains pending events before closing store).
 	if d.eventBus != nil {

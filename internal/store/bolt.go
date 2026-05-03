@@ -23,7 +23,7 @@ func New(path string) (*Store, error) {
 
 	// Ensure all buckets exist
 	err = db.Update(func(tx *bolt.Tx) error {
-		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig, BucketEvents}
+		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig, BucketEvents, BucketWebhooks}
 		for _, b := range buckets {
 			if _, err := tx.CreateBucketIfNotExists([]byte(b)); err != nil {
 				return err
@@ -187,6 +187,47 @@ func (s *Store) ListPortForwards(vmID string) ([]*types.PortForward, error) {
 // DeletePortForward removes a port forward rule.
 func (s *Store) DeletePortForward(id string) error {
 	return s.delete(BucketPortForwards, id)
+}
+
+// --- Webhooks ---
+
+// PutWebhook stores a webhook record.
+func (s *Store) PutWebhook(wh *types.Webhook) error {
+	return s.put(BucketWebhooks, wh.ID, wh)
+}
+
+// GetWebhook retrieves a webhook by ID.
+func (s *Store) GetWebhook(id string) (*types.Webhook, error) {
+	var wh types.Webhook
+	if err := s.get(BucketWebhooks, id, &wh); err != nil {
+		return nil, err
+	}
+	return &wh, nil
+}
+
+// ListWebhooks returns all stored webhooks.
+func (s *Store) ListWebhooks() ([]*types.Webhook, error) {
+	var hooks []*types.Webhook
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketWebhooks))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			var wh types.Webhook
+			if err := json.Unmarshal(v, &wh); err != nil {
+				return err
+			}
+			hooks = append(hooks, &wh)
+			return nil
+		})
+	})
+	return hooks, err
+}
+
+// DeleteWebhook removes a webhook record.
+func (s *Store) DeleteWebhook(id string) error {
+	return s.delete(BucketWebhooks, id)
 }
 
 // --- generic helpers ---
