@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-05-02
+> **Last updated:** 2026-05-03
 > **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, and OpenAPI tooling are now complete; the main remaining gaps are the libvirt-backed clone implementation, VM metrics charting polish, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -68,7 +68,7 @@ Currently the only way to duplicate a VM is export-to-image then create-from-ima
 | 2.1.4 | Add `POST /api/v1/vms/{id}/clone` endpoint | S | ✅ Done — API now exposes VM cloning with request validation, duplicate-name checks, typed error responses, and handler coverage for success/not-found/error cases |
 | 2.1.5 | Add `vmsmith vm clone <id> --name <name>` CLI command | S | ✅ Done — CLI now supports `vmsmith vm clone <id> --name <name>` with test coverage and updated docs |
 | 2.1.6 | Add "Clone" button to VMDetail page in frontend | S | ✅ Done — VM detail now offers a clone action modal that posts the new VM name to `POST /api/v1/vms/{id}/clone` and redirects to the cloned VM on success |
-| 2.1.7 | Add integration + E2E tests | M | ✅ Done — clone coverage now spans API integration tests in `internal/api/api_test.go` plus the VM-detail clone flow in `tests/web/gui.spec.js`, including the redirect to the newly created machine |
+| 2.1.7 | Add integration + E2E tests | M | ✅ Done — clone coverage now spans API integration tests in `internal/api/api_test.go`, CLI coverage in `internal/cli/commands_test.go`, the VM-detail clone flow in `tests/web/gui.spec.js`, and the lifecycle path in `tests/e2e/test_api_vm_lifecycle.py` |
 
 ### 2.2 VM Tags & Metadata
 
