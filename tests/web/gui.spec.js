@@ -478,6 +478,41 @@ test.describe("VM Detail Metrics", () => {
     await expect(page.getByTestId("vm-detail-ip")).toBeVisible();
     await expect(page.getByTestId("vm-detail-metrics")).not.toBeVisible();
   });
+
+  test("metrics tab renders the four uPlot charts for a running VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    await expect(page.getByTestId("metric-chart-cpu")).toBeVisible();
+    await expect(page.getByTestId("metric-chart-memory")).toBeVisible();
+    await expect(page.getByTestId("metric-chart-disk-i/o")).toBeVisible();
+    await expect(page.getByTestId("metric-chart-network")).toBeVisible();
+
+    // Each chart wrapper hosts at least one canvas once uPlot mounts.
+    await expect(page.locator('[data-testid="metric-chart-cpu"] canvas').first()).toBeVisible();
+  });
+
+  test("metrics tab transitions to live status after SSE connects", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    // The mock SSE endpoint emits frames after connecting; the indicator
+    // flips from loading -> live as soon as onopen fires.
+    await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "live", { timeout: 5000 });
+    await expect(page.getByTestId("metrics-live-status")).toHaveText("live");
+  });
+
+  test("metrics charts include legend labels for multi-series charts", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("tab-metrics").click();
+    // Disk I/O is a two-series chart (Read + Write); verify the legend chips render.
+    await expect(page.getByTestId("metric-chart-legend-read")).toBeVisible();
+    await expect(page.getByTestId("metric-chart-legend-write")).toBeVisible();
+  });
 });
 
 // ============================================================

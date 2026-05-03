@@ -7,6 +7,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // Some embedded browsers (and Linux POSIX-locale Chromium in CI) report
+      // an `Intl`-invalid value like `en-US@posix` for navigator.language,
+      // which crashes any module that calls `new Intl.NumberFormat(navigator.language)`
+      // during import (e.g. uPlot). This runs before the module bundle so any
+      // downstream imports see a valid BCP-47 tag.
+      (function () {
+        try { new Intl.NumberFormat(navigator.language); }
+        catch (_) {
+          try { Object.defineProperty(navigator, 'language', { value: 'en-US', configurable: true }); } catch (_) {}
+          try { Object.defineProperty(navigator, 'languages', { value: ['en-US'], configurable: true }); } catch (_) {}
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
