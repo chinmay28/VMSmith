@@ -945,7 +945,7 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"ID", "NAME", "SIZE", "FORMAT", "CREATED"}
+	wantHeaders := []string{"ID", "NAME", "SIZE", "FORMAT", "TAGS", "CREATED"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
@@ -1027,6 +1027,72 @@ func TestCLI_ImageDelete_NotFound(t *testing.T) {
 	_, err := runCLI("image", "delete", "nonexistent-img")
 	if err == nil {
 		t.Error("expected error for nonexistent image")
+	}
+}
+
+func TestCLI_ImageEdit_DescriptionAndTags(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	s.PutImage(&types.Image{
+		ID:          "img-meta",
+		Name:        "lab-image",
+		Path:        "/tmp/lab.qcow2",
+		SizeBytes:   1024,
+		Format:      "qcow2",
+		Description: "old",
+		Tags:        []string{"old"},
+		CreatedAt:   time.Now(),
+	})
+
+	out, err := runCLI("image", "edit", "img-meta",
+		"--description", "promoted to release",
+		"--tag", "rocky",
+		"--tag", "rc",
+	)
+	if err != nil {
+		t.Fatalf("image edit: %v", err)
+	}
+	if !strings.Contains(out, "Image img-meta updated") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+
+	stored, err := s.GetImage("img-meta")
+	if err != nil {
+		t.Fatalf("GetImage: %v", err)
+	}
+	if stored.Description != "promoted to release" {
+		t.Errorf("Description = %q", stored.Description)
+	}
+	if got := stored.Tags; len(got) != 2 || got[0] != "rc" || got[1] != "rocky" {
+		t.Errorf("Tags = %v, want [rc rocky]", got)
+	}
+}
+
+func TestCLI_ImageEdit_NoFlagsErrors(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	s.PutImage(&types.Image{ID: "img-noop", Name: "noop", Path: "/tmp/x.qcow2", Format: "qcow2", CreatedAt: time.Now()})
+
+	if _, err := runCLI("image", "edit", "img-noop"); err == nil {
+		t.Error("expected error when no flags provided")
+	}
+}
+
+func TestCLI_ImageList_FilterByTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-qa", Name: "qa-image", Path: "/tmp/qa.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"qa"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-prod", Name: "prod-image", Path: "/tmp/prod.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"prod"}, CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--tag", "PROD")
+	if err != nil {
+		t.Fatalf("image list --tag: %v", err)
+	}
+	if !strings.Contains(out, "prod-image") || strings.Contains(out, "qa-image") {
+		t.Fatalf("filter result = %q", out)
 	}
 }
 

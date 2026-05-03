@@ -94,11 +94,15 @@ export const snapshots = {
     unwrap(apiClient.DELETE('/vms/{vmID}/snapshots/{snapName}', { params: { path: { vmID: vmId, snapName } } })),
 };
 
-function uploadImageWithProgress(file: File, name: string, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) {
+function uploadImageWithProgress(file: File, name: string, options: { description?: string; tags?: string[] } = {}, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) {
   const token = getAuthToken();
   const fd = new FormData();
   fd.append('file', file);
   if (name) fd.append('name', name);
+  if (options.description) fd.append('description', options.description);
+  if (options.tags && options.tags.length > 0) {
+    fd.append('tags', options.tags.join(','));
+  }
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -137,11 +141,14 @@ function uploadImageWithProgress(file: File, name: string, onProgress?: (progres
 
 // --- Images ---
 export const images = {
-  list: ({ page, perPage }: { page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage } } }), { withMeta: true }),
-  create: (vmId: string, name: string) => unwrap(apiClient.POST('/images', { body: { vm_id: vmId, name } })),
-  upload: (file: File, name: string, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) =>
-    uploadImageWithProgress(file, name, onProgress),
+  list: ({ page, perPage, tag = '' }: { page?: number; perPage?: number; tag?: string } = {}) =>
+    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage, tag: tag || undefined } as any } }), { withMeta: true }),
+  create: (vmId: string, name: string, options: { description?: string; tags?: string[] } = {}) =>
+    unwrap(apiClient.POST('/images', { body: { vm_id: vmId, name, description: options.description, tags: options.tags } })),
+  update: (id: string, patch: { description?: string; tags?: string[] }) =>
+    unwrap(apiClient.PATCH('/images/{imageID}', { params: { path: { imageID: id } }, body: patch })),
+  upload: (file: File, name: string, options: { description?: string; tags?: string[] } = {}, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) =>
+    uploadImageWithProgress(file, name, options, onProgress),
   delete: (id: string) => unwrap(apiClient.DELETE('/images/{imageID}', { params: { path: { imageID: id } } })),
   downloadUrl: (id: string) => `${BASE}/images/${id}/download`,
 };

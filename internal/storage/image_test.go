@@ -146,7 +146,7 @@ func TestStorageManager_ImportImage_Success(t *testing.T) {
 	mgr, _, imagesDir := newTestManager(t)
 
 	content := []byte("fake qcow2 data")
-	img, err := mgr.ImportImage("uploaded-image", content)
+	img, err := mgr.ImportImage("uploaded-image", content, CreateImageOptions{})
 	if err != nil {
 		t.Fatalf("ImportImage: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestStorageManager_ImportImage_Success(t *testing.T) {
 func TestStorageManager_ImportImage_Persisted(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	if _, err := mgr.ImportImage("persist-test", []byte("data")); err != nil {
+	if _, err := mgr.ImportImage("persist-test", []byte("data"), CreateImageOptions{}); err != nil {
 		t.Fatalf("ImportImage: %v", err)
 	}
 
@@ -190,5 +190,82 @@ func TestStorageManager_ImportImage_Persisted(t *testing.T) {
 	}
 	if imgs[0].Name != "persist-test" {
 		t.Errorf("Name = %q, want persist-test", imgs[0].Name)
+	}
+}
+
+func TestStorageManager_ImportImage_PersistsMetadata(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	img, err := mgr.ImportImage("with-meta", []byte("data"), CreateImageOptions{
+		Description: "  qcow2 lab build ",
+		Tags:        []string{"lab", "ubuntu"},
+	})
+	if err != nil {
+		t.Fatalf("ImportImage: %v", err)
+	}
+	if img.Description != "qcow2 lab build" {
+		t.Errorf("Description = %q, want trimmed", img.Description)
+	}
+	if got := img.Tags; len(got) != 2 || got[0] != "lab" || got[1] != "ubuntu" {
+		t.Errorf("Tags = %v, want [lab ubuntu]", got)
+	}
+	if img.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt should be set on import")
+	}
+
+	stored, err := mgr.GetImage(img.ID)
+	if err != nil {
+		t.Fatalf("GetImage: %v", err)
+	}
+	if stored.Description != "qcow2 lab build" {
+		t.Errorf("stored.Description = %q", stored.Description)
+	}
+}
+
+func TestStorageManager_UpdateImage_AppliesPatch(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	img, err := mgr.ImportImage("patchable", []byte("data"), CreateImageOptions{
+		Description: "old",
+		Tags:        []string{"alpha"},
+	})
+	if err != nil {
+		t.Fatalf("ImportImage: %v", err)
+	}
+	originalUpdated := img.UpdatedAt
+
+	// Description change triggers an update; tags untouched (nil = no change).
+	updated, err := mgr.UpdateImage(img.ID, types.ImageUpdateSpec{Description: "fresh"})
+	if err != nil {
+		t.Fatalf("UpdateImage: %v", err)
+	}
+	if updated.Description != "fresh" {
+		t.Errorf("Description = %q, want fresh", updated.Description)
+	}
+	if got := updated.Tags; len(got) != 1 || got[0] != "alpha" {
+		t.Errorf("Tags = %v, want [alpha]", got)
+	}
+	if !updated.UpdatedAt.After(originalUpdated) {
+		t.Error("UpdatedAt should advance after a real change")
+	}
+
+	// Empty Description is treated as "no change"; non-nil empty Tags clears.
+	cleared, err := mgr.UpdateImage(img.ID, types.ImageUpdateSpec{Tags: []string{}})
+	if err != nil {
+		t.Fatalf("UpdateImage clear: %v", err)
+	}
+	if cleared.Description != "fresh" {
+		t.Errorf("Description = %q, want unchanged 'fresh'", cleared.Description)
+	}
+	if len(cleared.Tags) != 0 {
+		t.Errorf("Tags = %v, want empty", cleared.Tags)
+	}
+}
+
+func TestStorageManager_UpdateImage_NotFound(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	if _, err := mgr.UpdateImage("img-missing", types.ImageUpdateSpec{Description: "x"}); err == nil {
+		t.Error("expected error updating missing image")
 	}
 }

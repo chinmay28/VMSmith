@@ -24,8 +24,17 @@ func NewManager(cfg *config.Config, store *store.Store) *Manager {
 	return &Manager{store: store, cfg: cfg}
 }
 
-// CreateImage creates a flattened qcow2 image from a VM's disk.
-func (m *Manager) CreateImage(vmDiskPath, name string, sourceVM string) (*types.Image, error) {
+// CreateImageOptions carries optional metadata for CreateImage. Description is
+// a free-form string (max 1024 chars enforced at the API layer); Tags are
+// already-normalized values produced by validate.NormalizeTags.
+type CreateImageOptions struct {
+	Description string
+	Tags        []string
+}
+
+// CreateImage creates a flattened qcow2 image from a VM's disk and persists
+// the optional description / tags alongside the standard image metadata.
+func (m *Manager) CreateImage(vmDiskPath, name, sourceVM string, opts CreateImageOptions) (*types.Image, error) {
 	imagePath := filepath.Join(m.cfg.Storage.ImagesDir, name+".qcow2")
 
 	// Flatten the overlay into a standalone image (no backing file)
@@ -40,20 +49,23 @@ func (m *Manager) CreateImage(vmDiskPath, name string, sourceVM string) (*types.
 		return nil, fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
 	}
 
-	// Get the file size
 	info, err := os.Stat(imagePath)
 	if err != nil {
 		return nil, err
 	}
 
+	now := time.Now()
 	img := &types.Image{
-		ID:        fmt.Sprintf("img-%d", time.Now().UnixNano()),
-		Name:      name,
-		Path:      imagePath,
-		SizeBytes: info.Size(),
-		Format:    "qcow2",
-		SourceVM:  sourceVM,
-		CreatedAt: time.Now(),
+		ID:          fmt.Sprintf("img-%d", now.UnixNano()),
+		Name:        name,
+		Path:        imagePath,
+		SizeBytes:   info.Size(),
+		Format:      "qcow2",
+		SourceVM:    sourceVM,
+		Description: strings.TrimSpace(opts.Description),
+		Tags:        opts.Tags,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := m.store.PutImage(img); err != nil {
@@ -128,13 +140,43 @@ func (m *Manager) GetImage(id string) (*types.Image, error) {
 	return m.store.GetImage(id)
 }
 
+// UpdateImage applies a metadata patch to an existing image. An empty
+// Description is treated as "no change". A nil Tags slice means "no change";
+// a non-nil slice (including an empty one) replaces the current tag set.
+// Tags are not re-validated here — callers should normalize first.
+func (m *Manager) UpdateImage(id string, patch types.ImageUpdateSpec) (*types.Image, error) {
+	img, err := m.store.GetImage(id)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := false
+	if desc := strings.TrimSpace(patch.Description); desc != "" && desc != img.Description {
+		img.Description = desc
+		changed = true
+	}
+	if patch.Tags != nil {
+		img.Tags = patch.Tags
+		changed = true
+	}
+
+	if changed {
+		img.UpdatedAt = time.Now()
+		if err := m.store.PutImage(img); err != nil {
+			return nil, err
+		}
+	}
+	return img, nil
+}
+
 // ImagePath returns the filesystem path for a named image.
 func (m *Manager) ImagePath(name string) string {
 	return filepath.Join(m.cfg.Storage.ImagesDir, name+".qcow2")
 }
 
-// ImportImage saves an uploaded file into the images directory and registers it.
-func (m *Manager) ImportImage(name string, src []byte) (*types.Image, error) {
+// ImportImage saves an uploaded file into the images directory and registers
+// it with the supplied metadata.
+func (m *Manager) ImportImage(name string, src []byte, opts CreateImageOptions) (*types.Image, error) {
 	if err := os.MkdirAll(m.cfg.Storage.ImagesDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -144,13 +186,17 @@ func (m *Manager) ImportImage(name string, src []byte) (*types.Image, error) {
 		return nil, fmt.Errorf("writing image file: %w", err)
 	}
 
+	now := time.Now()
 	img := &types.Image{
-		ID:        fmt.Sprintf("img-%d", time.Now().UnixNano()),
-		Name:      name,
-		Path:      imagePath,
-		SizeBytes: int64(len(src)),
-		Format:    "qcow2",
-		CreatedAt: time.Now(),
+		ID:          fmt.Sprintf("img-%d", now.UnixNano()),
+		Name:        name,
+		Path:        imagePath,
+		SizeBytes:   int64(len(src)),
+		Format:      "qcow2",
+		Description: strings.TrimSpace(opts.Description),
+		Tags:        opts.Tags,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := m.store.PutImage(img); err != nil {
