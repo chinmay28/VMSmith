@@ -73,6 +73,7 @@ export const vms = {
     unwrap(apiClient.POST('/vms/{vmID}/clone', { params: { path: { vmID: id } }, body: { name } })),
   start: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/start', { params: { path: { vmID: id } } })),
   stop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/stop', { params: { path: { vmID: id } } })),
+  restart: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/restart', { params: { path: { vmID: id } } })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
   stats: (id: string, { since = '', fields = '' }: { since?: string; fields?: string } = {}) =>
     unwrap(apiClient.GET('/vms/{vmID}/stats', {

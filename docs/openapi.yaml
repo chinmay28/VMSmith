@@ -230,6 +230,23 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/restart:
+    post:
+      tags: [VMs]
+      summary: Restart a VM (graceful stop then start; or just start if stopped)
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM restarted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/clone:
     post:
       tags: [VMs]
@@ -1024,41 +1041,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
-    MetricSample:
-      type: object
-      required: [timestamp]
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-        cpu_percent:
-          type: number
-          format: double
-          nullable: true
-        mem_used_mb:
-          type: integer
-          format: int64
-          nullable: true
-        mem_avail_mb:
-          type: integer
-          format: int64
-          nullable: true
-        disk_read_bps:
-          type: integer
-          format: int64
-          nullable: true
-        disk_write_bps:
-          type: integer
-          format: int64
-          nullable: true
-        net_rx_bps:
-          type: integer
-          format: int64
-          nullable: true
-        net_tx_bps:
-          type: integer
-          format: int64
-          nullable: true
     TopVMItem:
       type: object
       required: [vm_id, name, state, value]

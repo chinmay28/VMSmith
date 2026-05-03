@@ -93,6 +93,25 @@ Operating on VMs one-at-a-time is tedious when managing many.
 | 2.3.2 | Add `vmsmith vm start --all`, `vmsmith vm stop --all`, with `--tag` filter | M | ✅ Done — CLI `vm start` / `vm stop` now accept `--all` with optional `--tag`, skip VMs already in the wrong state, and document/test the bulk lifecycle flow |
 | 2.3.3 | Add multi-select checkboxes + bulk action bar to VMList frontend page | M | ✅ Done — VMList now supports per-row selection, select-all for the current filtered view, and a bulk action bar that fans out start/stop/delete over existing per-VM endpoints with selection-aware skip messaging |
 
+#### 2.3.4 VM Restart action ✅
+
+`vm.Manager.Restart(ctx, id)` performs a graceful shutdown (30s grace before
+forced destroy) followed by a start. Surfaced everywhere the rest of the
+lifecycle is:
+
+- API: `POST /api/v1/vms/{vmID}/restart` (returns `{"status":"restarted"}`)
+- CLI: `vmsmith vm restart <id>`
+- GUI: "Restart" button next to Stop on VMDetail, only when the VM is running
+- Events: emits `vm.restart_requested` (`app` source) on success
+- Tests: unit (MockManager + happy-path / not-found / error-injection),
+  integration (`internal/api/api_test.go`: `TestRestartVM`,
+  `TestRestartVM_Error`), CLI (`TestCLI_VMRestart`,
+  `TestCLI_VMRestart_NotFound`), and Playwright mock GUI
+  (`restart running VM`)
+
+This is the manager-layer primitive that the future scheduler restart action
+(5.2.5) will reuse.
+
 ### 2.4 VM Templates
 
 Save and reuse VM configurations without re-specifying every parameter.
@@ -594,7 +613,7 @@ v1 actions:
 | `snapshot` | `vm.Manager.CreateSnapshot(ctx, vmID, name)`. Snapshot name template defaults to `auto-{schedule_name}-{rfc3339}`. Honors `RetentionCount`: after creation, list snapshots whose names start with `auto-{schedule_name}-` and delete oldest until count ≤ retention. |
 | `start` | `vm.Manager.Start(ctx, vmID)`. Skip if already running with `skip_reason: "vm_already_running"`. |
 | `stop` | `vm.Manager.Stop(ctx, vmID)`. Skip if already stopped. |
-| `restart` | Stop then Start with a 30s wait between. Single run record. |
+| `restart` | `vm.Manager.Restart(ctx, vmID)` — graceful `Shutdown()` (with a 30s grace period before `Destroy()` falls back) followed by `Create()`. Single run record. |
 
 **Tag-selector fan-out.** When `TagSelector` is set (and `VMID` is empty), the scheduler resolves the matching VM list at fire time — not at schedule-create time. Each matched VM gets its own `ScheduleRun` record. New VMs picked up automatically; deleted VMs simply produce zero runs.
 

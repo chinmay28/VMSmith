@@ -346,6 +346,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart a VM (graceful stop then start; or just start if stopped) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM restarted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StatusResponse"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/clone": {
         parameters: {
             query?: never;
@@ -434,6 +474,57 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/stats/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream VM resource metrics (SSE)
+         * @description Server-Sent Events stream of `MetricSample` frames.  Each new sample
+         *     produced by the metrics collector is delivered as one `vm.stats`
+         *     event whose `data` field is a JSON-encoded `MetricSample` and whose
+         *     `id` is the sample's unix-nanosecond timestamp.  Clients should
+         *     seed history with `GET /vms/{vmID}/stats` before subscribing —
+         *     the stream provides no replay.  A `: keepalive` comment frame is
+         *     sent every 30 seconds.  The stream closes when the client
+         *     disconnects, the VM is deleted, or the daemon shuts down.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Server-Sent Events stream */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
                 404: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
@@ -1315,24 +1406,6 @@ export interface components {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
         };
-        MetricSample: {
-            /** Format: date-time */
-            timestamp: string;
-            /** Format: double */
-            cpu_percent?: number | null;
-            /** Format: int64 */
-            mem_used_mb?: number | null;
-            /** Format: int64 */
-            mem_avail_mb?: number | null;
-            /** Format: int64 */
-            disk_read_bps?: number | null;
-            /** Format: int64 */
-            disk_write_bps?: number | null;
-            /** Format: int64 */
-            net_rx_bps?: number | null;
-            /** Format: int64 */
-            net_tx_bps?: number | null;
-        };
         TopVMItem: {
             vm_id: string;
             name: string;
@@ -1440,7 +1513,6 @@ export interface components {
              * @description Number of in-flight Server-Sent Event clients on
              *     `/api/v1/events/stream`.  Useful for spotting consumer pressure
              *     and stuck SSE connections.
-             *
              */
             event_stream_connections: number;
         };

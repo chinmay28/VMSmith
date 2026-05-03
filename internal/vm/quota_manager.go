@@ -48,10 +48,13 @@ func (m *quotaManager) Update(ctx context.Context, id string, patch types.VMUpda
 	return m.base.Update(ctx, id, patch)
 }
 
-func (m *quotaManager) Start(ctx context.Context, id string) error { return m.base.Start(ctx, id) }
-func (m *quotaManager) Stop(ctx context.Context, id string) error { return m.base.Stop(ctx, id) }
-func (m *quotaManager) Delete(ctx context.Context, id string) error { return m.base.Delete(ctx, id) }
-func (m *quotaManager) Get(ctx context.Context, id string) (*types.VM, error) { return m.base.Get(ctx, id) }
+func (m *quotaManager) Start(ctx context.Context, id string) error   { return m.base.Start(ctx, id) }
+func (m *quotaManager) Stop(ctx context.Context, id string) error    { return m.base.Stop(ctx, id) }
+func (m *quotaManager) Restart(ctx context.Context, id string) error { return m.base.Restart(ctx, id) }
+func (m *quotaManager) Delete(ctx context.Context, id string) error  { return m.base.Delete(ctx, id) }
+func (m *quotaManager) Get(ctx context.Context, id string) (*types.VM, error) {
+	return m.base.Get(ctx, id)
+}
 func (m *quotaManager) List(ctx context.Context) ([]*types.VM, error) { return m.base.List(ctx) }
 func (m *quotaManager) CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error) {
 	snap, err := m.base.CreateSnapshot(ctx, vmID, name)

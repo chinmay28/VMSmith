@@ -419,6 +419,70 @@ func (m *LibvirtManager) Stop(ctx context.Context, id string) error {
 	return m.store.PutVM(vm)
 }
 
+// Restart performs a graceful stop followed by a start.  When the VM is already
+// stopped, it just starts it.  The shutdown step falls back to a forced destroy
+// after restartShutdownTimeout so a stuck guest doesn't block the operation.
+func (m *LibvirtManager) Restart(ctx context.Context, id string) error {
+	vm, err := m.store.GetVM(id)
+	if err != nil {
+		return err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return fmt.Errorf("looking up domain %s: %w", vm.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return fmt.Errorf("getting domain state: %w", err)
+	}
+
+	if state == libvirt.DOMAIN_RUNNING {
+		if shutdownErr := dom.Shutdown(); shutdownErr != nil {
+			if destroyErr := dom.Destroy(); destroyErr != nil {
+				return fmt.Errorf("shutting down domain: %w (destroy fallback: %v)", shutdownErr, destroyErr)
+			}
+		} else if !waitForDomainShutoff(ctx, dom, restartShutdownTimeout) {
+			if destroyErr := dom.Destroy(); destroyErr != nil {
+				return fmt.Errorf("forcing shutdown after grace period: %w", destroyErr)
+			}
+		}
+	}
+
+	if err := dom.Create(); err != nil {
+		return fmt.Errorf("starting domain: %w", err)
+	}
+
+	vm.State = types.VMStateRunning
+	vm.UpdatedAt = time.Now()
+	return m.store.PutVM(vm)
+}
+
+// restartShutdownTimeout is the grace period given to a guest to react to ACPI
+// shutdown before Restart force-destroys it.  Kept short relative to libvirt's
+// default to avoid hanging an interactive `vmsmith vm restart` call.
+const restartShutdownTimeout = 30 * time.Second
+
+// waitForDomainShutoff polls dom.GetState until the domain reports SHUTOFF or
+// the deadline passes.  Returns true if the domain shut down within the window.
+func waitForDomainShutoff(ctx context.Context, dom *libvirt.Domain, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		state, _, err := dom.GetState()
+		if err == nil && state == libvirt.DOMAIN_SHUTOFF {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return false
+}
+
 // Delete removes a VM entirely: stops it, undefines the domain, removes disk files.
 func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	vm, err := m.store.GetVM(id)

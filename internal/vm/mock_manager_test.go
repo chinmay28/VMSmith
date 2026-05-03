@@ -150,6 +150,51 @@ func TestMockManager_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestMockManager_Restart(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "rebooter"})
+	id := vm.ID
+
+	if err := m.Stop(ctx, id); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if err := m.Restart(ctx, id); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	got, _ := m.Get(ctx, id)
+	if got.State != types.VMStateRunning {
+		t.Errorf("after restart: State = %q, want running", got.State)
+	}
+
+	// Restart-from-running should also leave it running.
+	if err := m.Restart(ctx, id); err != nil {
+		t.Fatalf("Restart from running: %v", err)
+	}
+	got, _ = m.Get(ctx, id)
+	if got.State != types.VMStateRunning {
+		t.Errorf("after second restart: State = %q, want running", got.State)
+	}
+}
+
+func TestMockManager_Restart_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if err := m.Restart(context.Background(), "vm-missing"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestMockManager_Restart_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "boom"})
+	m.RestartErr = fmt.Errorf("restart boom")
+	if err := m.Restart(context.Background(), vm.ID); err == nil || err.Error() != "restart boom" {
+		t.Fatalf("err = %v, want restart boom", err)
+	}
+}
+
 func TestMockManager_Snapshots(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()

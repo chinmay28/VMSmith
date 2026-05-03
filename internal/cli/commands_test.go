@@ -534,6 +534,36 @@ func TestCLI_VMStop_AllNoMatches(t *testing.T) {
 	}
 }
 
+func TestCLI_VMRestart(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-r", Name: "rebooter", State: types.VMStateRunning})
+
+	out, err := runCLI("vm", "restart", "vm-r")
+	if err != nil {
+		t.Fatalf("vm restart: %v", err)
+	}
+	if !strings.Contains(out, "vm-r") || !strings.Contains(out, "restarted") {
+		t.Errorf("expected VM id and 'restarted' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-r")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestCLI_VMRestart_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "restart", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
 func TestCLI_VMDelete(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
