@@ -343,8 +343,38 @@ func TestRunAutoStartSweepReportsFailures(t *testing.T) {
 	bus.Start()
 	defer bus.Stop()
 
+	// Subscribe before the sweep so we don't race the publish.
+	ch, cancelSub := bus.Subscribe("auto-start-test")
+	defer cancelSub()
+
 	d := &Daemon{vmManager: mgr, eventBus: bus}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	d.runAutoStartSweep(ctx) // must not panic
+
+	// Drain events until we see the auto_start_failed system event or time out.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-ch:
+			if evt == nil {
+				continue
+			}
+			if evt.Type != "vm.auto_start_failed" {
+				continue
+			}
+			if evt.Severity != types.EventSeverityWarn {
+				t.Fatalf("severity = %q, want warn", evt.Severity)
+			}
+			if evt.Attributes["vm_id"] != "boom" {
+				t.Fatalf("vm_id attr = %q, want boom", evt.Attributes["vm_id"])
+			}
+			if !strings.Contains(evt.Attributes["error"], "simulated boot failure") {
+				t.Fatalf("error attr = %q, want it to mention the simulated failure", evt.Attributes["error"])
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for vm.auto_start_failed event")
+		}
+	}
 }
