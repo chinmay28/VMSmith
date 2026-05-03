@@ -6,11 +6,13 @@ const DIST_DIR = path.resolve(__dirname, "../../internal/web/dist");
 const DIST_INDEX = path.join(DIST_DIR, "index.html");
 
 let vmCounter = 0;
+let webhookCounter = 0;
 const vms = new Map();
 const snapshots = new Map();
 const images = new Map();
 const templates = new Map();
 const portForwards = new Map();
+const webhookList = new Map();
 
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
@@ -43,11 +45,13 @@ function seed() {
 
 function resetState() {
   vmCounter = 0;
+  webhookCounter = 0;
   vms.clear();
   snapshots.clear();
   images.clear();
   templates.clear();
   portForwards.clear();
+  webhookList.clear();
   seed();
 }
 
@@ -382,6 +386,61 @@ const server = http.createServer(async (req, res) => {
     );
     const total = filtered.length;
     return json(res, 200, filtered, { "X-Total-Count": String(total) });
+  }
+  if (p === "/api/v1/webhooks" && method === "GET") {
+    return json(res, 200, [...webhookList.values()]);
+  }
+  if (p === "/api/v1/webhooks" && method === "POST") {
+    const body = await parseBody(req);
+    const url2 = (body.url || "").trim();
+    const secret = (body.secret || "").trim();
+    if (!url2 || (!url2.startsWith("http://") && !url2.startsWith("https://"))) {
+      return json(res, 400, { code: "invalid_url", message: "url must be http(s)" });
+    }
+    if (!secret) {
+      return json(res, 400, { code: "missing_secret", message: "secret is required" });
+    }
+    webhookCounter++;
+    const wh = {
+      id: `wh-${webhookCounter}`,
+      url: url2,
+      event_types: Array.isArray(body.event_types) ? body.event_types : null,
+      active: true,
+      created_at: new Date().toISOString(),
+    };
+    webhookList.set(wh.id, wh);
+    return json(res, 201, wh);
+  }
+  if ((m = p.match(/^\/api\/v1\/webhooks\/([^/]+)$/)) && method === "DELETE") {
+    if (!webhookList.has(m[1])) {
+      return json(res, 404, { code: "resource_not_found", message: "webhook not found" });
+    }
+    webhookList.delete(m[1]);
+    res.writeHead(204);
+    return res.end();
+  }
+  if ((m = p.match(/^\/api\/v1\/webhooks\/([^/]+)\/test$/)) && method === "POST") {
+    const wh = webhookList.get(m[1]);
+    if (!wh) {
+      return json(res, 404, { code: "resource_not_found", message: "webhook not found" });
+    }
+    // Synthesize a successful test result: receivers whose URL contains "fail"
+    // probe as a failure so tests can exercise both branches deterministically.
+    const fail = wh.url.includes("fail");
+    const now = new Date().toISOString();
+    const result = fail
+      ? { success: false, status_code: 500, error: "HTTP 500", duration_ms: 12, attempted_at: now, event_id: `wh-test-${Date.now()}` }
+      : { success: true, status_code: 204, duration_ms: 14, attempted_at: now, event_id: `wh-test-${Date.now()}` };
+    wh.last_delivery_at = now;
+    if (result.success) {
+      wh.last_status = result.status_code;
+      wh.last_error = "";
+    } else {
+      wh.last_status = 0;
+      wh.last_error = result.error;
+    }
+    webhookList.set(wh.id, wh);
+    return json(res, 200, result);
   }
   if (p === "/api/v1/host/interfaces" && method === "GET") {
     return json(res, 200, [

@@ -551,9 +551,61 @@ test.describe("Navigation", () => {
     await page.getByTestId("nav-logs").click();
     await expect(page.getByTestId("log-table")).toBeVisible();
 
+    // Settings
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
     // Back to dashboard
     await page.getByTestId("nav-dashboard").click();
     await expect(page.getByTestId("stat-total")).toBeVisible();
+  });
+});
+
+// ============================================================
+// Settings — Webhooks (roadmap 4.2.16)
+// ============================================================
+test.describe("Settings — Webhooks", () => {
+  test("create, send test event, and delete a webhook", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    // Create.
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/hook");
+    await page.getByTestId("webhook-secret-input").fill("topsecret");
+    await page.getByTestId("webhook-event-types-input").fill("vm.started, system.*");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+    // Send test event — mock-server reports a 204 success.
+    await page.getByTestId(`webhook-test-${rowID}`).click();
+    const status = page.getByTestId("webhook-status").first();
+    await expect(status).toContainText(/204|test ok/i);
+
+    // Delete.
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.getByTestId(`webhook-delete-${rowID}`).click();
+    await expect(page.getByTestId(`webhook-row-${rowID}`)).not.toBeVisible();
+  });
+
+  test("send-test surfaces failure for failing receivers", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    // Mock-server returns failure when URL contains "fail".
+    await page.getByTestId("webhook-url-input").fill("https://example.com/fail");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+    await page.getByTestId(`webhook-test-${rowID}`).click();
+    await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500|failed|500/i);
   });
 });
 

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/internal/webhooks"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -30,11 +33,26 @@ type WebhookRegistrar interface {
 	Unregister(id string)
 }
 
+// WebhookTester runs a single synchronous delivery attempt against a registered
+// webhook to back the "send test event" UI affordance.
+type WebhookTester interface {
+	TestDeliver(ctx context.Context, webhookID string) (*types.WebhookTestResult, error)
+}
+
 // SetWebhookSubsystem wires the persistence and runtime manager into the
 // server.  Either may be nil; with no store the endpoints return 503.
+//
+// The runtime manager is accepted as a `WebhookRegistrar`.  When it also
+// satisfies `WebhookTester` the POST /webhooks/{id}/test endpoint becomes
+// available; otherwise it returns 503 webhook_test_unavailable.
 func (s *Server) SetWebhookSubsystem(store WebhookStore, mgr WebhookRegistrar) {
 	s.webhookStore = store
 	s.webhookManager = mgr
+	if tester, ok := mgr.(WebhookTester); ok {
+		s.webhookTester = tester
+	} else {
+		s.webhookTester = nil
+	}
 }
 
 func (s *Server) requireWebhookStore(w http.ResponseWriter) bool {
@@ -131,6 +149,31 @@ func (s *Server) GetWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, redactWebhook(wh))
+}
+
+// TestWebhook handles POST /api/v1/webhooks/{id}/test.  It synthesises a
+// `system.webhook_test` event, delivers it once (no retries), and returns the
+// outcome so the UI can surface a quick success/failure verdict.
+func (s *Server) TestWebhook(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWebhookStore(w) {
+		return
+	}
+	if s.webhookTester == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "webhook_test_unavailable",
+			"webhook test deliveries are not enabled (no runtime manager configured)")
+		return
+	}
+	id := chi.URLParam(r, "webhookID")
+	result, err := s.webhookTester.TestDeliver(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, webhooks.ErrWebhookNotFound) {
+			writeErrorCode(w, http.StatusNotFound, "resource_not_found", "webhook not found")
+			return
+		}
+		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to deliver test event")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // DeleteWebhook handles DELETE /api/v1/webhooks/{id}.
