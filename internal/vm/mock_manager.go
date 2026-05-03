@@ -163,6 +163,9 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 			vm.Spec.NatGateway = patch.NatGateway
 		}
 	}
+	if patch.AutoStart != nil {
+		vm.Spec.AutoStart = *patch.AutoStart
+	}
 
 	vm.UpdatedAt = time.Now()
 	vmCopy := *vm

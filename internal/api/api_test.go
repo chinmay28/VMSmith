@@ -1048,6 +1048,70 @@ func TestUpdateVM_CPUAndRAM(t *testing.T) {
 	}
 }
 
+func TestCreateVM_AutoStartFlag(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:      "auto-on",
+		Image:     "ubuntu",
+		CPUs:      2,
+		RAMMB:     2048,
+		AutoStart: true,
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if !created.Spec.AutoStart {
+		t.Fatalf("Spec.AutoStart = false, want true (round-trip should preserve the flag)")
+	}
+}
+
+func TestUpdateVM_AutoStartToggle(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:   "vm-as",
+		Name: "togglable",
+		Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, AutoStart: false},
+	})
+
+	enable := true
+	patch := types.VMUpdateSpec{AutoStart: &enable}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-as", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if !updated.Spec.AutoStart {
+		t.Fatalf("AutoStart = false after enable patch, want true")
+	}
+
+	// Disable.
+	disable := false
+	patch = types.VMUpdateSpec{AutoStart: &disable}
+	req2, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-as", jsonBody(t, patch))
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, _ := http.DefaultClient.Do(req2)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("disable status = %d, want 200", resp2.StatusCode)
+	}
+	decodeJSON(t, resp2, &updated)
+	if updated.Spec.AutoStart {
+		t.Fatalf("AutoStart = true after disable patch, want false")
+	}
+}
+
 func TestUpdateVM_DiskGrow(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

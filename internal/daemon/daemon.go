@@ -261,6 +261,14 @@ func (d *Daemon) Run() error {
 		}()
 	}
 
+	// Auto-start sweep: start any VM marked AutoStart=true that is currently
+	// stopped. Failures are logged and emitted as system events but do not
+	// block daemon startup — operators can investigate after the fact via the
+	// activity feed or `vmsmith vm list`.
+	if d.vmManager != nil {
+		go d.runAutoStartSweep(ctx)
+	}
+
 	// Start server in goroutine.
 	errCh := make(chan error, 1)
 	go func() {
@@ -325,6 +333,59 @@ func (d *Daemon) Run() error {
 
 	fmt.Println("Daemon stopped")
 	return nil
+}
+
+// runAutoStartSweep walks the persisted VM set once at daemon boot and
+// asks the VM manager to Start any VM marked AutoStart=true that is not
+// already running. Errors are logged and emitted as system events; they do
+// not block startup.
+func (d *Daemon) runAutoStartSweep(ctx context.Context) {
+	vms, err := d.vmManager.List(ctx)
+	if err != nil {
+		logger.Warn("daemon", "auto-start sweep: list failed", "error", err.Error())
+		return
+	}
+
+	var attempted, started, failed int
+	for _, v := range vms {
+		if v == nil || !v.Spec.AutoStart {
+			continue
+		}
+		if v.State == types.VMStateRunning {
+			continue
+		}
+		attempted++
+		logger.Info("daemon", "auto-starting VM", "vm", v.Name, "id", v.ID)
+		if err := d.vmManager.Start(ctx, v.ID); err != nil {
+			failed++
+			logger.Error("daemon", "auto-start failed", "vm", v.Name, "id", v.ID, "error", err.Error())
+			if d.eventBus != nil {
+				d.eventBus.Publish(events.NewSystemEventWithAttrs(
+					"vm.auto_start_failed",
+					types.EventSeverityWarn,
+					fmt.Sprintf("auto-start failed for VM %q: %s", v.Name, err.Error()),
+					map[string]string{"vm_id": v.ID, "vm_name": v.Name, "error": err.Error()},
+				))
+			}
+			continue
+		}
+		started++
+		if d.eventBus != nil {
+			d.eventBus.Publish(events.NewAppEvent(
+				"vm.auto_started",
+				v.ID,
+				fmt.Sprintf("VM %q auto-started by daemon", v.Name),
+				map[string]string{"vm_name": v.Name},
+			))
+		}
+	}
+
+	if attempted > 0 {
+		logger.Info("daemon", "auto-start sweep complete",
+			"attempted", strconv.Itoa(attempted),
+			"started", strconv.Itoa(started),
+			"failed", strconv.Itoa(failed))
+	}
 }
 
 // Stop sends SIGTERM to a running daemon.

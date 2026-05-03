@@ -105,6 +105,15 @@ Save and reuse VM configurations without re-specifying every parameter.
 | 2.4.4 | Add `vmsmith template create|list|delete` CLI commands | M | ✅ Done — CLI now supports local template create/list/delete flows with coverage for the happy-path CRUD workflow |
 | 2.4.5 | Add template selector dropdown to Create VM modal in frontend | S | ✅ Done — the Create VM modal now lists saved templates, prefills form defaults when one is selected, and keeps manual field edits as explicit overrides |
 
+### 2.5 Daemon-managed VM Lifecycle
+
+Operator-friendly lifecycle hooks driven by the daemon itself, separate from
+explicit user actions.
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 2.5.1 | Auto-start VMs at daemon boot via a per-VM `auto_start` flag on `VMSpec`/`VMUpdateSpec`, exposed in API, CLI (`--auto-start`), and GUI (checkbox + summary card). Daemon performs a sweep on startup, calling `Start` for any VM marked `auto_start=true` that is currently stopped, emitting `vm.auto_started` / `vm.auto_start_failed` events for observability | M | ✅ Done — `pkg/types/vm.go` adds `AutoStart bool` (always serialised, no `omitempty`) plus `*bool` pointer in `VMUpdateSpec` so toggles are unambiguous; `LibvirtManager.Update` and `MockManager.Update` honour the new flag (an AutoStart-only edit is metadata-only and skips the stop/restart path); `internal/daemon/daemon.go` runs `runAutoStartSweep` after metrics + scrape startup but before the HTTP server begins serving so the daemon settles into a fully running state. Unit, mock-GUI, daemon, and API integration tests cover create/update toggling, the daemon sweep happy path, and the per-VM error path |
+
 ---
 
 ## Phase 3: Operational Excellence (Week 5-8)

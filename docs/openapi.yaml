@@ -922,6 +922,9 @@ components:
           type: string
         nat_gateway:
           type: string
+        auto_start:
+          type: boolean
+          description: When true, the daemon starts this VM automatically at boot.
     VMUpdateSpec:
       type: object
       properties:
@@ -941,6 +944,10 @@ components:
           type: string
         nat_gateway:
           type: string
+        auto_start:
+          type: boolean
+          description: Toggle auto-start at daemon boot. Omit to leave unchanged.
+          nullable: true
     VM:
       type: object
       required: [id, name, spec, state, disk_path, created_at, updated_at]

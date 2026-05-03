@@ -251,6 +251,17 @@ async function main() {
       await assertVisible(p, "vm-card-test-new-vm"); // new VM in list
     }, page);
 
+    await runTest("advanced tab exposes auto-start checkbox", async (p) => {
+      await p.locator('[data-testid="btn-new-vm"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="tab-advanced"]').click();
+      await p.waitForTimeout(150);
+      await assertVisible(p, "input-vm-auto-start");
+      // Cancel out of the modal so subsequent tests start clean.
+      await p.keyboard.press("Escape");
+      await p.waitForTimeout(200);
+    }, page);
+
     await page.close();
 
     // ================== VM Detail Tests ==================
@@ -301,6 +312,20 @@ async function main() {
       await p.locator('[data-testid="btn-delete-snap-before-deploy"]').click();
       await p.waitForTimeout(1000);
       await assertNotVisible(p, "snap-before-deploy");
+    }, page);
+
+    await runTest("auto-start summary card and edit toggle", async (p) => {
+      await assertVisible(p, "vm-detail-auto-start");
+      // Open the edit modal and flip the checkbox on.
+      await p.locator('[data-testid="btn-edit-vm"]').click();
+      await p.waitForTimeout(200);
+      await assertVisible(p, "input-edit-auto-start");
+      await p.locator('[data-testid="input-edit-auto-start"]').check();
+      await p.locator('[data-testid="btn-submit-edit"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "input-edit-auto-start");
+      // Summary card should now read "On".
+      await assertText(p, "vm-detail-auto-start", "On");
     }, page);
 
     await runTest("back link returns to VM list", async (p) => {

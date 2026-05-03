@@ -39,6 +39,12 @@ type VMSpec struct {
 	// NatGateway is the gateway for NatStaticIP (e.g. "192.168.100.1").
 	// Only used when NatStaticIP is set.
 	NatGateway string `json:"nat_gateway,omitempty" yaml:"nat_gateway,omitempty"`
+
+	// AutoStart, when true, asks the daemon to start this VM automatically
+	// after vmsmith starts up. The sweep runs once at daemon boot; VMs that
+	// are already running are left untouched. Always serialised so clients
+	// can distinguish "off" from "field absent".
+	AutoStart bool `json:"auto_start" yaml:"auto_start"`
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
@@ -60,6 +66,11 @@ type VMUpdateSpec struct {
 	// NatGateway overrides the gateway when NatStaticIP is also set.
 	// Defaults to the subnet gateway (e.g. 192.168.100.1) when omitted.
 	NatGateway string `json:"nat_gateway,omitempty"`
+
+	// AutoStart toggles whether the daemon will start this VM automatically
+	// at daemon boot. Use a pointer so we can distinguish "not provided"
+	// (no change) from "explicitly false" (turn off).
+	AutoStart *bool `json:"auto_start,omitempty"`
 }
 
 // VM represents a virtual machine and its current state.

@@ -414,10 +414,10 @@ Additional docs routes:
 
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
-POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks; VM names must be unique, 1-64 chars, alphanumeric/hyphen)
+POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks, auto_start; VM names must be unique, 1-64 chars, alphanumeric/hyphen). When `auto_start=true`, the daemon will start this VM automatically at boot via the auto-start sweep.
 GET    /vms/{id}                       Get VM
 POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }`; validates the new name and returns the cloned VM in stopped state)
-PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway — zero/empty ignored; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
+PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway, auto_start — zero/empty ignored; `auto_start` uses a `*bool` so omit it to keep the current value; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 DELETE /vms/{id}                       Delete VM
