@@ -7,6 +7,7 @@ import VMDetail from './pages/VMDetail';
 import ImageList from './pages/ImageList';
 import LogViewer from './pages/LogViewer';
 import Activity from './pages/Activity';
+import Settings from './pages/Settings';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/images" element={<ImageList />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/logs" element={<LogViewer />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>
     </AuthGate>

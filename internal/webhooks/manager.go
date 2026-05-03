@@ -477,4 +477,101 @@ func (w *worker) publishOverflow(evt *types.Event) {
 // Errors returned by validateTarget are surfaced to API callers as 400s.
 var (
 	ErrInvalidWebhook = errors.New("invalid webhook")
+	// ErrWebhookNotFound is returned by TestDeliver when no webhook with the
+	// given ID is registered.  Callers map this to HTTP 404.
+	ErrWebhookNotFound = errors.New("webhook not found")
 )
+
+// TestDeliver synthesises a `system.webhook_test` event and delivers it to
+// the webhook with the given ID exactly once (no retries).  The result
+// records the receiver's HTTP status, the duration, and any error so the UI
+// can surface a quick "test succeeded / failed" answer to the operator.
+//
+// LastDelivery* fields on the persisted webhook are updated to reflect this
+// attempt so the same telemetry the regular delivery path reports is visible
+// after a manual test.  The synthetic event is NOT published to the bus —
+// that would fan it out to every other subscriber too.
+func (m *Manager) TestDeliver(ctx context.Context, webhookID string) (*types.WebhookTestResult, error) {
+	if m.store == nil {
+		return nil, ErrInvalidWebhook
+	}
+	hook, err := m.store.GetWebhook(webhookID)
+	if err != nil || hook == nil {
+		return nil, ErrWebhookNotFound
+	}
+
+	evt := &types.Event{
+		ID:         fmt.Sprintf("wh-test-%d", time.Now().UnixNano()),
+		Type:       "system.webhook_test",
+		Source:     types.EventSourceSystem,
+		Severity:   types.EventSeverityInfo,
+		Message:    "synthetic test event from POST /api/v1/webhooks/{id}/test",
+		Attributes: map[string]string{"webhook_id": webhookID},
+		OccurredAt: time.Now().UTC(),
+	}
+
+	body, err := json.Marshal(evt)
+	if err != nil {
+		return nil, fmt.Errorf("marshal test event: %w", err)
+	}
+
+	result := &types.WebhookTestResult{AttemptedAt: time.Now().UTC(), EventID: evt.ID}
+
+	target, verifiedIPs, err := validateTarget(hook.URL, m.allowedHosts, m.resolveIPs)
+	if err != nil {
+		result.Error = err.Error()
+		m.recordExternalDeliveryResult(hook, result)
+		return result, nil
+	}
+
+	client := m.clientForDelivery(verifiedIPs)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
+	if err != nil {
+		result.Error = err.Error()
+		m.recordExternalDeliveryResult(hook, result)
+		return result, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "vmsmith-webhook/1")
+	req.Header.Set(HeaderSignature, "sha256="+Sign(hook.Secret, body))
+	req.Header.Set(HeaderEventID, evt.ID)
+	req.Header.Set(HeaderEventType, evt.Type)
+	req.Header.Set(HeaderSchemaVersion, strconv.Itoa(types.EventSchemaVersion))
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	result.DurationMs = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Error = err.Error()
+		m.recordExternalDeliveryResult(hook, result)
+		return result, nil
+	}
+	defer resp.Body.Close()
+	result.StatusCode = resp.StatusCode
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Success = true
+	} else {
+		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+	m.recordExternalDeliveryResult(hook, result)
+	return result, nil
+}
+
+// recordExternalDeliveryResult mirrors the bookkeeping done by worker.recordSuccess /
+// recordFailure but is callable from the synchronous test path.  It updates
+// the persisted webhook with the latest delivery telemetry.  Persistence
+// errors are logged but do not affect the API response.
+func (m *Manager) recordExternalDeliveryResult(hook *types.Webhook, result *types.WebhookTestResult) {
+	hook.LastDeliveryAt = result.AttemptedAt
+	if result.Success {
+		hook.LastStatus = result.StatusCode
+		hook.LastError = ""
+	} else {
+		hook.LastStatus = 0
+		hook.LastError = result.Error
+	}
+	if err := m.store.PutWebhook(hook); err != nil {
+		logger.Warn("webhooks", "persist last-delivery state failed (test)",
+			"webhook_id", hook.ID, "error", err.Error())
+	}
+}
