@@ -1358,6 +1358,8 @@ export interface components {
             nat_gateway?: string;
             /** @description When true, the daemon starts this VM automatically at boot. */
             auto_start?: boolean;
+            /** @description When true, the VM is delete-protected. Stop/start/restart still work. */
+            locked?: boolean;
         };
         VMUpdateSpec: {
             cpus?: number;
@@ -1369,6 +1371,8 @@ export interface components {
             nat_gateway?: string;
             /** @description Toggle auto-start at daemon boot. Omit to leave unchanged. */
             auto_start?: boolean | null;
+            /** @description Toggle delete-protection. Omit to leave unchanged. */
+            locked?: boolean | null;
         };
         VM: {
             id: string;

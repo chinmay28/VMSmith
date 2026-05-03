@@ -444,6 +444,76 @@ func TestMockManager_Update_AutoStart(t *testing.T) {
 	}
 }
 
+func TestMockManager_Update_Locked(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "locked-test", Locked: false})
+	if vm.Spec.Locked {
+		t.Fatalf("initial Locked = true, want false")
+	}
+
+	enable := true
+	updated, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{Locked: &enable})
+	if err != nil {
+		t.Fatalf("Update enable Locked: %v", err)
+	}
+	if !updated.Spec.Locked {
+		t.Fatalf("Locked = false after enable, want true")
+	}
+
+	disable := false
+	updated, err = m.Update(ctx, vm.ID, types.VMUpdateSpec{Locked: &disable})
+	if err != nil {
+		t.Fatalf("Update disable Locked: %v", err)
+	}
+	if updated.Spec.Locked {
+		t.Fatalf("Locked = true after disable, want false")
+	}
+
+	// nil pointer means "no change" — leave the flag alone.
+	updated, err = m.Update(ctx, vm.ID, types.VMUpdateSpec{Description: "still off"})
+	if err != nil {
+		t.Fatalf("Update description: %v", err)
+	}
+	if updated.Spec.Locked {
+		t.Fatalf("Locked got flipped on a nil-Locked patch")
+	}
+}
+
+func TestMockManager_Delete_Locked(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "delete-locked", Locked: true})
+
+	err := m.Delete(ctx, vm.ID)
+	if err == nil {
+		t.Fatalf("Delete locked VM succeeded, want vm_locked error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("Delete error type = %T (%v), want *types.APIError", err, err)
+	}
+	if apiErr.Code != "vm_locked" {
+		t.Fatalf("Delete error code = %q, want %q", apiErr.Code, "vm_locked")
+	}
+
+	// Confirm the VM still exists after the rejected delete.
+	if _, err := m.Get(ctx, vm.ID); err != nil {
+		t.Fatalf("VM gone after rejected delete: %v", err)
+	}
+
+	// Unlock and delete should now succeed.
+	unlock := false
+	if _, err := m.Update(ctx, vm.ID, types.VMUpdateSpec{Locked: &unlock}); err != nil {
+		t.Fatalf("Update unlock: %v", err)
+	}
+	if err := m.Delete(ctx, vm.ID); err != nil {
+		t.Fatalf("Delete after unlock: %v", err)
+	}
+}
+
 func TestMockManager_SeedVM(t *testing.T) {
 	m := NewMockManager()
 

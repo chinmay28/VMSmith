@@ -1010,6 +1010,9 @@ components:
         auto_start:
           type: boolean
           description: When true, the daemon starts this VM automatically at boot.
+        locked:
+          type: boolean
+          description: When true, the VM is delete-protected. Stop/start/restart still work.
     VMUpdateSpec:
       type: object
       properties:
@@ -1032,6 +1035,10 @@ components:
         auto_start:
           type: boolean
           description: Toggle auto-start at daemon boot. Omit to leave unchanged.
+          nullable: true
+        locked:
+          type: boolean
+          description: Toggle delete-protection. Omit to leave unchanged.
           nullable: true
     VM:
       type: object
