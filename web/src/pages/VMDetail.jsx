@@ -509,12 +509,17 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
   return (
     <div className="divide-y divide-steel-800/40">
       {snapList.map(snap => (
-        <div key={snap.name} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors" data-testid={`snap-${snap.name}`}>
-          <div className="flex items-center gap-2">
-            <Clock size={12} className="text-steel-600" />
-            <span className="font-mono text-sm text-steel-200">{snap.name}</span>
+        <div key={snap.name} className="flex items-start justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors gap-3" data-testid={`snap-${snap.name}`}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Clock size={12} className="text-steel-600 flex-shrink-0" />
+              <span className="font-mono text-sm text-steel-200 truncate">{snap.name}</span>
+            </div>
+            {snap.description ? (
+              <p className="text-xs text-steel-500 mt-1 ml-5 line-clamp-2" data-testid={`snap-desc-${snap.name}`}>{snap.description}</p>
+            ) : null}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button
               className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
               onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
@@ -568,13 +573,15 @@ function PortList({ vmId, portList, refreshPorts }) {
 // --- Create Snapshot Modal ---
 function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
   const [name, setName] = useState('');
-  const createMut = useMutation((n) => snapshots.create(vmId, n));
+  const [description, setDescription] = useState('');
+  const createMut = useMutation((args) => snapshots.create(vmId, args.name, args.description));
 
   const handleSubmit = async () => {
-    await createMut.execute(name);
+    await createMut.execute({ name, description: description.trim() });
     onCreated();
     onClose();
     setName('');
+    setDescription('');
   };
 
   return (
@@ -583,6 +590,18 @@ function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
         <div>
           <label className="label">Snapshot Name</label>
           <input className="input" placeholder="before-update" value={name} onChange={e => setName(e.target.value)} autoFocus data-testid="input-snap-name" />
+        </div>
+        <div>
+          <label className="label">Description <span className="text-steel-500 font-normal">(optional)</span></label>
+          <textarea
+            className="input"
+            rows={2}
+            maxLength={1024}
+            placeholder="Why this snapshot? e.g. before applying May patch"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="input-snap-description"
+          />
         </div>
         {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
         <div className="flex justify-end gap-2">

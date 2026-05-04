@@ -8,7 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
+
+// snapshotDescriptionMaxLen mirrors the API-side cap on description length so
+// the in-process CLI path rejects oversized values before reaching the manager.
+const snapshotDescriptionMaxLen = 1024
 
 var snapshotCmd = &cobra.Command{
 	Use:     "snapshot",
@@ -23,6 +28,10 @@ var snapCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
 		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+		if len(description) > snapshotDescriptionMaxLen {
+			return fmt.Errorf("description must be at most %d characters", snapshotDescriptionMaxLen)
+		}
 		logger.Info("cli", "snapshot create", "vm_id", vmID, "name", name)
 
 		mgr, cleanup, err := newVMManager()
@@ -32,13 +41,16 @@ var snapCreateCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		snap, err := mgr.CreateSnapshot(context.Background(), vmID, name)
+		snap, err := mgr.CreateSnapshot(context.Background(), vmID, types.SnapshotSpec{Name: name, Description: description})
 		if err != nil {
 			logger.Error("cli", "snapshot create failed", "vm_id", vmID, "name", name, "error", err.Error())
 			return err
 		}
 		logger.Info("cli", "snapshot created", "vm_id", vmID, "snap_name", snap.Name)
 		fmt.Printf("Snapshot created: %s\n", snap.Name)
+		if snap.Description != "" {
+			fmt.Printf("Description: %s\n", snap.Description)
+		}
 		return nil
 	},
 }
@@ -93,9 +105,13 @@ var snapListCmd = &cobra.Command{
 		logger.Info("cli", "snapshot list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(snaps)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tCREATED")
+		fmt.Fprintln(w, "NAME\tCREATED\tDESCRIPTION")
 		for _, s := range snaps {
-			fmt.Fprintf(w, "%s\t%s\n", s.Name, s.CreatedAt.Format("2006-01-02 15:04:05"))
+			created := ""
+			if !s.CreatedAt.IsZero() {
+				created = s.CreatedAt.Format("2006-01-02 15:04:05")
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, created, s.Description)
 		}
 		w.Flush()
 		return nil
@@ -131,6 +147,7 @@ var snapDeleteCmd = &cobra.Command{
 func init() {
 	snapCreateCmd.Flags().String("name", "", "snapshot name (required)")
 	snapCreateCmd.MarkFlagRequired("name")
+	snapCreateCmd.Flags().String("description", "", "free-text description for the snapshot (optional, max 1024 chars)")
 
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")

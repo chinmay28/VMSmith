@@ -288,6 +288,7 @@ async function main() {
 
     await runTest("shows existing snapshots", async (p) => {
       await assertVisible(p, "snap-before-deploy");
+      await assertText(p, "snap-desc-before-deploy", "checkpoint before May deploy");
     }, page);
 
     await runTest("stop running VM", async (p) => {
@@ -311,6 +312,17 @@ async function main() {
       await p.locator('[data-testid="btn-submit-snapshot"]').click();
       await p.waitForTimeout(1000);
       await assertVisible(p, "snap-test-snap");
+    }, page);
+
+    await runTest("create snapshot with description", async (p) => {
+      await p.locator('[data-testid="btn-new-snapshot"]').click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="input-snap-name"]').fill("noted-snap");
+      await p.locator('[data-testid="input-snap-description"]').fill("captured before risky upgrade");
+      await p.locator('[data-testid="btn-submit-snapshot"]').click();
+      await p.waitForTimeout(1000);
+      await assertVisible(p, "snap-noted-snap");
+      await assertText(p, "snap-desc-noted-snap", "captured before risky upgrade");
     }, page);
 
     await runTest("delete snapshot", async (p) => {

@@ -423,8 +423,8 @@ POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
-GET    /vms/{id}/snapshots             List snapshots
-POST   /vms/{id}/snapshots             Create snapshot
+GET    /vms/{id}/snapshots             List snapshots (each entry carries `name`, optional `description`, and a libvirt-parsed `created_at`)
+POST   /vms/{id}/snapshots             Create snapshot (body: `{ "name": "...", "description": "..." }` — description optional, ≤1024 chars; persisted via libvirt's `<description>` element so it round-trips through `dumpxml`)
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
 GET    /images                         List images (`?page=<n>&per_page=<n>`; `?tag=<tag>` filters case-insensitively; returns `X-Total-Count`); CLI also supports local `--limit` / `--offset` and `--tag` filters on `vmsmith image list`

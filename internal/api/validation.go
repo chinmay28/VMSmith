@@ -12,6 +12,11 @@ import (
 
 var vmNameRe = validatepkg.VMNameRe
 
+// maxDescriptionLength bounds free-text description fields (VM, image, snapshot)
+// at the API boundary so a misbehaving client cannot push arbitrarily large blobs
+// into bbolt records.
+const maxDescriptionLength = 1024
+
 func validateVMSpec(spec types.VMSpec) error {
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
@@ -108,9 +113,12 @@ func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
 	return types.ValidatePortForward(hostPort, guestPort, proto)
 }
 
-func validateCreateSnapshotRequest(name string) error {
+func validateCreateSnapshotRequest(name, description string) error {
 	if strings.TrimSpace(name) == "" {
 		return types.NewAPIError("invalid_name", "snapshot name is required")
+	}
+	if len(description) > maxDescriptionLength {
+		return types.NewAPIError("invalid_description", fmt.Sprintf("description must be at most %d characters", maxDescriptionLength))
 	}
 	return nil
 }

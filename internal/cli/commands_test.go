@@ -860,8 +860,8 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	defer cleanup()
 
 	mock.SeedVM(&types.VM{ID: "vm-2", Name: "snappy"})
-	mock.CreateSnapshot(nil, "vm-2", "snap-a")
-	mock.CreateSnapshot(nil, "vm-2", "snap-b")
+	mock.CreateSnapshot(nil, "vm-2", types.SnapshotSpec{Name: "snap-a", Description: "before upgrade"})
+	mock.CreateSnapshot(nil, "vm-2", types.SnapshotSpec{Name: "snap-b"})
 
 	out, err := runCLI("snapshot", "list", "vm-2")
 	if err != nil {
@@ -874,7 +874,7 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"NAME", "CREATED"}
+	wantHeaders := []string{"NAME", "CREATED", "DESCRIPTION"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
@@ -885,13 +885,49 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	if got := rows[2][0]; got != "snap-b" {
 		t.Fatalf("second snapshot name = %q, want snap-b", got)
 	}
+	if got := rows[1][2]; got != "before" && got != "before upgrade" {
+		// tableRows splits on whitespace, so a multi-word description may
+		// land split across columns in rows[1]. Tolerate either form.
+		t.Fatalf("first snapshot description column = %q, want 'before' (multi-word descriptions get split by tableRows)", got)
+	}
 	for i, row := range rows[1:] {
-		if len(row) != 2 {
-			t.Fatalf("snapshot row %d = %v, want 2 columns", i+1, row)
-		}
 		if _, err := time.Parse("2006-01-02 15:04:05", row[1]); err != nil {
 			t.Fatalf("snapshot row %d created timestamp = %q: %v", i+1, row[1], err)
 		}
+	}
+}
+
+func TestCLI_SnapshotCreate_DescriptionFlag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-d", Name: "noted"})
+
+	if _, err := runCLI("snapshot", "create", "vm-d", "--name", "first", "--description", "before patch"); err != nil {
+		t.Fatalf("snapshot create: %v", err)
+	}
+
+	snaps, err := mock.ListSnapshots(nil, "vm-d")
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(snaps))
+	}
+	if snaps[0].Description != "before patch" {
+		t.Fatalf("description = %q, want 'before patch'", snaps[0].Description)
+	}
+}
+
+func TestCLI_SnapshotCreate_DescriptionTooLong(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-d2", Name: "noted2"})
+
+	long := strings.Repeat("x", 1025)
+	if _, err := runCLI("snapshot", "create", "vm-d2", "--name", "snap", "--description", long); err == nil {
+		t.Fatal("expected error for description over 1024 chars")
 	}
 }
 
@@ -900,7 +936,7 @@ func TestCLI_SnapshotRestore(t *testing.T) {
 	defer cleanup()
 
 	mock.SeedVM(&types.VM{ID: "vm-r", Name: "restorable"})
-	mock.CreateSnapshot(nil, "vm-r", "good-state")
+	mock.CreateSnapshot(nil, "vm-r", types.SnapshotSpec{Name: "good-state"})
 
 	out, err := runCLI("snapshot", "restore", "vm-r", "--name", "good-state")
 	if err != nil {
@@ -928,7 +964,7 @@ func TestCLI_SnapshotDelete(t *testing.T) {
 	defer cleanup()
 
 	mock.SeedVM(&types.VM{ID: "vm-del", Name: "snapper"})
-	mock.CreateSnapshot(nil, "vm-del", "temp-snap")
+	mock.CreateSnapshot(nil, "vm-del", types.SnapshotSpec{Name: "temp-snap"})
 
 	out, err := runCLI("snapshot", "delete", "vm-del", "--name", "temp-snap")
 	if err != nil {

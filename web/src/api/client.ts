@@ -86,8 +86,13 @@ export const vms = {
 // --- Snapshots ---
 export const snapshots = {
   list: (vmId: string) => unwrap(apiClient.GET('/vms/{vmID}/snapshots', { params: { path: { vmID: vmId } } })),
-  create: (vmId: string, name: string) =>
-    unwrap(apiClient.POST('/vms/{vmID}/snapshots', { params: { path: { vmID: vmId } }, body: { name } })),
+  create: (vmId: string, name: string, description?: string) =>
+    unwrap(
+      apiClient.POST('/vms/{vmID}/snapshots', {
+        params: { path: { vmID: vmId } },
+        body: description ? { name, description } : { name },
+      }),
+    ),
   restore: (vmId: string, snapName: string) =>
     unwrap(apiClient.POST('/vms/{vmID}/snapshots/{snapName}/restore', { params: { path: { vmID: vmId, snapName } } })),
   delete: (vmId: string, snapName: string) =>

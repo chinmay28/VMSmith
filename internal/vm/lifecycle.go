@@ -793,7 +793,7 @@ func (m *LibvirtManager) List(ctx context.Context) ([]*types.VM, error) {
 // --- Snapshot operations ---
 
 // CreateSnapshot takes a snapshot of a VM.
-func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error) {
+func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, spec types.SnapshotSpec) (*types.Snapshot, error) {
 	vm, err := m.store.GetVM(vmID)
 	if err != nil {
 		return nil, err
@@ -805,20 +805,34 @@ func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, name s
 	}
 	defer dom.Free()
 
-	snapXML := fmt.Sprintf(`<domainsnapshot><name>%s</name></domainsnapshot>`, name)
-	_, err = dom.CreateSnapshotXML(snapXML, 0)
+	doc := snapshotXMLDoc{Name: spec.Name, Description: spec.Description}
+	snapXML, err := xml.Marshal(doc)
 	if err != nil {
+		return nil, fmt.Errorf("encoding snapshot xml: %w", err)
+	}
+	if _, err := dom.CreateSnapshotXML(string(snapXML), 0); err != nil {
 		return nil, fmt.Errorf("creating snapshot: %w", err)
 	}
 
 	snap := &types.Snapshot{
-		ID:        fmt.Sprintf("%s/%s", vmID, name),
-		VMID:      vmID,
-		Name:      name,
-		CreatedAt: time.Now(),
+		ID:          fmt.Sprintf("%s/%s", vmID, spec.Name),
+		VMID:        vmID,
+		Name:        spec.Name,
+		Description: spec.Description,
+		CreatedAt:   time.Now(),
 	}
 
 	return snap, nil
+}
+
+// snapshotXMLDoc is the libvirt domainsnapshot XML projection used when creating
+// or parsing snapshot definitions.  Description and CreationTime are optional in
+// libvirt's schema, so we only include populated fields on encode.
+type snapshotXMLDoc struct {
+	XMLName      xml.Name `xml:"domainsnapshot"`
+	Name         string   `xml:"name"`
+	Description  string   `xml:"description,omitempty"`
+	CreationTime string   `xml:"creationTime,omitempty"`
 }
 
 // RestoreSnapshot reverts a VM to a previous snapshot.
@@ -864,15 +878,52 @@ func (m *LibvirtManager) ListSnapshots(ctx context.Context, vmID string) ([]*typ
 	var result []*types.Snapshot
 	for _, s := range snaps {
 		name, _ := s.GetName()
-		result = append(result, &types.Snapshot{
+		entry := &types.Snapshot{
 			ID:   fmt.Sprintf("%s/%s", vmID, name),
 			VMID: vmID,
 			Name: name,
-		})
+		}
+		if rawXML, xmlErr := s.GetXMLDesc(0); xmlErr == nil {
+			if desc, created, parseErr := parseSnapshotXML(rawXML); parseErr == nil {
+				entry.Description = desc
+				if !created.IsZero() {
+					entry.CreatedAt = created
+				}
+			}
+		}
+		result = append(result, entry)
 		s.Free()
 	}
 
 	return result, nil
+}
+
+// parseSnapshotXML extracts the operator-supplied description and the libvirt
+// creation timestamp from a domainsnapshot XML document.  Either field may be
+// absent — callers should treat zero values as "not present".
+func parseSnapshotXML(raw string) (string, time.Time, error) {
+	var doc snapshotXMLDoc
+	if err := xml.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", time.Time{}, err
+	}
+	var created time.Time
+	if doc.CreationTime != "" {
+		if secs, err := parseUnixSeconds(doc.CreationTime); err == nil {
+			created = time.Unix(secs, 0).UTC()
+		}
+	}
+	return strings.TrimSpace(doc.Description), created, nil
+}
+
+func parseUnixSeconds(s string) (int64, error) {
+	var n int64
+	for _, ch := range strings.TrimSpace(s) {
+		if ch < '0' || ch > '9' {
+			return 0, fmt.Errorf("non-numeric creationTime: %q", s)
+		}
+		n = n*10 + int64(ch-'0')
+	}
+	return n, nil
 }
 
 // DeleteSnapshot removes a snapshot.

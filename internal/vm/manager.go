@@ -22,7 +22,7 @@ type Manager interface {
 	List(ctx context.Context) ([]*types.VM, error)
 
 	// Snapshots
-	CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error)
+	CreateSnapshot(ctx context.Context, vmID string, spec types.SnapshotSpec) (*types.Snapshot, error)
 	RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error
 	ListSnapshots(ctx context.Context, vmID string) ([]*types.Snapshot, error)
 	DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error
