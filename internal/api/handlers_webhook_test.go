@@ -2,18 +2,21 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
+	"github.com/vmsmith/vmsmith/internal/webhooks"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -282,4 +285,97 @@ func readAllBody(r *http.Response) ([]byte, error) {
 	var buf bytes.Buffer
 	_, err := buf.ReadFrom(r.Body)
 	return buf.Bytes(), err
+}
+
+// fakeWebhookTester captures the most recent TestDeliver call and returns the
+// pre-configured result.  When err != nil it is returned instead of the
+// result, simulating ErrWebhookNotFound or transport failures.
+type fakeWebhookTester struct {
+	mu      sync.Mutex
+	called  []string
+	result  *types.WebhookTestResult
+	err     error
+}
+
+func (f *fakeWebhookTester) TestDeliver(_ context.Context, id string) (*types.WebhookTestResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.called = append(f.called, id)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
+}
+
+// fakeWebhookFull combines store, registrar and tester so SetWebhookSubsystem
+// installs all three on a single value (mirroring the real Manager wiring).
+type fakeWebhookFull struct {
+	*fakeWebhookStore
+	*fakeWebhookTester
+}
+
+func TestTestWebhook_Success(t *testing.T) {
+	ts, apiServer, store, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	store.PutWebhook(&types.Webhook{ID: "wh-ok", URL: "https://example.com/x", Secret: "k", Active: true})
+	tester := &fakeWebhookTester{
+		result: &types.WebhookTestResult{
+			Success:     true,
+			StatusCode:  204,
+			DurationMs:  42,
+			AttemptedAt: time.Now().UTC(),
+			EventID:     "wh-test-1",
+		},
+	}
+	apiServer.SetWebhookSubsystem(&fakeWebhookFull{store, tester}, &fakeWebhookFull{store, tester})
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks/wh-ok/test", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got types.WebhookTestResult
+	decodeJSON(t, resp, &got)
+	if !got.Success || got.StatusCode != 204 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	tester.mu.Lock()
+	defer tester.mu.Unlock()
+	if len(tester.called) != 1 || tester.called[0] != "wh-ok" {
+		t.Fatalf("TestDeliver called with %v, want [wh-ok]", tester.called)
+	}
+}
+
+func TestTestWebhook_NotFound(t *testing.T) {
+	ts, apiServer, store, cleanup := webhookTestServer(t)
+	defer cleanup()
+	tester := &fakeWebhookTester{err: webhooks.ErrWebhookNotFound}
+	apiServer.SetWebhookSubsystem(&fakeWebhookFull{store, tester}, &fakeWebhookFull{store, tester})
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks/wh-missing/test", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTestWebhook_NoTesterReturns503(t *testing.T) {
+	ts, apiServer, store, cleanup := webhookTestServer(t)
+	defer cleanup()
+	// Re-wire so the registrar has no TestDeliver method.
+	apiServer.SetWebhookSubsystem(store, store)
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks/whatever/test", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
 }

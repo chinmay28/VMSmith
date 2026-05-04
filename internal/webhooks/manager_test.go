@@ -350,3 +350,158 @@ func TestManager_UnregisterStopsWorker(t *testing.T) {
 		t.Fatalf("expected zero deliveries after unregister, got %d", got)
 	}
 }
+
+func TestManager_TestDeliver_Success(t *testing.T) {
+	store := newMemStore()
+
+	type capture struct {
+		body  []byte
+		hdr   http.Header
+		count int32
+	}
+	cap := &capture{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		cap.body = body
+		cap.hdr = r.Header.Clone()
+		atomic.AddInt32(&cap.count, 1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	mgr := newTestManager(t, store, nil, []string{host, "127.0.0.1"})
+
+	wh := &types.Webhook{
+		ID:        "wh-test-success",
+		URL:       srv.URL,
+		Secret:    "shh",
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	if err := store.PutWebhook(wh); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.TestDeliver(context.Background(), wh.ID)
+	if err != nil {
+		t.Fatalf("TestDeliver: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", res.StatusCode)
+	}
+	if res.EventID == "" {
+		t.Fatalf("expected synthetic event id; got %+v", res)
+	}
+	if got := atomic.LoadInt32(&cap.count); got != 1 {
+		t.Fatalf("receiver hit %d times, want 1", got)
+	}
+	if cap.hdr.Get(HeaderEventType) != "system.webhook_test" {
+		t.Fatalf("event type header = %q, want system.webhook_test", cap.hdr.Get(HeaderEventType))
+	}
+	sig := cap.hdr.Get(HeaderSignature)
+	if !strings.HasPrefix(sig, "sha256=") {
+		t.Fatalf("missing signature header: %q", sig)
+	}
+	if want := signWith("shh", cap.body); strings.TrimPrefix(sig, "sha256=") != want {
+		t.Fatalf("signature mismatch")
+	}
+
+	persisted, err := store.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != http.StatusNoContent {
+		t.Fatalf("LastStatus = %d, want 204", persisted.LastStatus)
+	}
+	if persisted.LastError != "" {
+		t.Fatalf("LastError = %q, want empty after success", persisted.LastError)
+	}
+	if persisted.LastDeliveryAt.IsZero() {
+		t.Fatalf("LastDeliveryAt was not updated")
+	}
+}
+
+func TestManager_TestDeliver_Failure(t *testing.T) {
+	store := newMemStore()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	mgr := newTestManager(t, store, nil, []string{host, "127.0.0.1"})
+
+	wh := &types.Webhook{
+		ID:        "wh-test-fail",
+		URL:       srv.URL,
+		Secret:    "shh",
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	if err := store.PutWebhook(wh); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := mgr.TestDeliver(context.Background(), wh.ID)
+	if err != nil {
+		t.Fatalf("TestDeliver returned error: %v", err)
+	}
+	if res.Success {
+		t.Fatalf("expected failure, got success: %+v", res)
+	}
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", res.StatusCode)
+	}
+	if res.Error == "" {
+		t.Fatalf("expected error message on failure")
+	}
+
+	persisted, _ := store.GetWebhook(wh.ID)
+	if persisted.LastStatus != 0 {
+		t.Fatalf("LastStatus = %d, want 0 after failure", persisted.LastStatus)
+	}
+	if persisted.LastError == "" {
+		t.Fatalf("LastError was not recorded")
+	}
+}
+
+func TestManager_TestDeliver_NotFound(t *testing.T) {
+	store := newMemStore()
+	mgr := newTestManager(t, store, nil, nil)
+	_, err := mgr.TestDeliver(context.Background(), "wh-missing")
+	if !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("err = %v, want ErrWebhookNotFound", err)
+	}
+}
+
+func TestManager_TestDeliver_SSRFBlocked(t *testing.T) {
+	store := newMemStore()
+	// Empty allow-list and no resolver override -> validateTarget rejects loopback URLs.
+	mgr := NewManager(store, nil, Config{HTTPTimeout: time.Second})
+	mgr.disableJitter = true
+
+	wh := &types.Webhook{
+		ID:        "wh-ssrf",
+		URL:       "http://127.0.0.1:1/blocked",
+		Secret:    "k",
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	_ = store.PutWebhook(wh)
+
+	res, err := mgr.TestDeliver(context.Background(), wh.ID)
+	if err != nil {
+		t.Fatalf("TestDeliver: %v", err)
+	}
+	if res.Success {
+		t.Fatalf("expected SSRF block to fail, got success")
+	}
+	if res.Error == "" {
+		t.Fatalf("expected error to describe SSRF block")
+	}
+}

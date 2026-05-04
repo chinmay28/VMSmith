@@ -50,6 +50,7 @@ type Server struct {
 	eventStreamConns     atomic.Int64
 	webhookStore         WebhookStore
 	webhookManager       WebhookRegistrar
+	webhookTester        WebhookTester
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -244,6 +245,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Post("/", s.withRequestBodyLimit(s.CreateWebhook))
 			r.Get("/{webhookID}", s.GetWebhook)
 			r.Delete("/{webhookID}", s.DeleteWebhook)
+			r.Post("/{webhookID}/test", s.TestWebhook)
 		})
 	})
 

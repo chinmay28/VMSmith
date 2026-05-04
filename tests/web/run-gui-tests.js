@@ -470,6 +470,52 @@ async function main() {
 
     await page.close();
 
+    // ================== Settings: Webhooks (4.2.16) ==================
+    console.log("\nSettings - Webhooks:");
+
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(500);
+
+    await runTest("settings page lists, creates, tests, and deletes webhooks", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "settings-page");
+
+      // No webhooks initially → empty state.
+      const list = p.locator('[data-testid="webhook-list"]');
+      await assert(!(await list.isVisible()), "webhook-list should be hidden when empty");
+
+      // Create a webhook.
+      await p.locator('[data-testid="add-webhook-btn"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="webhook-url-input"]').fill("https://example.com/hook");
+      await p.locator('[data-testid="webhook-secret-input"]').fill("topsecret");
+      await p.locator('[data-testid="webhook-event-types-input"]').fill("vm.started, system.*");
+      await p.locator('[data-testid="webhook-create-submit"]').click();
+      await p.waitForTimeout(600);
+
+      const row = p.locator('[data-testid^="webhook-row-"]').first();
+      await row.waitFor({ state: "visible", timeout: 5000 });
+      const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+      // "Send test event" surfaces an inline success indicator.
+      await p.locator(`[data-testid="webhook-test-${rowID}"]`).click();
+      await p.waitForTimeout(700);
+      await assertVisible(p, "webhook-status");
+      const statusText = (await p.locator('[data-testid="webhook-status"]').first().textContent()) || "";
+      await assert(/204|test ok/i.test(statusText), `expected success status, got "${statusText.trim()}"`);
+
+      // Delete (accept confirm dialog).
+      p.on("dialog", (d) => d.accept());
+      await p.locator(`[data-testid="webhook-delete-${rowID}"]`).click();
+      await p.waitForTimeout(600);
+      const deletedRow = p.locator(`[data-testid="webhook-row-${rowID}"]`);
+      await assert(!(await deletedRow.isVisible()), "deleted webhook row should disappear");
+    }, page);
+
+    await page.close();
+
     // ================== Full Lifecycle E2E ==================
     console.log("\nFull Lifecycle E2E:");
 

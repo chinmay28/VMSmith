@@ -186,6 +186,17 @@ export const logs = {
     }), { withMeta: true }),
 };
 
+// --- Webhooks ---
+export const webhooks = {
+  list: () => unwrap(apiClient.GET('/webhooks', {})),
+  create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
+    unwrap(apiClient.POST('/webhooks', { body: spec })),
+  delete: (id: string) =>
+    unwrap(apiClient.DELETE('/webhooks/{webhookID}', { params: { path: { webhookID: id } } })),
+  test: (id: string) =>
+    unwrap(apiClient.POST('/webhooks/{webhookID}/test', { params: { path: { webhookID: id } } })),
+};
+
 // --- Events ---
 // Filter params line up 1:1 with GET /api/v1/events query params.
 export const events = {
@@ -204,4 +215,4 @@ export const events = {
     }), { withMeta: true }),
 };
 
-export default { vms, snapshots, images, templates, ports, host, quotas, logs, events };
+export default { vms, snapshots, images, templates, ports, host, quotas, logs, events, webhooks };

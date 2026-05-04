@@ -436,6 +436,10 @@ POST   /vms/{id}/ports                 Add port forward
 DELETE /vms/{id}/ports/{portId}        Remove port forward
 GET    /host/interfaces                List host network interfaces
 GET    /logs                           Query log entries (level, limit, since, source)
+GET    /webhooks                       List registered webhooks (secrets redacted)
+POST   /webhooks                       Register webhook (URL + HMAC secret + optional event_types filters)
+DELETE /webhooks/{id}                  Unregister webhook
+POST   /webhooks/{id}/test             Synthesise a `system.webhook_test` event and deliver it once; returns `WebhookTestResult` with success / status_code / duration / error and updates `last_delivery_at` / `last_status` / `last_error`. Used by the Settings page "Test" button.
 ```
 
 ---

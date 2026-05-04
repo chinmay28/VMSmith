@@ -1208,6 +1208,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List registered webhooks (secrets redacted) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Webhook list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"][];
+                    };
+                };
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        /** Register a new webhook */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["WebhookCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Webhook created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{webhookID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhookID: string;
+            };
+            cookie?: never;
+        };
+        /** Get a single webhook (secret redacted) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Webhook */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a webhook */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{webhookID}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhookID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a synthetic test event to a webhook
+         * @description Synthesises a `system.webhook_test` event and delivers it once (no retries) to the registered webhook so operators can verify connectivity, signing, and receiver health.  Updates the persisted webhook's `last_status` / `last_error` / `last_delivery_at` fields.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Delivery attempted (success or failure both return 200; inspect the body) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebhookTestResult"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/logs": {
         parameters: {
             query?: never;
@@ -1525,6 +1699,49 @@ export interface components {
             cpus: components["schemas"]["QuotaUsageSummary"];
             ram_mb: components["schemas"]["QuotaUsageSummary"];
             disk_gb: components["schemas"]["QuotaUsageSummary"];
+        };
+        Webhook: {
+            /** @example wh-1741234567890123 */
+            id: string;
+            /**
+             * Format: uri
+             * @example https://example.com/hook
+             */
+            url: string;
+            /** @description Optional event-type filter list (exact match or "prefix.*" glob). Empty = all events. */
+            event_types?: string[];
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_delivery_at?: string;
+            /** @description HTTP status of the most recent successful delivery; 0 if last attempt failed. */
+            last_status?: number;
+            last_error?: string;
+        };
+        WebhookCreateRequest: {
+            /** Format: uri */
+            url: string;
+            /** @description HMAC-SHA256 signing secret. Never returned in responses. */
+            secret: string;
+            event_types?: string[];
+        };
+        WebhookTestResult: {
+            /** @description True iff the receiver returned a 2xx HTTP status. */
+            success: boolean;
+            /** @description HTTP status code returned by the receiver, if any. */
+            status_code?: number;
+            /** @description Error message when delivery failed. */
+            error?: string;
+            /**
+             * Format: int64
+             * @description Round-trip time of the single delivery attempt.
+             */
+            duration_ms: number;
+            /** Format: date-time */
+            attempted_at: string;
+            /** @description ID of the synthetic system.webhook_test event used for the probe. */
+            event_id?: string;
         };
         LogField: {
             [key: string]: string;

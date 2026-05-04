@@ -750,6 +750,34 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /webhooks/{webhookID}/test:
+    parameters:
+      - name: webhookID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Webhooks]
+      summary: Send a synthetic test event to a webhook
+      description: >
+        Synthesises a `system.webhook_test` event and delivers it once
+        (no retries) to the registered webhook so operators can verify
+        connectivity, signing, and receiver health.  Updates the persisted
+        webhook's `last_status` / `last_error` / `last_delivery_at` fields.
+      responses:
+        '200':
+          description: Delivery attempted (success or failure both return 200; inspect the body)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookTestResult'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /logs:
     get:
       tags: [Logs]
@@ -1386,6 +1414,29 @@ components:
           type: array
           items:
             type: string
+    WebhookTestResult:
+      type: object
+      required: [success, duration_ms, attempted_at]
+      properties:
+        success:
+          type: boolean
+          description: True iff the receiver returned a 2xx HTTP status.
+        status_code:
+          type: integer
+          description: HTTP status code returned by the receiver, if any.
+        error:
+          type: string
+          description: Error message when delivery failed.
+        duration_ms:
+          type: integer
+          format: int64
+          description: Round-trip time of the single delivery attempt.
+        attempted_at:
+          type: string
+          format: date-time
+        event_id:
+          type: string
+          description: ID of the synthetic system.webhook_test event used for the probe.
     LogField:
       type: object
       additionalProperties:

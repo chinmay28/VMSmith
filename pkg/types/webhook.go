@@ -34,3 +34,17 @@ type WebhookCreateRequest struct {
 	Secret     string   `json:"secret"`
 	EventTypes []string `json:"event_types,omitempty"`
 }
+
+// WebhookTestResult is the response from POST /api/v1/webhooks/{id}/test.
+// The endpoint synthesises a `system.webhook_test` event, delivers it once
+// (no retries — the UI wants a quick answer), and reports the outcome so the
+// operator can see whether the receiver is reachable, signature-validating,
+// and returning a 2xx.
+type WebhookTestResult struct {
+	Success     bool      `json:"success"`
+	StatusCode  int       `json:"status_code,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	DurationMs  int64     `json:"duration_ms"`
+	AttemptedAt time.Time `json:"attempted_at"`
+	EventID     string    `json:"event_id,omitempty"`
+}
