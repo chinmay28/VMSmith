@@ -450,6 +450,30 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
   });
 
+  test("clone VM shows API validation errors and stays on source VM", async ({ page }) => {
+    await page.route("**/api/v1/vms/vm-1/clone", async (route) => {
+      await route.fulfill({
+        status: 400,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: "invalid_name",
+          message: 'vm with name "db-server" already exists',
+        }),
+      });
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-clone-vm").click();
+    await page.getByTestId("input-clone-name").fill("db-server");
+    await page.getByTestId("btn-submit-clone").click();
+
+    await expect(page).toHaveURL(/\/vms\/vm-1$/);
+    await expect(page.getByTestId("input-clone-name")).toHaveValue("db-server");
+    await expect(page.getByText('vm with name "db-server" already exists')).toBeVisible();
+  });
+
   test("back link returns to VM list", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
