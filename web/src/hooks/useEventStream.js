@@ -12,6 +12,7 @@ export const STATE_CLOSED = 'closed';
 const FALLBACK_AFTER_FAILURES = 3;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
+const FALLBACK_WINDOW_MS = 30_000;
 const FALLBACK_POLL_INTERVAL_MS = 10_000;
 
 function buildStreamUrl({ since, apiKey }) {
@@ -31,8 +32,8 @@ function buildStreamUrl({ since, apiKey }) {
  * `onEvent` callback for side effects (e.g. invalidating polling caches).
  *
  * The hook handles automatic reconnect with `Last-Event-ID` (passed via the
- * `since` query param) and falls back to short-poll mode after repeated
- * failures so consumers always see a working state in degraded environments.
+ * `since` query param) and falls back to short-poll mode for 30 seconds after
+ * repeated failures so consumers keep updating while SSE recovers.
  *
  * @param {object} options
  * @param {(event: object) => void} [options.onEvent] Called for each parsed event.
@@ -55,6 +56,25 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
   const sourceRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const fallbackTimerRef = useRef(null);
+  const fallbackExitTimerRef = useRef(null);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const clearFallbackTimers = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      clearInterval(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    if (fallbackExitTimerRef.current) {
+      clearTimeout(fallbackExitTimerRef.current);
+      fallbackExitTimerRef.current = null;
+    }
+  }, []);
 
   const dispatchEvent = useCallback((evt) => {
     if (!evt) return;
@@ -74,56 +94,14 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
     }
   }, []);
 
-  const startFallback = useCallback(() => {
-    if (closedRef.current) return;
-    setStatus(STATE_FALLBACK);
-
-    const poll = async () => {
-      if (closedRef.current) return;
-      try {
-        const params = new URLSearchParams();
-        const after = lastIdRef.current;
-        if (after) params.set('until', String(parseInt(after, 10) + 1));
-        params.set('per_page', '50');
-
-        const headers = {};
-        const apiKey = getAuthToken();
-        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-
-        const resp = await fetch(`${API_BASE}/events?${params.toString()}`, { headers });
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-        const events = await resp.json();
-        // /events returns newest-first; replay oldest-first so listeners get
-        // chronological order and lastEventId advances monotonically.
-        if (Array.isArray(events)) {
-          for (let i = events.length - 1; i >= 0; i -= 1) {
-            const e = events[i];
-            const seq = parseInt(e?.id ?? '0', 10);
-            const cursor = parseInt(after ?? '0', 10);
-            if (Number.isFinite(seq) && seq > cursor) {
-              dispatchEvent(e);
-            }
-          }
-        }
-      } catch {
-        // Swallow — fallback mode keeps polling regardless.
-      }
-    };
-
-    poll();
-    fallbackTimerRef.current = setInterval(poll, FALLBACK_POLL_INTERVAL_MS);
-  }, [dispatchEvent]);
-
   const connect = useCallback(() => {
     if (closedRef.current) return;
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-      // No SSE support — fall back immediately.
-      startFallback();
       return;
     }
 
+    clearReconnectTimer();
+    clearFallbackTimers();
     setStatus(failureCountRef.current === 0 ? STATE_CONNECTING : STATE_RECONNECTING);
 
     const url = buildStreamUrl({
@@ -135,7 +113,6 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
     try {
       es = new window.EventSource(url);
     } catch {
-      scheduleReconnect();
       return;
     }
     sourceRef.current = es;
@@ -153,8 +130,6 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
       } catch {
         return;
       }
-      // browsers expose msg.lastEventId; prefer it over body id since
-      // the SSE spec guarantees it survives reconnects.
       if (msg.lastEventId) {
         lastIdRef.current = msg.lastEventId;
       }
@@ -162,38 +137,113 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
     };
 
     es.onerror = () => {
-      // EventSource auto-reconnects internally, but we want exponential
-      // backoff and fallback after persistent failures, so we tear down
-      // and reschedule explicitly.
       es.close();
       sourceRef.current = null;
       failureCountRef.current += 1;
       if (failureCountRef.current >= FALLBACK_AFTER_FAILURES) {
-        startFallback();
+        clearReconnectTimer();
+        clearFallbackTimers();
+        setStatus(STATE_FALLBACK);
+
+        const poll = async () => {
+          if (closedRef.current) return;
+          try {
+            const params = new URLSearchParams();
+            const after = lastIdRef.current;
+            if (after) params.set('until', String(parseInt(after, 10) + 1));
+            params.set('per_page', '50');
+
+            const headers = {};
+            const apiKey = getAuthToken();
+            if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+            const resp = await fetch(`${API_BASE}/events?${params.toString()}`, { headers });
+            if (!resp.ok) {
+              throw new Error(`HTTP ${resp.status}`);
+            }
+            const events = await resp.json();
+            if (Array.isArray(events)) {
+              for (let i = events.length - 1; i >= 0; i -= 1) {
+                const event = events[i];
+                const seq = parseInt(event?.id ?? '0', 10);
+                const cursor = parseInt(after ?? '0', 10);
+                if (Number.isFinite(seq) && seq > cursor) {
+                  dispatchEvent(event);
+                }
+              }
+            }
+          } catch {
+            // Swallow, fallback mode keeps polling until we retry SSE.
+          }
+        };
+
+        poll();
+        fallbackTimerRef.current = setInterval(poll, FALLBACK_POLL_INTERVAL_MS);
+        fallbackExitTimerRef.current = setTimeout(() => {
+          if (closedRef.current) return;
+          clearFallbackTimers();
+          failureCountRef.current = 0;
+          connect();
+        }, FALLBACK_WINDOW_MS);
         return;
       }
-      scheduleReconnect();
-    };
-  }, [dispatchEvent, startFallback]);
 
-  const scheduleReconnect = useCallback(() => {
-    if (closedRef.current) return;
-    setStatus(STATE_RECONNECTING);
-    const attempt = failureCountRef.current;
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1));
-    reconnectTimerRef.current = setTimeout(connect, delay);
-  }, [connect]);
+      clearReconnectTimer();
+      setStatus(STATE_RECONNECTING);
+      const attempt = failureCountRef.current;
+      const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1));
+      reconnectTimerRef.current = setTimeout(connect, delay);
+    };
+  }, [clearFallbackTimers, clearReconnectTimer, dispatchEvent]);
 
   useEffect(() => {
     if (!enabled) {
       closedRef.current = true;
+      clearReconnectTimer();
+      clearFallbackTimers();
       setStatus(STATE_CLOSED);
       return undefined;
     }
 
     closedRef.current = false;
     failureCountRef.current = 0;
-    connect();
+
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+      setStatus(STATE_FALLBACK);
+      const poll = async () => {
+        if (closedRef.current) return;
+        try {
+          const params = new URLSearchParams();
+          const after = lastIdRef.current;
+          if (after) params.set('until', String(parseInt(after, 10) + 1));
+          params.set('per_page', '50');
+
+          const headers = {};
+          const apiKey = getAuthToken();
+          if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+          const resp = await fetch(`${API_BASE}/events?${params.toString()}`, { headers });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const events = await resp.json();
+          if (Array.isArray(events)) {
+            for (let i = events.length - 1; i >= 0; i -= 1) {
+              const event = events[i];
+              const seq = parseInt(event?.id ?? '0', 10);
+              const cursor = parseInt(after ?? '0', 10);
+              if (Number.isFinite(seq) && seq > cursor) {
+                dispatchEvent(event);
+              }
+            }
+          }
+        } catch {
+          // Ignore, next poll will try again.
+        }
+      };
+      poll();
+      fallbackTimerRef.current = setInterval(poll, FALLBACK_POLL_INTERVAL_MS);
+    } else {
+      connect();
+    }
 
     return () => {
       closedRef.current = true;
@@ -201,17 +251,11 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
         sourceRef.current.close();
         sourceRef.current = null;
       }
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      if (fallbackTimerRef.current) {
-        clearInterval(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
+      clearReconnectTimer();
+      clearFallbackTimers();
       setStatus(STATE_CLOSED);
     };
-  }, [enabled, connect]);
+  }, [enabled, clearFallbackTimers, clearReconnectTimer, connect, dispatchEvent]);
 
   return { status, lastEventId, lastEvent };
 }
