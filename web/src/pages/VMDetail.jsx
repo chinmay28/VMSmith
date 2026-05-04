@@ -136,6 +136,11 @@ export default function VMDetail() {
           value={spec.auto_start ? 'On' : 'Off'}
           testId="vm-detail-auto-start"
         />
+        <InfoCard
+          label="Delete protection"
+          value={spec.locked ? 'Locked' : 'Unlocked'}
+          testId="vm-detail-locked"
+        />
       </div>
 
       {/* Attached Networks */}
@@ -309,6 +314,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [tags, setTags] = useState('');
   const [natIP, setNatIP] = useState('');
   const [autoStart, setAutoStart] = useState(false);
+  const [locked, setLocked] = useState(false);
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
   const spec = normalizeSpec(vm.spec);
   const currentCpus = Number.isFinite(spec.cpus) ? spec.cpus : 0;
@@ -330,6 +336,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     setTags(safeArray(vm.tags).join(', '));
     setNatIP(currentIP);
     setAutoStart(!!spec.auto_start);
+    setLocked(!!spec.locked);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -353,6 +360,10 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
 
     if (autoStart !== !!spec.auto_start) {
       patch.auto_start = autoStart;
+    }
+
+    if (locked !== !!spec.locked) {
+      patch.locked = locked;
     }
 
     if (Object.keys(patch).length === 0) { onClose(); return; }
@@ -452,6 +463,22 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
             <span className="text-steel-200 font-medium">Auto-start at daemon boot</span>
             <span className="block text-steel-500 mt-1">
               The daemon will start this VM automatically when vmsmith starts up.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="input-edit-locked"
+            className="mt-1"
+            checked={locked}
+            onChange={(e) => setLocked(e.target.checked)}
+          />
+          <span className="text-xs">
+            <span className="text-steel-200 font-medium">Lock VM (delete-protected)</span>
+            <span className="block text-steel-500 mt-1">
+              When locked, the VM rejects deletion. Stop, start, and restart still work.
             </span>
           </span>
         </label>

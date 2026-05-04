@@ -489,6 +489,9 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if vm.Spec.Locked {
+		return types.NewAPIError("vm_locked", "vm is locked; unlock it before deleting")
+	}
 
 	dom, err := m.conn.LookupDomainByName(vm.Name)
 	if err == nil {
@@ -590,15 +593,29 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		autoStartChanged = true
 	}
 
+	// Resolve Locked change. nil pointer means "no change".
+	newLocked := storedVM.Spec.Locked
+	lockedChanged := false
+	if patch.Locked != nil && *patch.Locked != storedVM.Spec.Locked {
+		newLocked = *patch.Locked
+		lockedChanged = true
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged {
 		return storedVM, nil
 	}
 
-	// AutoStart-only change is a metadata flip — no need to stop/restart the VM
-	// or regenerate any libvirt artifacts.
-	if autoStartChanged && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged {
-		storedVM.Spec.AutoStart = newAutoStart
+	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
+	// dance and any libvirt redefinitions — they're pure bbolt writes.
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged
+	if metadataOnly {
+		if autoStartChanged {
+			storedVM.Spec.AutoStart = newAutoStart
+		}
+		if lockedChanged {
+			storedVM.Spec.Locked = newLocked
+		}
 		storedVM.UpdatedAt = time.Now()
 		if err := m.store.PutVM(storedVM); err != nil {
 			return nil, fmt.Errorf("storing updated VM: %w", err)
@@ -697,6 +714,9 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if autoStartChanged {
 		storedVM.Spec.AutoStart = newAutoStart
+	}
+	if lockedChanged {
+		storedVM.Spec.Locked = newLocked
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {

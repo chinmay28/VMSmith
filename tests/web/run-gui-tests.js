@@ -328,6 +328,19 @@ async function main() {
       await assertText(p, "vm-detail-auto-start", "On");
     }, page);
 
+    await runTest("locked summary card and edit toggle", async (p) => {
+      await assertVisible(p, "vm-detail-locked");
+      await p.locator('[data-testid="btn-edit-vm"]').click();
+      await p.waitForTimeout(200);
+      await assertVisible(p, "input-edit-locked");
+      await p.locator('[data-testid="input-edit-locked"]').check();
+      await p.locator('[data-testid="btn-submit-edit"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "input-edit-locked");
+      // Summary card now reads "Locked".
+      await assertText(p, "vm-detail-locked", "Locked");
+    }, page);
+
     await runTest("back link returns to VM list", async (p) => {
       await p.locator('[data-testid="back-link"]').click();
       await p.waitForTimeout(500);

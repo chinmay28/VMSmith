@@ -582,6 +582,54 @@ func TestCLI_VMDelete(t *testing.T) {
 	}
 }
 
+func TestCLI_VMLockUnlock(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-lk", Name: "important", Spec: types.VMSpec{CPUs: 1}})
+
+	out, err := runCLI("vm", "lock", "vm-lk")
+	if err != nil {
+		t.Fatalf("vm lock: %v", err)
+	}
+	if !strings.Contains(out, "locked") {
+		t.Errorf("expected 'locked' in output, got: %q", out)
+	}
+	got, _ := mock.Get(nil, "vm-lk")
+	if !got.Spec.Locked {
+		t.Errorf("Spec.Locked = false, want true after lock")
+	}
+
+	// Locked VM rejects delete with vm_locked.
+	if _, err := runCLI("vm", "delete", "vm-lk"); err == nil {
+		t.Error("expected delete error on locked VM")
+	}
+
+	// Unlock and confirm delete works.
+	out, err = runCLI("vm", "unlock", "vm-lk")
+	if err != nil {
+		t.Fatalf("vm unlock: %v", err)
+	}
+	if !strings.Contains(out, "unlocked") {
+		t.Errorf("expected 'unlocked' in output, got: %q", out)
+	}
+	if _, err := runCLI("vm", "delete", "vm-lk"); err != nil {
+		t.Fatalf("vm delete after unlock: %v", err)
+	}
+	if mock.VMCount() != 0 {
+		t.Error("expected VM to be deleted after unlock")
+	}
+}
+
+func TestCLI_VMLock_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	if _, err := runCLI("vm", "lock", "nonexistent"); err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
 func TestCLI_VMDelete_NotFound(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()

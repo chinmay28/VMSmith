@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -332,6 +332,15 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
         <div className="flex items-center gap-2.5">
           <span className="font-mono text-sm text-steel-100 truncate">{vm.name}</span>
           <StatusBadge state={vm.state} />
+          {spec.locked && (
+            <span
+              className="badge bg-amber-500/10 text-amber-300 border-amber-500/20 inline-flex items-center gap-1"
+              data-testid={`badge-locked-${vm.name}`}
+              title="Delete-protected: unlock from the edit form before deleting"
+            >
+              <Lock size={10} /> locked
+            </span>
+          )}
         </div>
         <p className="text-xs font-mono text-steel-500 mt-0.5">
           {cpuText} vCPU · {ramText} MB · {diskText} GB
