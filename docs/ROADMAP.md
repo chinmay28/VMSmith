@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-05-03
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are libvirt clone implementation, VM metrics streaming/charts, advanced operations, and long-tail production polish.
+> **Last updated:** 2026-05-04
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, webhook settings UX polish, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -199,7 +199,7 @@ Prevent VMs from consuming all host resources.
 
 ### 4.1 VM Resource Metrics
 
-Users have no visibility into what's happening inside VMs. Per-host stats already exist (`GET /api/v1/host/stats`, on-demand sample, see `internal/api/host_stats.go`); per-VM time-series and history are missing.
+VM metrics are now broadly shipped across the API, CLI, Prometheus, and frontend charts. The remaining work in this track is mostly soak and end-to-end validation, plus any follow-up polish that falls out of real-world usage.
 
 #### 4.1.0 Architectural overview
 
@@ -320,7 +320,7 @@ The original 4.1.4 (host-level stats on dashboard) is already done and remains i
 
 No way to know when a VM crashes, completes creation, or changes state. The work in this section is the foundation for several downstream features (audit log, dashboards without polling, schedules in 5.2, future alerting).
 
-**Status (2026-04-28):** Partially started. `internal/vm/events.go` already registers a `DomainEventLifecycleRegister` callback, runs the libvirt default event loop, and propagates state into the `vms` bbolt bucket. The events themselves are **not** persisted, queried, or streamed — every consumer below has to be built. The libvirt callback is the only producer wired up; API handlers and daemon code do not yet emit events.
+**Status (2026-05-04):** Broadly shipped. Events are now persisted, queryable via `GET /api/v1/events`, streamable via `GET /api/v1/events/stream`, surfaced in the CLI and web UI, and fanned out through the in-process bus to webhook delivery. The main remaining gaps in this track are the webhook Settings/test-delivery UX (`4.2.16`), the remaining integration/E2E test matrix (`4.2.17`), and the lingering libvirt-state refactor cleanup called out in `4.2.4`.
 
 #### 4.2.0 Architectural overview
 
