@@ -68,7 +68,7 @@ Currently the only way to duplicate a VM is export-to-image then create-from-ima
 | 2.1.4 | Add `POST /api/v1/vms/{id}/clone` endpoint | S | ✅ Done — API now exposes VM cloning with request validation, duplicate-name checks, typed error responses, and handler coverage for success/not-found/error cases |
 | 2.1.5 | Add `vmsmith vm clone <id> --name <name>` CLI command | S | ✅ Done — CLI now supports `vmsmith vm clone <id> --name <name>` with test coverage and updated docs |
 | 2.1.6 | Add "Clone" button to VMDetail page in frontend | S | ✅ Done — VM detail now offers a clone action modal that posts the new VM name to `POST /api/v1/vms/{id}/clone` and redirects to the cloned VM on success |
-| 2.1.7 | Add integration + E2E tests | M | ✅ Done — clone coverage now spans API integration tests in `internal/api/api_test.go` plus the VM-detail clone flow in `tests/web/gui.spec.js`, including the redirect to the newly created machine |
+| 2.1.7 | Add integration + E2E tests | M | ✅ Done — clone coverage now spans API integration + failure-path validation in `internal/api/api_test.go`, the real-daemon clone flow in `tests/e2e/test_api_vm_lifecycle.py`, and the VM-detail Playwright flow in `tests/web/gui.spec.js`, including duplicate-name error handling and redirect to the newly created machine |
 
 ### 2.2 VM Tags & Metadata
 
@@ -732,11 +732,11 @@ With the initial platform hardening work mostly done, the next highest-value roa
 <<<<<<< HEAD
 | **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus, the leaderboard, the CLI, and the live uPlot charts on VMDetail are all shipped; only the deeper unit/integration/E2E coverage in 4.1.10 (counter-reset edge cases, real-VM stress test) remains |
 | **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, and Activity views are shipped; the biggest remaining work is webhook delivery plus the last bit of frontend/live-update polish |
-| **P1** | VM Cloning | 2.1.2 | Main clone flows and their integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
+| **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
 =======
 | **P0** | VM Resource Metrics | 4.1.7, 4.1.10 | Backend stats, SSE streaming, Prometheus export, dashboard rollups, and CLI support are shipped; the main remaining metrics gap is richer VMDetail charting plus deeper end-to-end coverage |
 | **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, Activity views, and the bounded live-update fallback are shipped; the biggest remaining work is webhook delivery |
-| **P1** | VM Cloning | 2.1.2 | Main clone flows ship today, but the libvirt implementation is still the last notable product gap |
+| **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today, but the libvirt implementation is still the last notable product gap |
 >>>>>>> 6652e5d (feat(events): bound live-update polling fallback window)
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
