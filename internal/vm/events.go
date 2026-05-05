@@ -99,6 +99,14 @@ func (m *LibvirtManager) handleLifecycleEvent(dom *libvirt.Domain, event *libvir
 		return
 	}
 
+	m.handleStoredLifecycleEvent(name, vmRecord, event)
+}
+
+func (m *LibvirtManager) handleStoredLifecycleEvent(name string, vmRecord *types.VM, event *libvirt.DomainEventLifecycle) {
+	if vmRecord == nil || event == nil {
+		return
+	}
+
 	state := lifecycleEventToVMState(event)
 	evtType, severity := lifecycleEventToTypeAndSeverity(event)
 
@@ -106,16 +114,8 @@ func (m *LibvirtManager) handleLifecycleEvent(dom *libvirt.Domain, event *libvir
 		"vm", name, "event", event.String(), "type", evtType, "state", string(state))
 
 	if m.eventBus == nil {
-		// Bus not wired (test harness or early-startup path): fall back to
-		// directly persisting the state change so the daemon never silently
-		// loses a libvirt-driven state transition.  This preserves the
-		// pre-refactor behavior for callers that haven't migrated yet.
-		vmRecord.State = state
-		vmRecord.UpdatedAt = time.Now()
-		if err := m.store.PutVM(vmRecord); err != nil {
-			logger.Warn("daemon", "failed to persist lifecycle event state (no bus)",
-				"vm", name, "event", event.String(), "error", err.Error())
-		}
+		logger.Warn("daemon", "dropping lifecycle event because event bus is not configured",
+			"vm", name, "event", event.String(), "type", evtType, "state", string(state))
 		return
 	}
 
@@ -195,4 +195,3 @@ func lifecycleEventToTypeAndSeverity(event *libvirt.DomainEventLifecycle) (strin
 		return fmt.Sprintf("vm.lifecycle_%d", event.Event), types.EventSeverityInfo
 	}
 }
-
