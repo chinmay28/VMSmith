@@ -80,6 +80,25 @@ func (m *Manager) ListImages() ([]*types.Image, error) {
 	return m.store.ListImages()
 }
 
+// FilterImagesByTag returns only images whose tag list contains tag
+// (case-insensitive). The returned slice is a fresh allocation so callers can
+// safely retain the input slice unchanged.
+func FilterImagesByTag(imgs []*types.Image, tag string) []*types.Image {
+	out := make([]*types.Image, 0, len(imgs))
+	for _, img := range imgs {
+		if img == nil {
+			continue
+		}
+		for _, t := range img.Tags {
+			if strings.EqualFold(t, tag) {
+				out = append(out, img)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // CreateTemplate stores a reusable VM template.
 func (m *Manager) CreateTemplate(tpl *types.VMTemplate) (*types.VMTemplate, error) {
 	if tpl == nil {

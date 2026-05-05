@@ -82,7 +82,7 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 
 	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
 	if tagFilter != "" {
-		imgs = filterImagesByTag(imgs, tagFilter)
+		imgs = storage.FilterImagesByTag(imgs, tagFilter)
 	}
 
 	total := len(imgs)
@@ -256,23 +256,6 @@ func (s *Server) DownloadImage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Disposition", "attachment; filename="+img.Name+".qcow2")
 	http.ServeFile(w, r, img.Path)
-}
-
-// filterImagesByTag returns only images whose tag list contains tag (case-insensitive).
-func filterImagesByTag(imgs []*types.Image, tag string) []*types.Image {
-	out := imgs[:0]
-	for _, img := range imgs {
-		if img == nil {
-			continue
-		}
-		for _, t := range img.Tags {
-			if strings.EqualFold(t, tag) {
-				out = append(out, img)
-				break
-			}
-		}
-	}
-	return out
 }
 
 // parseTagFormValues accepts either repeated `tags` form values or a single

@@ -49,7 +49,7 @@ var imageListCmd = &cobra.Command{
 			return err
 		}
 		if tagFilter != "" {
-			imgs = filterImagesByTag(imgs, tagFilter)
+			imgs = storage.FilterImagesByTag(imgs, tagFilter)
 		}
 		sort.SliceStable(imgs, func(i, j int) bool {
 			if !imgs[i].CreatedAt.Equal(imgs[j].CreatedAt) {
@@ -145,7 +145,8 @@ var imageEditCmd = &cobra.Command{
 
 		patch := types.ImageUpdateSpec{}
 		if descriptionChanged {
-			patch.Description = strings.TrimSpace(mustGetString(cmd, "description"))
+			desc, _ := cmd.Flags().GetString("description")
+			patch.Description = strings.TrimSpace(desc)
 		}
 		if tagsChanged {
 			rawTags, _ := cmd.Flags().GetStringArray("tag")
@@ -179,29 +180,6 @@ var imageEditCmd = &cobra.Command{
 		fmt.Printf("Tags: %s\n", strings.Join(img.Tags, ", "))
 		return nil
 	},
-}
-
-func mustGetString(cmd *cobra.Command, name string) string {
-	v, _ := cmd.Flags().GetString(name)
-	return v
-}
-
-// filterImagesByTag returns only images whose tag list contains tag
-// (case-insensitive). The slice is filtered in-place.
-func filterImagesByTag(imgs []*types.Image, tag string) []*types.Image {
-	out := imgs[:0]
-	for _, img := range imgs {
-		if img == nil {
-			continue
-		}
-		for _, t := range img.Tags {
-			if strings.EqualFold(t, tag) {
-				out = append(out, img)
-				break
-			}
-		}
-	}
-	return out
 }
 
 var imagePushCmd = &cobra.Command{
