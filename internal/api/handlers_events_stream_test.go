@@ -102,12 +102,16 @@ func TestStreamEvents_ReplaysFromLastEventID(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	frame := readSSEFrame(t, resp.Body)
+	br := bufio.NewReader(resp.Body)
+	frame, err := readSSEFrame(br)
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
 	cancel()
 	io.Copy(io.Discard, resp.Body)
 
-	if !strings.Contains(frame, "id: 2\n") || !strings.Contains(frame, "event: vm.stopped\n") {
-		t.Fatalf("unexpected frame: %q", frame)
+	if frame.id != "2" || frame.event != "vm.stopped" {
+		t.Fatalf("unexpected frame: id=%q event=%q data=%q", frame.id, frame.event, frame.data)
 	}
 }
 
@@ -140,18 +144,3 @@ func TestStreamEvents_ReplayOverflowReturnsGone(t *testing.T) {
 	}
 }
 
-func readSSEFrame(t *testing.T, r io.Reader) string {
-	t.Helper()
-	br := bufio.NewReader(r)
-	var b strings.Builder
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read frame: %v", err)
-		}
-		b.WriteString(line)
-		if line == "\n" {
-			return b.String()
-		}
-	}
-}
