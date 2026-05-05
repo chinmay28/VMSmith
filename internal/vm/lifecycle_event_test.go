@@ -1,11 +1,14 @@
 package vm
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/events"
+	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
+	"libvirt.org/go/libvirt"
 )
 
 // memEventStore is a minimal events.Store stub for unit tests.
@@ -58,4 +61,61 @@ func TestEmitDHCPExhausted_PublishesSystemEvent(t *testing.T) {
 func TestEmitDHCPExhausted_NoBus(t *testing.T) {
 	m := &LibvirtManager{}
 	m.emitDHCPExhausted("vm", "reason") // must not panic
+}
+
+func TestHandleStoredLifecycleEvent_NoBus_DoesNotMutateStoreState(t *testing.T) {
+	s, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	original := &types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateStopped}
+	if err := s.PutVM(original); err != nil {
+		t.Fatalf("seed VM: %v", err)
+	}
+
+	m := &LibvirtManager{store: s}
+	m.handleStoredLifecycleEvent("alpha", original, &libvirt.DomainEventLifecycle{Event: libvirt.DOMAIN_EVENT_STARTED})
+
+	got, err := s.GetVM("vm-1")
+	if err != nil {
+		t.Fatalf("GetVM: %v", err)
+	}
+	if got.State != types.VMStateStopped {
+		t.Fatalf("state mutated without event bus: got %q want %q", got.State, types.VMStateStopped)
+	}
+}
+
+func TestHandleStoredLifecycleEvent_WithBus_PublishesLibvirtEvent(t *testing.T) {
+	bus := events.New(&memEventStore{})
+	bus.Start()
+	defer bus.Stop()
+
+	ch, cancel := bus.Subscribe("test")
+	defer cancel()
+
+	m := &LibvirtManager{}
+	m.SetEventBus(bus)
+
+	vmRecord := &types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped}
+	m.handleStoredLifecycleEvent("beta", vmRecord, &libvirt.DomainEventLifecycle{Event: libvirt.DOMAIN_EVENT_STARTED})
+
+	select {
+	case evt := <-ch:
+		if evt.Type != "vm.started" {
+			t.Fatalf("Type = %q, want vm.started", evt.Type)
+		}
+		if evt.Source != types.EventSourceLibvirt {
+			t.Fatalf("Source = %q, want %q", evt.Source, types.EventSourceLibvirt)
+		}
+		if evt.VMID != "vm-2" {
+			t.Fatalf("VMID = %q, want vm-2", evt.VMID)
+		}
+		if evt.Attributes["state"] != string(types.VMStateRunning) {
+			t.Fatalf("state attr = %q, want %q", evt.Attributes["state"], types.VMStateRunning)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for lifecycle event")
+	}
 }
