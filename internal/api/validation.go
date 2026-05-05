@@ -189,7 +189,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503
