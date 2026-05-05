@@ -10,4 +10,7 @@ const (
 	BucketConfig       = "config"
 	BucketEvents       = "events"
 	BucketWebhooks     = "webhooks"
+	BucketSchedules    = "schedules"
+	BucketScheduleRuns = "schedule_runs"
+	BucketScheduleMeta = "schedule_meta"
 )
