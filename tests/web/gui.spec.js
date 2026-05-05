@@ -373,6 +373,35 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-before-deploy")).not.toBeVisible();
   });
 
+  test("add port forward with description and see it inline", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-port").click();
+    await page.getByTestId("input-host-port").fill("2222");
+    await page.getByTestId("input-guest-port").fill("22");
+    await page.getByTestId("input-port-description").fill("ssh-jumpbox");
+    await page.getByTestId("btn-submit-port").click();
+
+    // Description should render under the new port forward row
+    const newDescription = page.locator('[data-testid^="port-description-"]').filter({ hasText: "ssh-jumpbox" });
+    await expect(newDescription).toBeVisible();
+  });
+
+  test("port modal rejects descriptions over 256 chars", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-port").click();
+    await page.getByTestId("input-host-port").fill("4444");
+    await page.getByTestId("input-guest-port").fill("80");
+    await page.getByTestId("input-port-description").fill("x".repeat(257));
+    // The maxLength attribute clamps the typed value to 256, so the field
+    // should never exceed the cap.
+    const value = await page.getByTestId("input-port-description").inputValue();
+    expect(value.length).toBeLessThanOrEqual(256);
+  });
+
   test("edit button opens edit modal pre-filled with current values", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

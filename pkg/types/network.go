@@ -56,12 +56,13 @@ type NetworkAttachment struct {
 
 // PortForward represents a NAT port forwarding rule.
 type PortForward struct {
-	ID        string   `json:"id"`
-	VMID      string   `json:"vm_id"`
-	HostPort  int      `json:"host_port"`
-	GuestPort int      `json:"guest_port"`
-	GuestIP   string   `json:"guest_ip"`
-	Protocol  Protocol `json:"protocol"`
+	ID          string   `json:"id"`
+	VMID        string   `json:"vm_id"`
+	HostPort    int      `json:"host_port"`
+	GuestPort   int      `json:"guest_port"`
+	GuestIP     string   `json:"guest_ip"`
+	Protocol    Protocol `json:"protocol"`
+	Description string   `json:"description,omitempty"`
 }
 
 func ValidatePortForward(hostPort, guestPort int, proto Protocol) error {

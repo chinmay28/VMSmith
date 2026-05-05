@@ -22,8 +22,14 @@ func NewPortForwarder(store *store.Store) *PortForwarder {
 	return pf
 }
 
+// AddOptions carries optional metadata for Add. Description is a free-form
+// string capped at the API boundary (256 chars).
+type AddOptions struct {
+	Description string
+}
+
 // Add creates a new port forwarding rule: host_port -> guest_ip:guest_port.
-func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP string, proto types.Protocol) (*types.PortForward, error) {
+func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP string, proto types.Protocol, opts AddOptions) (*types.PortForward, error) {
 	if proto == "" {
 		proto = types.ProtocolTCP
 	}
@@ -47,12 +53,13 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 	}
 
 	rule := &types.PortForward{
-		ID:        fmt.Sprintf("pf-%d", time.Now().UnixNano()),
-		VMID:      vmID,
-		HostPort:  hostPort,
-		GuestPort: guestPort,
-		GuestIP:   guestIP,
-		Protocol:  proto,
+		ID:          fmt.Sprintf("pf-%d", time.Now().UnixNano()),
+		VMID:        vmID,
+		HostPort:    hostPort,
+		GuestPort:   guestPort,
+		GuestIP:     guestIP,
+		Protocol:    proto,
+		Description: opts.Description,
 	}
 
 	if err := pf.store.PutPortForward(rule); err != nil {

@@ -345,8 +345,21 @@ const server = http.createServer(async (req, res) => {
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports$/)) && method === "POST") {
     const body = await parseBody(req);
+    if (typeof body.description === "string" && body.description.length > 256) {
+      return json(res, 400, { code: "invalid_port_forward", message: "description must be at most 256 characters" });
+    }
     const vm = vms.get(m[1]);
-    const pf = { id: `pf-${Date.now()}`, vm_id: m[1], host_port: body.host_port, guest_port: body.guest_port, guest_ip: vm?.ip || "192.168.100.10", protocol: body.protocol || "tcp" };
+    const pf = {
+      id: `pf-${Date.now()}`,
+      vm_id: m[1],
+      host_port: body.host_port,
+      guest_port: body.guest_port,
+      guest_ip: vm?.ip || "192.168.100.10",
+      protocol: body.protocol || "tcp",
+    };
+    if (body.description) {
+      pf.description = body.description;
+    }
     const list = portForwards.get(m[1]) || []; list.push(pf); portForwards.set(m[1], list);
     return json(res, 201, pf);
   }

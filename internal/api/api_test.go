@@ -1651,6 +1651,29 @@ func TestAddPort(t *testing.T) {
 	}
 }
 
+func TestAddPort_RejectsLongDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-desc", Name: "desc", IP: "192.168.100.10"})
+
+	body := jsonBody(t, addPortRequest{
+		HostPort:    2222,
+		GuestPort:   22,
+		Protocol:    "tcp",
+		Description: strings.Repeat("x", 257),
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-desc/ports", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for over-long description", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_port_forward" {
+		t.Errorf("code = %q, want invalid_port_forward", apiErr.Code)
+	}
+}
+
 func TestAddPort_NoIP(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

@@ -113,6 +113,19 @@ func validatePortForward(hostPort, guestPort int, proto types.Protocol) error {
 	return types.ValidatePortForward(hostPort, guestPort, proto)
 }
 
+// maxPortForwardDescriptionLength bounds the free-text label on a port-forward
+// rule. It is shorter than the VM/image/snapshot description cap because
+// port-forward descriptions are intended to be one-line labels (e.g. "web",
+// "ssh-jumpbox", "metrics scrape target").
+const maxPortForwardDescriptionLength = 256
+
+func validatePortForwardDescription(description string) error {
+	if len(description) > maxPortForwardDescriptionLength {
+		return types.NewAPIError("invalid_port_forward", fmt.Sprintf("description must be at most %d characters", maxPortForwardDescriptionLength))
+	}
+	return nil
+}
+
 func validateCreateSnapshotRequest(name, description string) error {
 	if strings.TrimSpace(name) == "" {
 		return types.NewAPIError("invalid_name", "snapshot name is required")

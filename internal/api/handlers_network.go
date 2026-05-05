@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/internal/network"
@@ -11,9 +12,10 @@ import (
 )
 
 type addPortRequest struct {
-	HostPort  int            `json:"host_port"`
-	GuestPort int            `json:"guest_port"`
-	Protocol  types.Protocol `json:"protocol,omitempty"`
+	HostPort    int            `json:"host_port"`
+	GuestPort   int            `json:"guest_port"`
+	Protocol    types.Protocol `json:"protocol,omitempty"`
+	Description string         `json:"description,omitempty"`
 }
 
 // AddPort handles POST /api/v1/vms/{vmID}/ports
@@ -37,6 +39,11 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	description := strings.TrimSpace(req.Description)
+	if err := validatePortForwardDescription(description); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	// Get VM to find its IP
 	vm, err := s.vmManager.Get(r.Context(), vmID)
@@ -50,7 +57,7 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol)
+	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol, network.AddOptions{Description: description})
 	if err != nil {
 		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "port_forward_conflict" {
 			writeAPIError(w, http.StatusConflict, apiErr)

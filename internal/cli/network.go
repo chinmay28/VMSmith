@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,8 @@ import (
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
+
+const cliMaxPortForwardDescriptionLength = 256
 
 var portCmd = &cobra.Command{
 	Use:   "port",
@@ -27,6 +30,8 @@ var portAddCmd = &cobra.Command{
 		hostPort, _ := cmd.Flags().GetInt("host")
 		guestPort, _ := cmd.Flags().GetInt("guest")
 		proto, _ := cmd.Flags().GetString("proto")
+		descriptionRaw, _ := cmd.Flags().GetString("description")
+		description := strings.TrimSpace(descriptionRaw)
 
 		logger.Info("cli", "port add", "vm_id", vmID,
 			"host_port", fmt.Sprintf("%d", hostPort),
@@ -35,6 +40,9 @@ var portAddCmd = &cobra.Command{
 
 		if err := types.ValidatePortForward(hostPort, guestPort, types.Protocol(proto)); err != nil {
 			return err
+		}
+		if len(description) > cliMaxPortForwardDescriptionLength {
+			return fmt.Errorf("description must be at most %d characters", cliMaxPortForwardDescriptionLength)
 		}
 
 		vmMgr, vmCleanup, err := newVMManager()
@@ -61,7 +69,7 @@ var portAddCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		rule, err := pf.Add(vmID, hostPort, guestPort, vm.IP, types.Protocol(proto))
+		rule, err := pf.Add(vmID, hostPort, guestPort, vm.IP, types.Protocol(proto), network.AddOptions{Description: description})
 		if err != nil {
 			logger.Error("cli", "port add failed", "vm_id", vmID,
 				"host_port", fmt.Sprintf("%d", hostPort),
@@ -77,6 +85,9 @@ var portAddCmd = &cobra.Command{
 
 		fmt.Printf("Port forward added: host:%d -> %s:%d (%s)\n",
 			rule.HostPort, rule.GuestIP, rule.GuestPort, rule.Protocol)
+		if rule.Description != "" {
+			fmt.Printf("Description: %s\n", rule.Description)
+		}
 		return nil
 	},
 }
@@ -105,10 +116,10 @@ var portListCmd = &cobra.Command{
 		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tHOST PORT\tGUEST\tPROTOCOL")
+		fmt.Fprintln(w, "ID\tHOST PORT\tGUEST\tPROTOCOL\tDESCRIPTION")
 		for _, p := range ports {
-			fmt.Fprintf(w, "%s\t%d\t%s:%d\t%s\n",
-				p.ID, p.HostPort, p.GuestIP, p.GuestPort, p.Protocol)
+			fmt.Fprintf(w, "%s\t%d\t%s:%d\t%s\t%s\n",
+				p.ID, p.HostPort, p.GuestIP, p.GuestPort, p.Protocol, p.Description)
 		}
 		w.Flush()
 		return nil
@@ -144,6 +155,7 @@ func init() {
 	portAddCmd.Flags().Int("host", 0, "host port (required)")
 	portAddCmd.Flags().Int("guest", 0, "guest port (required)")
 	portAddCmd.Flags().String("proto", "tcp", "protocol (tcp or udp)")
+	portAddCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars)")
 	portAddCmd.MarkFlagRequired("host")
 	portAddCmd.MarkFlagRequired("guest")
 
