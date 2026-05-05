@@ -630,7 +630,7 @@ v1 actions:
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 5.2.1 | Define `pkg/types/schedule.go` (`Schedule`) and `pkg/types/schedule_run.go` (`ScheduleRun`) per the schemas above | S | Pure types |
+| 5.2.1 | Define `pkg/types/schedule.go` (`Schedule`) and `pkg/types/schedule_run.go` (`ScheduleRun`) per the schemas above | S | ✅ Done — added schedule + run model types (including action/catch-up/status constants) in `pkg/types/schedule.go` and `pkg/types/schedule_run.go` |
 | 5.2.2 | Add `schedules`, `schedule_runs`, `schedule_meta` bbolt buckets; `Store.{Put,Get,List,Delete}Schedule`, `Store.AppendRun(scheduleID, run)` (with retention trim in the same tx), `Store.ListRuns(scheduleID, limit)`, `Store.GetLastTick`/`SetLastTick` | M | `schedule_runs` keys are `{schedule_id}/{ts_be}` for fast per-schedule scans |
 | 5.2.3 | Create `internal/scheduler/` package: per-timezone `cron.Cron` instances, schedule registration/deregistration on CRUD, bounded worker pool, action registry. Unit tests for: spec parsing, timezone routing, max-concurrent skip, queue overflow | L | Use `robfig/cron/v3` with `WithSeconds` |
 | 5.2.4 | Implement catch-up logic on daemon startup: compare `last_tick` to `now()`, fire each schedule per its `catch_up_policy`. Tick the meta key every 60s thereafter | M | Cap `run_all` replay at 100 missed fires per schedule with a warning log to prevent storms |
