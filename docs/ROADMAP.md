@@ -729,15 +729,9 @@ With the initial platform hardening work mostly done, the next highest-value roa
 
 | Priority | Area | Key Tasks | Why |
 |----------|------|-----------|-----|
-<<<<<<< HEAD
-| **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus, the leaderboard, the CLI, and the live uPlot charts on VMDetail are all shipped; only the deeper unit/integration/E2E coverage in 4.1.10 (counter-reset edge cases, real-VM stress test) remains |
-| **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, and Activity views are shipped; the biggest remaining work is webhook delivery plus the last bit of frontend/live-update polish |
+| **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus export, dashboard rollups, CLI support, and live VMDetail charting are shipped; the main remaining work is the deeper unit/integration/E2E coverage in 4.1.10, including counter-reset edge cases and a real-VM stress path |
+| **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, Activity views, and the bounded live-update fallback are shipped; the biggest remaining work is webhook delivery plus the last bit of test/polish work |
 | **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
-=======
-| **P0** | VM Resource Metrics | 4.1.7, 4.1.10 | Backend stats, SSE streaming, Prometheus export, dashboard rollups, and CLI support are shipped; the main remaining metrics gap is richer VMDetail charting plus deeper end-to-end coverage |
-| **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, Activity views, and the bounded live-update fallback are shipped; the biggest remaining work is webhook delivery |
-| **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today, but the libvirt implementation is still the last notable product gap |
->>>>>>> 6652e5d (feat(events): bound live-update polling fallback window)
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
