@@ -711,6 +711,7 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | 6.2.2 | Create RPM package build (for Rocky/RHEL/Fedora) | M | ✅ Done — added `make rpm` + `scripts/build-rpm.sh` to produce an RPM that packages the linux/amd64 release binary, systemd unit, and default config for Rocky/RHEL/Fedora installs |
 | 6.2.3 | Create container image for VMSmith daemon (requires privileged mode for libvirt) | M | ✅ Done — added multi-stage `Dockerfile`, `scripts/docker-entrypoint.sh`, `.dockerignore`, and `docs/CONTAINER.md` for privileged local/lab usage |
 | 6.2.4 | Add installation script (`curl -sSL https://... \| sh`) | S | ✅ Done — added `scripts/install.sh` to download the published Linux amd64 release asset and install it to `/usr/local/bin/vmsmith`, plus README/production docs and a local smoke test |
+| 6.2.5 | Build identification: `pkg/version` + linker-set vars, `GET /api/version` (public, no auth), `vmsmith version` / `--version`, GUI footer | S | ✅ Done — `Makefile` now wires `-X $(VERSION_PKG).Version=...` plus `Commit` and `BuildDate`, the daemon serves `/api/version` outside `/api/v1` so health checks and the GUI footer can read it without an API key, the CLI ships `vmsmith version [--json]`, and `web/src/components/Layout.jsx` renders the live build label with commit/date in a tooltip. Covered by `pkg/version`, `internal/api`, `internal/cli`, mock-server, and Playwright tests |
 
 ### 6.3 Documentation Expansion
 

@@ -186,6 +186,18 @@ export const logs = {
     }), { withMeta: true }),
 };
 
+// --- System ---
+// Build info — public endpoint at /api/version (outside the authenticated
+// /api/v1 tree).  Fetched by the layout footer before any auth token is
+// available, so we issue a plain fetch instead of going through apiClient.
+export const system = {
+  version: async (): Promise<{ version: string; commit: string; build_date: string; go_version: string; os: string; arch: string }> => {
+    const resp = await fetch('/api/version', { headers: { Accept: 'application/json' } });
+    if (!resp.ok) throw new Error(`/api/version returned ${resp.status}`);
+    return resp.json();
+  },
+};
+
 // --- Events ---
 // Filter params line up 1:1 with GET /api/v1/events query params.
 export const events = {
@@ -204,4 +216,4 @@ export const events = {
     }), { withMeta: true }),
 };
 
-export default { vms, snapshots, images, templates, ports, host, quotas, logs, events };
+export default { vms, snapshots, images, templates, ports, host, quotas, logs, events, system };

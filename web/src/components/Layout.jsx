@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText, Activity } from 'lucide-react';
 import mascot from '../assets/mascot.png';
+import { system } from '../api/client';
 
 const navItems = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', testId: 'nav-dashboard' },
@@ -11,6 +13,21 @@ const navItems = [
 ];
 
 export default function Layout({ children }) {
+  const [buildInfo, setBuildInfo] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    system.version()
+      .then(info => { if (!cancelled) setBuildInfo(info); })
+      .catch(() => { /* footer falls back to a static label */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const versionLabel = buildInfo?.version ? `VM Smith ${buildInfo.version}` : 'VM Smith';
+  const versionTitle = buildInfo
+    ? `commit ${buildInfo.commit} · built ${buildInfo.build_date} · ${buildInfo.go_version} ${buildInfo.os}/${buildInfo.arch}`
+    : 'build info unavailable';
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -63,7 +80,9 @@ export default function Layout({ children }) {
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-steel-800/40">
-          <p className="text-[10px] font-mono text-forge-800">VM Smith v0.1.0-dev</p>
+          <p className="text-[10px] font-mono text-forge-800" data-testid="layout-version" title={versionTitle}>
+            {versionLabel}
+          </p>
         </div>
       </aside>
 
