@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -228,6 +229,158 @@ func TestTemplateCRUD(t *testing.T) {
 	}
 	if _, err := s.GetTemplate(tpl.ID); err == nil {
 		t.Fatal("expected template to be deleted")
+	}
+}
+
+// --- Schedule tests ---
+
+func TestScheduleCRUD(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	schedule := &types.Schedule{
+		ID:            "sched-1",
+		Name:          "nightly snapshot",
+		VMID:          "vm-1",
+		Action:        types.ScheduleActionSnapshot,
+		CronSpec:      "0 0 2 * * *",
+		Timezone:      "UTC",
+		Enabled:       true,
+		CatchUpPolicy: types.ScheduleCatchUpRunOnce,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := s.PutSchedule(schedule); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	got, err := s.GetSchedule(schedule.ID)
+	if err != nil {
+		t.Fatalf("GetSchedule: %v", err)
+	}
+	if got.Name != schedule.Name || got.Action != schedule.Action {
+		t.Fatalf("GetSchedule = %#v, want %#v", got, schedule)
+	}
+
+	list, err := s.ListSchedules()
+	if err != nil {
+		t.Fatalf("ListSchedules: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != schedule.ID {
+		t.Fatalf("ListSchedules = %#v, want %#v", list, schedule)
+	}
+
+	if err := s.DeleteSchedule(schedule.ID); err != nil {
+		t.Fatalf("DeleteSchedule: %v", err)
+	}
+	if _, err := s.GetSchedule(schedule.ID); err == nil {
+		t.Fatal("expected schedule to be deleted")
+	}
+}
+
+func TestAppendRunAndListRuns(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	base := time.Date(2026, 5, 5, 16, 0, 0, 0, time.UTC)
+	runs := []*types.ScheduleRun{
+		{ID: "run-1", ScheduleID: "sched-1", VMID: "vm-1", StartedAt: base.Add(1 * time.Minute), Status: types.ScheduleRunStatusSuccess},
+		{ID: "run-2", ScheduleID: "sched-1", VMID: "vm-1", StartedAt: base.Add(2 * time.Minute), Status: types.ScheduleRunStatusError, Error: "boom"},
+		{ID: "run-3", ScheduleID: "sched-1", VMID: "vm-2", StartedAt: base.Add(3 * time.Minute), Status: types.ScheduleRunStatusSkipped, SkipReason: types.ScheduleRunSkipReasonConcurrentRun},
+	}
+	for _, run := range runs {
+		if err := s.AppendRun("sched-1", run); err != nil {
+			t.Fatalf("AppendRun: %v", err)
+		}
+	}
+
+	stored, err := s.ListRuns("sched-1", 0)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(stored) != 3 {
+		t.Fatalf("ListRuns length = %d, want 3", len(stored))
+	}
+	if stored[0].ID != "run-3" || stored[1].ID != "run-2" || stored[2].ID != "run-1" {
+		t.Fatalf("ListRuns order = [%s %s %s], want [run-3 run-2 run-1]", stored[0].ID, stored[1].ID, stored[2].ID)
+	}
+
+	limited, err := s.ListRuns("sched-1", 2)
+	if err != nil {
+		t.Fatalf("ListRuns limit: %v", err)
+	}
+	if len(limited) != 2 || limited[0].ID != "run-3" || limited[1].ID != "run-2" {
+		t.Fatalf("ListRuns limit = %#v, want newest two runs", limited)
+	}
+}
+
+func TestAppendRunTrimsHistoryAndDeleteScheduleRemovesRuns(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	for i := 0; i < defaultScheduleRunHistory+5; i++ {
+		run := &types.ScheduleRun{
+			ID:         fmt.Sprintf("run-%03d", i),
+			ScheduleID: "sched-1",
+			VMID:       "vm-1",
+			StartedAt:  time.Unix(0, int64(i+1)).UTC(),
+			Status:     types.ScheduleRunStatusSuccess,
+		}
+		if err := s.AppendRun("sched-1", run); err != nil {
+			t.Fatalf("AppendRun %d: %v", i, err)
+		}
+	}
+
+	runs, err := s.ListRuns("sched-1", 0)
+	if err != nil {
+		t.Fatalf("ListRuns after trim: %v", err)
+	}
+	if len(runs) != defaultScheduleRunHistory {
+		t.Fatalf("trimmed run count = %d, want %d", len(runs), defaultScheduleRunHistory)
+	}
+	if runs[len(runs)-1].ID != "run-005" {
+		t.Fatalf("oldest retained run = %s, want run-005", runs[len(runs)-1].ID)
+	}
+
+	if err := s.PutSchedule(&types.Schedule{ID: "sched-1", Name: "cleanup"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+	if err := s.DeleteSchedule("sched-1"); err != nil {
+		t.Fatalf("DeleteSchedule: %v", err)
+	}
+	runs, err = s.ListRuns("sched-1", 0)
+	if err != nil {
+		t.Fatalf("ListRuns after delete: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("runs after delete = %d, want 0", len(runs))
+	}
+}
+
+func TestLastTickRoundTrip(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	zero, err := s.GetLastTick()
+	if err != nil {
+		t.Fatalf("GetLastTick empty: %v", err)
+	}
+	if !zero.IsZero() {
+		t.Fatalf("GetLastTick empty = %v, want zero", zero)
+	}
+
+	want := time.Date(2026, 5, 5, 16, 4, 0, 123456789, time.UTC)
+	if err := s.SetLastTick(want); err != nil {
+		t.Fatalf("SetLastTick: %v", err)
+	}
+	got, err := s.GetLastTick()
+	if err != nil {
+		t.Fatalf("GetLastTick: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("GetLastTick = %v, want %v", got, want)
 	}
 }
 

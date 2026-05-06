@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -23,7 +24,7 @@ func New(path string) (*Store, error) {
 
 	// Ensure all buckets exist
 	err = db.Update(func(tx *bolt.Tx) error {
-		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig, BucketEvents, BucketWebhooks}
+		buckets := []string{BucketVMs, BucketImages, BucketTemplates, BucketSnapshots, BucketPortForwards, BucketConfig, BucketEvents, BucketWebhooks, BucketSchedules, BucketScheduleRuns, BucketScheduleMeta}
 		for _, b := range buckets {
 			if _, err := tx.CreateBucketIfNotExists([]byte(b)); err != nil {
 				return err
@@ -38,6 +39,8 @@ func New(path string) (*Store, error) {
 
 	return &Store{db: db}, nil
 }
+
+const defaultScheduleRunHistory = 200
 
 // Close closes the underlying database.
 func (s *Store) Close() error {
@@ -228,6 +231,153 @@ func (s *Store) ListWebhooks() ([]*types.Webhook, error) {
 // DeleteWebhook removes a webhook record.
 func (s *Store) DeleteWebhook(id string) error {
 	return s.delete(BucketWebhooks, id)
+}
+
+// --- Schedule operations ---
+
+// PutSchedule stores a schedule record.
+func (s *Store) PutSchedule(schedule *types.Schedule) error {
+	return s.put(BucketSchedules, schedule.ID, schedule)
+}
+
+// GetSchedule retrieves a schedule by ID.
+func (s *Store) GetSchedule(id string) (*types.Schedule, error) {
+	var schedule types.Schedule
+	if err := s.get(BucketSchedules, id, &schedule); err != nil {
+		return nil, err
+	}
+	return &schedule, nil
+}
+
+// ListSchedules returns all stored schedules.
+func (s *Store) ListSchedules() ([]*types.Schedule, error) {
+	var schedules []*types.Schedule
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketSchedules))
+		return b.ForEach(func(k, v []byte) error {
+			var schedule types.Schedule
+			if err := json.Unmarshal(v, &schedule); err != nil {
+				return err
+			}
+			schedules = append(schedules, &schedule)
+			return nil
+		})
+	})
+	return schedules, err
+}
+
+// DeleteSchedule removes a schedule record and all stored runs for it.
+func (s *Store) DeleteSchedule(id string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		if err := tx.Bucket([]byte(BucketSchedules)).Delete([]byte(id)); err != nil {
+			return err
+		}
+
+		runs := tx.Bucket([]byte(BucketScheduleRuns))
+		prefix := []byte(id + "/")
+		c := runs.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			if err := runs.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// AppendRun stores a schedule run and trims retained history for the schedule.
+func (s *Store) AppendRun(scheduleID string, run *types.ScheduleRun) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketScheduleRuns))
+
+		if run.ScheduleID == "" {
+			run.ScheduleID = scheduleID
+		}
+		if run.StartedAt.IsZero() {
+			run.StartedAt = time.Now().UTC()
+		}
+
+		key := scheduleRunKey(scheduleID, uint64(run.StartedAt.UTC().UnixNano()))
+		data, err := json.Marshal(run)
+		if err != nil {
+			return err
+		}
+		if err := b.Put(key, data); err != nil {
+			return err
+		}
+
+		prefix := []byte(scheduleID + "/")
+		var keys [][]byte
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			cp := make([]byte, len(k))
+			copy(cp, k)
+			keys = append(keys, cp)
+		}
+
+		excess := len(keys) - defaultScheduleRunHistory
+		for i := 0; i < excess; i++ {
+			if err := b.Delete(keys[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ListRuns returns the most recent stored runs for a schedule, newest first.
+func (s *Store) ListRuns(scheduleID string, limit int) ([]*types.ScheduleRun, error) {
+	var runs []*types.ScheduleRun
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketScheduleRuns))
+		prefix := []byte(scheduleID + "/")
+		c := b.Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			if !bytes.HasPrefix(k, prefix) {
+				if bytes.Compare(k, prefix) < 0 {
+					break
+				}
+				continue
+			}
+
+			var run types.ScheduleRun
+			if err := json.Unmarshal(v, &run); err != nil {
+				return err
+			}
+			runs = append(runs, &run)
+			if limit > 0 && len(runs) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	return runs, err
+}
+
+// GetLastTick returns the scheduler catch-up cursor.
+func (s *Store) GetLastTick() (time.Time, error) {
+	var tick time.Time
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketScheduleMeta))
+		v := b.Get([]byte("last_tick"))
+		if v == nil {
+			return nil
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, string(v))
+		if err != nil {
+			return err
+		}
+		tick = parsed
+		return nil
+	})
+	return tick, err
+}
+
+// SetLastTick updates the scheduler catch-up cursor.
+func (s *Store) SetLastTick(tick time.Time) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte(BucketScheduleMeta)).Put([]byte("last_tick"), []byte(tick.UTC().Format(time.RFC3339Nano)))
+	})
 }
 
 // --- generic helpers ---
@@ -587,4 +737,13 @@ func decodeSeqKey(key []byte) uint64 {
 	return uint64(key[0])<<56 | uint64(key[1])<<48 | uint64(key[2])<<40 |
 		uint64(key[3])<<32 | uint64(key[4])<<24 | uint64(key[5])<<16 |
 		uint64(key[6])<<8 | uint64(key[7])
+}
+
+func scheduleRunKey(scheduleID string, startedAt uint64) []byte {
+	key := make([]byte, len(scheduleID)+1+8)
+	copy(key, scheduleID)
+	key[len(scheduleID)] = '/'
+	seq := encodeSeqKey(startedAt)
+	copy(key[len(scheduleID)+1:], seq[:])
+	return key
 }
