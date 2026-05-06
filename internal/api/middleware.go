@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -130,7 +131,7 @@ func requestLogger(next http.Handler) http.Handler {
 			"remote", r.RemoteAddr,
 		}
 		if r.URL.RawQuery != "" {
-			fields = append(fields, "query", r.URL.RawQuery)
+			fields = append(fields, "query", redactSensitiveRawQuery(r.URL.RawQuery))
 		}
 		if bodySnippet != "" {
 			fields = append(fields, "body", bodySnippet)
@@ -145,6 +146,42 @@ func requestLogger(next http.Handler) http.Handler {
 			logger.Info("api", msg, fields...)
 		}
 	})
+}
+
+func redactSensitiveRawQuery(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	const redacted = "REDACTED"
+	sensitiveKeys := map[string]struct{}{
+		"ticket":  {},
+		"api_key": {},
+	}
+
+	parts := strings.Split(raw, "&")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		key := part
+		if idx := strings.Index(part, "="); idx >= 0 {
+			key = part[:idx]
+		}
+
+		decodedKey, err := url.QueryUnescape(key)
+		if err != nil {
+			decodedKey = key
+		}
+		if _, ok := sensitiveKeys[decodedKey]; !ok {
+			continue
+		}
+
+		parts[i] = key + "=" + redacted
+	}
+
+	return strings.Join(parts, "&")
 }
 
 // nopCloser pairs an io.Reader with a no-op Close method.
