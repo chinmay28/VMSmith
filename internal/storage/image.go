@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -141,6 +142,37 @@ func (m *Manager) DeleteTemplate(id string) error {
 		return err
 	}
 	return m.store.DeleteTemplate(id)
+}
+
+// UpdateTemplate applies a partial patch to an existing template. An empty
+// patch.Description leaves the description untouched; a nil patch.Tags leaves
+// the tag set untouched, while a non-nil empty slice clears tags. UpdatedAt
+// is bumped only when at least one field actually changed. The returned
+// `changed` bool tells the caller whether anything was modified, so handlers
+// can suppress side effects (e.g. event emission) on no-op patches.
+func (m *Manager) UpdateTemplate(id string, patch types.TemplateUpdateSpec) (*types.VMTemplate, bool, error) {
+	tpl, err := m.store.GetTemplate(id)
+	if err != nil {
+		return nil, false, err
+	}
+
+	changed := false
+	if trimmed := strings.TrimSpace(patch.Description); trimmed != "" && trimmed != tpl.Description {
+		tpl.Description = trimmed
+		changed = true
+	}
+	if patch.Tags != nil && !slices.Equal(patch.Tags, tpl.Tags) {
+		// Caller passed an explicit slice (including []) — replace.
+		tpl.Tags = append([]string(nil), patch.Tags...)
+		changed = true
+	}
+	if changed {
+		tpl.UpdatedAt = time.Now()
+		if err := m.store.PutTemplate(tpl); err != nil {
+			return nil, false, err
+		}
+	}
+	return tpl, changed, nil
 }
 
 // DeleteImage removes an image from disk and metadata.

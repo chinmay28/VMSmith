@@ -550,12 +550,33 @@ function CreateVMModal({ open, onClose, onCreated }) {
                     </select>
                   )}
                 </div>
-                <div className="flex items-end">
-                  {form.template_id ? (
-                    <p className="text-xs text-steel-500 pb-2" data-testid="template-hint">
-                      Template defaults are prefilled below, and anything you change here overrides them.
-                    </p>
-                  ) : <div />}
+                <div className="flex flex-col items-stretch justify-end pb-2">
+                  {form.template_id ? (() => {
+                    const selected = templates.find(t => t.id === form.template_id);
+                    const selectedTags = selected?.tags || [];
+                    const selectedDesc = selected?.description || '';
+                    return (
+                      <>
+                        <p className="text-xs text-steel-500" data-testid="template-hint">
+                          Template defaults are prefilled below, and anything you change here overrides them.
+                        </p>
+                        {selectedDesc && (
+                          <p className="mt-1 text-xs text-steel-400 italic" data-testid="template-description">
+                            {selectedDesc}
+                          </p>
+                        )}
+                        {selectedTags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1" data-testid="template-tag-chips">
+                            {selectedTags.map(t => (
+                              <span key={t} className="inline-flex items-center rounded bg-steel-700/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-steel-200">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })() : <div />}
                 </div>
               </div>
 

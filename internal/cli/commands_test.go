@@ -1331,6 +1331,111 @@ func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
 	}
 }
 
+func TestCLI_TemplateEdit_DescriptionAndTags(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI(
+		"template", "create", "edit-target",
+		"--image", "ubuntu-24.04",
+		"--tag", "first",
+	); err != nil {
+		t.Fatalf("template create: %v", err)
+	}
+
+	templates, err := s.ListTemplates()
+	if err != nil {
+		t.Fatalf("ListTemplates: %v", err)
+	}
+	id := templates[0].ID
+
+	out, err := runCLI(
+		"template", "edit", id,
+		"--description", "edited",
+		"--tag", "second",
+		"--tag", "third",
+	)
+	if err != nil {
+		t.Fatalf("template edit: %v", err)
+	}
+	if !strings.Contains(out, "updated") {
+		t.Fatalf("expected confirmation, got %q", out)
+	}
+
+	updated, err := s.GetTemplate(id)
+	if err != nil {
+		t.Fatalf("GetTemplate: %v", err)
+	}
+	if updated.Description != "edited" {
+		t.Errorf("Description = %q", updated.Description)
+	}
+	if got := strings.Join(updated.Tags, ","); got != "second,third" {
+		t.Errorf("Tags = %q, want second,third", got)
+	}
+}
+
+func TestCLI_TemplateEdit_NoFlagsErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("template", "create", "no-edit", "--image", "ubuntu"); err != nil {
+		t.Fatalf("template create: %v", err)
+	}
+
+	if _, err := runCLI("template", "edit", "tmpl-anything"); err == nil {
+		t.Error("expected error when no edit flags are provided")
+	}
+}
+
+func TestCLI_TemplateEdit_ClearTags(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI(
+		"template", "create", "clear-target",
+		"--image", "ubuntu",
+		"--tag", "drop1",
+		"--tag", "drop2",
+	); err != nil {
+		t.Fatalf("template create: %v", err)
+	}
+
+	tpls, _ := s.ListTemplates()
+	id := tpls[0].ID
+
+	if _, err := runCLI("template", "edit", id, "--clear-tags"); err != nil {
+		t.Fatalf("template edit --clear-tags: %v", err)
+	}
+	updated, _ := s.GetTemplate(id)
+	if len(updated.Tags) != 0 {
+		t.Errorf("Tags = %v, want []", updated.Tags)
+	}
+}
+
+func TestCLI_TemplateList_FilterByTag(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("template", "create", "alpha", "--image", "ubuntu", "--tag", "prod"); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := runCLI("template", "create", "beta", "--image", "ubuntu", "--tag", "dev"); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--tag", "PROD")
+	if err != nil {
+		t.Fatalf("template list --tag: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d: %q", len(rows), out)
+	}
+	if rows[1][1] != "alpha" {
+		t.Fatalf("filtered row name = %q, want alpha", rows[1][1])
+	}
+}
+
 func TestCLI_TemplateCreate_RejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name    string

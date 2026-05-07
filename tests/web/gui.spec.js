@@ -219,6 +219,30 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("input-vm-default-user")).toHaveValue("ubuntu");
   });
 
+  test("template selection surfaces description and tag chips", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-template").selectOption("tmpl-1");
+
+    // Description text from the seeded template (mock-server seeds
+    // "Small Ubuntu template" on tmpl-1) must render alongside the hint.
+    const desc = page.getByTestId("template-description");
+    await expect(desc).toBeVisible();
+    await expect(desc).toContainText("Small Ubuntu template");
+
+    const chips = page.getByTestId("template-tag-chips");
+    await expect(chips).toBeVisible();
+    await expect(chips).toContainText("starter");
+    await expect(chips).toContainText("ubuntu");
+
+    // Switching back to "No template" should remove both pieces.
+    await page.getByTestId("input-vm-template").selectOption("");
+    await expect(page.getByTestId("template-description")).toHaveCount(0);
+    await expect(page.getByTestId("template-tag-chips")).toHaveCount(0);
+  });
+
   test("cancel create modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

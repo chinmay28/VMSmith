@@ -1090,6 +1090,12 @@ export interface paths {
                 query?: {
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
+                    /**
+                     * @description Case-insensitive filter; only templates carrying this tag are
+                     *     returned. Filtering is applied before pagination, so
+                     *     X-Total-Count reflects the filtered population.
+                     */
+                    tag?: string;
                 };
                 header?: never;
                 path?: never;
@@ -1180,7 +1186,42 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a template's description and/or tags
+         * @description Only `description` and `tags` are mutable. PATCH semantics: an empty
+         *     `description` is treated as "no change"; a `null`/missing `tags`
+         *     field is treated as "no change", while an explicit empty array
+         *     (`"tags": []`) clears the tag set.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    templateID: components["parameters"]["TemplateID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description Template updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VMTemplate"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         trace?: never;
     };
     "/host/interfaces": {
@@ -1790,6 +1831,15 @@ export interface components {
             tags?: string[];
             default_user?: string;
             networks?: components["schemas"]["NetworkAttachment"][];
+        };
+        /**
+         * @description Partial update for an existing template. An empty `description`
+         *     means "no change"; a missing `tags` field means "no change",
+         *     while an explicit empty `tags` array clears the tag set.
+         */
+        UpdateTemplateRequest: {
+            description?: string;
+            tags?: string[] | null;
         };
         HostInterface: {
             name: string;

@@ -118,6 +118,7 @@ var templateListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
+		tagFilter, _ := cmd.Flags().GetString("tag")
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
@@ -134,6 +135,9 @@ var templateListCmd = &cobra.Command{
 		if err != nil {
 			logger.Error("cli", "template list failed", "error", err.Error())
 			return err
+		}
+		if tagFilter = strings.TrimSpace(tagFilter); tagFilter != "" {
+			templates = filterTemplatesByTag(templates, tagFilter)
 		}
 		sort.SliceStable(templates, func(i, j int) bool {
 			if !templates[i].CreatedAt.Equal(templates[j].CreatedAt) {
@@ -152,6 +156,96 @@ var templateListCmd = &cobra.Command{
 		w.Flush()
 		return nil
 	},
+}
+
+var templateEditCmd = &cobra.Command{
+	Use:   "edit <template-id>",
+	Short: "Edit description and tags on an existing template",
+	Long: `Edit the metadata fields (description, tags) on an existing VM template.
+
+Pass --description with a non-empty value to set/replace the description, or
+pass --tag (repeatable) to replace the tag set. Use --clear-tags to remove
+every tag in one shot. At least one flag must be provided.
+
+Image, resources, name, and network attachments are immutable post-create —
+delete and re-create the template to change them.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		descSet := cmd.Flags().Changed("description")
+		tagsSet := cmd.Flags().Changed("tag")
+		clearTags, _ := cmd.Flags().GetBool("clear-tags")
+
+		if !descSet && !tagsSet && !clearTags {
+			return fmt.Errorf("at least one of --description, --tag, or --clear-tags is required")
+		}
+		if tagsSet && clearTags {
+			return fmt.Errorf("--tag and --clear-tags are mutually exclusive")
+		}
+
+		patch := types.TemplateUpdateSpec{}
+		if descSet {
+			desc, _ := cmd.Flags().GetString("description")
+			patch.Description = strings.TrimSpace(desc)
+			if patch.Description == "" {
+				return fmt.Errorf("--description must be a non-empty value")
+			}
+			if len(patch.Description) > 1024 {
+				return fmt.Errorf("--description must be 1024 characters or fewer")
+			}
+		}
+		if tagsSet {
+			tags, _ := cmd.Flags().GetStringSlice("tag")
+			normalized, err := validatepkg.NormalizeTags(tags)
+			if err != nil {
+				return err
+			}
+			if normalized == nil {
+				normalized = []string{}
+			}
+			patch.Tags = normalized
+		} else if clearTags {
+			patch.Tags = []string{}
+		}
+
+		mgr, cleanup, err := newStorageManager()
+		if err != nil {
+			logger.Error("cli", "template edit: failed to init storage manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		tpl, _, err := mgr.UpdateTemplate(id, patch)
+		if err != nil {
+			logger.Error("cli", "template edit failed", "id", id, "error", err.Error())
+			return err
+		}
+
+		fmt.Printf("Template %s updated\n", tpl.ID)
+		fmt.Printf("  Name:  %s\n", tpl.Name)
+		if tpl.Description != "" {
+			fmt.Printf("  Desc:  %s\n", tpl.Description)
+		}
+		if len(tpl.Tags) > 0 {
+			fmt.Printf("  Tags:  %s\n", strings.Join(tpl.Tags, ", "))
+		} else {
+			fmt.Printf("  Tags:  (none)\n")
+		}
+		return nil
+	},
+}
+
+func filterTemplatesByTag(templates []*types.VMTemplate, tag string) []*types.VMTemplate {
+	out := make([]*types.VMTemplate, 0, len(templates))
+	for _, tpl := range templates {
+		for _, t := range tpl.Tags {
+			if strings.EqualFold(t, tag) {
+				out = append(out, tpl)
+				break
+			}
+		}
+	}
+	return out
 }
 
 var templateDeleteCmd = &cobra.Command{
@@ -192,8 +286,14 @@ func init() {
 
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
+	templateListCmd.Flags().String("tag", "", "filter templates by tag (case-insensitive)")
+
+	templateEditCmd.Flags().String("description", "", "new template description (omit to keep current)")
+	templateEditCmd.Flags().StringSlice("tag", nil, "replace template tags (repeatable; omit to keep current)")
+	templateEditCmd.Flags().Bool("clear-tags", false, "remove every tag from the template")
 
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateCreateCmd)
+	templateCmd.AddCommand(templateEditCmd)
 	templateCmd.AddCommand(templateDeleteCmd)
 }

@@ -81,12 +81,22 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListTemplates handles GET /api/v1/templates.
+//
+// Optional query params:
+//   - tag=<value>   case-insensitive filter; only templates carrying this
+//     tag are returned. Filtering happens before pagination so the
+//     X-Total-Count header reflects the filtered population.
+//   - page / per_page (see parsePagination)
 func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := s.storageMgr.ListTemplates()
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
+	}
+
+	if tagFilter := strings.TrimSpace(r.URL.Query().Get("tag")); tagFilter != "" {
+		templates = filterTemplatesByTag(templates, tagFilter)
 	}
 
 	total := len(templates)
@@ -98,6 +108,72 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, templates)
+}
+
+// UpdateTemplate handles PATCH /api/v1/templates/{templateID}. Description
+// and Tags are the only mutable fields — image, resources, name, and
+// network attachments are immutable post-create. See
+// types.TemplateUpdateSpec for PATCH semantics.
+func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "templateID")
+
+	var patch types.TemplateUpdateSpec
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+
+	if err := validateTemplateDescription(patch.Description); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+	if patch.Tags != nil {
+		tags, err := normalizeTags(patch.Tags)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+		// normalizeTags returns nil for an all-blank input slice; preserve
+		// the caller's "explicitly clear" intent so the manager still
+		// replaces the current tag set with [].
+		if tags == nil {
+			tags = []string{}
+		}
+		patch.Tags = tags
+	}
+
+	tpl, changed, err := s.storageMgr.UpdateTemplate(id, patch)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusNotFound), apiErr)
+		return
+	}
+
+	if changed {
+		s.publishAppEvent("template.updated", "", "template "+tpl.Name+" updated", map[string]string{
+			"template_id":   tpl.ID,
+			"template_name": tpl.Name,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, tpl)
+}
+
+func filterTemplatesByTag(templates []*types.VMTemplate, tag string) []*types.VMTemplate {
+	out := make([]*types.VMTemplate, 0, len(templates))
+	for _, tpl := range templates {
+		for _, t := range tpl.Tags {
+			if strings.EqualFold(t, tag) {
+				out = append(out, tpl)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // DeleteTemplate handles DELETE /api/v1/templates/{templateID}.
