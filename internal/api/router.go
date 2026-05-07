@@ -198,6 +198,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				r.Route("/snapshots", func(r chi.Router) {
 					r.Post("/", s.withRequestBodyLimit(s.CreateSnapshot))
 					r.Get("/", s.ListSnapshots)
+					r.Post("/bulk_delete", s.withRequestBodyLimit(s.BulkDeleteSnapshots))
 					r.Post("/{snapName}/restore", s.RestoreSnapshot)
 					r.Delete("/{snapName}", s.DeleteSnapshot)
 				})

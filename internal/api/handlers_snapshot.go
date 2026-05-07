@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -11,6 +12,28 @@ import (
 type createSnapshotRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// bulkDeleteSnapshotsRequest selects snapshots to delete in a single batch.
+//
+// Exactly one of Names or Prefix must be set.  When Prefix is set, every
+// snapshot returned by ListSnapshots whose Name starts with that prefix is
+// targeted; this is the cheap way to clean up a series of automated snapshots
+// (e.g. all "auto-nightly-*" snapshots) without enumerating them client-side.
+type bulkDeleteSnapshotsRequest struct {
+	Names  []string `json:"names,omitempty"`
+	Prefix string   `json:"prefix,omitempty"`
+}
+
+type bulkDeleteSnapshotResult struct {
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkDeleteSnapshotsResponse struct {
+	Results []bulkDeleteSnapshotResult `json:"results"`
 }
 
 // CreateSnapshot handles POST /api/v1/vms/{vmID}/snapshots
@@ -104,4 +127,81 @@ func (s *Server) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// BulkDeleteSnapshots handles POST /api/v1/vms/{vmID}/snapshots/bulk_delete.
+//
+// Accepts either an explicit list of snapshot names ("names") or a prefix
+// match against the VM's existing snapshots ("prefix").  Returns a per-target
+// result list so partial failures (one snapshot missing, the rest succeeded)
+// surface in a single response — mirroring the bulk VM action shape.
+func (s *Server) BulkDeleteSnapshots(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
+
+	var req bulkDeleteSnapshotsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	prefix := strings.TrimSpace(req.Prefix)
+	cleanedNames := make([]string, 0, len(req.Names))
+	for _, n := range req.Names {
+		if t := strings.TrimSpace(n); t != "" {
+			cleanedNames = append(cleanedNames, t)
+		}
+	}
+
+	if prefix == "" && len(cleanedNames) == 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"exactly one of names or prefix must be provided"))
+		return
+	}
+	if prefix != "" && len(cleanedNames) > 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"names and prefix are mutually exclusive"))
+		return
+	}
+
+	targets := cleanedNames
+	if prefix != "" {
+		snaps, err := s.vmManager.ListSnapshots(r.Context(), vmID)
+		if err != nil {
+			apiErr := sanitizeManagerError(err)
+			writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+			return
+		}
+		for _, snap := range snaps {
+			if strings.HasPrefix(snap.Name, prefix) {
+				targets = append(targets, snap.Name)
+			}
+		}
+	}
+
+	results := make([]bulkDeleteSnapshotResult, 0, len(targets))
+	for _, name := range targets {
+		if err := s.vmManager.DeleteSnapshot(r.Context(), vmID, name); err != nil {
+			err = sanitizeManagerError(err)
+			result := bulkDeleteSnapshotResult{Name: name, Success: false}
+			if apiErr, ok := err.(*types.APIError); ok {
+				result.Code = apiErr.Code
+				result.Message = apiErr.Message
+			} else {
+				result.Message = err.Error()
+			}
+			results = append(results, result)
+			continue
+		}
+		results = append(results, bulkDeleteSnapshotResult{Name: name, Success: true})
+		s.publishAppEvent("snapshot.deleted", vmID, "snapshot "+name+" deleted", map[string]string{
+			"snapshot": name,
+			"bulk":     "true",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, bulkDeleteSnapshotsResponse{Results: results})
 }

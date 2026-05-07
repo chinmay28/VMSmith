@@ -97,6 +97,13 @@ export const snapshots = {
     unwrap(apiClient.POST('/vms/{vmID}/snapshots/{snapName}/restore', { params: { path: { vmID: vmId, snapName } } })),
   delete: (vmId: string, snapName: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/snapshots/{snapName}', { params: { path: { vmID: vmId, snapName } } })),
+  // bulkDelete deletes multiple snapshots in a single round-trip. Pass either
+  // {names: [...]} for explicit IDs or {prefix: "..."} for a prefix sweep.
+  bulkDelete: (vmId: string, body: { names?: string[]; prefix?: string }) =>
+    unwrap(apiClient.POST('/vms/{vmID}/snapshots/bulk_delete', {
+      params: { path: { vmID: vmId } },
+      body,
+    })),
 };
 
 function uploadImageWithProgress(file: File, name: string, options: { description?: string; tags?: string[] } = {}, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) {

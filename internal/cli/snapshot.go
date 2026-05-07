@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -120,12 +122,28 @@ var snapListCmd = &cobra.Command{
 
 var snapDeleteCmd = &cobra.Command{
 	Use:   "delete <vm-id>",
-	Short: "Delete a snapshot",
-	Args:  cobra.ExactArgs(1),
+	Short: "Delete a snapshot (or many via --prefix)",
+	Long: `Delete a snapshot.
+
+Single delete:    vmsmith snapshot delete <vm-id> --name <snap>
+Bulk by prefix:   vmsmith snapshot delete <vm-id> --prefix auto-nightly-
+Exactly one of --name or --prefix is required.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
 		name, _ := cmd.Flags().GetString("name")
-		logger.Info("cli", "snapshot delete", "vm_id", vmID, "name", name)
+		prefix, _ := cmd.Flags().GetString("prefix")
+		name = strings.TrimSpace(name)
+		prefix = strings.TrimSpace(prefix)
+
+		if name == "" && prefix == "" {
+			return fmt.Errorf("exactly one of --name or --prefix is required")
+		}
+		if name != "" && prefix != "" {
+			return fmt.Errorf("--name and --prefix are mutually exclusive")
+		}
+
+		logger.Info("cli", "snapshot delete", "vm_id", vmID, "name", name, "prefix", prefix)
 
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -134,14 +152,61 @@ var snapDeleteCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		if err := mgr.DeleteSnapshot(context.Background(), vmID, name); err != nil {
-			logger.Error("cli", "snapshot delete failed", "vm_id", vmID, "name", name, "error", err.Error())
-			return err
+		if name != "" {
+			if err := mgr.DeleteSnapshot(context.Background(), vmID, name); err != nil {
+				logger.Error("cli", "snapshot delete failed", "vm_id", vmID, "name", name, "error", err.Error())
+				return err
+			}
+			logger.Info("cli", "snapshot deleted", "vm_id", vmID, "name", name)
+			fmt.Printf("Snapshot %s deleted\n", name)
+			return nil
 		}
-		logger.Info("cli", "snapshot deleted", "vm_id", vmID, "name", name)
-		fmt.Printf("Snapshot %s deleted\n", name)
-		return nil
+
+		// Prefix path: enumerate matches first, then delete one by one.
+		// We accept partial failures (one missing snapshot doesn't abort the
+		// rest) and print a per-snapshot status — same shape as the API
+		// bulk_delete endpoint.
+		return runSnapshotPrefixDelete(cmd.Context(), mgr, vmID, prefix)
 	},
+}
+
+func runSnapshotPrefixDelete(ctx context.Context, mgr vm.Manager, vmID, prefix string) error {
+	snaps, err := mgr.ListSnapshots(ctx, vmID)
+	if err != nil {
+		logger.Error("cli", "snapshot delete: list failed", "vm_id", vmID, "error", err.Error())
+		return err
+	}
+	matches := make([]string, 0)
+	for _, s := range snaps {
+		if strings.HasPrefix(s.Name, prefix) {
+			matches = append(matches, s.Name)
+		}
+	}
+	if len(matches) == 0 {
+		fmt.Printf("No snapshots match prefix %q\n", prefix)
+		return nil
+	}
+
+	successes := 0
+	failures := 0
+	for _, n := range matches {
+		if err := mgr.DeleteSnapshot(ctx, vmID, n); err != nil {
+			fmt.Printf("FAIL  %s: %s\n", n, err.Error())
+			failures++
+			continue
+		}
+		fmt.Printf("OK    %s\n", n)
+		successes++
+	}
+	logger.Info("cli", "snapshot bulk delete complete",
+		"vm_id", vmID, "prefix", prefix,
+		"matched", fmt.Sprintf("%d", len(matches)),
+		"success", fmt.Sprintf("%d", successes),
+		"failed", fmt.Sprintf("%d", failures))
+	if failures > 0 {
+		return fmt.Errorf("%d of %d snapshots failed to delete", failures, len(matches))
+	}
+	return nil
 }
 
 func init() {
@@ -152,8 +217,8 @@ func init() {
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")
 
-	snapDeleteCmd.Flags().String("name", "", "snapshot name to delete (required)")
-	snapDeleteCmd.MarkFlagRequired("name")
+	snapDeleteCmd.Flags().String("name", "", "single snapshot name to delete (mutually exclusive with --prefix)")
+	snapDeleteCmd.Flags().String("prefix", "", "delete every snapshot whose name starts with this prefix (mutually exclusive with --name)")
 
 	snapshotCmd.AddCommand(snapCreateCmd)
 	snapshotCmd.AddCommand(snapRestoreCmd)

@@ -417,6 +417,35 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/snapshots/bulk_delete:
+    post:
+      tags: [Snapshots]
+      summary: Delete multiple snapshots in a single request
+      description: |
+        Delete a batch of snapshots either by explicit name list or by prefix
+        match. Returns a per-target result so partial failures are visible.
+        Exactly one of `names` or `prefix` must be provided.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDeleteSnapshotsRequest'
+      responses:
+        '200':
+          description: Per-snapshot delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeleteSnapshotsResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/ports:
     get:
       tags: [Port Forwards]
@@ -1183,6 +1212,41 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
+    BulkDeleteSnapshotsRequest:
+      type: object
+      description: |
+        Selector for the snapshots to delete. Exactly one of `names` or `prefix`
+        must be set; the request is rejected with HTTP 400 `invalid_bulk_request`
+        when both or neither are present.
+      properties:
+        names:
+          type: array
+          description: Explicit list of snapshot names to delete.
+          items:
+            type: string
+        prefix:
+          type: string
+          description: Match every snapshot whose name starts with this prefix.
+    BulkDeleteSnapshotsResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDeleteSnapshotResult'
+    BulkDeleteSnapshotResult:
+      type: object
+      required: [name, success]
+      properties:
+        name:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
     TopVMItem:
       type: object
       required: [vm_id, name, state, value]
