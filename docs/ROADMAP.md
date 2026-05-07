@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-05-04
+> **Last updated:** 2026-05-06
 > **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, webhook settings UX polish, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -631,7 +631,7 @@ v1 actions:
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 5.2.1 | Define `pkg/types/schedule.go` (`Schedule`) and `pkg/types/schedule_run.go` (`ScheduleRun`) per the schemas above | S | ✅ Done — added schedule + run model types (including action/catch-up/status constants) in `pkg/types/schedule.go` and `pkg/types/schedule_run.go` |
-| 5.2.2 | Add `schedules`, `schedule_runs`, `schedule_meta` bbolt buckets; `Store.{Put,Get,List,Delete}Schedule`, `Store.AppendRun(scheduleID, run)` (with retention trim in the same tx), `Store.ListRuns(scheduleID, limit)`, `Store.GetLastTick`/`SetLastTick` | M | `schedule_runs` keys are `{schedule_id}/{ts_be}` for fast per-schedule scans |
+| 5.2.2 | Add `schedules`, `schedule_runs`, `schedule_meta` bbolt buckets; `Store.{Put,Get,List,Delete}Schedule`, `Store.AppendRun(scheduleID, run)` (with retention trim in the same tx), `Store.ListRuns(scheduleID, limit)`, `Store.GetLastTick`/`SetLastTick` | M | ✅ Done — store buckets plus schedule CRUD/run-history helpers and last-tick persistence are implemented in `internal/store/bolt.go`, with retention trimming and coverage in `internal/store/bolt_test.go`; run keys use `{schedule_id}/{ts_be}` for fast per-schedule scans |
 | 5.2.3 | Create `internal/scheduler/` package: per-timezone `cron.Cron` instances, schedule registration/deregistration on CRUD, bounded worker pool, action registry. Unit tests for: spec parsing, timezone routing, max-concurrent skip, queue overflow | L | Use `robfig/cron/v3` with `WithSeconds` |
 | 5.2.4 | Implement catch-up logic on daemon startup: compare `last_tick` to `now()`, fire each schedule per its `catch_up_policy`. Tick the meta key every 60s thereafter | M | Cap `run_all` replay at 100 missed fires per schedule with a warning log to prevent storms |
 | 5.2.5 | Action registry with `snapshot`, `start`, `stop`, `restart` handlers. Snapshot honors `RetentionCount` and uses a name template scoped to the schedule. Per-action timeout + retry with backoff | M | Reject actions on non-existent/deleted VMs with `skip_reason: "vm_not_found"` |
