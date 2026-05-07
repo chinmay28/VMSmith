@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -907,23 +908,12 @@ func parseSnapshotXML(raw string) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	var created time.Time
-	if doc.CreationTime != "" {
-		if secs, err := parseUnixSeconds(doc.CreationTime); err == nil {
+	if trimmed := strings.TrimSpace(doc.CreationTime); trimmed != "" {
+		if secs, err := strconv.ParseInt(trimmed, 10, 64); err == nil && secs >= 0 {
 			created = time.Unix(secs, 0).UTC()
 		}
 	}
 	return strings.TrimSpace(doc.Description), created, nil
-}
-
-func parseUnixSeconds(s string) (int64, error) {
-	var n int64
-	for _, ch := range strings.TrimSpace(s) {
-		if ch < '0' || ch > '9' {
-			return 0, fmt.Errorf("non-numeric creationTime: %q", s)
-		}
-		n = n*10 + int64(ch-'0')
-	}
-	return n, nil
 }
 
 // DeleteSnapshot removes a snapshot.

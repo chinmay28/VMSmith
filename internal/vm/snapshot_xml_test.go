@@ -71,37 +71,6 @@ func TestParseSnapshotXML_NonNumericCreationTime(t *testing.T) {
 	}
 }
 
-func TestParseUnixSeconds(t *testing.T) {
-	cases := []struct {
-		in      string
-		want    int64
-		wantErr bool
-	}{
-		{"0", 0, false},
-		{"1", 1, false},
-		{"1714694400", 1714694400, false},
-		{" 1714694400 ", 1714694400, false},
-		{"abc", 0, true},
-		{"12a3", 0, true},
-	}
-	for _, c := range cases {
-		got, err := parseUnixSeconds(c.in)
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("parseUnixSeconds(%q): expected error", c.in)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("parseUnixSeconds(%q): unexpected error %v", c.in, err)
-			continue
-		}
-		if got != c.want {
-			t.Errorf("parseUnixSeconds(%q) = %d, want %d", c.in, got, c.want)
-		}
-	}
-}
-
 func TestSnapshotXMLDoc_RoundTrip(t *testing.T) {
 	doc := snapshotXMLDoc{Name: "snap-1", Description: "rolled back to here"}
 	buf, err := xml.Marshal(doc)
