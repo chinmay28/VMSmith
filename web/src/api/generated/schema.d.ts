@@ -845,6 +845,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/console/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a single-use console ticket
+         * @description Returns a short-TTL one-time token the caller passes to the console
+         *     websocket endpoint (forthcoming).  The VM must be in the `running`
+         *     state.  The endpoint returns 503 `service_unavailable` when the
+         *     daemon was started without a console subsystem (e.g. on a host where
+         *     the console feature is disabled in config).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ticket issued */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsoleTicket"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images": {
         parameters: {
             query?: never;
@@ -1777,6 +1826,14 @@ export interface components {
             protocol: components["schemas"]["Protocol"];
             /** @description Optional free-form label for the rule. */
             description?: string;
+        };
+        ConsoleTicket: {
+            /** @description Single-use opaque token; pass to the websocket endpoint. */
+            ticket: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description Path the client should dial after upgrading to a websocket. */
+            websocket_url: string;
         };
         Image: {
             id: string;

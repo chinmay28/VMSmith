@@ -442,6 +442,7 @@ POST   /templates                      Create template (CreateTemplateRequest bo
 PATCH  /templates/{id}                 Update template description / tags (TemplateUpdateSpec: empty `description` = no change; nil `tags` = no change; explicit `[]` clears the tag set; image, resources, name, networks immutable post-create)
 DELETE /templates/{id}                 Delete template
 GET    /host/interfaces                List host network interfaces
+POST   /vms/{id}/console/ticket        Issue a single-use console ticket. Returns `{ticket, expires_at, websocket_url}`. 404 on unknown VM, 409 `vm_not_running` when VM is not running, 503 `service_unavailable` when the console subsystem is disabled.
 GET    /logs                           Query log entries (level, limit, since, source)
 GET    /webhooks                       List registered webhooks (secrets redacted)
 POST   /webhooks                       Register webhook (URL + HMAC secret + optional event_types filters)

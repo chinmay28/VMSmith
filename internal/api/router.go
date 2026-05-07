@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	apidocs "github.com/vmsmith/vmsmith/docs"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/console"
 	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
@@ -51,6 +52,7 @@ type Server struct {
 	webhookStore         WebhookStore
 	webhookManager       WebhookRegistrar
 	webhookTester        WebhookTester
+	consoleStore         *console.Store
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -218,6 +220,10 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 					r.Post("/", s.withRequestBodyLimit(s.AddPort))
 					r.Delete("/{portID}", s.RemovePort)
 				})
+
+				// Console ticket issuance — single endpoint here; the
+				// websocket itself is registered separately by 5.1.4.
+				r.Post("/console/ticket", s.IssueConsoleTicket)
 			})
 		})
 
