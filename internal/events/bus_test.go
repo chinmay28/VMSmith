@@ -229,6 +229,131 @@ func TestNewSystemEvent_NoAttrs(t *testing.T) {
 	}
 }
 
+// TestBusSlowSubscriberIsDropped guards the invariant that a subscriber whose
+// channel is full does not block the bus.  We fill the buffered subscriber
+// channel without ever reading from it, then publish more events than the
+// subscriber buffer can hold and confirm the bus continued processing — the
+// store reflects every persisted event even though the subscriber received
+// at most subscriberBufSize.
+func TestBusSlowSubscriberIsDropped(t *testing.T) {
+	store := &mockStore{}
+	bus := New(store)
+	bus.Start()
+	defer bus.Stop()
+
+	// Slow subscriber — never reads from ch.
+	_, cancel := bus.Subscribe("slow")
+	defer cancel()
+
+	// Fast subscriber — reads everything to confirm the bus still fans out
+	// to healthy subscribers while a slow one is being dropped.
+	fastCh, cancelFast := bus.Subscribe("fast")
+	defer cancelFast()
+
+	const total = subscriberBufSize + 32
+	for i := range total {
+		bus.Publish(&types.Event{Type: "tick", Message: fmt.Sprintf("%d", i)})
+	}
+
+	deadline := time.After(2 * time.Second)
+	for received := 0; received < total; {
+		select {
+		case <-fastCh:
+			received++
+		case <-deadline:
+			t.Fatalf("fast subscriber received %d/%d before timeout", received, total)
+		}
+	}
+
+	stored := store.all()
+	if len(stored) != total {
+		t.Fatalf("expected %d persisted events, got %d", total, len(stored))
+	}
+}
+
+// TestBusPersistenceErrorStillFansOut covers the branch in process() where
+// store.AppendEvent fails: the bus must still deliver to subscribers (with a
+// transient ID prefix) instead of silently dropping the event.
+func TestBusPersistenceErrorStillFansOut(t *testing.T) {
+	store := &mockStore{Err: fmt.Errorf("disk full")}
+	bus := New(store)
+	bus.Start()
+	defer bus.Stop()
+
+	ch, cancel := bus.Subscribe("test")
+	defer cancel()
+
+	bus.Publish(&types.Event{Type: "vm.started"})
+
+	select {
+	case evt := <-ch:
+		if evt.Type != "vm.started" {
+			t.Fatalf("type = %q, want vm.started", evt.Type)
+		}
+		if evt.ID == "" {
+			t.Error("ID should be assigned even when persistence fails")
+		}
+		// IDs from a failed persist are tagged so consumers can tell them apart.
+		if len(evt.ID) < len("transient-") || evt.ID[:len("transient-")] != "transient-" {
+			t.Errorf("ID = %q, want transient-* prefix on persistence failure", evt.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout — subscriber should still receive event when persistence fails")
+	}
+}
+
+// TestBusPublishOverflowDropsWithoutBlocking verifies that a flood larger than
+// the publish channel's buffer cannot deadlock Publish (which is invoked from
+// the libvirt event loop and must never block).  We use a store that blocks
+// AppendEvent until released, fill the publish buffer, then issue many more
+// Publish calls and assert each returns within a short timeout.
+func TestBusPublishOverflowDropsWithoutBlocking(t *testing.T) {
+	gate := make(chan struct{})
+	released := make(chan struct{})
+	store := &blockingStore{gate: gate, released: released}
+	bus := New(store)
+	bus.Start()
+	defer func() {
+		close(gate) // unblock the run goroutine before Stop drains.
+		bus.Stop()
+	}()
+
+	// First publish hits the run loop and blocks on AppendEvent (waiting on
+	// gate).  Subsequent publishes accumulate in publishCh until it's full.
+	for range publishBufSize + 16 {
+		done := make(chan struct{})
+		go func() {
+			bus.Publish(&types.Event{Type: "flood"})
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("Publish blocked when buffer was full — must drop instead")
+		}
+	}
+}
+
+// blockingStore.AppendEvent waits on gate so the bus's run goroutine stalls
+// long enough for publishCh to fill.
+type blockingStore struct {
+	mu       sync.Mutex
+	gate     chan struct{}
+	released chan struct{}
+	seq      uint64
+	events   []*types.Event
+}
+
+func (b *blockingStore) AppendEvent(evt *types.Event) (uint64, error) {
+	<-b.gate
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.seq++
+	cp := *evt
+	b.events = append(b.events, &cp)
+	return b.seq, nil
+}
+
 func TestBusOccurredAtSet(t *testing.T) {
 	store := &mockStore{}
 	bus := New(store)
