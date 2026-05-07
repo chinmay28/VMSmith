@@ -373,6 +373,43 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-before-deploy")).not.toBeVisible();
   });
 
+  test("bulk delete selected snapshots", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Three seeded snapshots: before-deploy + two auto-* dailies
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // Tick the two automatic ones
+    await page.getByTestId("snap-checkbox-auto-2026-05-06").check();
+    await page.getByTestId("snap-checkbox-auto-2026-05-07").check();
+
+    await page.getByTestId("btn-bulk-delete-snaps").click();
+
+    // Both should disappear; manual one is preserved.
+    await expect(page.getByTestId("snap-auto-2026-05-06")).not.toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).not.toBeVisible();
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+
+    // Result summary shows
+    await expect(page.getByTestId("snap-bulk-result")).toContainText("2 of 2 succeeded");
+  });
+
+  test("bulk delete via select-all snapshots", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("snap-select-all").check();
+    await page.getByTestId("btn-bulk-delete-snaps").click();
+
+    // All three seeded snapshots gone.
+    await expect(page.getByTestId("snap-before-deploy")).not.toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).not.toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).not.toBeVisible();
+  });
+
   test("add port forward with description and see it inline", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

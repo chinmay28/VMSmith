@@ -2099,6 +2099,173 @@ func TestDeleteSnapshot_SnapshotNotFound(t *testing.T) {
 }
 
 // ============================================================
+// Snapshot bulk-delete tests
+// ============================================================
+
+func decodeBulkSnapshotResponse(t *testing.T, resp *http.Response) bulkDeleteSnapshotsResponse {
+	t.Helper()
+	var out bulkDeleteSnapshotsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode bulk response: %v", err)
+	}
+	return out
+}
+
+func TestBulkDeleteSnapshots_ByNames(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bd"})
+	for _, n := range []string{"keep", "auto-1", "auto-2", "auto-3"} {
+		mockMgr.CreateSnapshot(nil, "vm-bd", types.SnapshotSpec{Name: n})
+	}
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{Names: []string{"auto-1", "auto-3"}})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-bd/snapshots/bulk_delete", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST bulk_delete: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkSnapshotResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	for _, r := range out.Results {
+		if !r.Success {
+			t.Errorf("expected success for %q, got code=%q msg=%q", r.Name, r.Code, r.Message)
+		}
+	}
+
+	snaps, _ := mockMgr.ListSnapshots(nil, "vm-bd")
+	names := make(map[string]bool, len(snaps))
+	for _, s := range snaps {
+		names[s.Name] = true
+	}
+	if !names["keep"] || !names["auto-2"] {
+		t.Errorf("survivors = %v, want both keep and auto-2", names)
+	}
+	if names["auto-1"] || names["auto-3"] {
+		t.Errorf("expected auto-1 and auto-3 to be deleted, survivors = %v", names)
+	}
+}
+
+func TestBulkDeleteSnapshots_ByPrefix(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bp"})
+	for _, n := range []string{"manual-rollback", "auto-nightly-1", "auto-nightly-2", "auto-weekly-1"} {
+		mockMgr.CreateSnapshot(nil, "vm-bp", types.SnapshotSpec{Name: n})
+	}
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{Prefix: "auto-nightly-"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-bp/snapshots/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkSnapshotResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+
+	snaps, _ := mockMgr.ListSnapshots(nil, "vm-bp")
+	names := make([]string, 0, len(snaps))
+	for _, s := range snaps {
+		names = append(names, s.Name)
+	}
+	wantSurvivors := map[string]bool{"manual-rollback": true, "auto-weekly-1": true}
+	for _, n := range names {
+		if !wantSurvivors[n] {
+			t.Errorf("unexpected survivor: %s", n)
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("survivors = %d, want 2 (got %v)", len(names), names)
+	}
+}
+
+func TestBulkDeleteSnapshots_PartialFailure(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-pf"})
+	mockMgr.CreateSnapshot(nil, "vm-pf", types.SnapshotSpec{Name: "exists-1"})
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{Names: []string{"exists-1", "missing"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-pf/snapshots/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkSnapshotResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	gotByName := map[string]bulkDeleteSnapshotResult{}
+	for _, r := range out.Results {
+		gotByName[r.Name] = r
+	}
+	if !gotByName["exists-1"].Success {
+		t.Errorf("expected exists-1 to succeed, got %+v", gotByName["exists-1"])
+	}
+	if gotByName["missing"].Success {
+		t.Errorf("expected missing to fail")
+	}
+	if gotByName["missing"].Code != "resource_not_found" {
+		t.Errorf("missing.Code = %q, want resource_not_found", gotByName["missing"].Code)
+	}
+}
+
+func TestBulkDeleteSnapshots_EmptyRequestRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-empty"})
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-empty/snapshots/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteSnapshots_BothNamesAndPrefixRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-both"})
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{Names: []string{"a"}, Prefix: "b-"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-both/snapshots/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteSnapshots_PrefixNoMatchesEmptyResponse(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-nm"})
+	mockMgr.CreateSnapshot(nil, "vm-nm", types.SnapshotSpec{Name: "manual-1"})
+
+	body := jsonBody(t, bulkDeleteSnapshotsRequest{Prefix: "auto-"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-nm/snapshots/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkSnapshotResponse(t, resp)
+	if len(out.Results) != 0 {
+		t.Errorf("results = %d, want 0", len(out.Results))
+	}
+	snaps, _ := mockMgr.ListSnapshots(nil, "vm-nm")
+	if len(snaps) != 1 {
+		t.Errorf("survivors = %d, want 1 (manual-1 untouched)", len(snaps))
+	}
+}
+
+// ============================================================
 // Image handler tests
 // ============================================================
 

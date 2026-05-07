@@ -425,6 +425,7 @@ POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace befo
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
 GET    /vms/{id}/snapshots             List snapshots (each entry carries `name`, optional `description`, and a libvirt-parsed `created_at`)
 POST   /vms/{id}/snapshots             Create snapshot (body: `{ "name": "...", "description": "..." }` — description optional, ≤1024 chars; persisted via libvirt's `<description>` element so it round-trips through `dumpxml`)
+POST   /vms/{id}/snapshots/bulk_delete Delete multiple snapshots in a single request. Body: `{"names": [...]}` or `{"prefix": "..."}` (exactly one). Returns `{"results": [{name, success, code?, message?}]}`. Emits one `snapshot.deleted` event per successful target with `bulk=true`. CLI: `vmsmith snapshot delete <vm-id> --prefix <s>`.
 POST   /vms/{id}/snapshots/{name}/restore  Restore snapshot
 DELETE /vms/{id}/snapshots/{name}      Delete snapshot
 GET    /images                         List images (`?page=<n>&per_page=<n>`; `?tag=<tag>` filters case-insensitively; returns `X-Total-Count`); CLI also supports local `--limit` / `--offset` and `--tag` filters on `vmsmith image list`

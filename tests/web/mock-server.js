@@ -28,6 +28,8 @@ function seed() {
       description: "checkpoint before May deploy",
       created_at: new Date().toISOString(),
     },
+    { id: `${vm1.id}/auto-2026-05-06`, vm_id: vm1.id, name: "auto-2026-05-06", created_at: new Date().toISOString() },
+    { id: `${vm1.id}/auto-2026-05-07`, vm_id: vm1.id, name: "auto-2026-05-07", created_at: new Date().toISOString() },
   ]);
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
@@ -332,6 +334,27 @@ const server = http.createServer(async (req, res) => {
     const list = snapshots.get(vmId) || [];
     list.push(snap); snapshots.set(vmId, list);
     return json(res, 201, snap);
+  }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/bulk_delete$/)) && method === "POST") {
+    const vmId = m[1];
+    const body = await parseBody(req);
+    const names = Array.isArray(body.names) ? body.names.filter(n => typeof n === "string" && n.trim() !== "") : [];
+    const prefix = typeof body.prefix === "string" ? body.prefix.trim() : "";
+    if (!names.length && !prefix) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "exactly one of names or prefix must be provided" });
+    }
+    if (names.length && prefix) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "names and prefix are mutually exclusive" });
+    }
+    const existing = snapshots.get(vmId) || [];
+    const targets = prefix ? existing.filter(s => s.name.startsWith(prefix)).map(s => s.name) : names;
+    const remaining = existing.filter(s => !targets.includes(s.name));
+    snapshots.set(vmId, remaining);
+    const existingNames = new Set(existing.map(s => s.name));
+    const results = targets.map(n => existingNames.has(n)
+      ? { name: n, success: true }
+      : { name: n, success: false, code: "resource_not_found", message: "snapshot not found" });
+    return json(res, 200, { results });
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)\/restore$/)) && method === "POST") {
     return json(res, 200, { status: "restored" });

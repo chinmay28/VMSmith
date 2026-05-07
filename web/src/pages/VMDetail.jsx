@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
@@ -501,41 +501,121 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
 function SnapshotList({ vmId, snapList, refreshSnaps }) {
   const restoreMut = useMutation((name) => snapshots.restore(vmId, name));
   const deleteMut  = useMutation((name) => snapshots.delete(vmId, name));
+  const bulkMut    = useMutation((body) => snapshots.bulkDelete(vmId, body));
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkResult, setBulkResult] = useState(null);
+
+  // Drop selections that no longer exist (e.g., after a deletion or list refresh).
+  React.useEffect(() => {
+    if (!snapList?.length) {
+      if (selected.size) setSelected(new Set());
+      return;
+    }
+    const existing = new Set(snapList.map(s => s.name));
+    let changed = false;
+    const next = new Set();
+    selected.forEach(n => {
+      if (existing.has(n)) next.add(n);
+      else changed = true;
+    });
+    if (changed) setSelected(next);
+  }, [snapList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!snapList?.length) {
     return <EmptyState icon={Camera} title="No snapshots" description="Capture the VM state at any point." />;
   }
 
+  const allSelected = selected.size > 0 && selected.size === snapList.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(snapList.map(s => s.name)));
+  };
+  const toggleOne = (name) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+  const handleBulkDelete = async () => {
+    if (!selected.size) return;
+    const result = await bulkMut.execute({ names: Array.from(selected) });
+    setBulkResult(result);
+    setSelected(new Set());
+    refreshSnaps();
+  };
+
   return (
-    <div className="divide-y divide-steel-800/40">
-      {snapList.map(snap => (
-        <div key={snap.name} className="flex items-start justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors gap-3" data-testid={`snap-${snap.name}`}>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <Clock size={12} className="text-steel-600 flex-shrink-0" />
-              <span className="font-mono text-sm text-steel-200 truncate">{snap.name}</span>
+    <div>
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-steel-800/40 bg-steel-900/40">
+        <label className="flex items-center gap-2 text-xs text-steel-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = someSelected; }}
+            onChange={toggleAll}
+            data-testid="snap-select-all"
+          />
+          {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+        </label>
+        <button
+          className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={handleBulkDelete}
+          disabled={!selected.size || bulkMut.loading}
+          data-testid="btn-bulk-delete-snaps"
+        >
+          <Trash2 size={12} /> Delete selected
+        </button>
+      </div>
+      <div className="divide-y divide-steel-800/40">
+        {snapList.map(snap => (
+          <div key={snap.name} className="flex items-start justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors gap-3" data-testid={`snap-${snap.name}`}>
+            <div className="flex items-start gap-2 min-w-0 flex-1">
+              <input
+                type="checkbox"
+                checked={selected.has(snap.name)}
+                onChange={() => toggleOne(snap.name)}
+                data-testid={`snap-checkbox-${snap.name}`}
+                className="mt-1"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Clock size={12} className="text-steel-600 flex-shrink-0" />
+                  <span className="font-mono text-sm text-steel-200 truncate">{snap.name}</span>
+                </div>
+                {snap.description ? (
+                  <p className="text-xs text-steel-500 mt-1 ml-5 line-clamp-2" data-testid={`snap-desc-${snap.name}`}>{snap.description}</p>
+                ) : null}
+              </div>
             </div>
-            {snap.description ? (
-              <p className="text-xs text-steel-500 mt-1 ml-5 line-clamp-2" data-testid={`snap-desc-${snap.name}`}>{snap.description}</p>
-            ) : null}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
+                onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
+              >
+                <RotateCcw size={12} /> Restore
+              </button>
+              <button
+                className="btn-ghost text-xs text-red-400 hover:text-red-300"
+                onClick={async () => { await deleteMut.execute(snap.name); refreshSnaps(); }}
+                data-testid={`btn-delete-snap-${snap.name}`}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <button
-              className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
-              onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
-            >
-              <RotateCcw size={12} /> Restore
-            </button>
-            <button
-              className="btn-ghost text-xs text-red-400 hover:text-red-300"
-              onClick={async () => { await deleteMut.execute(snap.name); refreshSnaps(); }}
-              data-testid={`btn-delete-snap-${snap.name}`}
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
+        ))}
+      </div>
+      {bulkResult && (
+        <div className="px-4 py-2 text-xs text-steel-400" data-testid="snap-bulk-result">
+          {(() => {
+            const total = bulkResult.results.length;
+            const ok = bulkResult.results.filter(r => r.success).length;
+            return `Bulk delete: ${ok} of ${total} succeeded`;
+          })()}
         </div>
-      ))}
+      )}
     </div>
   );
 }

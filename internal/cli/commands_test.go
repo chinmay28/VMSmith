@@ -980,6 +980,72 @@ func TestCLI_SnapshotDelete(t *testing.T) {
 	}
 }
 
+func TestCLI_SnapshotDelete_NoFlags(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+	if _, err := runCLI("snapshot", "delete", "vm-x"); err == nil {
+		t.Fatal("expected error when neither --name nor --prefix is given")
+	}
+}
+
+func TestCLI_SnapshotDelete_BothFlags(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+	if _, err := runCLI("snapshot", "delete", "vm-x", "--name", "a", "--prefix", "b-"); err == nil {
+		t.Fatal("expected error when both --name and --prefix are given")
+	}
+}
+
+func TestCLI_SnapshotDelete_PrefixDeletesAllMatching(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-bd", Name: "snapper"})
+	for _, n := range []string{"manual-rollback", "auto-nightly-1", "auto-nightly-2", "auto-weekly-1"} {
+		mock.CreateSnapshot(nil, "vm-bd", types.SnapshotSpec{Name: n})
+	}
+
+	out, err := runCLI("snapshot", "delete", "vm-bd", "--prefix", "auto-nightly-")
+	if err != nil {
+		t.Fatalf("snapshot delete --prefix: %v", err)
+	}
+	if !strings.Contains(out, "auto-nightly-1") || !strings.Contains(out, "auto-nightly-2") {
+		t.Errorf("expected both deleted names in output, got: %q", out)
+	}
+
+	survivors, _ := mock.ListSnapshots(nil, "vm-bd")
+	want := map[string]bool{"manual-rollback": true, "auto-weekly-1": true}
+	if len(survivors) != 2 {
+		t.Fatalf("survivors = %d, want 2", len(survivors))
+	}
+	for _, s := range survivors {
+		if !want[s.Name] {
+			t.Errorf("unexpected survivor: %s", s.Name)
+		}
+	}
+}
+
+func TestCLI_SnapshotDelete_PrefixNoMatchPrintsMessage(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-nm"})
+	mock.CreateSnapshot(nil, "vm-nm", types.SnapshotSpec{Name: "manual-1"})
+
+	out, err := runCLI("snapshot", "delete", "vm-nm", "--prefix", "auto-")
+	if err != nil {
+		t.Fatalf("snapshot delete --prefix: %v", err)
+	}
+	if !strings.Contains(out, "No snapshots match prefix") {
+		t.Errorf("expected no-match message, got: %q", out)
+	}
+
+	snaps, _ := mock.ListSnapshots(nil, "vm-nm")
+	if len(snaps) != 1 {
+		t.Errorf("survivors = %d, want 1 (manual-1 untouched)", len(snaps))
+	}
+}
+
 // =====================================================// Image command tests
 // =====================================================
 func TestCLI_ImageList_Empty(t *testing.T) {

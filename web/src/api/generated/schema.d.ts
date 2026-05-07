@@ -686,6 +686,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/snapshots/bulk_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete multiple snapshots in a single request
+         * @description Delete a batch of snapshots either by explicit name list or by prefix
+         *     match. Returns a per-target result so partial failures are visible.
+         *     Exactly one of `names` or `prefix` must be provided.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteSnapshotsRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-snapshot delete results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkDeleteSnapshotsResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/ports": {
         parameters: {
             query?: never;
@@ -1619,6 +1669,26 @@ export interface components {
         BulkVMActionResponse: {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
+        };
+        /**
+         * @description Selector for the snapshots to delete. Exactly one of `names` or `prefix`
+         *     must be set; the request is rejected with HTTP 400 `invalid_bulk_request`
+         *     when both or neither are present.
+         */
+        BulkDeleteSnapshotsRequest: {
+            /** @description Explicit list of snapshot names to delete. */
+            names?: string[];
+            /** @description Match every snapshot whose name starts with this prefix. */
+            prefix?: string;
+        };
+        BulkDeleteSnapshotsResponse: {
+            results: components["schemas"]["BulkDeleteSnapshotResult"][];
+        };
+        BulkDeleteSnapshotResult: {
+            name: string;
+            success: boolean;
+            code?: string;
+            message?: string;
         };
         TopVMItem: {
             vm_id: string;

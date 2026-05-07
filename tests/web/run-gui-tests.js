@@ -331,6 +331,20 @@ async function main() {
       await assertNotVisible(p, "snap-before-deploy");
     }, page);
 
+    await runTest("bulk-delete selected snapshots", async (p) => {
+      // Auto- snapshots are seeded alongside the manual one; tick both and
+      // confirm they vanish while no surviving non-auto snapshot does.
+      await assertVisible(p, "snap-auto-2026-05-06");
+      await assertVisible(p, "snap-auto-2026-05-07");
+      await p.locator('[data-testid="snap-checkbox-auto-2026-05-06"]').check();
+      await p.locator('[data-testid="snap-checkbox-auto-2026-05-07"]').check();
+      await p.locator('[data-testid="btn-bulk-delete-snaps"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "snap-auto-2026-05-06");
+      await assertNotVisible(p, "snap-auto-2026-05-07");
+      await assertText(p, "snap-bulk-result", "2 of 2 succeeded");
+    }, page);
+
     await runTest("auto-start summary card and edit toggle", async (p) => {
       await assertVisible(p, "vm-detail-auto-start");
       // Open the edit modal and flip the checkbox on.
