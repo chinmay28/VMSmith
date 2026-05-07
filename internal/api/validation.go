@@ -158,7 +158,19 @@ func validateCreateImageRequest(vmID, name string) error {
 }
 
 func validateTemplateRequest(req createTemplateRequest) error {
+	if err := validateTemplateDescription(req.Description); err != nil {
+		return err
+	}
 	return validatepkg.ValidateTemplateRequest(req.Name, req.Image, req.CPUs, req.RAMMB, req.DiskGB)
+}
+
+const maxTemplateDescriptionLength = 1024
+
+func validateTemplateDescription(desc string) error {
+	if len(desc) > maxTemplateDescriptionLength {
+		return types.NewAPIError("invalid_spec", fmt.Sprintf("description must be %d characters or fewer", maxTemplateDescriptionLength))
+	}
+	return nil
 }
 
 func validateUniqueTemplateName(name string, templates []*types.VMTemplate) error {

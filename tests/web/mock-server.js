@@ -420,8 +420,33 @@ const server = http.createServer(async (req, res) => {
     }
   }
   if (p === "/api/v1/templates" && method === "GET") {
-    const list = [...templates.values()];
+    let list = [...templates.values()];
+    const tag = (url.searchParams.get("tag") || "").trim();
+    if (tag) {
+      const lc = tag.toLowerCase();
+      list = list.filter(t => (t.tags || []).some(x => String(x).toLowerCase() === lc));
+    }
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
+  // PATCH /api/v1/templates/{id}: edit description and/or tags. Mirror server
+  // PATCH semantics — empty `description` or missing `tags` means "no change";
+  // an explicit `tags: []` clears the tag set.
+  {
+    const m = p.match(/^\/api\/v1\/templates\/(tmpl-[^/]+)$/);
+    if (m && method === "PATCH") {
+      const tpl = templates.get(m[1]);
+      if (!tpl) return json(res, 404, { error: "resource_not_found", code: "resource_not_found" });
+      const patch = body || {};
+      if (typeof patch.description === "string" && patch.description.trim() !== "") {
+        tpl.description = patch.description.trim();
+      }
+      if (Array.isArray(patch.tags)) {
+        tpl.tags = patch.tags.slice();
+      }
+      tpl.updated_at = new Date().toISOString();
+      templates.set(tpl.id, tpl);
+      return json(res, 200, tpl);
+    }
   }
   if (p === "/api/v1/quotas/usage" && method === "GET") {
     const list = [...vms.values()];

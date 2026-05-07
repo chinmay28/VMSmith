@@ -437,6 +437,10 @@ GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards
 POST   /vms/{id}/ports                 Add port forward (`host_port`, `guest_port`, `protocol?`, `description?` — `description` is an optional free-form label, ≤256 chars)
 DELETE /vms/{id}/ports/{portId}        Remove port forward
+GET    /templates                      List templates (`?tag=<tag>` case-insensitive filter applied before pagination, `?page=<n>&per_page=<n>`; returns `X-Total-Count`); CLI also supports `vmsmith template list --tag <tag>`
+POST   /templates                      Create template (CreateTemplateRequest body; rejects duplicate names)
+PATCH  /templates/{id}                 Update template description / tags (TemplateUpdateSpec: empty `description` = no change; nil `tags` = no change; explicit `[]` clears the tag set; image, resources, name, networks immutable post-create)
+DELETE /templates/{id}                 Delete template
 GET    /host/interfaces                List host network interfaces
 GET    /logs                           Query log entries (level, limit, since, source)
 GET    /webhooks                       List registered webhooks (secrets redacted)

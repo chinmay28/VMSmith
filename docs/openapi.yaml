@@ -660,6 +660,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
+        - in: query
+          name: tag
+          schema: { type: string }
+          description: |
+            Case-insensitive filter; only templates carrying this tag are
+            returned. Filtering is applied before pagination, so
+            X-Total-Count reflects the filtered population.
       responses:
         '200':
           description: Template list
@@ -697,6 +704,35 @@ paths:
         default:
           $ref: '#/components/responses/APIError'
   /templates/{templateID}:
+    patch:
+      tags: [Templates]
+      summary: Update a template's description and/or tags
+      description: |
+        Only `description` and `tags` are mutable. PATCH semantics: an empty
+        `description` is treated as "no change"; a `null`/missing `tags`
+        field is treated as "no change", while an explicit empty array
+        (`"tags": []`) clears the tag set.
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateRequest'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VMTemplate'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
     delete:
       tags: [Templates]
       summary: Delete a template
@@ -1451,6 +1487,20 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NetworkAttachment'
+    UpdateTemplateRequest:
+      type: object
+      description: |
+        Partial update for an existing template. An empty `description`
+        means "no change"; a missing `tags` field means "no change",
+        while an explicit empty `tags` array clears the tag set.
+      properties:
+        description:
+          type: string
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
     HostInterface:
       type: object
       required: [name, ips, mac, is_up, is_physical]

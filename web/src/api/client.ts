@@ -194,10 +194,12 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage }: { page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage } } }), { withMeta: true }),
+  list: ({ page, perPage, tag }: { page?: number; perPage?: number; tag?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag } as any } }), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
+  update: (id: string, patch: { description?: string; tags?: string[] }) =>
+    unwrap(apiClient.PATCH('/templates/{templateID}' as any, { params: { path: { templateID: id } }, body: patch } as any)),
   delete: (id: string) => unwrap(apiClient.DELETE('/templates/{templateID}', { params: { path: { templateID: id } } })),
 };
 

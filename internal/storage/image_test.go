@@ -3,6 +3,7 @@ package storage
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,5 +268,118 @@ func TestStorageManager_UpdateImage_NotFound(t *testing.T) {
 
 	if _, err := mgr.UpdateImage("img-missing", types.ImageUpdateSpec{Description: "x"}); err == nil {
 		t.Error("expected error updating missing image")
+	}
+}
+
+func seedTemplate(t *testing.T, mgr *Manager, name string, tags []string, desc string) *types.VMTemplate {
+	t.Helper()
+	tpl, err := mgr.CreateTemplate(&types.VMTemplate{
+		Name:        name,
+		Image:       "/images/base.qcow2",
+		CPUs:        2,
+		RAMMB:       2048,
+		DiskGB:      20,
+		Description: desc,
+		Tags:        tags,
+	})
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+	return tpl
+}
+
+func TestStorageManager_UpdateTemplate_AppliesPatch(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	tpl := seedTemplate(t, mgr, "starter", []string{"dev"}, "starter template")
+	originalUpdated := tpl.UpdatedAt
+
+	// Sleep is unnecessary; wall-clock advance is enforced by time.Now() in
+	// the manager. But ensure we won't get a zero diff on very fast hosts.
+	time.Sleep(2 * time.Millisecond)
+
+	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
+		Description: "now more useful",
+		Tags:        []string{"dev", "linux"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if out.Description != "now more useful" {
+		t.Errorf("Description = %q, want %q", out.Description, "now more useful")
+	}
+	if got, want := strings.Join(out.Tags, ","), "dev,linux"; got != want {
+		t.Errorf("Tags = %q, want %q", got, want)
+	}
+	if !out.UpdatedAt.After(originalUpdated) {
+		t.Errorf("UpdatedAt should advance: was %v, now %v", originalUpdated, out.UpdatedAt)
+	}
+}
+
+func TestStorageManager_UpdateTemplate_DescriptionOnlyKeepsTags(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	tpl := seedTemplate(t, mgr, "kept", []string{"keep-me", "alpha"}, "before")
+
+	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
+		Description: "after",
+	})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if out.Description != "after" {
+		t.Errorf("Description = %q", out.Description)
+	}
+	if got, want := strings.Join(out.Tags, ","), "keep-me,alpha"; got != want {
+		t.Errorf("Tags = %q, want %q (nil patch.Tags must keep existing)", got, want)
+	}
+}
+
+func TestStorageManager_UpdateTemplate_NilTagsKeepsExisting(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	tpl := seedTemplate(t, mgr, "nil-tags", []string{"existing"}, "")
+
+	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: nil})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if got, want := strings.Join(out.Tags, ","), "existing"; got != want {
+		t.Errorf("Tags = %q, want %q", got, want)
+	}
+}
+
+func TestStorageManager_UpdateTemplate_EmptySliceClearsTags(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	tpl := seedTemplate(t, mgr, "clear-tags", []string{"a", "b"}, "")
+
+	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: []string{}})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if len(out.Tags) != 0 {
+		t.Errorf("Tags = %v, want []", out.Tags)
+	}
+}
+
+func TestStorageManager_UpdateTemplate_NoChangeKeepsUpdatedAt(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	tpl := seedTemplate(t, mgr, "no-op", []string{"x"}, "same")
+	originalUpdated := tpl.UpdatedAt
+
+	time.Sleep(2 * time.Millisecond)
+
+	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Description: "same"})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if !out.UpdatedAt.Equal(originalUpdated) {
+		t.Errorf("UpdatedAt should not advance on no-op patch: was %v, now %v", originalUpdated, out.UpdatedAt)
+	}
+}
+
+func TestStorageManager_UpdateTemplate_NotFound(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	_, err := mgr.UpdateTemplate("tmpl-does-not-exist", types.TemplateUpdateSpec{Description: "x"})
+	if err == nil {
+		t.Fatal("expected error for unknown template id")
 	}
 }
