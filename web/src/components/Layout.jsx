@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText, Activity } from 'lucide-react';
+import { Server, HardDrive, LayoutDashboard, Monitor, ScrollText, Activity, Settings as SettingsIcon } from 'lucide-react';
 import mascot from '../assets/mascot.png';
 import { system } from '../api/client';
 
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/images',   icon: HardDrive,       label: 'Images',    testId: 'nav-images' },
   { to: '/activity', icon: Activity,        label: 'Activity',  testId: 'nav-activity' },
   { to: '/logs',     icon: ScrollText,      label: 'Logs',      testId: 'nav-logs' },
+  { to: '/settings', icon: SettingsIcon,    label: 'Settings',  testId: 'nav-settings' },
 ];
 
 export default function Layout({ children }) {
