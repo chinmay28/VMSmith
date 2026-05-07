@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { HardDrive, Download, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { HardDrive, Download, Trash2, Upload, Pencil } from 'lucide-react';
 import { images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
@@ -8,16 +8,24 @@ const DEFAULT_PER_PAGE = 25;
 
 export default function ImageList() {
   const [showUpload, setShowUpload] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage }),
-    [page, perPage],
+    () => imagesApi.list({ page, perPage, tag: tagFilter }),
+    [page, perPage, tagFilter],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
   const imageList = imageResponse?.data || [];
   const totalImages = imageResponse?.meta?.totalCount ?? imageList.length;
+  const allTags = useMemo(
+    () => [...new Set(imageList.flatMap(img => img.tags || []))].sort(),
+    [imageList],
+  );
+
+  useEffect(() => { setPage(1); }, [tagFilter]);
 
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Delete image "${name}"?`)) return;
@@ -46,6 +54,29 @@ export default function ImageList() {
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
 
       <UploadImageModal open={showUpload} onClose={() => setShowUpload(false)} onUploaded={refresh} />
+      <EditImageModal image={editing} onClose={() => setEditing(null)} onSaved={refresh} />
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4" data-testid="image-tag-filter">
+          <button
+            className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`}
+            onClick={() => setTagFilter('')}
+            data-testid="image-tag-filter-all"
+          >
+            All
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`}
+              onClick={() => setTagFilter(tag)}
+              data-testid={`image-tag-filter-${tag}`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading && !imageList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
@@ -54,7 +85,7 @@ export default function ImageList() {
           <EmptyState
             icon={HardDrive}
             title="No images"
-            description="Export a VM to create a portable disk image."
+            description={tagFilter ? `No images carry tag "${tagFilter}".` : 'Export a VM to create a portable disk image.'}
           />
         </div>
       ) : (
@@ -63,7 +94,7 @@ export default function ImageList() {
             <thead>
               <tr className="border-b border-steel-800/40">
                 <th className="table-header table-cell">Name</th>
-                <th className="table-header table-cell">Path</th>
+                <th className="table-header table-cell">Tags</th>
                 <th className="table-header table-cell">Format</th>
                 <th className="table-header table-cell">Size</th>
                 <th className="table-header table-cell">Created</th>
@@ -83,11 +114,30 @@ export default function ImageList() {
                         {img.source_vm && (
                           <p className="text-[10px] font-mono text-steel-600 mt-0.5">from {img.source_vm}</p>
                         )}
+                        {img.description && (
+                          <p
+                            className="text-[11px] text-steel-400 mt-0.5 max-w-[260px] truncate"
+                            title={img.description}
+                            data-testid={`image-description-${img.name}`}
+                          >
+                            {img.description}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </td>
-                  <td className="table-cell font-mono text-xs text-steel-500 max-w-[200px] truncate" title={img.path}>
-                    {img.path}
+                  <td className="table-cell">
+                    {img.tags?.length > 0 ? (
+                      <div className="flex flex-wrap gap-1" data-testid={`image-tags-${img.name}`}>
+                        {img.tags.map(tag => (
+                          <span key={tag} className="badge bg-steel-800/60 text-steel-300 border-steel-700/40">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-steel-600">—</span>
+                    )}
                   </td>
                   <td className="table-cell">
                     <span className="badge bg-steel-800/60 text-steel-400 border-steel-700/40">{img.format}</span>
@@ -100,6 +150,13 @@ export default function ImageList() {
                   </td>
                   <td className="table-cell text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        className="btn-ghost text-xs text-steel-400 hover:text-steel-200"
+                        onClick={() => setEditing(img)}
+                        data-testid={`btn-edit-image-${img.name}`}
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
                       <a
                         href={imagesApi.downloadUrl(img.id)}
                         className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
@@ -142,6 +199,8 @@ export default function ImageList() {
 function UploadImageModal({ open, onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [tagsField, setTagsField] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ loaded: 0, total: 0, percent: 0 });
   const [error, setError] = useState('');
@@ -168,11 +227,19 @@ function UploadImageModal({ open, onClose, onUploaded }) {
     setUploadProgress({ loaded: 0, total: file.size || 0, percent: 0 });
     setError('');
     try {
-      await imagesApi.upload(file, name.trim() || undefined, setUploadProgress);
+      const tags = tagsField.split(',').map(t => t.trim()).filter(Boolean);
+      await imagesApi.upload(
+        file,
+        name.trim() || undefined,
+        { description: description.trim() || undefined, tags: tags.length ? tags : undefined },
+        setUploadProgress,
+      );
       onUploaded();
       onClose();
       setFile(null);
       setName('');
+      setDescription('');
+      setTagsField('');
       setUploadProgress({ loaded: 0, total: 0, percent: 0 });
     } catch (e) {
       setError(e.message);
@@ -223,6 +290,28 @@ function UploadImageModal({ open, onClose, onUploaded }) {
           <p className="text-[10px] font-mono text-steel-600 mt-1">Derived from filename if left blank</p>
         </div>
 
+        <div>
+          <label className="label">Description</label>
+          <input
+            className="input"
+            placeholder="Optional human-readable note"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="upload-image-description"
+          />
+        </div>
+
+        <div>
+          <label className="label">Tags</label>
+          <input
+            className="input"
+            placeholder="comma,separated,tags"
+            value={tagsField}
+            onChange={e => setTagsField(e.target.value)}
+            data-testid="upload-image-tags"
+          />
+        </div>
+
         {uploading && (
           <div className="space-y-2" data-testid="image-upload-progress">
             <div className="flex items-center justify-between text-xs font-mono text-steel-500">
@@ -251,6 +340,85 @@ function UploadImageModal({ open, onClose, onUploaded }) {
           <button className="btn-primary" onClick={handleSubmit} disabled={!file || uploading}>
             {uploading ? <Spinner size={14} /> : <Upload size={15} />}
             Upload
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EditImageModal({ image, onClose, onSaved }) {
+  const [description, setDescription] = useState('');
+  const [tagsField, setTagsField] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (image) {
+      setDescription(image.description || '');
+      setTagsField((image.tags || []).join(','));
+      setError('');
+    }
+  }, [image]);
+
+  if (!image) return null;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const patch = {};
+      const trimmedDescription = description.trim();
+      if (trimmedDescription !== (image.description || '')) {
+        patch.description = trimmedDescription;
+      }
+      const newTags = tagsField.split(',').map(t => t.trim()).filter(Boolean);
+      const currentTags = (image.tags || []).join(',');
+      if (newTags.join(',') !== currentTags) {
+        patch.tags = newTags;
+      }
+      if (Object.keys(patch).length === 0) {
+        onClose();
+        return;
+      }
+      await imagesApi.update(image.id, patch);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={!!image} onClose={onClose} title={`Edit Image — ${image.name}`}>
+      <div className="space-y-4" data-testid="edit-image-modal">
+        <div>
+          <label className="label">Description</label>
+          <input
+            className="input"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="edit-image-description"
+          />
+        </div>
+        <div>
+          <label className="label">Tags</label>
+          <input
+            className="input"
+            placeholder="comma,separated,tags"
+            value={tagsField}
+            onChange={e => setTagsField(e.target.value)}
+            data-testid="edit-image-tags"
+          />
+        </div>
+        {error && <p className="text-sm text-red-400">Error: {error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn-primary" onClick={handleSave} disabled={saving} data-testid="btn-save-image">
+            {saving ? <Spinner size={14} /> : null}
+            Save
           </button>
         </div>
       </div>
