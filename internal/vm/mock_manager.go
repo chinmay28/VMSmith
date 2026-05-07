@@ -167,6 +167,9 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	if patch.AutoStart != nil {
 		vm.Spec.AutoStart = *patch.AutoStart
 	}
+	if patch.Locked != nil {
+		vm.Spec.Locked = *patch.Locked
+	}
 
 	vm.UpdatedAt = time.Now()
 	vmCopy := *vm
@@ -235,8 +238,12 @@ func (m *MockManager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.vms[id]; !ok {
+	vm, ok := m.vms[id]
+	if !ok {
 		return fmt.Errorf("vms/%s: not found", id)
+	}
+	if vm.Spec.Locked {
+		return types.NewAPIError("vm_locked", "vm is locked; unlock it before deleting")
 	}
 	delete(m.vms, id)
 	delete(m.snapshots, id)

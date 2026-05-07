@@ -45,6 +45,12 @@ type VMSpec struct {
 	// are already running are left untouched. Always serialised so clients
 	// can distinguish "off" from "field absent".
 	AutoStart bool `json:"auto_start" yaml:"auto_start"`
+
+	// Locked, when true, prevents the VM from being deleted via API/CLI/GUI.
+	// Stop, Start, and Restart still work — Lock is a delete-protection flag,
+	// not a freeze. Always serialised so clients can distinguish "unlocked"
+	// from "field absent".
+	Locked bool `json:"locked" yaml:"locked"`
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
@@ -71,6 +77,10 @@ type VMUpdateSpec struct {
 	// at daemon boot. Use a pointer so we can distinguish "not provided"
 	// (no change) from "explicitly false" (turn off).
 	AutoStart *bool `json:"auto_start,omitempty"`
+
+	// Locked toggles delete-protection on the VM. Use a pointer so we can
+	// distinguish "not provided" (no change) from "explicitly false" (unlock).
+	Locked *bool `json:"locked,omitempty"`
 }
 
 // VM represents a virtual machine and its current state.
