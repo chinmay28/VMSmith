@@ -1,6 +1,6 @@
 import createClient from 'openapi-fetch';
 import { clearAuthToken, getAuthToken, requireAuth } from '../auth.js';
-import type { paths } from './generated/schema';
+import type { components, paths } from './generated/schema';
 
 const BASE = '/api/v1';
 
@@ -161,11 +161,26 @@ export const images = {
 // --- Port Forwards ---
 export const ports = {
   list: (vmId: string) => unwrap(apiClient.GET('/vms/{vmID}/ports', { params: { path: { vmID: vmId } } })),
-  add: (vmId: string, hostPort: number, guestPort: number, protocol: 'tcp' | 'udp' = 'tcp') =>
-    unwrap(apiClient.POST('/vms/{vmID}/ports', {
+  add: (
+    vmId: string,
+    hostPort: number,
+    guestPort: number,
+    protocol: 'tcp' | 'udp' = 'tcp',
+    description?: string,
+  ) => {
+    const body: components['schemas']['AddPortRequest'] = {
+      host_port: hostPort,
+      guest_port: guestPort,
+      protocol,
+    };
+    if (description) {
+      body.description = description;
+    }
+    return unwrap(apiClient.POST('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId } },
-      body: { host_port: hostPort, guest_port: guestPort, protocol },
-    })),
+      body,
+    }));
+  },
   remove: (vmId: string, portId: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/ports/{portID}', { params: { path: { vmID: vmId, portID: portId } } })),
 };

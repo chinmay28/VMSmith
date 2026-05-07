@@ -1343,12 +1343,13 @@ func TestCLI_PortList_WithForwards(t *testing.T) {
 
 	// Seed a port forward directly
 	s.PutPortForward(&types.PortForward{
-		ID:        "pf-1",
-		VMID:      "vm-x",
-		HostPort:  2222,
-		GuestPort: 22,
-		GuestIP:   "192.168.100.10",
-		Protocol:  types.ProtocolTCP,
+		ID:          "pf-1",
+		VMID:        "vm-x",
+		HostPort:    2222,
+		GuestPort:   22,
+		GuestIP:     "192.168.100.10",
+		Protocol:    types.ProtocolTCP,
+		Description: "ssh-jumpbox",
 	})
 	s.PutPortForward(&types.PortForward{
 		ID:        "pf-2",
@@ -1370,12 +1371,12 @@ func TestCLI_PortList_WithForwards(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"ID", "HOST PORT", "GUEST", "PROTOCOL"}
+	wantHeaders := []string{"ID", "HOST PORT", "GUEST", "PROTOCOL", "DESCRIPTION"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
 
-	if got := strings.Join(rows[1], "|"); got != "pf-1|2222|192.168.100.10:22|tcp" {
+	if got := strings.Join(rows[1], "|"); got != "pf-1|2222|192.168.100.10:22|tcp|ssh-jumpbox" {
 		t.Fatalf("first row = %v", rows[1])
 	}
 	if got := strings.Join(rows[2], "|"); got != "pf-2|8443|192.168.100.10:443|udp" {
@@ -1410,6 +1411,31 @@ func TestCLI_PortAdd_VMNotFound(t *testing.T) {
 	_, err := runCLI("port", "add", "nonexistent", "--host", "8080", "--guest", "80")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_PortAdd_DescriptionTooLong(t *testing.T) {
+	calledVMManager := false
+	vmManagerOverride = func() (vm.Manager, func(), error) {
+		calledVMManager = true
+		return vm.NewMockManager(), func() {}, nil
+	}
+	defer func() { vmManagerOverride = nil }()
+
+	_, _, pfCleanup := withTestPortForwarder(t)
+	defer pfCleanup()
+
+	_, err := runCLI("port", "add", "vm-any",
+		"--host", "2222", "--guest", "22",
+		"--description", strings.Repeat("x", 257))
+	if err == nil {
+		t.Fatal("expected validation error for over-long description")
+	}
+	if !strings.Contains(err.Error(), "description must be at most") {
+		t.Fatalf("expected description-length error, got: %v", err)
+	}
+	if calledVMManager {
+		t.Fatal("expected VM manager initialization to be skipped for invalid description")
 	}
 }
 

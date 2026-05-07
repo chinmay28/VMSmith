@@ -71,7 +71,7 @@ func TestPortForwarder_Add_InvalidInputRejectedBeforeStoreOrIptables(t *testing.
 		return nil
 	}
 
-	_, err := pf.Add("vm-a", 0, 22, "192.168.100.10", types.ProtocolTCP)
+	_, err := pf.Add("vm-a", 0, 22, "192.168.100.10", types.ProtocolTCP, AddOptions{})
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -108,7 +108,7 @@ func TestPortForwarder_Add_DuplicateHostPortProtocolRejected(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	_, err := pf.Add("vm-b", 2222, 2222, "192.168.100.20", types.ProtocolTCP)
+	_, err := pf.Add("vm-b", 2222, 2222, "192.168.100.20", types.ProtocolTCP, AddOptions{})
 	if err == nil {
 		t.Fatal("expected conflict error")
 	}
@@ -158,7 +158,7 @@ func TestPortForwarder_Add_Success(t *testing.T) {
 		return nil
 	}
 
-	fwd, err := pf.Add("vm-a", 2222, 22, "192.168.100.10", types.ProtocolTCP)
+	fwd, err := pf.Add("vm-a", 2222, 22, "192.168.100.10", types.ProtocolTCP, AddOptions{})
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestPortForwarder_Add_DefaultProtocol(t *testing.T) {
 		return nil
 	}
 
-	fwd, err := pf.Add("vm-a", 8080, 80, "192.168.100.10", "")
+	fwd, err := pf.Add("vm-a", 8080, 80, "192.168.100.10", "", AddOptions{})
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -215,12 +215,50 @@ func TestPortForwarder_Add_UDP(t *testing.T) {
 		return nil
 	}
 
-	fwd, err := pf.Add("vm-a", 5353, 53, "192.168.100.10", types.ProtocolUDP)
+	fwd, err := pf.Add("vm-a", 5353, 53, "192.168.100.10", types.ProtocolUDP, AddOptions{})
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if fwd.Protocol != types.ProtocolUDP {
 		t.Errorf("Protocol = %q, want udp", fwd.Protocol)
+	}
+}
+
+func TestPortForwarder_Add_PersistsDescription(t *testing.T) {
+	pf, s := newTestPortForwarder(t)
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	}
+
+	fwd, err := pf.Add("vm-a", 2222, 22, "192.168.100.10", types.ProtocolTCP, AddOptions{Description: "ssh-jumpbox"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if fwd.Description != "ssh-jumpbox" {
+		t.Errorf("Description = %q, want ssh-jumpbox", fwd.Description)
+	}
+
+	stored, err := s.ListPortForwards("vm-a")
+	if err != nil {
+		t.Fatalf("ListPortForwards: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Description != "ssh-jumpbox" {
+		t.Errorf("persisted description = %q, want ssh-jumpbox", stored[0].Description)
+	}
+}
+
+func TestPortForwarder_Add_DescriptionOmittedWhenEmpty(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	}
+
+	fwd, err := pf.Add("vm-a", 9090, 90, "192.168.100.10", types.ProtocolTCP, AddOptions{})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if fwd.Description != "" {
+		t.Errorf("Description = %q, want empty", fwd.Description)
 	}
 }
 
@@ -239,7 +277,7 @@ func TestPortForwarder_Add_SamePortDifferentProtocol(t *testing.T) {
 	}
 
 	// Same port but UDP should succeed
-	_, err := pf.Add("vm-a", 8080, 80, "192.168.100.10", types.ProtocolUDP)
+	_, err := pf.Add("vm-a", 8080, 80, "192.168.100.10", types.ProtocolUDP, AddOptions{})
 	if err != nil {
 		t.Fatalf("same port different protocol should succeed: %v", err)
 	}

@@ -434,7 +434,7 @@ PATCH  /images/{id}                    Update image `description` and/or `tags`.
 DELETE /images/{id}                    Delete image
 GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards
-POST   /vms/{id}/ports                 Add port forward
+POST   /vms/{id}/ports                 Add port forward (`host_port`, `guest_port`, `protocol?`, `description?` — `description` is an optional free-form label, ≤256 chars)
 DELETE /vms/{id}/ports/{portId}        Remove port forward
 GET    /host/interfaces                List host network interfaces
 GET    /logs                           Query log entries (level, limit, since, source)

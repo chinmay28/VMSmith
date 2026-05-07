@@ -192,7 +192,7 @@ export default function VMDetail() {
               <Network size={14} className="text-steel-500" />
               <h2 className="text-sm font-display font-semibold text-steel-300">Port Forwards</h2>
             </div>
-            <button className="btn-ghost text-xs" onClick={() => setShowPortModal(true)}>
+            <button className="btn-ghost text-xs" onClick={() => setShowPortModal(true)} data-testid="btn-new-port">
               <Plus size={13} /> Add
             </button>
           </div>
@@ -551,12 +551,19 @@ function PortList({ vmId, portList, refreshPorts }) {
   return (
     <div className="divide-y divide-steel-800/40">
       {portList.map(pf => (
-        <div key={pf.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors">
+        <div key={pf.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors" data-testid={`port-row-${pf.id}`}>
           <div>
-            <span className="font-mono text-sm text-steel-200">
-              :{pf.host_port} → {pf.guest_ip}:{pf.guest_port}
-            </span>
-            <span className="ml-2 badge bg-steel-800/60 text-steel-500 border-steel-700/40">{pf.protocol}</span>
+            <div>
+              <span className="font-mono text-sm text-steel-200">
+                :{pf.host_port} → {pf.guest_ip}:{pf.guest_port}
+              </span>
+              <span className="ml-2 badge bg-steel-800/60 text-steel-500 border-steel-700/40">{pf.protocol}</span>
+            </div>
+            {pf.description && (
+              <div className="mt-0.5 text-xs text-steel-400" data-testid={`port-description-${pf.id}`}>
+                {pf.description}
+              </div>
+            )}
           </div>
           <button
             className="btn-ghost text-xs text-red-400 hover:text-red-300"
@@ -620,7 +627,10 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
   const [hostPort, setHostPort] = useState('');
   const [guestPort, setGuestPort] = useState('');
   const [protocol, setProtocol] = useState('tcp');
-  const addMut = useMutation(() => ports.add(vmId, parseInt(hostPort), parseInt(guestPort), protocol));
+  const [description, setDescription] = useState('');
+  const addMut = useMutation(() =>
+    ports.add(vmId, parseInt(hostPort), parseInt(guestPort), protocol, description.trim() || undefined),
+  );
 
   const handleSubmit = async () => {
     await addMut.execute();
@@ -628,6 +638,7 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
     onClose();
     setHostPort('');
     setGuestPort('');
+    setDescription('');
   };
 
   return (
@@ -636,11 +647,11 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Host Port</label>
-            <input className="input" type="number" placeholder="2222" value={hostPort} onChange={e => setHostPort(e.target.value)} autoFocus />
+            <input className="input" type="number" placeholder="2222" value={hostPort} onChange={e => setHostPort(e.target.value)} autoFocus data-testid="input-host-port" />
           </div>
           <div>
             <label className="label">Guest Port</label>
-            <input className="input" type="number" placeholder="22" value={guestPort} onChange={e => setGuestPort(e.target.value)} />
+            <input className="input" type="number" placeholder="22" value={guestPort} onChange={e => setGuestPort(e.target.value)} data-testid="input-guest-port" />
           </div>
         </div>
         <div>
@@ -650,10 +661,27 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
             <option value="udp">UDP</option>
           </select>
         </div>
+        <div>
+          <label className="label">Description <span className="text-steel-500">(optional)</span></label>
+          <input
+            className="input"
+            type="text"
+            placeholder="e.g. ssh-jumpbox"
+            maxLength={256}
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="input-port-description"
+          />
+        </div>
         {addMut.error && <p className="text-sm text-red-400">{addMut.error}</p>}
         <div className="flex justify-end gap-2">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={!hostPort || !guestPort || addMut.loading}>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={!hostPort || !guestPort || addMut.loading}
+            data-testid="btn-submit-port"
+          >
             {addMut.loading ? <Spinner size={14} /> : <Plus size={14} />} Add
           </button>
         </div>

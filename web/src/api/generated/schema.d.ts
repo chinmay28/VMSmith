@@ -1654,6 +1654,8 @@ export interface components {
             host_port: number;
             guest_port: number;
             protocol?: components["schemas"]["Protocol"];
+            /** @description Optional free-form label for the rule (e.g. "web", "metrics scrape"). */
+            description?: string;
         };
         PortForward: {
             id: string;
@@ -1662,6 +1664,8 @@ export interface components {
             guest_port: number;
             guest_ip: string;
             protocol: components["schemas"]["Protocol"];
+            /** @description Optional free-form label for the rule. */
+            description?: string;
         };
         Image: {
             id: string;

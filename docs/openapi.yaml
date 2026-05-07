@@ -1250,6 +1250,10 @@ components:
           type: integer
         protocol:
           $ref: '#/components/schemas/Protocol'
+        description:
+          type: string
+          maxLength: 256
+          description: Optional free-form label for the rule (e.g. "web", "metrics scrape").
     PortForward:
       type: object
       required: [id, vm_id, host_port, guest_port, guest_ip, protocol]
@@ -1266,6 +1270,9 @@ components:
           type: string
         protocol:
           $ref: '#/components/schemas/Protocol'
+        description:
+          type: string
+          description: Optional free-form label for the rule.
     Image:
       type: object
       required: [id, name, path, size_bytes, format, created_at]
