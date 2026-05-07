@@ -1224,6 +1224,9 @@ components:
           type: string
         name:
           type: string
+        description:
+          type: string
+          description: Optional free-text description (max 1024 chars).
         created_at:
           type: string
           format: date-time
@@ -1233,6 +1236,10 @@ components:
       properties:
         name:
           type: string
+        description:
+          type: string
+          maxLength: 1024
+          description: Optional free-text description for this snapshot.
     AddPortRequest:
       type: object
       required: [host_port, guest_port]

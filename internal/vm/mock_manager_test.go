@@ -203,12 +203,15 @@ func TestMockManager_Snapshots(t *testing.T) {
 	id := vm.ID
 
 	// Create
-	snap, err := m.CreateSnapshot(ctx, id, "snap1")
+	snap, err := m.CreateSnapshot(ctx, id, types.SnapshotSpec{Name: "snap1", Description: "before patch"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
 	if snap.Name != "snap1" {
 		t.Errorf("Name = %q", snap.Name)
+	}
+	if snap.Description != "before patch" {
+		t.Errorf("Description = %q, want 'before patch'", snap.Description)
 	}
 
 	// List

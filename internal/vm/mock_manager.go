@@ -284,7 +284,7 @@ func (m *MockManager) List(ctx context.Context) ([]*types.VM, error) {
 	return result, nil
 }
 
-func (m *MockManager) CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error) {
+func (m *MockManager) CreateSnapshot(ctx context.Context, vmID string, spec types.SnapshotSpec) (*types.Snapshot, error) {
 	if m.CreateSnapshotErr != nil {
 		return nil, m.CreateSnapshotErr
 	}
@@ -297,10 +297,11 @@ func (m *MockManager) CreateSnapshot(ctx context.Context, vmID string, name stri
 	}
 
 	snap := &types.Snapshot{
-		ID:        fmt.Sprintf("%s/%s", vmID, name),
-		VMID:      vmID,
-		Name:      name,
-		CreatedAt: time.Now(),
+		ID:          fmt.Sprintf("%s/%s", vmID, spec.Name),
+		VMID:        vmID,
+		Name:        spec.Name,
+		Description: spec.Description,
+		CreatedAt:   time.Now(),
 	}
 
 	m.snapshots[vmID] = append(m.snapshots[vmID], snap)

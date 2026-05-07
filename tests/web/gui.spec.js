@@ -340,6 +340,26 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-test-snap")).toBeVisible();
   });
 
+  test("create snapshot with description", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-snapshot").click();
+    await page.getByTestId("input-snap-name").fill("noted-snap");
+    await page.getByTestId("input-snap-description").fill("captured before risky upgrade");
+    await page.getByTestId("btn-submit-snapshot").click();
+
+    await expect(page.getByTestId("snap-noted-snap")).toBeVisible();
+    await expect(page.getByTestId("snap-desc-noted-snap")).toHaveText("captured before risky upgrade");
+  });
+
+  test("renders existing snapshot description", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("checkpoint before May deploy");
+  });
+
   test("delete snapshot", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

@@ -21,7 +21,13 @@ function seed() {
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
   snapshots.set(vm1.id, [
-    { id: `${vm1.id}/before-deploy`, vm_id: vm1.id, name: "before-deploy", created_at: new Date().toISOString() },
+    {
+      id: `${vm1.id}/before-deploy`,
+      vm_id: vm1.id,
+      name: "before-deploy",
+      description: "checkpoint before May deploy",
+      created_at: new Date().toISOString(),
+    },
   ]);
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
@@ -310,7 +316,19 @@ const server = http.createServer(async (req, res) => {
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "POST") {
     const body = await parseBody(req);
     const vmId = m[1];
-    const snap = { id: `${vmId}/${body.name}`, vm_id: vmId, name: body.name, created_at: new Date().toISOString() };
+    if (!body.name || !String(body.name).trim()) {
+      return json(res, 400, { error: { code: "invalid_name", message: "snapshot name is required" } });
+    }
+    if (typeof body.description === "string" && body.description.length > 1024) {
+      return json(res, 400, { error: { code: "invalid_description", message: "description must be at most 1024 characters" } });
+    }
+    const snap = {
+      id: `${vmId}/${body.name}`,
+      vm_id: vmId,
+      name: body.name,
+      created_at: new Date().toISOString(),
+    };
+    if (body.description) snap.description = body.description;
     const list = snapshots.get(vmId) || [];
     list.push(snap); snapshots.set(vmId, list);
     return json(res, 201, snap);

@@ -9,7 +9,8 @@ import (
 )
 
 type createSnapshotRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // CreateSnapshot handles POST /api/v1/vms/{vmID}/snapshots
@@ -25,21 +26,24 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
 		return
 	}
-	if err := validateCreateSnapshotRequest(req.Name); err != nil {
+	if err := validateCreateSnapshotRequest(req.Name, req.Description); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	snap, err := s.vmManager.CreateSnapshot(r.Context(), vmID, req.Name)
+	spec := types.SnapshotSpec{Name: req.Name, Description: req.Description}
+	snap, err := s.vmManager.CreateSnapshot(r.Context(), vmID, spec)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
 
-	s.publishAppEvent("snapshot.created", vmID, "snapshot "+req.Name+" created", map[string]string{
-		"snapshot": req.Name,
-	})
+	attrs := map[string]string{"snapshot": req.Name}
+	if req.Description != "" {
+		attrs["description"] = req.Description
+	}
+	s.publishAppEvent("snapshot.created", vmID, "snapshot "+req.Name+" created", attrs)
 
 	writeJSON(w, http.StatusCreated, snap)
 }

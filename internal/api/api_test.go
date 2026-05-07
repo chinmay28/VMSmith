@@ -1500,13 +1500,56 @@ func TestCreateSnapshot(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshot_WithDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-d", Name: "snappable", State: types.VMStateRunning})
+
+	body := jsonBody(t, map[string]string{"name": "before-patch", "description": "before applying May patch"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-snap-d/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+
+	if snap.Description != "before applying May patch" {
+		t.Errorf("Description = %q, want 'before applying May patch'", snap.Description)
+	}
+
+	// Round-trip via list
+	listResp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-d/snapshots")
+	var listed []*types.Snapshot
+	decodeJSON(t, listResp, &listed)
+	if len(listed) != 1 || listed[0].Description != "before applying May patch" {
+		t.Errorf("list did not preserve description: got %+v", listed)
+	}
+}
+
+func TestCreateSnapshot_RejectsLongDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-x", Name: "snappable"})
+
+	long := strings.Repeat("x", 1025)
+	body := jsonBody(t, map[string]string{"name": "snap", "description": long})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-snap-x/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_description")
+}
+
 func TestListSnapshots(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-s", Name: "host"})
-	mockMgr.CreateSnapshot(nil, "vm-s", "snap1")
-	mockMgr.CreateSnapshot(nil, "vm-s", "snap2")
+	mockMgr.CreateSnapshot(nil, "vm-s", types.SnapshotSpec{Name: "snap1"})
+	mockMgr.CreateSnapshot(nil, "vm-s", types.SnapshotSpec{Name: "snap2"})
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-s/snapshots")
 	if resp.StatusCode != http.StatusOK {
@@ -1529,9 +1572,9 @@ func TestListSnapshots_Pagination(t *testing.T) {
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-s", Name: "host"})
-	mockMgr.CreateSnapshot(nil, "vm-s", "snap1")
-	mockMgr.CreateSnapshot(nil, "vm-s", "snap2")
-	mockMgr.CreateSnapshot(nil, "vm-s", "snap3")
+	mockMgr.CreateSnapshot(nil, "vm-s", types.SnapshotSpec{Name: "snap1"})
+	mockMgr.CreateSnapshot(nil, "vm-s", types.SnapshotSpec{Name: "snap2"})
+	mockMgr.CreateSnapshot(nil, "vm-s", types.SnapshotSpec{Name: "snap3"})
 
 	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-s/snapshots?page=2&per_page=1")
 	if err != nil {
@@ -1560,7 +1603,7 @@ func TestRestoreSnapshot(t *testing.T) {
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-r", Name: "restorable"})
-	mockMgr.CreateSnapshot(nil, "vm-r", "good-state")
+	mockMgr.CreateSnapshot(nil, "vm-r", types.SnapshotSpec{Name: "good-state"})
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-r/snapshots/good-state/restore", "application/json", nil)
 	if resp.StatusCode != http.StatusOK {
@@ -1573,7 +1616,7 @@ func TestDeleteSnapshot(t *testing.T) {
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-ds", Name: "host"})
-	mockMgr.CreateSnapshot(nil, "vm-ds", "temp")
+	mockMgr.CreateSnapshot(nil, "vm-ds", types.SnapshotSpec{Name: "temp"})
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-ds/snapshots/temp", nil)
 	resp, _ := http.DefaultClient.Do(req)
@@ -1982,7 +2025,7 @@ func TestRestoreSnapshot_SnapshotNotFound(t *testing.T) {
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-r"})
-	mockMgr.CreateSnapshot(nil, "vm-r", "good-state")
+	mockMgr.CreateSnapshot(nil, "vm-r", types.SnapshotSpec{Name: "good-state"})
 
 	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-r/snapshots/missing/restore", "application/json", nil)
 	if resp.StatusCode != http.StatusNotFound {
@@ -2022,7 +2065,7 @@ func TestDeleteSnapshot_SnapshotNotFound(t *testing.T) {
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-ds"})
-	mockMgr.CreateSnapshot(nil, "vm-ds", "existing")
+	mockMgr.CreateSnapshot(nil, "vm-ds", types.SnapshotSpec{Name: "existing"})
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/vms/vm-ds/snapshots/missing", nil)
 	resp, _ := http.DefaultClient.Do(req)

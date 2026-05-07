@@ -70,11 +70,11 @@ func TestQuotaManagerSnapshotRetention(t *testing.T) {
 	ctx := context.Background()
 	
 	// Create first two snapshots (within limit)
-	_, err := mgr.CreateSnapshot(ctx, "vm-1", "snap1")
+	_, err := mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap1"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 1 failed: %v", err)
 	}
-	_, err = mgr.CreateSnapshot(ctx, "vm-1", "snap2")
+	_, err = mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap2"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 2 failed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestQuotaManagerSnapshotRetention(t *testing.T) {
 	}
 	
 	// Creating 3rd snapshot should succeed but prune snap1
-	_, err = mgr.CreateSnapshot(ctx, "vm-1", "snap3")
+	_, err = mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap3"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 3 failed: %v", err)
 	}
@@ -109,13 +109,13 @@ func TestQuotaManagerSnapshotRetention_DeleteErrorIsHandled(t *testing.T) {
 	mgr := WithQuotas(base, config.QuotasConfig{MaxSnapshotsPerVM: 1})
 	ctx := context.Background()
 	
-	_, _ = mgr.CreateSnapshot(ctx, "vm-1", "snap1")
+	_, _ = mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap1"})
 	
 	// Force the mock to return an error on deletion
 	base.DeleteSnapshotErr = fmt.Errorf("mock delete error")
 	
 	// Create second snapshot (over limit)
-	_, err := mgr.CreateSnapshot(ctx, "vm-1", "snap2")
+	_, err := mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap2"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 2 failed: %v", err)
 	}

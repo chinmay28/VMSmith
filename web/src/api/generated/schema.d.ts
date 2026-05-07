@@ -1640,11 +1640,15 @@ export interface components {
             id: string;
             vm_id: string;
             name: string;
+            /** @description Optional free-text description (max 1024 chars). */
+            description?: string;
             /** Format: date-time */
             created_at: string;
         };
         CreateSnapshotRequest: {
             name: string;
+            /** @description Optional free-text description for this snapshot. */
+            description?: string;
         };
         AddPortRequest: {
             host_port: number;

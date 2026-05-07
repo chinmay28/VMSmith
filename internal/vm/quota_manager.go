@@ -56,8 +56,8 @@ func (m *quotaManager) Get(ctx context.Context, id string) (*types.VM, error) {
 	return m.base.Get(ctx, id)
 }
 func (m *quotaManager) List(ctx context.Context) ([]*types.VM, error) { return m.base.List(ctx) }
-func (m *quotaManager) CreateSnapshot(ctx context.Context, vmID string, name string) (*types.Snapshot, error) {
-	snap, err := m.base.CreateSnapshot(ctx, vmID, name)
+func (m *quotaManager) CreateSnapshot(ctx context.Context, vmID string, spec types.SnapshotSpec) (*types.Snapshot, error) {
+	snap, err := m.base.CreateSnapshot(ctx, vmID, spec)
 	if err != nil {
 		return nil, err
 	}
