@@ -1,7 +1,14 @@
 BINARY    := vmsmith
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT    := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# BUILD_DATE is the HEAD commit's author date in RFC 3339 format. Sourcing
+# from `git log` instead of `date` keeps two builds of the same SHA byte-
+# identical, which lets reproducible-build verifiers and Go's content-based
+# linker cache do their job.
+BUILD_DATE := $(shell git log -1 --format=%cI HEAD 2>/dev/null || echo "unknown")
 BUILD_DIR := ./bin
-LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
+VERSION_PKG := github.com/vmsmith/vmsmith/pkg/version
+LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_DATE)"
 WEB_DIR   := ./web
 
 .PHONY: build install install-service clean purge test lint fmt deps web web-install \

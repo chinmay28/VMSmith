@@ -411,6 +411,7 @@ Most API routes are under `/api/v1/`. Full reference in `docs/ARCHITECTURE.md` (
 Additional docs routes:
 - `GET /api/docs` — embedded Swagger UI for the REST API
 - `GET /api/openapi.yaml` — served OpenAPI schema consumed by Swagger UI
+- `GET /api/version` — public build identification (`version`, `commit`, `build_date`, `go_version`, `os`, `arch`). Sits outside the authenticated `/api/v1` tree so health checks and the GUI footer can read it without an API key. Values are populated at link time via `-X github.com/vmsmith/vmsmith/pkg/version.Version=…` (see `Makefile`); on an unconfigured build the response carries `version: "dev"`, `commit: "unknown"`, `build_date: "unknown"`. The CLI exposes the same payload via `vmsmith version` (human-readable) or `vmsmith version --json`.
 
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`

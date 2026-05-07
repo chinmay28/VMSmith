@@ -4,14 +4,16 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/logger"
+	"github.com/vmsmith/vmsmith/pkg/version"
 )
 
 var cfgFile string
 var apiKey string
 
 var rootCmd = &cobra.Command{
-	Use:   "vmsmith",
-	Short: "vmSmith — lightweight VM provisioning and management",
+	Use:     "vmsmith",
+	Version: version.Version,
+	Short:   "vmSmith — lightweight VM provisioning and management",
 	Long: `vmSmith is a CLI tool and daemon for provisioning and managing
 QEMU/KVM virtual machines on Linux hosts.
 
@@ -49,4 +51,5 @@ func init() {
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(eventsCmd)
 	rootCmd.AddCommand(webhookCmd)
+	rootCmd.AddCommand(versionCmd)
 }

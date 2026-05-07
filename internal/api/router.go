@@ -155,6 +155,10 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 	})
 	r.Get("/api/openapi.yaml", apidocs.SpecHandler().ServeHTTP)
 
+	// Build identification — public so health checks and the GUI footer can
+	// read it without an API key. Returns nothing sensitive.
+	r.Get("/api/version", s.GetVersion)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(s.rateLimitMiddleware)
 		r.Use(middleware.SetHeader("Content-Type", "application/json"))

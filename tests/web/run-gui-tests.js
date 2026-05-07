@@ -113,6 +113,11 @@ async function main() {
       await assertVisible(p, "vm-row-db-server");
     }, page);
 
+    await runTest("layout footer shows mock build version", async (p) => {
+      await assertVisible(p, "layout-version");
+      await assertText(p, "layout-version", "VM Smith v0.0.0-mock");
+    }, page);
+
     await runTest("clicking VM row navigates to detail", async (p) => {
       await p.locator('[data-testid="vm-row-web-server"]').click();
       await p.waitForTimeout(500);

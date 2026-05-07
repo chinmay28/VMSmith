@@ -84,6 +84,18 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   const method = req.method;
 
+  // Build info — public, mirrors the daemon's GET /api/version.
+  if (p === "/api/version" && method === "GET") {
+    return json(res, 200, {
+      version: "v0.0.0-mock",
+      commit: "mockcommit",
+      build_date: "2026-05-06T00:00:00Z",
+      go_version: "go1.22.0",
+      os: "linux",
+      arch: "amd64",
+    }, { "Cache-Control": "no-store" });
+  }
+
   // API routes
   if (p === "/api/v1/vms" && method === "GET") {
     const list = [...vms.values()];

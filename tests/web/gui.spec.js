@@ -817,3 +817,26 @@ test.describe("Full Lifecycle", () => {
     await expect(page.getByTestId("vm-card-e2e-test-vm")).not.toBeVisible();
   });
 });
+
+// ============================================================
+// Layout footer / build info
+// ============================================================
+test.describe("Layout footer", () => {
+  test("renders the build version returned by /api/version", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const footer = page.getByTestId("layout-version");
+    await expect(footer).toBeVisible();
+    await expect(footer).toContainText("VM Smith v0.0.0-mock");
+    const title = await footer.getAttribute("title");
+    expect(title).toContain("commit mockcommit");
+    expect(title).toContain("2026-05-06T00:00:00Z");
+  });
+
+  test("falls back to a static label when /api/version fails", async ({ page }) => {
+    await page.route("**/api/version", (route) => route.fulfill({ status: 500, body: "{}" }));
+    await page.goto(BASE_URL);
+    const footer = page.getByTestId("layout-version");
+    await expect(footer).toBeVisible();
+    await expect(footer).toHaveText("VM Smith");
+  });
+});
