@@ -395,7 +395,7 @@ var vmEditCmd = &cobra.Command{
 			fmt.Printf("  IP:    %s\n", result.IP)
 		}
 		fmt.Printf("  Auto-start: %t\n", result.Spec.AutoStart)
-		fmt.Printf("  Locked:    %t\n", result.Spec.Locked)
+		fmt.Printf("  Locked:     %t\n", result.Spec.Locked)
 		return nil
 	},
 }
