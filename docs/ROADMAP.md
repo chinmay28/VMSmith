@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-05-06
+> **Last updated:** 2026-05-07
 > **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, webhook settings UX polish, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
@@ -512,7 +512,7 @@ VNC is already configured in domain XML (`internal/vm/domain.go:60` — `<graphi
 | 5.1.7 | Vendor noVNC under `web/src/vendor/novnc/` (pinned version, license header preserved). Add `web/src/pages/VMConsole.jsx` with ticket fetch, RFB instantiation, Ctrl-Alt-Del button, fullscreen toggle, status overlay | L | Add to router as `/vms/:id/console`; "Console" button on VMDetail opens in a new tab to give a clean keyboard capture surface |
 | 5.1.8 | Add VNC password support: `vnc_password` field on `VMSpec`/`VMUpdateSpec`, redact-on-read in API responses, persist as bcrypt hash + reversible-encrypted blob (AES-GCM with `daemon.console.password_key`). Regenerate domain XML on next start with `passwd='...'`. Add unit tests for round-trip and redaction | M | Reject password on update if VM is running and require restart message |
 | 5.1.9 | Serial console (`?intent=serial`): `vm.Manager.OpenSerialConsole(ctx, id) (io.ReadWriteCloser, error)` wrapping `Domain.OpenConsole`. Websocket handler uses `text` subprotocol. Bundle `xterm.js` and add a "Serial" tab next to "VNC" on the VMConsole page | M | Tickets carry `intent`; ticket for VNC cannot open serial and vice versa |
-| 5.1.10 | Redact `?ticket=` from request middleware logs (extend the existing logging middleware to scrub the query param). Add a unit test asserting the ticket never appears in captured log output | S | |
+| 5.1.10 | Redact `?ticket=` from request middleware logs (extend the existing logging middleware to scrub the query param). Add a unit test asserting the ticket never appears in captured log output | S | ✅ Done — `internal/api/requestLogger` now redacts both `ticket` and SSE `api_key` query params, with unit coverage ensuring raw secrets never reach structured log output |
 | 5.1.11 | Tests: unit (ticket store concurrency + expiry, password encryption round-trip, redaction), integration (ticket → websocket happy path with a fake VNC echo server, ticket reuse rejected, expired ticket rejected, VM stop forces close, idle timeout), Playwright (open console page, see canvas mount, send Ctrl-Alt-Del) | L | Use `httptest.NewServer` + `gorilla/websocket` test helpers |
 | 5.1.12 | Docs: new section in `docs/ARCHITECTURE.md` covering proxy design, ticket flow, security checklist; add operator note in `docs/PRODUCTION_DEPLOYMENT.md` about firewalling the host's loopback (no action needed if iptables doesn't touch `lo`) | S | |
 
