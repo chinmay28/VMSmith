@@ -146,17 +146,19 @@ func (s *Server) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		patch.Tags = tags
 	}
 
-	tpl, err := s.storageMgr.UpdateTemplate(id, patch)
+	tpl, changed, err := s.storageMgr.UpdateTemplate(id, patch)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusNotFound), apiErr)
 		return
 	}
 
-	s.publishAppEvent("template.updated", "", "template "+tpl.Name+" updated", map[string]string{
-		"template_id":   tpl.ID,
-		"template_name": tpl.Name,
-	})
+	if changed {
+		s.publishAppEvent("template.updated", "", "template "+tpl.Name+" updated", map[string]string{
+			"template_id":   tpl.ID,
+			"template_name": tpl.Name,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, tpl)
 }

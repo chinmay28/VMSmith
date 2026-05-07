@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -146,11 +147,13 @@ func (m *Manager) DeleteTemplate(id string) error {
 // UpdateTemplate applies a partial patch to an existing template. An empty
 // patch.Description leaves the description untouched; a nil patch.Tags leaves
 // the tag set untouched, while a non-nil empty slice clears tags. UpdatedAt
-// is bumped only when at least one field actually changed.
-func (m *Manager) UpdateTemplate(id string, patch types.TemplateUpdateSpec) (*types.VMTemplate, error) {
+// is bumped only when at least one field actually changed. The returned
+// `changed` bool tells the caller whether anything was modified, so handlers
+// can suppress side effects (e.g. event emission) on no-op patches.
+func (m *Manager) UpdateTemplate(id string, patch types.TemplateUpdateSpec) (*types.VMTemplate, bool, error) {
 	tpl, err := m.store.GetTemplate(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	changed := false
@@ -158,7 +161,7 @@ func (m *Manager) UpdateTemplate(id string, patch types.TemplateUpdateSpec) (*ty
 		tpl.Description = trimmed
 		changed = true
 	}
-	if patch.Tags != nil && !stringSlicesEqual(patch.Tags, tpl.Tags) {
+	if patch.Tags != nil && !slices.Equal(patch.Tags, tpl.Tags) {
 		// Caller passed an explicit slice (including []) — replace.
 		tpl.Tags = append([]string(nil), patch.Tags...)
 		changed = true
@@ -166,22 +169,10 @@ func (m *Manager) UpdateTemplate(id string, patch types.TemplateUpdateSpec) (*ty
 	if changed {
 		tpl.UpdatedAt = time.Now()
 		if err := m.store.PutTemplate(tpl); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-	return tpl, nil
-}
-
-func stringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return tpl, changed, nil
 }
 
 // DeleteImage removes an image from disk and metadata.

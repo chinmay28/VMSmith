@@ -215,7 +215,7 @@ delete and re-create the template to change them.`,
 		}
 		defer cleanup()
 
-		tpl, err := mgr.UpdateTemplate(id, patch)
+		tpl, _, err := mgr.UpdateTemplate(id, patch)
 		if err != nil {
 			logger.Error("cli", "template edit failed", "id", id, "error", err.Error())
 			return err

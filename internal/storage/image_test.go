@@ -297,12 +297,15 @@ func TestStorageManager_UpdateTemplate_AppliesPatch(t *testing.T) {
 	// the manager. But ensure we won't get a zero diff on very fast hosts.
 	time.Sleep(2 * time.Millisecond)
 
-	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
+	out, changed, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
 		Description: "now more useful",
 		Tags:        []string{"dev", "linux"},
 	})
 	if err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if !changed {
+		t.Errorf("changed = false, want true for description+tags edit")
 	}
 	if out.Description != "now more useful" {
 		t.Errorf("Description = %q, want %q", out.Description, "now more useful")
@@ -319,11 +322,14 @@ func TestStorageManager_UpdateTemplate_DescriptionOnlyKeepsTags(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	tpl := seedTemplate(t, mgr, "kept", []string{"keep-me", "alpha"}, "before")
 
-	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
+	out, changed, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{
 		Description: "after",
 	})
 	if err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if !changed {
+		t.Errorf("changed = false, want true for description edit")
 	}
 	if out.Description != "after" {
 		t.Errorf("Description = %q", out.Description)
@@ -337,9 +343,12 @@ func TestStorageManager_UpdateTemplate_NilTagsKeepsExisting(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	tpl := seedTemplate(t, mgr, "nil-tags", []string{"existing"}, "")
 
-	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: nil})
+	out, changed, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: nil})
 	if err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if changed {
+		t.Errorf("changed = true, want false for empty patch")
 	}
 	if got, want := strings.Join(out.Tags, ","), "existing"; got != want {
 		t.Errorf("Tags = %q, want %q", got, want)
@@ -350,9 +359,12 @@ func TestStorageManager_UpdateTemplate_EmptySliceClearsTags(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	tpl := seedTemplate(t, mgr, "clear-tags", []string{"a", "b"}, "")
 
-	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: []string{}})
+	out, changed, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Tags: []string{}})
 	if err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if !changed {
+		t.Errorf("changed = false, want true for explicit clear")
 	}
 	if len(out.Tags) != 0 {
 		t.Errorf("Tags = %v, want []", out.Tags)
@@ -366,9 +378,12 @@ func TestStorageManager_UpdateTemplate_NoChangeKeepsUpdatedAt(t *testing.T) {
 
 	time.Sleep(2 * time.Millisecond)
 
-	out, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Description: "same"})
+	out, changed, err := mgr.UpdateTemplate(tpl.ID, types.TemplateUpdateSpec{Description: "same"})
 	if err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if changed {
+		t.Errorf("changed = true, want false for no-op patch")
 	}
 	if !out.UpdatedAt.Equal(originalUpdated) {
 		t.Errorf("UpdatedAt should not advance on no-op patch: was %v, now %v", originalUpdated, out.UpdatedAt)
@@ -378,7 +393,7 @@ func TestStorageManager_UpdateTemplate_NoChangeKeepsUpdatedAt(t *testing.T) {
 func TestStorageManager_UpdateTemplate_NotFound(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, err := mgr.UpdateTemplate("tmpl-does-not-exist", types.TemplateUpdateSpec{Description: "x"})
+	_, _, err := mgr.UpdateTemplate("tmpl-does-not-exist", types.TemplateUpdateSpec{Description: "x"})
 	if err == nil {
 		t.Fatal("expected error for unknown template id")
 	}
