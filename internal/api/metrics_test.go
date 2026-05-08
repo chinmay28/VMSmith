@@ -536,6 +536,60 @@ func TestStreamVMStats_VMNotFound(t *testing.T) {
 	}
 }
 
+func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-replay", "stream-replay", types.VMStateRunning)
+
+	cases := []struct {
+		name        string
+		buildURL    func() string
+		addHeaders  func(*http.Request)
+	}{
+		{
+			name:     "last-event-id header",
+			buildURL: func() string { return ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream" },
+			addHeaders: func(req *http.Request) {
+				req.Header.Set("Last-Event-ID", "123")
+			},
+		},
+		{
+			name:       "since query",
+			buildURL:   func() string { return ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream?since=123" },
+			addHeaders: func(*http.Request) {},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tc.buildURL(), nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			tc.addHeaders(req)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			var errResp errorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if errResp.Code != "metrics_replay_not_supported" {
+				t.Errorf("code = %q, want metrics_replay_not_supported", errResp.Code)
+			}
+		})
+	}
+}
+
 func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
 	m := newTestMetricsMock()
 	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
