@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/vmsmith/vmsmith/internal/api"
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/console"
 	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/metrics"
@@ -44,6 +45,7 @@ type Daemon struct {
 	eventBus       *events.EventBus
 	retention      *events.Retention
 	webhookMgr     *webhooks.Manager
+	consoleStore   *console.Store
 	apiServer      *api.Server
 	server         *http.Server
 	metricsSrv     *http.Server // optional separate Prometheus scrape server
@@ -176,6 +178,12 @@ func New(cfg *config.Config) (*Daemon, error) {
 	})
 	apiServer.SetWebhookSubsystem(s, webhookMgr)
 
+	// Console-ticket store: short-TTL single-use tokens used by the
+	// (forthcoming) console websocket. Always wired so the issuance
+	// endpoint is available; the websocket itself lands in 5.1.4.
+	consoleStore := console.NewStore()
+	apiServer.SetConsoleStore(consoleStore)
+
 	server := &http.Server{
 		Addr:    cfg.Daemon.Listen,
 		Handler: apiServer,
@@ -195,6 +203,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		eventBus:       eventBus,
 		retention:      retention,
 		webhookMgr:     webhookMgr,
+		consoleStore:   consoleStore,
 		apiServer:      apiServer,
 		server:         server,
 	}
@@ -496,6 +505,11 @@ func (d *Daemon) closeResources() error {
 	// quiescent queue and don't try to publish onto a stopped bus.
 	if d.webhookMgr != nil {
 		d.webhookMgr.Stop()
+	}
+
+	// Stop the console-ticket janitor goroutine.
+	if d.consoleStore != nil {
+		d.consoleStore.Close()
 	}
 
 	// Stop event bus (drains pending events before closing store).

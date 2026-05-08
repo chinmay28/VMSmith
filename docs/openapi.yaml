@@ -505,6 +505,33 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/console/ticket:
+    post:
+      tags: [Console]
+      summary: Issue a single-use console ticket
+      description: |
+        Returns a short-TTL one-time token the caller passes to the console
+        websocket endpoint (forthcoming).  The VM must be in the `running`
+        state.  The endpoint returns 503 `service_unavailable` when the
+        daemon was started without a console subsystem (e.g. on a host where
+        the console feature is disabled in config).
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: Ticket issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTicket'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /images:
     get:
       tags: [Images]
@@ -1373,6 +1400,19 @@ components:
         description:
           type: string
           description: Optional free-form label for the rule.
+    ConsoleTicket:
+      type: object
+      required: [ticket, expires_at, websocket_url]
+      properties:
+        ticket:
+          type: string
+          description: Single-use opaque token; pass to the websocket endpoint.
+        expires_at:
+          type: string
+          format: date-time
+        websocket_url:
+          type: string
+          description: Path the client should dial after upgrading to a websocket.
     Image:
       type: object
       required: [id, name, path, size_bytes, format, created_at]
