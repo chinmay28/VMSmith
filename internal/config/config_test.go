@@ -15,6 +15,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Daemon.LogFile == "" {
 		t.Error("Daemon.LogFile should have a default value")
 	}
+	if cfg.Daemon.Console.MaxConcurrentSessions != 8 {
+		t.Errorf("Daemon.Console.MaxConcurrentSessions = %d, want 8", cfg.Daemon.Console.MaxConcurrentSessions)
+	}
+	if cfg.Daemon.Console.MaxSessionSeconds != 3600 {
+		t.Errorf("Daemon.Console.MaxSessionSeconds = %d, want 3600", cfg.Daemon.Console.MaxSessionSeconds)
+	}
+	if cfg.Daemon.Console.IdleTimeoutSeconds != 600 {
+		t.Errorf("Daemon.Console.IdleTimeoutSeconds = %d, want 600", cfg.Daemon.Console.IdleTimeoutSeconds)
+	}
 	if cfg.Daemon.MaxRequestBodyBytes != 50<<20 {
 		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want %d", cfg.Daemon.MaxRequestBodyBytes, 50<<20)
 	}
@@ -96,6 +105,11 @@ daemon:
     key_file: "/etc/vmsmith/tls/server.key"
     auto_cert: "vmsmith.example.com"
     auto_cert_cache_dir: "/var/lib/vmsmith/autocert"
+  console:
+    max_concurrent_sessions: 12
+    max_session_seconds: 7200
+    idle_timeout_seconds: 900
+    password_key: "base64-secret"
   max_request_body_bytes: 1048576
   max_upload_body_bytes: 2147483648
   max_concurrent_creates: 1
@@ -140,6 +154,18 @@ quotas:
 	}
 	if !cfg.Daemon.TLSConfigured() {
 		t.Error("Daemon.TLSConfigured() = false, want true")
+	}
+	if cfg.Daemon.Console.MaxConcurrentSessions != 12 {
+		t.Errorf("Daemon.Console.MaxConcurrentSessions = %d, want 12", cfg.Daemon.Console.MaxConcurrentSessions)
+	}
+	if cfg.Daemon.Console.MaxSessionSeconds != 7200 {
+		t.Errorf("Daemon.Console.MaxSessionSeconds = %d, want 7200", cfg.Daemon.Console.MaxSessionSeconds)
+	}
+	if cfg.Daemon.Console.IdleTimeoutSeconds != 900 {
+		t.Errorf("Daemon.Console.IdleTimeoutSeconds = %d, want 900", cfg.Daemon.Console.IdleTimeoutSeconds)
+	}
+	if cfg.Daemon.Console.PasswordKey != "base64-secret" {
+		t.Errorf("Daemon.Console.PasswordKey = %q, want base64-secret", cfg.Daemon.Console.PasswordKey)
 	}
 	if cfg.Daemon.MaxRequestBodyBytes != 1048576 {
 		t.Errorf("Daemon.MaxRequestBodyBytes = %d, want 1048576", cfg.Daemon.MaxRequestBodyBytes)
