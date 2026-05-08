@@ -609,6 +609,90 @@ func TestCLI_VMForceStop_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_VMSuspend(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s", Name: "pauseme", State: types.VMStateRunning})
+
+	out, err := runCLI("vm", "suspend", "vm-s")
+	if err != nil {
+		t.Fatalf("vm suspend: %v", err)
+	}
+	if !strings.Contains(out, "vm-s") || !strings.Contains(out, "suspended") {
+		t.Errorf("expected VM id and 'suspended' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-s")
+	if got.State != types.VMStatePaused {
+		t.Errorf("State = %q, want paused", got.State)
+	}
+}
+
+func TestCLI_VMSuspend_NotRunning(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-stopped", State: types.VMStateStopped})
+
+	_, err := runCLI("vm", "suspend", "vm-stopped")
+	if err == nil {
+		t.Fatal("expected error for non-running VM")
+	}
+}
+
+func TestCLI_VMSuspend_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "suspend", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_VMResume(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-r", Name: "resumeme", State: types.VMStatePaused})
+
+	out, err := runCLI("vm", "resume", "vm-r")
+	if err != nil {
+		t.Fatalf("vm resume: %v", err)
+	}
+	if !strings.Contains(out, "vm-r") || !strings.Contains(out, "resumed") {
+		t.Errorf("expected VM id and 'resumed' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-r")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestCLI_VMResume_NotPaused(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+
+	_, err := runCLI("vm", "resume", "vm-running")
+	if err == nil {
+		t.Fatal("expected error for non-paused VM")
+	}
+}
+
+func TestCLI_VMResume_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "resume", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
 func TestCLI_VMDelete(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

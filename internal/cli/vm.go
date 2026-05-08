@@ -273,6 +273,54 @@ var vmRestartCmd = &cobra.Command{
 	},
 }
 
+var vmSuspendCmd = &cobra.Command{
+	Use:   "suspend <id>",
+	Short: "Suspend a running VM (freeze CPU + memory; resume later)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm suspend", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm suspend: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.Suspend(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm suspend failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "suspend", "id", id)
+		fmt.Printf("VM %s suspended\n", id)
+		return nil
+	},
+}
+
+var vmResumeCmd = &cobra.Command{
+	Use:   "resume <id>",
+	Short: "Resume a paused VM",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm resume", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm resume: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.Resume(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm resume failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "resume", "id", id)
+		fmt.Printf("VM %s resumed\n", id)
+		return nil
+	},
+}
+
 var vmDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a VM and its resources",
@@ -975,6 +1023,8 @@ Examples:
 	vmCmd.AddCommand(vmStopCmd)
 	vmCmd.AddCommand(vmForceStopCmd)
 	vmCmd.AddCommand(vmRestartCmd)
+	vmCmd.AddCommand(vmSuspendCmd)
+	vmCmd.AddCommand(vmResumeCmd)
 	vmCmd.AddCommand(vmDeleteCmd)
 	vmCmd.AddCommand(vmInfoCmd)
 	vmCmd.AddCommand(vmStatsCmd)

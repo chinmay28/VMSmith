@@ -28,6 +28,8 @@ type MockManager struct {
 	StopErr               error
 	ForceStopErr          error
 	RestartErr            error
+	SuspendErr            error
+	ResumeErr             error
 	DeleteErr             error
 	GetErr                error
 	ListErr               error
@@ -252,6 +254,51 @@ func (m *MockManager) Restart(ctx context.Context, id string) error {
 	vm, ok := m.vms[id]
 	if !ok {
 		return fmt.Errorf("vms/%s: not found", id)
+	}
+
+	vm.State = types.VMStateRunning
+	vm.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *MockManager) Suspend(ctx context.Context, id string) error {
+	if m.SuspendErr != nil {
+		return m.SuspendErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	vm, ok := m.vms[id]
+	if !ok {
+		return fmt.Errorf("vms/%s: not found", id)
+	}
+	if vm.State == types.VMStatePaused {
+		return types.NewAPIError("vm_already_paused", "vm is already paused")
+	}
+	if vm.State != types.VMStateRunning {
+		return types.NewAPIError("vm_not_running", "vm must be running to suspend")
+	}
+
+	vm.State = types.VMStatePaused
+	vm.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *MockManager) Resume(ctx context.Context, id string) error {
+	if m.ResumeErr != nil {
+		return m.ResumeErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	vm, ok := m.vms[id]
+	if !ok {
+		return fmt.Errorf("vms/%s: not found", id)
+	}
+	if vm.State != types.VMStatePaused {
+		return types.NewAPIError("vm_not_paused", "vm must be paused to resume")
 	}
 
 	vm.State = types.VMStateRunning

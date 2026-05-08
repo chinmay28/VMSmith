@@ -271,6 +271,52 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/suspend:
+    post:
+      tags: [VMs]
+      summary: Suspend a running VM (freeze CPU + memory)
+      description: |
+        Pauses CPU + memory of a running VM without releasing host resources.
+        IPs, sockets, and RAM contents are preserved; resume picks up where
+        suspend left off. Returns 409 `vm_not_running` if the VM is stopped, or
+        409 `vm_already_paused` if it is already paused.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM suspended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/resume:
+    post:
+      tags: [VMs]
+      summary: Resume a paused VM
+      description: |
+        Unpauses a suspended VM, restoring it to the running state. Returns
+        409 `vm_not_paused` if the VM is not currently paused.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/clone:
     post:
       tags: [VMs]
@@ -1132,7 +1178,7 @@ components:
       in: query
       schema:
         type: string
-        enum: [creating, running, stopped, deleted, unknown]
+        enum: [creating, running, stopped, paused, deleted, unknown]
     Page:
       name: page
       in: query
@@ -1167,7 +1213,7 @@ components:
       enum: [tcp, udp]
     VMState:
       type: string
-      enum: [creating, running, stopped, deleted, unknown]
+      enum: [creating, running, stopped, paused, deleted, unknown]
     NetworkMode:
       type: string
       enum: [nat, macvtap, bridge]

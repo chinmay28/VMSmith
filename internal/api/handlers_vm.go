@@ -375,6 +375,35 @@ func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
 }
 
+// SuspendVM handles POST /api/v1/vms/{vmID}/suspend.  Pauses CPU+memory of a
+// running VM so it can be resumed later without rebooting.  Returns 409 with
+// `vm_not_running` if the VM is not currently running, and 409 with
+// `vm_already_paused` if it is already paused.
+func (s *Server) SuspendVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.Suspend(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.suspend_requested", id, fmt.Sprintf("VM %q suspend requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "suspended"})
+}
+
+// ResumeVM handles POST /api/v1/vms/{vmID}/resume.  Unpauses a suspended VM,
+// restoring it to the running state.  Returns 409 with `vm_not_paused` if the
+// VM is not currently paused.
+func (s *Server) ResumeVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.Resume(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.resume_requested", id, fmt.Sprintf("VM %q resume requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
+}
+
 // BulkVMAction handles POST /api/v1/vms/bulk.
 func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 	var req bulkVMActionRequest

@@ -369,6 +369,28 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("btn-start")).toBeVisible();
   });
 
+  test("suspend running VM and resume", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+
+    // Suspend button is only shown while running.
+    await expect(page.getByTestId("btn-suspend")).toBeVisible();
+    await page.getByTestId("btn-suspend").click();
+
+    // After suspend, state flips to paused and resume button appears.
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("paused");
+    await expect(page.getByTestId("btn-resume")).toBeVisible();
+    await expect(page.getByTestId("btn-suspend")).toHaveCount(0);
+    await expect(page.getByTestId("btn-stop")).toHaveCount(0);
+
+    // Resume puts the VM back into running.
+    await page.getByTestId("btn-resume").click();
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+    await expect(page.getByTestId("btn-suspend")).toBeVisible();
+    await expect(page.getByTestId("btn-resume")).toHaveCount(0);
+  });
+
   test("create snapshot", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

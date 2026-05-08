@@ -433,6 +433,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend a running VM (freeze CPU + memory)
+         * @description Pauses CPU + memory of a running VM without releasing host resources.
+         *     IPs, sockets, and RAM contents are preserved; resume picks up where
+         *     suspend left off. Returns 409 `vm_not_running` if the VM is stopped, or
+         *     409 `vm_already_paused` if it is already paused.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM suspended */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StatusResponse"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a paused VM
+         * @description Unpauses a suspended VM, restoring it to the running state. Returns
+         *     409 `vm_not_paused` if the VM is not currently paused.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM resumed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StatusResponse"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/clone": {
         parameters: {
             query?: never;
@@ -1765,7 +1857,7 @@ export interface components {
         /** @enum {string} */
         Protocol: "tcp" | "udp";
         /** @enum {string} */
-        VMState: "creating" | "running" | "stopped" | "deleted" | "unknown";
+        VMState: "creating" | "running" | "stopped" | "paused" | "deleted" | "unknown";
         /** @enum {string} */
         NetworkMode: "nat" | "macvtap" | "bridge";
         NetworkAttachment: {
@@ -2176,7 +2268,7 @@ export interface components {
         SnapshotName: string;
         /** @description Case-insensitive tag filter. */
         TagFilter: string;
-        StatusFilter: "creating" | "running" | "stopped" | "deleted" | "unknown";
+        StatusFilter: "creating" | "running" | "stopped" | "paused" | "deleted" | "unknown";
         Page: number;
         PerPage: number;
     };

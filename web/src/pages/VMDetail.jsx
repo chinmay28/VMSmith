@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, Download, Clock, Pencil, Copy, Zap
+  Plus, RotateCcw, Download, Clock, Pencil, Copy, Zap, Pause
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -31,6 +31,8 @@ export default function VMDetail() {
   const stopMut      = useMutation(vms.stop);
   const forceStopMut = useMutation(vms.forceStop);
   const restartMut   = useMutation(vms.restart);
+  const suspendMut   = useMutation(vms.suspend);
+  const resumeMut    = useMutation(vms.resume);
   const deleteMut    = useMutation(vms.delete);
 
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
@@ -95,6 +97,16 @@ export default function VMDetail() {
           {vm.state === 'running' && (
             <button className="btn-secondary" onClick={() => { restartMut.execute(id).then(refresh); }} data-testid="btn-restart" title="Graceful stop and start">
               <RotateCcw size={14} /> Restart
+            </button>
+          )}
+          {vm.state === 'running' && (
+            <button className="btn-secondary" onClick={() => { suspendMut.execute(id).then(refresh); }} data-testid="btn-suspend" title="Pause CPU and memory; resume later without rebooting">
+              <Pause size={14} /> Suspend
+            </button>
+          )}
+          {vm.state === 'paused' && (
+            <button className="btn-primary" onClick={() => { resumeMut.execute(id).then(refresh); }} data-testid="btn-resume" title="Unpause and continue running">
+              <Play size={14} /> Resume
             </button>
           )}
           <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">

@@ -34,6 +34,16 @@ func TestLifecycleEventToVMState(t *testing.T) {
 			want:  types.VMStateStopped,
 		},
 		{
+			name:  "suspended becomes paused",
+			event: &libvirt.DomainEventLifecycle{Event: libvirt.DOMAIN_EVENT_SUSPENDED},
+			want:  types.VMStatePaused,
+		},
+		{
+			name:  "pmsuspended becomes paused",
+			event: &libvirt.DomainEventLifecycle{Event: libvirt.DOMAIN_EVENT_PMSUSPENDED},
+			want:  types.VMStatePaused,
+		},
+		{
 			name:  "crashed becomes unknown",
 			event: &libvirt.DomainEventLifecycle{Event: libvirt.DOMAIN_EVENT_CRASHED},
 			want:  types.VMStateUnknown,

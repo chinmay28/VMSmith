@@ -2050,6 +2050,188 @@ func TestForceStopVM_Error(t *testing.T) {
 	}
 }
 
+func TestSuspendVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-s", Name: "pauseme", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-s/suspend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "suspended" {
+		t.Errorf("status field = %q, want suspended", body["status"])
+	}
+
+	got, _ := mockMgr.Get(context.Background(), "vm-s")
+	if got.State != types.VMStatePaused {
+		t.Errorf("State = %q, want paused", got.State)
+	}
+}
+
+func TestSuspendVM_NotRunning_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-stopped", State: types.VMStateStopped})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-stopped/suspend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+
+	var body types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body.Code != "vm_not_running" {
+		t.Errorf("code = %q, want vm_not_running", body.Code)
+	}
+}
+
+func TestSuspendVM_AlreadyPaused_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-p", State: types.VMStatePaused})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-p/suspend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+
+	var body types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body.Code != "vm_already_paused" {
+		t.Errorf("code = %q, want vm_already_paused", body.Code)
+	}
+}
+
+func TestSuspendVM_NotFound_Returns404(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/nonexistent/suspend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestSuspendVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.SuspendErr = types.ErrTest
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-x/suspend", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestResumeVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-r", Name: "resumeme", State: types.VMStatePaused})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-r/resume", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "resumed" {
+		t.Errorf("status field = %q, want resumed", body["status"])
+	}
+
+	got, _ := mockMgr.Get(context.Background(), "vm-r")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestResumeVM_NotPaused_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-running/resume", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+
+	var body types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body.Code != "vm_not_paused" {
+		t.Errorf("code = %q, want vm_not_paused", body.Code)
+	}
+}
+
+func TestResumeVM_NotFound_Returns404(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/nonexistent/resume", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestResumeVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStatePaused})
+	mockMgr.ResumeErr = types.ErrTest
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-x/resume", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
 // ============================================================
 // Snapshot handler error paths
 // ============================================================

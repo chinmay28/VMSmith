@@ -98,6 +98,10 @@
     @apply badge bg-blue-900/50 text-blue-300 border border-blue-700/40;
   }
 
+  .badge-paused {
+    @apply badge bg-amber-900/50 text-amber-300 border border-amber-700/40;
+  }
+
   .badge-error {
     @apply badge bg-red-900/50 text-red-300 border border-red-700/40;
   }

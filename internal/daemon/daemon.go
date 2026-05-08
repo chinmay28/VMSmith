@@ -382,7 +382,10 @@ func (d *Daemon) runAutoStartSweep(ctx context.Context) {
 		if v == nil || !v.Spec.AutoStart {
 			continue
 		}
-		if v.State == types.VMStateRunning {
+		if v.State == types.VMStateRunning || v.State == types.VMStatePaused {
+			// Already running or paused (memory preserved across daemon
+			// restart) — operator can resume manually. Skip the auto-start
+			// path so we don't try to dom.Create() a paused domain.
 			continue
 		}
 		attempted++

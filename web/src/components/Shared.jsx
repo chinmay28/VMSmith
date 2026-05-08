@@ -6,6 +6,7 @@ const stateStyles = {
   running:  'badge-running',
   stopped:  'badge-stopped',
   creating: 'badge-creating',
+  paused:   'badge-paused',
   unknown:  'badge-error',
   deleted:  'badge-error',
 };

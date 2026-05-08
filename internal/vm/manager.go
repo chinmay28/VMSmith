@@ -18,6 +18,8 @@ type Manager interface {
 	Stop(ctx context.Context, id string) error
 	ForceStop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) error
+	Suspend(ctx context.Context, id string) error
+	Resume(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Get(ctx context.Context, id string) (*types.VM, error)
 	List(ctx context.Context) ([]*types.VM, error)
