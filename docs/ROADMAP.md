@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-05-07
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, webhook settings UX polish, advanced operations, and long-tail production polish.
+> **Last updated:** 2026-05-08
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, webhook delivery + Settings UX, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -326,7 +326,7 @@ The original 4.1.4 (host-level stats on dashboard) is already done and remains i
 
 No way to know when a VM crashes, completes creation, or changes state. The work in this section is the foundation for several downstream features (audit log, dashboards without polling, schedules in 5.2, future alerting).
 
-**Status (2026-05-04):** Broadly shipped. Events are now persisted, queryable via `GET /api/v1/events`, streamable via `GET /api/v1/events/stream`, surfaced in the CLI and web UI, and fanned out through the in-process bus to webhook delivery. The main remaining gaps in this track are the webhook Settings/test-delivery UX (`4.2.16`), the remaining integration/E2E test matrix (`4.2.17`), and the lingering libvirt-state refactor cleanup called out in `4.2.4`.
+**Status (2026-05-08):** Broadly shipped. Events are now persisted, queryable via `GET /api/v1/events`, streamable via `GET /api/v1/events/stream`, surfaced in the CLI and web UI, and fanned out through the in-process bus to webhook delivery plus the Settings/test-delivery UX. The main remaining gaps in this track are the remaining integration/E2E test matrix (`4.2.17`) and the lingering libvirt-state refactor cleanup called out in `4.2.4`.
 
 #### 4.2.0 Architectural overview
 
@@ -737,7 +737,7 @@ With the initial platform hardening work mostly done, the next highest-value roa
 | Priority | Area | Key Tasks | Why |
 |----------|------|-----------|-----|
 | **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus export, dashboard rollups, CLI support, and live VMDetail charting are shipped; the main remaining work is the deeper unit/integration/E2E coverage in 4.1.10, including counter-reset edge cases and a real-VM stress path |
-| **P1** | Events | 4.2.15 – 4.2.17 | Core event API, SSE transport, connection observability, Activity views, and the bounded live-update fallback are shipped; the biggest remaining work is webhook delivery plus the last bit of test/polish work |
+| **P1** | Events | 4.2.17 | Core event API, SSE transport, connection observability, Activity views, webhook delivery, and the Settings/test-delivery UX are shipped; the biggest remaining work is the last integration/E2E coverage pass plus the libvirt-state cleanup called out in 4.2.4 |
 | **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.1 – 5.1.4 | High user value, but larger implementation surface |
