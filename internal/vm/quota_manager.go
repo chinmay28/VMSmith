@@ -88,6 +88,9 @@ func (m *quotaManager) ListSnapshots(ctx context.Context, vmID string) ([]*types
 func (m *quotaManager) DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error {
 	return m.base.DeleteSnapshot(ctx, vmID, snapshotName)
 }
+func (m *quotaManager) GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
+	return m.base.GetConsoleEndpoint(ctx, id, intent)
+}
 func (m *quotaManager) Close() error { return m.base.Close() }
 
 func CalculateQuotaUsage(vms []*types.VM, quotas config.QuotasConfig) types.QuotaUsage {
