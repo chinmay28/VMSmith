@@ -230,6 +230,30 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/force-stop:
+    post:
+      tags: [VMs]
+      summary: Force-stop a VM (immediate destroy, skips ACPI shutdown)
+      description: |
+        Equivalent to pulling the power cord — used when the guest OS is
+        unresponsive or the operator deliberately wants to skip graceful
+        shutdown. Returns 409 `vm_already_stopped` when the VM is not in a
+        running state.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM force-stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/restart:
     post:
       tags: [VMs]

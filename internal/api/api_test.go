@@ -1981,6 +1981,75 @@ func TestStopVM_Error(t *testing.T) {
 	}
 }
 
+func TestForceStopVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-fs", Name: "wedged", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-fs/force-stop", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["status"] != "force_stopped" {
+		t.Errorf("status field = %q, want force_stopped", body["status"])
+	}
+
+	got, _ := mockMgr.Get(nil, "vm-fs")
+	if got.State != types.VMStateStopped {
+		t.Errorf("State = %q, want stopped", got.State)
+	}
+}
+
+func TestForceStopVM_AlreadyStopped_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-fs2", Name: "stopped", State: types.VMStateStopped})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-fs2/force-stop", "application/json", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["code"] != "vm_already_stopped" {
+		t.Errorf("code = %v, want vm_already_stopped", body["code"])
+	}
+}
+
+func TestForceStopVM_NotFound_Returns404(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-missing/force-stop", "application/json", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestForceStopVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.ForceStopErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/force-stop", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
 // ============================================================
 // Snapshot handler error paths
 // ============================================================

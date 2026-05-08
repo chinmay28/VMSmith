@@ -179,6 +179,53 @@ func TestMockManager_Restart(t *testing.T) {
 	}
 }
 
+func TestMockManager_ForceStop(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	v, _ := m.Create(ctx, types.VMSpec{Name: "kill-me"})
+	if err := m.ForceStop(ctx, v.ID); err != nil {
+		t.Fatalf("ForceStop: %v", err)
+	}
+	got, _ := m.Get(ctx, v.ID)
+	if got.State != types.VMStateStopped {
+		t.Errorf("after ForceStop: State = %q, want stopped", got.State)
+	}
+}
+
+func TestMockManager_ForceStop_AlreadyStopped(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	v, _ := m.Create(ctx, types.VMSpec{Name: "stopped"})
+	if err := m.Stop(ctx, v.ID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	err := m.ForceStop(ctx, v.ID)
+	if err == nil {
+		t.Fatal("expected error on already-stopped force-stop")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "vm_already_stopped" {
+		t.Fatalf("err = %v, want vm_already_stopped APIError", err)
+	}
+}
+
+func TestMockManager_ForceStop_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if err := m.ForceStop(context.Background(), "vm-missing"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestMockManager_ForceStop_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "boom"})
+	m.ForceStopErr = fmt.Errorf("force-stop boom")
+	if err := m.ForceStop(context.Background(), vm.ID); err == nil || err.Error() != "force-stop boom" {
+		t.Fatalf("err = %v, want force-stop boom", err)
+	}
+}
+
 func TestMockManager_Restart_NotFound(t *testing.T) {
 	m := NewMockManager()
 	if err := m.Restart(context.Background(), "vm-missing"); err == nil {

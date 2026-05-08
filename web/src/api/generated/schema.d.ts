@@ -346,6 +346,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/force-stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force-stop a VM (immediate destroy, skips ACPI shutdown)
+         * @description Equivalent to pulling the power cord — used when the guest OS is
+         *     unresponsive or the operator deliberately wants to skip graceful
+         *     shutdown. Returns 409 `vm_already_stopped` when the VM is not in a
+         *     running state.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM force-stopped */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StatusResponse"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/restart": {
         parameters: {
             query?: never;

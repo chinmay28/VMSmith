@@ -16,6 +16,7 @@ type Manager interface {
 	Update(ctx context.Context, id string, patch types.VMUpdateSpec) (*types.VM, error)
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id string) error
+	ForceStop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Get(ctx context.Context, id string) (*types.VM, error)

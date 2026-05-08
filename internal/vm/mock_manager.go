@@ -26,6 +26,7 @@ type MockManager struct {
 	UpdateErr             error
 	StartErr              error
 	StopErr               error
+	ForceStopErr          error
 	RestartErr            error
 	DeleteErr             error
 	GetErr                error
@@ -212,6 +213,27 @@ func (m *MockManager) Stop(ctx context.Context, id string) error {
 	vm, ok := m.vms[id]
 	if !ok {
 		return fmt.Errorf("vms/%s: not found", id)
+	}
+
+	vm.State = types.VMStateStopped
+	vm.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *MockManager) ForceStop(ctx context.Context, id string) error {
+	if m.ForceStopErr != nil {
+		return m.ForceStopErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	vm, ok := m.vms[id]
+	if !ok {
+		return fmt.Errorf("vms/%s: not found", id)
+	}
+	if vm.State == types.VMStateStopped {
+		return types.NewAPIError("vm_already_stopped", "vm is already stopped")
 	}
 
 	vm.State = types.VMStateStopped

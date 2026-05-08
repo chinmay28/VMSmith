@@ -352,6 +352,23 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("btn-restart")).toBeVisible();
   });
 
+  test("force-stop running VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Force-stop button is only shown while running.
+    await expect(page.getByTestId("btn-force-stop")).toBeVisible();
+
+    // The handler asks for confirmation since this skips graceful shutdown.
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByTestId("btn-force-stop").click();
+
+    // After force-stop the VM is stopped and the Force-stop button disappears.
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
+    await expect(page.getByTestId("btn-force-stop")).toHaveCount(0);
+    await expect(page.getByTestId("btn-start")).toBeVisible();
+  });
+
   test("create snapshot", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

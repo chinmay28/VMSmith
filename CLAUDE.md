@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|restart|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
@@ -421,6 +421,7 @@ POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway, auto_start, locked — zero/empty ignored; `auto_start` and `locked` use `*bool` so omit them to keep the current value; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)
 POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
+POST   /vms/{id}/force-stop            Force-stop VM (immediate `dom.Destroy()`, skips ACPI shutdown — equivalent to pulling the power cord). Returns HTTP 409 `vm_already_stopped` when the VM is not running. CLI: `vmsmith vm force-stop <id>`.
 POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
 GET    /vms/{id}/snapshots             List snapshots (each entry carries `name`, optional `description`, and a libvirt-parsed `created_at`)

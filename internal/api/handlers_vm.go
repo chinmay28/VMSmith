@@ -345,6 +345,23 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
+// ForceStopVM handles POST /api/v1/vms/{vmID}/force-stop.  Skips the ACPI
+// shutdown signal that StopVM relies on and immediately destroys the running
+// domain — the libvirt equivalent of pulling the power cord.  Used when the
+// guest OS is unresponsive or the operator deliberately wants to skip
+// graceful shutdown.  Returns 409 vm_already_stopped when the VM is not in a
+// running state.
+func (s *Server) ForceStopVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.ForceStop(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.force_stop_requested", id, fmt.Sprintf("VM %q force-stop requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "force_stopped"})
+}
+
 // RestartVM handles POST /api/v1/vms/{vmID}/restart.  It performs a graceful
 // stop followed by a start; if the VM is already stopped it just starts.
 func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
