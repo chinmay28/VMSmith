@@ -564,6 +564,51 @@ func TestCLI_VMRestart_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_VMReboot(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-rb", Name: "rebooter", State: types.VMStateRunning})
+
+	out, err := runCLI("vm", "reboot", "vm-rb")
+	if err != nil {
+		t.Fatalf("vm reboot: %v", err)
+	}
+	if !strings.Contains(out, "vm-rb") || !strings.Contains(out, "rebooted") {
+		t.Errorf("expected VM id and 'rebooted' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-rb")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestCLI_VMReboot_NotRunning(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-stopped", State: types.VMStateStopped})
+
+	_, err := runCLI("vm", "reboot", "vm-stopped")
+	if err == nil {
+		t.Fatal("expected error for non-running VM")
+	}
+	if !strings.Contains(err.Error(), "vm_not_running") && !strings.Contains(err.Error(), "must be running") {
+		t.Errorf("expected vm_not_running error, got: %v", err)
+	}
+}
+
+func TestCLI_VMReboot_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "reboot", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
 func TestCLI_VMForceStop(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

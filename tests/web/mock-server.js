@@ -219,6 +219,12 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "running"; return json(res, 200, { status: "restarted" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/reboot$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state !== "running") return json(res, 409, { code: "vm_not_running", message: "vm must be running to reboot" });
+    return json(res, 200, { status: "rebooted" });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/suspend$/)) && method === "POST") {
     const vm = vms.get(m[1]);
     if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });

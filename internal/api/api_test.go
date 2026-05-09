@@ -1955,6 +1955,73 @@ func TestRestartVM_Error(t *testing.T) {
 	}
 }
 
+func TestRebootVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-rb", Name: "rebooter", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-rb/reboot", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "rebooted" {
+		t.Errorf("status field = %q, want rebooted", body["status"])
+	}
+
+	got, _ := mockMgr.Get(nil, "vm-rb")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestRebootVM_NotRunning_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-rbs", State: types.VMStateStopped})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-rbs/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["code"] != "vm_not_running" {
+		t.Errorf("code = %v, want vm_not_running", body["code"])
+	}
+}
+
+func TestRebootVM_NotFound_Returns404(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-missing/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestRebootVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.RebootErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
 func TestStartVM_Error(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

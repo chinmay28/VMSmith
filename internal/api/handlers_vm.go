@@ -375,6 +375,22 @@ func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
 }
 
+// RebootVM handles POST /api/v1/vms/{vmID}/reboot.  Sends an ACPI reboot
+// signal to the running guest via libvirt's dom.Reboot().  Unlike Restart
+// (stop+start, which power-cycles QEMU), Reboot keeps the domain alive and
+// preserves the IP / MAC / DHCP reservation.  Returns 409 `vm_not_running`
+// when the VM is not currently running.
+func (s *Server) RebootVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.Reboot(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.reboot_requested", id, fmt.Sprintf("VM %q reboot requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rebooted"})
+}
+
 // SuspendVM handles POST /api/v1/vms/{vmID}/suspend.  Pauses CPU+memory of a
 // running VM so it can be resumed later without rebooting.  Returns 409 with
 // `vm_not_running` if the VM is not currently running, and 409 with

@@ -369,6 +369,20 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("btn-start")).toBeVisible();
   });
 
+  test("reboot running VM keeps it running", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+
+    // Reboot button only appears while running.
+    await expect(page.getByTestId("btn-reboot")).toBeVisible();
+    await page.getByTestId("btn-reboot").click();
+
+    // Reboot keeps the VM in running state (in-guest reboot, no power cycle).
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+    await expect(page.getByTestId("btn-reboot")).toBeVisible();
+  });
+
   test("suspend running VM and resume", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

@@ -18,6 +18,7 @@ type Manager interface {
 	Stop(ctx context.Context, id string) error
 	ForceStop(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) error
+	Reboot(ctx context.Context, id string) error
 	Suspend(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
