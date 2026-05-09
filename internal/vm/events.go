@@ -156,8 +156,10 @@ func lifecycleEventToVMState(event *libvirt.DomainEventLifecycle) types.VMState 
 	switch event.Event {
 	case libvirt.DOMAIN_EVENT_STARTED, libvirt.DOMAIN_EVENT_RESUMED:
 		return types.VMStateRunning
-	case libvirt.DOMAIN_EVENT_STOPPED, libvirt.DOMAIN_EVENT_SHUTDOWN, libvirt.DOMAIN_EVENT_SUSPENDED, libvirt.DOMAIN_EVENT_PMSUSPENDED:
+	case libvirt.DOMAIN_EVENT_STOPPED, libvirt.DOMAIN_EVENT_SHUTDOWN:
 		return types.VMStateStopped
+	case libvirt.DOMAIN_EVENT_SUSPENDED, libvirt.DOMAIN_EVENT_PMSUSPENDED:
+		return types.VMStatePaused
 	case libvirt.DOMAIN_EVENT_CRASHED:
 		return types.VMStateUnknown
 	case libvirt.DOMAIN_EVENT_UNDEFINED:

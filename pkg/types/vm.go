@@ -9,6 +9,7 @@ const (
 	VMStateCreating VMState = "creating"
 	VMStateRunning  VMState = "running"
 	VMStateStopped  VMState = "stopped"
+	VMStatePaused   VMState = "paused"
 	VMStateDeleted  VMState = "deleted"
 	VMStateUnknown  VMState = "unknown"
 )

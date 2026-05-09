@@ -227,7 +227,7 @@ func statusForAPIError(err error, fallback int) int {
 		return 503
 	case "quota_exceeded":
 		return 429
-	case "vm_locked", "vm_already_stopped":
+	case "vm_locked", "vm_already_stopped", "vm_not_running", "vm_not_paused", "vm_already_paused":
 		return 409
 	default:
 		return fallback

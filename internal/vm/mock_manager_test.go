@@ -242,6 +242,100 @@ func TestMockManager_Restart_ErrorInjection(t *testing.T) {
 	}
 }
 
+func TestMockManager_SuspendResume_HappyPath(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "pauser"})
+
+	if err := m.Suspend(ctx, vm.ID); err != nil {
+		t.Fatalf("Suspend: %v", err)
+	}
+	got, _ := m.Get(ctx, vm.ID)
+	if got.State != types.VMStatePaused {
+		t.Errorf("after Suspend: State = %q, want paused", got.State)
+	}
+
+	if err := m.Resume(ctx, vm.ID); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	got, _ = m.Get(ctx, vm.ID)
+	if got.State != types.VMStateRunning {
+		t.Errorf("after Resume: State = %q, want running", got.State)
+	}
+}
+
+func TestMockManager_Suspend_NotRunning(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "stopped"})
+	_ = m.Stop(ctx, vm.ID)
+
+	err := m.Suspend(ctx, vm.ID)
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "vm_not_running" {
+		t.Fatalf("err = %v, want vm_not_running APIError", err)
+	}
+}
+
+func TestMockManager_Suspend_AlreadyPaused(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "twice"})
+	if err := m.Suspend(ctx, vm.ID); err != nil {
+		t.Fatalf("first Suspend: %v", err)
+	}
+
+	err := m.Suspend(ctx, vm.ID)
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "vm_already_paused" {
+		t.Fatalf("err = %v, want vm_already_paused APIError", err)
+	}
+}
+
+func TestMockManager_Resume_NotPaused(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "running"})
+
+	err := m.Resume(ctx, vm.ID)
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "vm_not_paused" {
+		t.Fatalf("err = %v, want vm_not_paused APIError", err)
+	}
+}
+
+func TestMockManager_Suspend_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if err := m.Suspend(context.Background(), "vm-missing"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestMockManager_Resume_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if err := m.Resume(context.Background(), "vm-missing"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestMockManager_Suspend_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "boom"})
+	m.SuspendErr = fmt.Errorf("suspend boom")
+	if err := m.Suspend(context.Background(), vm.ID); err == nil || err.Error() != "suspend boom" {
+		t.Fatalf("err = %v, want suspend boom", err)
+	}
+}
+
+func TestMockManager_Resume_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "boom"})
+	m.ResumeErr = fmt.Errorf("resume boom")
+	if err := m.Resume(context.Background(), vm.ID); err == nil || err.Error() != "resume boom" {
+		t.Fatalf("err = %v, want resume boom", err)
+	}
+}
+
 func TestMockManager_Snapshots(t *testing.T) {
 	m := NewMockManager()
 	ctx := context.Background()

@@ -219,6 +219,21 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "running"; return json(res, 200, { status: "restarted" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/suspend$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state === "paused") return json(res, 409, { code: "vm_already_paused", message: "vm is already paused" });
+    if (vm.state !== "running") return json(res, 409, { code: "vm_not_running", message: "vm must be running to suspend" });
+    vm.state = "paused";
+    return json(res, 200, { status: "suspended" });
+  }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/resume$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state !== "paused") return json(res, 409, { code: "vm_not_paused", message: "vm must be paused to resume" });
+    vm.state = "running";
+    return json(res, 200, { status: "resumed" });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
     const source = vms.get(m[1]);
     if (!source) return json(res, 404, { error: "not found" });

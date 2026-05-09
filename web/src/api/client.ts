@@ -75,6 +75,8 @@ export const vms = {
   stop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/stop', { params: { path: { vmID: id } } })),
   forceStop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/force-stop', { params: { path: { vmID: id } } })),
   restart: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/restart', { params: { path: { vmID: id } } })),
+  suspend: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/suspend', { params: { path: { vmID: id } } })),
+  resume: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/resume', { params: { path: { vmID: id } } })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
   stats: (id: string, { since = '', fields = '' }: { since?: string; fields?: string } = {}) =>
     unwrap(apiClient.GET('/vms/{vmID}/stats', {

@@ -196,6 +196,8 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				r.Post("/stop", s.StopVM)
 				r.Post("/force-stop", s.ForceStopVM)
 				r.Post("/restart", s.RestartVM)
+				r.Post("/suspend", s.SuspendVM)
+				r.Post("/resume", s.ResumeVM)
 
 				// Snapshots
 				r.Route("/snapshots", func(r chi.Router) {

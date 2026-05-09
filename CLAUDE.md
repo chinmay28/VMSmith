@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm suspend|resume <id>` pause / unpause CPU+memory)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
@@ -423,6 +423,8 @@ POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 POST   /vms/{id}/force-stop            Force-stop VM (immediate `dom.Destroy()`, skips ACPI shutdown — equivalent to pulling the power cord). Returns HTTP 409 `vm_already_stopped` when the VM is not running. CLI: `vmsmith vm force-stop <id>`.
 POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
+POST   /vms/{id}/suspend               Suspend a running VM (libvirt pause): freezes CPU + memory without releasing host resources. State becomes `paused`. Returns HTTP 409 `vm_not_running` when stopped or `vm_already_paused` when already paused.
+POST   /vms/{id}/resume                Resume a paused VM, restoring it to `running`. Returns HTTP 409 `vm_not_paused` if the VM is not currently paused.
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
 GET    /vms/{id}/snapshots             List snapshots (each entry carries `name`, optional `description`, and a libvirt-parsed `created_at`)
 POST   /vms/{id}/snapshots             Create snapshot (body: `{ "name": "...", "description": "..." }` — description optional, ≤1024 chars; persisted via libvirt's `<description>` element so it round-trips through `dumpxml`)

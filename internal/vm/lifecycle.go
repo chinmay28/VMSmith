@@ -496,6 +496,73 @@ func (m *LibvirtManager) Restart(ctx context.Context, id string) error {
 	return m.store.PutVM(vm)
 }
 
+// Suspend pauses a running VM, freezing CPU + memory state without releasing
+// resources. The VM keeps its IP, open files, and RAM contents — Resume picks
+// up exactly where Suspend left off. Refuses if the VM is not currently
+// running so callers get a clear typed error instead of a no-op.
+func (m *LibvirtManager) Suspend(ctx context.Context, id string) error {
+	vm, err := m.store.GetVM(id)
+	if err != nil {
+		return err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return fmt.Errorf("looking up domain %s: %w", vm.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return fmt.Errorf("getting domain state: %w", err)
+	}
+	if state == libvirt.DOMAIN_PAUSED {
+		return types.NewAPIError("vm_already_paused", "vm is already paused")
+	}
+	if state != libvirt.DOMAIN_RUNNING {
+		return types.NewAPIError("vm_not_running", "vm must be running to suspend")
+	}
+
+	if err := dom.Suspend(); err != nil {
+		return fmt.Errorf("suspending domain: %w", err)
+	}
+
+	vm.State = types.VMStatePaused
+	vm.UpdatedAt = time.Now()
+	return m.store.PutVM(vm)
+}
+
+// Resume unpauses a suspended VM, restoring it to the running state.
+// Refuses unless the VM is currently paused.
+func (m *LibvirtManager) Resume(ctx context.Context, id string) error {
+	vm, err := m.store.GetVM(id)
+	if err != nil {
+		return err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return fmt.Errorf("looking up domain %s: %w", vm.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return fmt.Errorf("getting domain state: %w", err)
+	}
+	if state != libvirt.DOMAIN_PAUSED {
+		return types.NewAPIError("vm_not_paused", "vm must be paused to resume")
+	}
+
+	if err := dom.Resume(); err != nil {
+		return fmt.Errorf("resuming domain: %w", err)
+	}
+
+	vm.State = types.VMStateRunning
+	vm.UpdatedAt = time.Now()
+	return m.store.PutVM(vm)
+}
+
 // restartShutdownTimeout is the grace period given to a guest to react to ACPI
 // shutdown before Restart force-destroys it.  Kept short relative to libvirt's
 // default to avoid hanging an interactive `vmsmith vm restart` call.
@@ -1698,7 +1765,7 @@ func domainStateToVMState(dom *libvirt.Domain) types.VMState {
 	case libvirt.DOMAIN_SHUTOFF:
 		return types.VMStateStopped
 	case libvirt.DOMAIN_PAUSED:
-		return types.VMStateStopped
+		return types.VMStatePaused
 	default:
 		return types.VMStateUnknown
 	}
