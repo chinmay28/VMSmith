@@ -938,6 +938,126 @@ func (m *LibvirtManager) DeleteSnapshot(ctx context.Context, vmID string, snapsh
 	return snap.Delete(0)
 }
 
+// GetConsoleEndpoint inspects the live libvirt domain XML to discover
+// where the daemon's console proxy should dial for the requested intent.
+// `vnc` reads the `<graphics type='vnc'>` element; `serial` reads the
+// `<console type='pty'>` element (and its `<source path>` companion if
+// the parent serial device carries it).  The VM must be running:
+// libvirt only allocates a graphics port and pty path while the domain
+// is alive, so a stopped VM returns a typed `vm_not_running` error.
+func (m *LibvirtManager) GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
+	if !intent.Valid() {
+		return nil, types.NewAPIError("invalid_console_intent", fmt.Sprintf("unknown console intent %q", string(intent)))
+	}
+
+	storedVM, err := m.store.GetVM(id)
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := m.conn.LookupDomainByName(storedVM.Name)
+	if err != nil {
+		return nil, fmt.Errorf("looking up domain: %w", err)
+	}
+	defer dom.Free()
+
+	if state := domainStateToVMState(dom); state != types.VMStateRunning {
+		return nil, types.NewAPIError("vm_not_running", "vm is not running; start it before requesting a console endpoint")
+	}
+
+	xmlStr, err := dom.GetXMLDesc(0)
+	if err != nil {
+		return nil, fmt.Errorf("reading domain xml: %w", err)
+	}
+
+	endpoint, err := parseConsoleEndpointFromXML(xmlStr, intent)
+	if err != nil {
+		return nil, err
+	}
+	return endpoint, nil
+}
+
+// parseConsoleEndpointFromXML extracts a console endpoint from a
+// libvirt domain XML document.  Pure-Go so it can be unit-tested
+// without a real libvirt connection.
+func parseConsoleEndpointFromXML(rawXML string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
+	type graphicsXML struct {
+		Type   string `xml:"type,attr"`
+		Port   string `xml:"port,attr"`
+		Listen string `xml:"listen,attr"`
+	}
+	type ptySourceXML struct {
+		Path string `xml:"path,attr"`
+	}
+	type consoleXML struct {
+		Type   string       `xml:"type,attr"`
+		TTY    string       `xml:"tty,attr"`
+		Source ptySourceXML `xml:"source"`
+	}
+	type devicesXML struct {
+		Graphics []graphicsXML `xml:"graphics"`
+		Serials  []consoleXML  `xml:"serial"`
+		Consoles []consoleXML  `xml:"console"`
+	}
+	type domainXML struct {
+		Devices devicesXML `xml:"devices"`
+	}
+
+	var d domainXML
+	if err := xml.Unmarshal([]byte(rawXML), &d); err != nil {
+		return nil, fmt.Errorf("parsing domain xml: %w", err)
+	}
+
+	switch intent {
+	case types.ConsoleIntentVNC:
+		for _, g := range d.Devices.Graphics {
+			if !strings.EqualFold(g.Type, "vnc") {
+				continue
+			}
+			port, perr := strconv.Atoi(strings.TrimSpace(g.Port))
+			if perr != nil || port <= 0 {
+				// libvirt records "-1" before a domain is started
+				// or `autoport='yes'` has been resolved.
+				return nil, types.NewAPIError("console_unavailable", "vnc port has not been assigned yet")
+			}
+			host := strings.TrimSpace(g.Listen)
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			return &types.ConsoleEndpoint{
+				Intent: types.ConsoleIntentVNC,
+				Host:   host,
+				Port:   port,
+			}, nil
+		}
+		return nil, types.NewAPIError("console_unavailable", "domain has no vnc graphics device")
+	case types.ConsoleIntentSerial:
+		// Prefer the `<console>` element because that is what libvirt
+		// fills in with the live `tty=` attribute; fall back to a
+		// `<serial>` element with a `<source path>` for older XML.
+		candidates := append([]consoleXML{}, d.Devices.Consoles...)
+		candidates = append(candidates, d.Devices.Serials...)
+		for _, c := range candidates {
+			if !strings.EqualFold(c.Type, "pty") {
+				continue
+			}
+			path := strings.TrimSpace(c.TTY)
+			if path == "" {
+				path = strings.TrimSpace(c.Source.Path)
+			}
+			if path == "" {
+				continue
+			}
+			return &types.ConsoleEndpoint{
+				Intent: types.ConsoleIntentSerial,
+				Path:   path,
+			}, nil
+		}
+		return nil, types.NewAPIError("console_unavailable", "domain has no serial pty endpoint yet")
+	}
+	return nil, types.NewAPIError("invalid_console_intent", fmt.Sprintf("unknown console intent %q", string(intent)))
+}
+
 // --- helpers ---
 
 func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {

@@ -27,6 +27,13 @@ type Manager interface {
 	ListSnapshots(ctx context.Context, vmID string) ([]*types.Snapshot, error)
 	DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error
 
+	// Console access — returns the host/port (vnc) or pty path (serial)
+	// the daemon's console proxy should dial.  Returns a typed
+	// `vm_not_running` API error when the VM is stopped (graphics + pty
+	// only exist while the domain is alive) and `console_unavailable`
+	// when the domain XML carries no matching device for the intent.
+	GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error)
+
 	// Connection management
 	Close() error
 }

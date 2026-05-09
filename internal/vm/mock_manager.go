@@ -12,32 +12,37 @@ import (
 
 // MockManager implements Manager for testing without libvirt.
 type MockManager struct {
-	mu        sync.RWMutex
-	vms       map[string]*types.VM
-	snapshots map[string][]*types.Snapshot // vmID -> snapshots
-	nextID    int
+	mu               sync.RWMutex
+	vms              map[string]*types.VM
+	snapshots        map[string][]*types.Snapshot // vmID -> snapshots
+	consoleEndpoints map[string]*types.ConsoleEndpoint
+	consoleListeners map[string]net.Listener
+	nextID           int
 
 	// Hooks for injecting errors in tests
-	CreateErr          error
-	CloneErr           error
-	UpdateErr          error
-	StartErr           error
-	StopErr            error
-	RestartErr         error
-	DeleteErr          error
-	GetErr             error
-	ListErr            error
-	CreateSnapshotErr  error
-	RestoreSnapshotErr error
-	DeleteSnapshotErr  error
-	CreateDelay        time.Duration
+	CreateErr             error
+	CloneErr              error
+	UpdateErr             error
+	StartErr              error
+	StopErr               error
+	RestartErr            error
+	DeleteErr             error
+	GetErr                error
+	ListErr               error
+	CreateSnapshotErr     error
+	RestoreSnapshotErr    error
+	DeleteSnapshotErr     error
+	GetConsoleEndpointErr error
+	CreateDelay           time.Duration
 }
 
 // NewMockManager creates a new mock VM manager.
 func NewMockManager() *MockManager {
 	return &MockManager{
-		vms:       make(map[string]*types.VM),
-		snapshots: make(map[string][]*types.Snapshot),
+		vms:              make(map[string]*types.VM),
+		snapshots:        make(map[string][]*types.Snapshot),
+		consoleEndpoints: make(map[string]*types.ConsoleEndpoint),
+		consoleListeners: make(map[string]net.Listener),
 	}
 }
 
@@ -362,7 +367,59 @@ func (m *MockManager) DeleteSnapshot(ctx context.Context, vmID string, snapshotN
 	return fmt.Errorf("snapshot %s not found", snapshotName)
 }
 
+// GetConsoleEndpoint returns a synthetic console endpoint suitable for
+// driving the websocket proxy in tests.  Tests that need a real socket
+// can pre-bind one with SeedConsoleListener; otherwise a synthetic
+// 127.0.0.1:5900 / /dev/pts/0 placeholder is returned for the running
+// VM.  Stopped VMs return a typed `vm_not_running` API error so the
+// HTTP handler emits the same 409 it would in production.
+func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
+	if m.GetConsoleEndpointErr != nil {
+		return nil, m.GetConsoleEndpointErr
+	}
+	if !intent.Valid() {
+		return nil, types.NewAPIError("invalid_console_intent", fmt.Sprintf("unknown console intent %q", string(intent)))
+	}
+
+	m.mu.RLock()
+	vm, ok := m.vms[id]
+	if ok {
+		// Snapshot under the read lock to avoid racing with Stop/Delete.
+		state := vm.State
+		seeded := m.consoleEndpoints[mockConsoleKey(id, intent)]
+		m.mu.RUnlock()
+		if state != types.VMStateRunning {
+			return nil, types.NewAPIError("vm_not_running", "vm is not running; start it before requesting a console endpoint")
+		}
+		if seeded != nil {
+			endpointCopy := *seeded
+			return &endpointCopy, nil
+		}
+		switch intent {
+		case types.ConsoleIntentVNC:
+			return &types.ConsoleEndpoint{
+				Intent: types.ConsoleIntentVNC,
+				Host:   "127.0.0.1",
+				Port:   5900,
+			}, nil
+		case types.ConsoleIntentSerial:
+			return &types.ConsoleEndpoint{
+				Intent: types.ConsoleIntentSerial,
+				Path:   "/dev/pts/0",
+			}, nil
+		}
+	}
+	m.mu.RUnlock()
+	return nil, fmt.Errorf("vms/%s: not found", id)
+}
+
 func (m *MockManager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, ln := range m.consoleListeners {
+		_ = ln.Close()
+		delete(m.consoleListeners, k)
+	}
 	return nil
 }
 
@@ -380,4 +437,50 @@ func (m *MockManager) VMCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.vms)
+}
+
+// mockConsoleKey is the lookup key used by SeedConsoleEndpoint /
+// SeedConsoleListener so a single VM can carry both a VNC and a serial
+// override at once.
+func mockConsoleKey(vmID string, intent types.ConsoleIntent) string {
+	return string(intent) + "|" + vmID
+}
+
+// SeedConsoleEndpoint pins the endpoint that GetConsoleEndpoint will
+// return for the given VM/intent pair.  Tests use this to point the
+// proxy at an in-test listener address without spinning up a real
+// libvirt domain.
+func (m *MockManager) SeedConsoleEndpoint(vmID string, intent types.ConsoleIntent, endpoint types.ConsoleEndpoint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	endpointCopy := endpoint
+	m.consoleEndpoints[mockConsoleKey(vmID, intent)] = &endpointCopy
+}
+
+// SeedConsoleListener spins up a TCP listener on loopback for the given
+// VM and pins its address as the VNC endpoint MockManager returns.
+// The caller owns the returned listener and is expected to handle
+// connections; Close() on the manager will also close any listeners
+// bound through this helper.  Mirrors the "synthetic listener" 5.1.3
+// requirement so 5.1.4's websocket-proxy tests can dial a known target.
+func (m *MockManager) SeedConsoleListener(vmID string) (net.Listener, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("seed console listener: %w", err)
+	}
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return nil, fmt.Errorf("seed console listener: unexpected addr type %T", ln.Addr())
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.consoleListeners[mockConsoleKey(vmID, types.ConsoleIntentVNC)] = ln
+	endpoint := types.ConsoleEndpoint{
+		Intent: types.ConsoleIntentVNC,
+		Host:   addr.IP.String(),
+		Port:   addr.Port,
+	}
+	m.consoleEndpoints[mockConsoleKey(vmID, types.ConsoleIntentVNC)] = &endpoint
+	return ln, nil
 }
