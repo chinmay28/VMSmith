@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/events"
+	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -38,6 +39,27 @@ func wireEventBus(t *testing.T, ts *httptest.Server) (*events.EventBus, <-chan *
 	bus.Start()
 	srv.SetEventBus(bus)
 	ch, cancel := bus.Subscribe("test")
+	teardown := func() {
+		cancel()
+		bus.Stop()
+	}
+	return bus, ch, teardown
+}
+
+// wireEventBusWithStore is like wireEventBus but routes the bus through the
+// supplied bbolt store so events.Publish writes through to the same store the
+// SSE replay path reads from.  Returns the bus, a test subscriber channel
+// (handy for assertions), and a teardown.
+func wireEventBusWithStore(t *testing.T, ts *httptest.Server, s *store.Store) (*events.EventBus, <-chan *types.Event, func()) {
+	t.Helper()
+	srv, ok := ts.Config.Handler.(*Server)
+	if !ok {
+		t.Fatalf("test server handler is not *api.Server")
+	}
+	bus := events.New(s)
+	bus.Start()
+	srv.SetEventBus(bus)
+	ch, cancel := bus.Subscribe("test-with-store")
 	teardown := func() {
 		cancel()
 		bus.Stop()
