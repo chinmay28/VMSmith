@@ -97,12 +97,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	s.eventStreamConns.Add(1)
 	defer s.eventStreamConns.Add(-1)
 
-	sw := newSSEWriter(w)
-	if sw == nil {
-		return // newSSEWriter already wrote 500
-	}
-
 	// Determine replay starting point from Last-Event-ID or ?since= (uint64).
+	// Computed before the SSE response status is committed so a replay-overflow
+	// short-circuit can still return 410.
 	var afterSeq uint64
 	if lastID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastID != "" {
 		if seq, err := strconv.ParseUint(lastID, 10, 64); err == nil {
@@ -114,25 +111,34 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Replay missed events.
+	// Fetch missed events (if any) and short-circuit with 410 on overflow
+	// before committing the SSE 200 response status.
+	var replayed []*types.Event
 	if afterSeq > 0 {
-		replayed, err := s.store.ListEventsAfterSeq(afterSeq, sseReplayLimit+1)
+		got, err := s.store.ListEventsAfterSeq(afterSeq, sseReplayLimit+1)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "replay failed")
 			return
 		}
-		if len(replayed) > sseReplayLimit {
+		if len(got) > sseReplayLimit {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusGone)
 			json.NewEncoder(w).Encode(types.NewAPIError("event_stream_replay_window_exceeded",
 				"client is too far behind; use GET /api/v1/events with pagination to catch up"))
 			return
 		}
-		for _, evt := range replayed {
-			data, _ := json.Marshal(evt)
-			if err := sw.WriteEvent(evt.ID, evt.Type, string(data)); err != nil {
-				return
-			}
+		replayed = got
+	}
+
+	sw := newSSEWriter(w)
+	if sw == nil {
+		return // newSSEWriter already wrote 500
+	}
+
+	for _, evt := range replayed {
+		data, _ := json.Marshal(evt)
+		if err := sw.WriteEvent(evt.ID, evt.Type, string(data)); err != nil {
+			return
 		}
 	}
 
