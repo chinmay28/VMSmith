@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -664,6 +665,165 @@ func TestListVMs_WithData(t *testing.T) {
 	if len(vms) != 2 {
 		t.Errorf("expected 2 VMs, got %d", len(vms))
 	}
+}
+
+func TestListVMs_SortByName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %v)", i, vm.Name, want[i], namesOf(got))
+		}
+	}
+}
+
+func TestListVMs_SortByNameDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"Charlie", "Bravo", "alpha"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByCreatedAtDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "first", CreatedAt: t0})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "second", CreatedAt: t0.Add(time.Hour)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "third", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=created_at&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"third", "second", "first"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByState(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=state&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 3 {
+		t.Fatalf("want 3 vms, got %d", len(got))
+	}
+	// "running" < "stopped" lexicographically; equal-state ties break on ID.
+	if got[0].State != types.VMStateRunning || got[1].State != types.VMStateRunning || got[2].State != types.VMStateStopped {
+		t.Fatalf("state order wrong: %v", []types.VMState{got[0].State, got[1].State, got[2].State})
+	}
+	if got[0].ID != "vm-1" || got[1].ID != "vm-2" {
+		t.Errorf("equal-state tie should break on id: got %q,%q", got[0].ID, got[1].ID)
+	}
+}
+
+func TestListVMs_SortPaginationDeterministic(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("vm-%d", i)
+		mockMgr.SeedVM(&types.VM{ID: id, Name: id})
+	}
+
+	// page 1
+	resp1, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc&page=1&per_page=2")
+	var page1 []*types.VM
+	decodeJSON(t, resp1, &page1)
+	if got := resp1.Header.Get("X-Total-Count"); got != "5" {
+		t.Fatalf("X-Total-Count = %q, want 5", got)
+	}
+
+	// page 2
+	resp2, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc&page=2&per_page=2")
+	var page2 []*types.VM
+	decodeJSON(t, resp2, &page2)
+
+	gotOrder := []string{page1[0].Name, page1[1].Name, page2[0].Name, page2[1].Name}
+	want := []string{"vm-4", "vm-3", "vm-2", "vm-1"}
+	for i, n := range gotOrder {
+		if n != want[i] {
+			t.Fatalf("page-spanning order[%d] = %q, want %q (full: %v)", i, n, want[i], gotOrder)
+		}
+	}
+}
+
+func TestListVMs_RejectsInvalidSort(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=ram_mb")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+}
+
+func TestListVMs_RejectsInvalidOrder(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_order" {
+		t.Errorf("code = %q, want invalid_order", apiErr.Code)
+	}
+}
+
+func namesOf(vms []*types.VM) []string {
+	out := make([]string, len(vms))
+	for i, vm := range vms {
+		out[i] = vm.Name
+	}
+	return out
 }
 
 func TestListVMs_PaginationSetsTotalCount(t *testing.T) {

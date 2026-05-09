@@ -251,6 +251,28 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-cancel-create").click();
     await expect(page.getByTestId("input-vm-name")).not.toBeVisible();
   });
+
+  test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Default sort=id asc; the seeded "vm-1" (web-server) is rendered before vm-2 (db-server).
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(2);
+    const idAscIds = await cards().evaluateAll(els => els.map(el => el.getAttribute("data-testid")));
+    expect(idAscIds[0]).toBe("vm-card-web-server");
+    expect(idAscIds[1]).toBe("vm-card-db-server");
+
+    // Switch to sort=name asc -> "db-server" comes before "web-server".
+    await page.getByTestId("vm-list-sort-field").selectOption("name");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Switch order to desc and verify the URL captures the change.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=name");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
 });
 
 // ============================================================

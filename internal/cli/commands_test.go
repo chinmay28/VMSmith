@@ -370,6 +370,77 @@ func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_SortByName(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "name")
+	if err != nil {
+		t.Fatalf("vm list --sort name: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByCreatedAtDesc(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	base := time.Unix(1_700_000_000, 0)
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "first", CreatedAt: base, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "second", CreatedAt: base.Add(time.Hour), State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "third", CreatedAt: base.Add(2 * time.Hour), State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "created_at", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"third", "second", "first"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidSort(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "ram_mb")
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidOrder(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--order", "sideways")
+	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("expected invalid --order error, got %v", err)
+	}
+}
+
 func TestCLI_VMList_InvalidOffset(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()

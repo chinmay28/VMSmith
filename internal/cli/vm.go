@@ -137,10 +137,30 @@ var vmListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
+		sortField, _ := cmd.Flags().GetString("sort")
+		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		if sortField == "" {
+			sortField = types.VMSortID
+		}
+		switch sortField {
+		case types.VMSortID, types.VMSortName, types.VMSortCreatedAt, types.VMSortState:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state", sortField)
+		}
+		orderField = strings.TrimSpace(strings.ToLower(orderField))
+		if orderField == "" {
+			orderField = types.SortOrderAsc
+		}
+		switch orderField {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", orderField)
+		}
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
@@ -182,12 +202,7 @@ var vmListCmd = &cobra.Command{
 			vms = filtered
 		}
 
-		sort.SliceStable(vms, func(i, j int) bool {
-			if !vms[i].CreatedAt.Equal(vms[j].CreatedAt) {
-				return vms[i].CreatedAt.Before(vms[j].CreatedAt)
-			}
-			return vms[i].ID < vms[j].ID
-		})
+		types.SortVMs(vms, sortField, orderField)
 
 		vms = paginateSlice(vms, limit, offset)
 		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
@@ -999,6 +1014,8 @@ Examples:
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
+	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
+	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
 	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")
