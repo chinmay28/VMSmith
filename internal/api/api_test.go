@@ -4310,3 +4310,229 @@ func TestUpdateSnapshot_ManagerError(t *testing.T) {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
 }
+
+// ============================================================
+// Bulk VM Tag endpoint tests
+// ============================================================
+
+func bulkTagPost(t *testing.T, ts *httptest.Server, action string, ids, tags []string) *http.Response {
+	t.Helper()
+	body := map[string]any{"action": action, "ids": ids, "tags": tags}
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk_tag", "application/json", jsonBody(t, body))
+	if err != nil {
+		t.Fatalf("POST /vms/bulk_tag: %v", err)
+	}
+	return resp
+}
+
+func TestBulkVMTag_Add_UnionsAndDedupesCaseInsensitively(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"prod"}})
+
+	resp := bulkTagPost(t, ts, "add", []string{"vm-1", "vm-2"}, []string{"db", "PROD", "cache"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkVMTagResponse
+	decodeJSON(t, resp, &got)
+	if got.Action != "add" {
+		t.Fatalf("action = %q, want add", got.Action)
+	}
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(got.Results))
+	}
+
+	// validate.NormalizeTags lowercases + sorts request tags before they reach
+	// the union step, and computeBulkTags sorts the merged result so persisted
+	// tags are canonical across all mutation paths.
+	want1 := []string{"cache", "db", "prod", "web"}
+	if !equalSlices(got.Results[0].Tags, want1) {
+		t.Fatalf("vm-1 tags = %v, want %v", got.Results[0].Tags, want1)
+	}
+	want2 := []string{"cache", "db", "prod"}
+	if !equalSlices(got.Results[1].Tags, want2) {
+		t.Fatalf("vm-2 tags = %v, want %v", got.Results[1].Tags, want2)
+	}
+
+	stored, _ := mockMgr.Get(nil, "vm-1")
+	if !equalSlices(stored.Tags, want1) {
+		t.Fatalf("persisted vm-1 tags = %v, want %v", stored.Tags, want1)
+	}
+}
+
+func TestBulkVMTag_Add_NoOpWhenAllPresent(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-noop", Name: "n", Tags: []string{"prod", "edge"}})
+
+	// If the no-op path actually called Update, the configured error would
+	// surface in the response — verify it does NOT.
+	mockMgr.UpdateErr = errors.New("update should not run for case-insensitive no-op")
+
+	resp := bulkTagPost(t, ts, "add", []string{"vm-noop"}, []string{"PROD"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkVMTagResponse
+	decodeJSON(t, resp, &got)
+	if !got.Results[0].Success {
+		t.Fatalf("expected success, got %+v", got.Results[0])
+	}
+	want := []string{"prod", "edge"}
+	if !equalSlices(got.Results[0].Tags, want) {
+		t.Fatalf("tags = %v, want %v", got.Results[0].Tags, want)
+	}
+}
+
+func TestBulkVMTag_Remove_DropsMatchesCaseInsensitively(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web", "edge"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"staging"}})
+
+	resp := bulkTagPost(t, ts, "remove", []string{"vm-1", "vm-2"}, []string{"WEB"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkVMTagResponse
+	decodeJSON(t, resp, &got)
+
+	want1 := []string{"prod", "edge"}
+	if !equalSlices(got.Results[0].Tags, want1) {
+		t.Fatalf("vm-1 tags = %v, want %v", got.Results[0].Tags, want1)
+	}
+	want2 := []string{"staging"}
+	if !equalSlices(got.Results[1].Tags, want2) {
+		t.Fatalf("vm-2 tags = %v, want %v", got.Results[1].Tags, want2)
+	}
+}
+
+func TestBulkVMTag_Set_ReplacesAndCanClear(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod", "web"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"staging"}})
+
+	// Replace.
+	resp := bulkTagPost(t, ts, "set", []string{"vm-1"}, []string{"db", "primary"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var setGot bulkVMTagResponse
+	decodeJSON(t, resp, &setGot)
+	want := []string{"db", "primary"}
+	if !equalSlices(setGot.Results[0].Tags, want) {
+		t.Fatalf("vm-1 tags = %v, want %v", setGot.Results[0].Tags, want)
+	}
+
+	// Empty set clears.
+	resp = bulkTagPost(t, ts, "set", []string{"vm-2"}, []string{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear status = %d, want 200", resp.StatusCode)
+	}
+	var clearGot bulkVMTagResponse
+	decodeJSON(t, resp, &clearGot)
+	if len(clearGot.Results[0].Tags) != 0 {
+		t.Fatalf("vm-2 tags after clear = %v, want []", clearGot.Results[0].Tags)
+	}
+	stored, _ := mockMgr.Get(nil, "vm-2")
+	if len(stored.Tags) != 0 {
+		t.Fatalf("persisted vm-2 tags after clear = %v, want []", stored.Tags)
+	}
+}
+
+func TestBulkVMTag_PartialFailure(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-ok", Name: "ok", Tags: []string{"prod"}})
+
+	resp := bulkTagPost(t, ts, "add", []string{"vm-ok", "missing", "  "}, []string{"new"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkVMTagResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 3 {
+		t.Fatalf("results = %d, want 3", len(got.Results))
+	}
+	if !got.Results[0].Success {
+		t.Fatalf("vm-ok result = %+v, want success", got.Results[0])
+	}
+	if got.Results[1].Success || got.Results[1].Code != "resource_not_found" {
+		t.Fatalf("missing result = %+v, want resource_not_found", got.Results[1])
+	}
+	if got.Results[2].Success || got.Results[2].Code != "invalid_vm_id" {
+		t.Fatalf("blank id result = %+v, want invalid_vm_id", got.Results[2])
+	}
+}
+
+func TestBulkVMTag_InvalidRequests(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+	}{
+		{name: "bad action", body: `{"action":"replace","ids":["vm-1"],"tags":["t"]}`, wantCode: "invalid_bulk_action"},
+		{name: "missing ids", body: `{"action":"add","ids":[],"tags":["t"]}`, wantCode: "invalid_bulk_request"},
+		{name: "empty add tags", body: `{"action":"add","ids":["vm-1"],"tags":[]}`, wantCode: "invalid_bulk_request"},
+		{name: "empty remove tags", body: `{"action":"remove","ids":["vm-1"],"tags":[]}`, wantCode: "invalid_bulk_request"},
+		// validate.NormalizeTags rejects blank or non-conforming tag values
+		// before the empty-set check, so the surfaced code is invalid_spec
+		// (the typed error code from the validate package).
+		{name: "blank-only add tags", body: `{"action":"add","ids":["vm-1"],"tags":["   ","\t"]}`, wantCode: "invalid_spec"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _, cleanup := testServer(t)
+			defer cleanup()
+			resp, err := http.Post(ts.URL+"/api/v1/vms/bulk_tag", "application/json", bytes.NewBufferString(tt.body))
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+			assertAPIErrorCode(t, resp, tt.wantCode)
+		})
+	}
+}
+
+func TestBulkVMTag_ManagerError(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-err", Name: "v", Tags: []string{"old"}})
+	mockMgr.UpdateErr = errors.New("disk full")
+
+	resp := bulkTagPost(t, ts, "set", []string{"vm-err"}, []string{"new"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkVMTagResponse
+	decodeJSON(t, resp, &got)
+	if got.Results[0].Success {
+		t.Fatalf("expected failure, got %+v", got.Results[0])
+	}
+	if got.Results[0].Message == "" {
+		t.Fatalf("expected non-empty error message")
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

@@ -2108,3 +2108,146 @@ func TestCLI_VMTop_FormatsByteRates(t *testing.T) {
 		t.Errorf("expected MB/s output for byte rate, got:\n%s", out)
 	}
 }
+
+// ---------- vm tag ----------
+
+func TestCLI_VMTag_Add(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"prod"}})
+
+	out, err := runCLI("vm", "tag", "add", "vm-1", "--tag", "web", "--tag", "PROD")
+	if err != nil {
+		t.Fatalf("vm tag add: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected ok status in output:\n%s", out)
+	}
+	got, _ := mock.Get(nil, "vm-1")
+	want := []string{"prod", "web"}
+	if !equalStringSlice(got.Tags, want) {
+		t.Errorf("vm-1 tags = %v, want %v", got.Tags, want)
+	}
+}
+
+func TestCLI_VMTag_Remove(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-r", Name: "n", Tags: []string{"prod", "web", "edge"}})
+
+	if _, err := runCLI("vm", "tag", "remove", "vm-r", "--tag", "WEB"); err != nil {
+		t.Fatalf("vm tag remove: %v", err)
+	}
+	got, _ := mock.Get(nil, "vm-r")
+	want := []string{"prod", "edge"}
+	if !equalStringSlice(got.Tags, want) {
+		t.Errorf("vm-r tags = %v, want %v", got.Tags, want)
+	}
+}
+
+func TestCLI_VMTag_Set_AndClear(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s", Name: "n", Tags: []string{"prod", "web"}})
+
+	if _, err := runCLI("vm", "tag", "set", "vm-s", "--tag", "canary"); err != nil {
+		t.Fatalf("vm tag set: %v", err)
+	}
+	got, _ := mock.Get(nil, "vm-s")
+	if !equalStringSlice(got.Tags, []string{"canary"}) {
+		t.Errorf("vm-s tags after set = %v, want [canary]", got.Tags)
+	}
+
+	// `set` with no --tag flag clears all tags.
+	if _, err := runCLI("vm", "tag", "set", "vm-s"); err != nil {
+		t.Fatalf("vm tag set (clear): %v", err)
+	}
+	got, _ = mock.Get(nil, "vm-s")
+	if len(got.Tags) != 0 {
+		t.Errorf("vm-s tags after clear = %v, want []", got.Tags)
+	}
+}
+
+func TestCLI_VMTag_AcceptsCommaSeparatedIDs(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-a", Name: "a", Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-b", Name: "b", Tags: []string{}})
+
+	if _, err := runCLI("vm", "tag", "add", "vm-a,vm-b", "--tag", "edge"); err != nil {
+		t.Fatalf("vm tag add: %v", err)
+	}
+
+	a, _ := mock.Get(nil, "vm-a")
+	if !equalStringSlice(a.Tags, []string{"edge", "prod"}) {
+		t.Errorf("vm-a = %v", a.Tags)
+	}
+	b, _ := mock.Get(nil, "vm-b")
+	if !equalStringSlice(b.Tags, []string{"edge"}) {
+		t.Errorf("vm-b = %v", b.Tags)
+	}
+}
+
+func TestCLI_VMTag_All_FilterTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-prod-1", Name: "p1", Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-prod-2", Name: "p2", Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-stage", Name: "s", Tags: []string{"staging"}})
+
+	if _, err := runCLI("vm", "tag", "add", "--all", "--filter-tag", "prod", "--tag", "east-1"); err != nil {
+		t.Fatalf("vm tag add --all: %v", err)
+	}
+	for _, id := range []string{"vm-prod-1", "vm-prod-2"} {
+		got, _ := mock.Get(nil, id)
+		if !equalStringSlice(got.Tags, []string{"east-1", "prod"}) {
+			t.Errorf("%s tags = %v, want [east-1 prod]", id, got.Tags)
+		}
+	}
+	stage, _ := mock.Get(nil, "vm-stage")
+	if !equalStringSlice(stage.Tags, []string{"staging"}) {
+		t.Errorf("vm-stage tags = %v, want unchanged [staging]", stage.Tags)
+	}
+}
+
+func TestCLI_VMTag_RejectsInvalidAction(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+	if _, err := runCLI("vm", "tag", "replace", "vm-1", "--tag", "x"); err == nil {
+		t.Error("expected error for invalid action")
+	}
+}
+
+func TestCLI_VMTag_AddRequiresTags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "n", Tags: []string{"prod"}})
+	if _, err := runCLI("vm", "tag", "add", "vm-1"); err == nil {
+		t.Error("expected error when --tag is omitted for add")
+	}
+}
+
+func TestCLI_VMTag_NotFound_ReturnsErr(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+	if _, err := runCLI("vm", "tag", "add", "missing-vm", "--tag", "edge"); err == nil {
+		t.Error("expected error for unknown VM")
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

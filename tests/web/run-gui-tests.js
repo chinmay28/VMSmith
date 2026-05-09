@@ -262,9 +262,61 @@ async function main() {
       await p.locator('[data-testid="tab-advanced"]').click();
       await p.waitForTimeout(150);
       await assertVisible(p, "input-vm-auto-start");
-      // Cancel out of the modal so subsequent tests start clean.
-      await p.keyboard.press("Escape");
+      // Cancel out of the modal so subsequent tests start clean. The Modal
+      // component does not bind Escape, so click the Cancel button.
+      await p.locator('[data-testid="btn-cancel-create"]').click();
       await p.waitForTimeout(200);
+    }, page);
+
+    await runTest("bulk tag add applies tags to selected VMs", async (p) => {
+      // Select both seeded VMs.
+      await p.locator('[data-testid="checkbox-select-vm-web-server"]').check();
+      await p.locator('[data-testid="checkbox-select-vm-db-server"]').check();
+      await p.locator('[data-testid="btn-bulk-tag"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="btn-bulk-tag-add"]').click();
+      // Wait for the modal slide-up animation (0.3s) plus a margin so the
+      // submit button is stable before we hit it.
+      await p.waitForTimeout(600);
+      await assertVisible(p, "bulk-tag-modal");
+      await p.locator('[data-testid="input-bulk-tags"]').fill("prod, edge");
+      // Submit via Enter rather than clicking — avoids any flaky overlay
+      // hit-testing on the still-animating modal card.
+      await p.locator('[data-testid="input-bulk-tags"]').press("Enter");
+      await p.waitForTimeout(1200);
+      await assertNotVisible(p, "bulk-tag-modal");
+      // Tag chips render on both cards.
+      const webText = await p.locator('[data-testid="vm-card-web-server"]').innerText();
+      const dbText = await p.locator('[data-testid="vm-card-db-server"]').innerText();
+      await assert(webText.includes("#prod") && webText.includes("#edge"), `web-server card missing tag chips, got "${webText}"`);
+      await assert(dbText.includes("#prod") && dbText.includes("#edge"), `db-server card missing tag chips, got "${dbText}"`);
+    }, page);
+
+    await runTest("bulk tag set with empty input clears all tags", async (p) => {
+      await p.locator('[data-testid="checkbox-select-vm-web-server"]').check();
+      await p.locator('[data-testid="btn-bulk-tag"]').click();
+      await p.waitForTimeout(200);
+      // The dropdown menu can be obscured by tag chips that the previous test
+      // added to the underlying VM cards. Click directly on the DOM node so
+      // the dispatched event reaches the menu button regardless of overlay.
+      await p.evaluate(() => {
+        const el = document.querySelector('[data-testid="btn-bulk-tag-set"]');
+        if (el) el.click();
+      });
+      await p.waitForTimeout(600);
+      await assertVisible(p, "input-bulk-tags");
+      // Submit via JS click on the actual button element. Avoids both the
+      // stability flake from animate-slide-up and the force-click coordinate
+      // race where the modal can unmount mid-click.
+      await p.evaluate(() => {
+        const el = document.querySelector('[data-testid="btn-bulk-tag-submit"]');
+        if (el) el.click();
+      });
+      await p.waitForTimeout(1200);
+      await assertNotVisible(p, "bulk-tag-modal");
+      const webText = await p.locator('[data-testid="vm-card-web-server"]').innerText();
+      await assert(!webText.includes("#prod") && !webText.includes("#edge"),
+        `web-server still shows tag chips after clear: "${webText}"`);
     }, page);
 
     await page.close();

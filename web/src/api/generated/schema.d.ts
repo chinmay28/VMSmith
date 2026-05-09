@@ -173,6 +173,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/bulk_tag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk add / remove / set tags on VMs
+         * @description Add, remove, or replace tags on multiple VMs in one request.
+         *     - `add` appends tags to each VM's tag set (case-insensitive de-dup).
+         *       No-op when every requested tag is already present.
+         *     - `remove` drops the matching tags from each VM. No-op when none of the
+         *       requested tags are present.
+         *     - `set` replaces each VM's tag set with the provided list. An empty
+         *       `tags` array clears all tags.
+         *
+         *     Tags are normalised the same way as on `POST /vms` and `PATCH /vms/{id}`:
+         *     lowercased, trimmed, validated against the tag character set
+         *     (`[a-z0-9][a-z0-9._:-]*`, ≤32 chars), and de-duplicated. Resulting tag
+         *     lists are returned in alphabetical order.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulkVMTagRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-VM bulk tag results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkVMTagResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}": {
         parameters: {
             query?: never;
@@ -1937,6 +1994,30 @@ export interface components {
         BulkVMActionResponse: {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
+        };
+        BulkVMTagRequest: {
+            /** @enum {string} */
+            action: "add" | "remove" | "set";
+            ids: string[];
+            /**
+             * @description Tags to apply. Required for `add` and `remove` (must contain at
+             *     least one valid tag after normalisation); for `set`, an empty
+             *     array clears all tags on the matched VMs.
+             */
+            tags: string[];
+        };
+        BulkVMTagResult: {
+            id: string;
+            success: boolean;
+            /** @description Resulting tag list after the action; only populated on success. */
+            tags?: string[];
+            code?: string;
+            message?: string;
+        };
+        BulkVMTagResponse: {
+            /** @enum {string} */
+            action: "add" | "remove" | "set";
+            results: components["schemas"]["BulkVMTagResult"][];
         };
         /**
          * @description Selector for the snapshots to delete. Exactly one of `names` or `prefix`

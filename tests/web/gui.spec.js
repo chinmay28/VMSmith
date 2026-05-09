@@ -251,6 +251,56 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-cancel-create").click();
     await expect(page.getByTestId("input-vm-name")).not.toBeVisible();
   });
+
+  test("bulk tag add applies new tags to selected VMs", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Select both seeded VMs.
+    await page.getByTestId("checkbox-select-vm-web-server").check();
+    await page.getByTestId("checkbox-select-vm-db-server").check();
+
+    // Open the Tags dropdown and pick Add.
+    await page.getByTestId("btn-bulk-tag").click();
+    await page.getByTestId("btn-bulk-tag-add").click();
+
+    await expect(page.getByTestId("bulk-tag-modal")).toBeVisible();
+    await page.getByTestId("input-bulk-tags").fill("prod, edge");
+    await page.getByTestId("btn-bulk-tag-submit").click();
+
+    // The modal closes and a status message appears.
+    await expect(page.getByTestId("bulk-tag-modal")).toHaveCount(0);
+    await expect(page.getByText(/2 VMs added/)).toBeVisible();
+
+    // Tag chips appear on the cards (case-insensitive normalisation gives
+    // lowercase tag values).
+    await expect(page.getByTestId("vm-card-web-server")).toContainText("#prod");
+    await expect(page.getByTestId("vm-card-web-server")).toContainText("#edge");
+    await expect(page.getByTestId("vm-card-db-server")).toContainText("#prod");
+  });
+
+  test("bulk tag set with empty input clears selected VM tags", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Seed tags via Add first.
+    await page.getByTestId("checkbox-select-vm-web-server").check();
+    await page.getByTestId("btn-bulk-tag").click();
+    await page.getByTestId("btn-bulk-tag-add").click();
+    await page.getByTestId("input-bulk-tags").fill("staging");
+    await page.getByTestId("btn-bulk-tag-submit").click();
+    await expect(page.getByTestId("vm-card-web-server")).toContainText("#staging");
+
+    // Now clear via Set with no tags.
+    await page.getByTestId("checkbox-select-vm-web-server").check();
+    await page.getByTestId("btn-bulk-tag").click();
+    await page.getByTestId("btn-bulk-tag-set").click();
+    await expect(page.getByTestId("input-bulk-tags")).toBeVisible();
+    await page.getByTestId("btn-bulk-tag-submit").click();
+
+    await expect(page.getByTestId("bulk-tag-modal")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-web-server")).not.toContainText("#staging");
+  });
 });
 
 // ============================================================

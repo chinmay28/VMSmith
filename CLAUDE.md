@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm suspend|resume <id>` pause / unpause CPU+memory)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|suspend|resume|delete|lock|unlock|tag (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm suspend|resume <id>` pause / unpause CPU+memory; `vm tag <add|remove|set> <id[,id...]> --tag t1` mutates VM tags in bulk via `POST /vms/bulk_tag` semantics, with `--all [--filter-tag <t>]` for fleet-wide application)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull
 │   │   ├── net.go               # vmsmith net interfaces
@@ -416,6 +416,7 @@ Additional docs routes:
 ```
 GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks, auto_start, locked; VM names must be unique, 1-64 chars, alphanumeric/hyphen). When `auto_start=true`, the daemon will start this VM automatically at boot via the auto-start sweep. When `locked=true`, the VM is delete-protected; deletion returns HTTP 409 `vm_locked`.
+POST   /vms/bulk_tag                   Bulk add / remove / set tags across multiple VMs in one request. Body: `{"action": "add"|"remove"|"set", "ids": [...], "tags": [...]}`. `add` and `remove` require ≥1 valid tag; `set` accepts an empty array to clear tags on every matched VM. Returns `{action, results: [{id, success, tags?, code?, message?}]}`. Emits `vm.tags_updated` per successful target. CLI: `vmsmith vm tag <add|remove|set> <id[,id...]> --tag t1 [--tag t2]` (or `--all [--filter-tag <t>]` to operate fleet-wide).
 GET    /vms/{id}                       Get VM
 POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }`; validates the new name and returns the cloned VM in stopped state)
 PATCH  /vms/{id}                       Update VM resources (VMUpdateSpec: cpus, ram_mb, disk_gb, nat_static_ip, nat_gateway, auto_start, locked — zero/empty ignored; `auto_start` and `locked` use `*bool` so omit them to keep the current value; disk grow-only; IP change updates DHCP reservation + regenerates cloud-init ISO with new instance-id)

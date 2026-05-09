@@ -570,6 +570,149 @@ func setVMLocked(id string, locked bool) error {
 	return nil
 }
 
+// vmTagCmd implements `vmsmith vm tag <add|remove|set> <id> [--tag t1] [--tag t2]`.
+//
+// Mirrors POST /api/v1/vms/bulk_tag for in-process CLI use against libvirt.
+// Use `--all` (with optional `--filter-tag`) to operate on every VM that matches
+// the filter; otherwise pass one or more comma-separated VM IDs as positional
+// args.
+var vmTagCmd = &cobra.Command{
+	Use:   "tag <add|remove|set> [vm-id[,vm-id...]]",
+	Short: "Add, remove, or set tags on one or more VMs",
+	Long: `Manage VM tags in bulk.
+
+Actions:
+  add    — append the given tags to each VM's tag set (case-insensitive de-dup).
+  remove — drop the given tags from each VM's tag set.
+  set    — replace each VM's tag set with the given tags (pass --tag '' or omit
+           the flag to clear all tags).
+
+Examples:
+  vmsmith vm tag add vm-12345 --tag prod --tag web
+  vmsmith vm tag remove vm-12345,vm-67890 --tag staging
+  vmsmith vm tag set vm-12345 --tag canary
+  vmsmith vm tag add --all --filter-tag prod --tag east-1`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runVMTagAction,
+}
+
+func runVMTagAction(cmd *cobra.Command, args []string) error {
+	action := types.BulkTagAction(strings.ToLower(strings.TrimSpace(args[0])))
+	if !action.IsValid() {
+		return fmt.Errorf("invalid action %q: must be one of add, remove, set", args[0])
+	}
+
+	all, _ := cmd.Flags().GetBool("all")
+	filterTag, _ := cmd.Flags().GetString("filter-tag")
+	rawTags, _ := cmd.Flags().GetStringSlice("tag")
+
+	if all && len(args) > 1 {
+		return fmt.Errorf("cannot specify a VM id when using --all")
+	}
+	if !all && len(args) < 2 {
+		return fmt.Errorf("missing VM id (or pass --all)")
+	}
+
+	tags := normalizeTagsForCLI(rawTags)
+	if action != types.BulkTagActionSet && len(tags) == 0 {
+		return fmt.Errorf("--tag is required for %q (pass at least one)", action)
+	}
+
+	mgr, cleanup, err := newVMManager()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var ids []string
+	if all {
+		filter := strings.TrimSpace(strings.ToLower(filterTag))
+		vms, err := mgr.List(ctx)
+		if err != nil {
+			return fmt.Errorf("listing VMs: %w", err)
+		}
+		for _, candidate := range vms {
+			if filter != "" {
+				match := false
+				for _, t := range candidate.Tags {
+					if strings.EqualFold(t, filter) {
+						match = true
+						break
+					}
+				}
+				if !match {
+					continue
+				}
+			}
+			ids = append(ids, candidate.ID)
+		}
+		sort.Strings(ids)
+		if len(ids) == 0 {
+			if filter != "" {
+				fmt.Printf("No VMs matched filter-tag %q\n", filter)
+			} else {
+				fmt.Printf("No VMs to tag\n")
+			}
+			return nil
+		}
+	} else {
+		for _, raw := range strings.Split(args[1], ",") {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			ids = append(ids, id)
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("no VM IDs provided")
+		}
+	}
+
+	logger.Info("cli", "vm tag", "action", string(action), "vms", fmt.Sprintf("%d", len(ids)), "tags", strings.Join(tags, ","))
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tACTION\tNEW TAGS\tSTATUS")
+	hadFailure := false
+	for _, id := range ids {
+		current, err := mgr.Get(ctx, id)
+		if err != nil {
+			fmt.Fprintf(w, "%s\t%s\t-\tfailed: %v\n", id, action, err)
+			hadFailure = true
+			continue
+		}
+		next := types.MergeTags(action, current.Tags, tags)
+		if types.TagsEqualSet(current.Tags, next) {
+			fmt.Fprintf(w, "%s\t%s\t%s\tno-op\n", id, action, joinTagsForOutput(current.Tags))
+			continue
+		}
+		patch := types.VMUpdateSpec{Tags: append([]string{}, next...)}
+		updated, err := mgr.Update(ctx, id, patch)
+		if err != nil {
+			fmt.Fprintf(w, "%s\t%s\t-\tfailed: %v\n", id, action, err)
+			hadFailure = true
+			continue
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\tok\n", updated.ID, action, joinTagsForOutput(updated.Tags))
+	}
+	w.Flush()
+	if hadFailure {
+		return fmt.Errorf("one or more VMs failed; see table above")
+	}
+	return nil
+}
+
+func joinTagsForOutput(tags []string) string {
+	if len(tags) == 0 {
+		return "(none)"
+	}
+	return strings.Join(tags, ",")
+}
+
 // vmStatsCmd implements "vmsmith vm stats <id> [--watch] [--fields cpu,mem,disk,net]".
 // The daemon holds the in-memory ring buffer for metrics, so this command
 // calls the REST API rather than directly using the VM manager.
@@ -1031,6 +1174,11 @@ Examples:
 	vmCmd.AddCommand(vmTopCmd)
 	vmCmd.AddCommand(vmLockCmd)
 	vmCmd.AddCommand(vmUnlockCmd)
+
+	vmTagCmd.Flags().Bool("all", false, "operate on every VM (combine with --filter-tag to scope)")
+	vmTagCmd.Flags().String("filter-tag", "", "only consider VMs already carrying this tag (used with --all)")
+	vmTagCmd.Flags().StringSlice("tag", nil, "tag to apply (repeatable); required for add/remove, optional for set (omitting clears)")
+	vmCmd.AddCommand(vmTagCmd)
 }
 
 // vmManagerOverride can be set in tests to bypass libvirt.

@@ -139,6 +139,42 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/bulk_tag:
+    post:
+      tags: [VMs]
+      summary: Bulk add / remove / set tags on VMs
+      description: |
+        Add, remove, or replace tags on multiple VMs in one request.
+        - `add` appends tags to each VM's tag set (case-insensitive de-dup).
+          No-op when every requested tag is already present.
+        - `remove` drops the matching tags from each VM. No-op when none of the
+          requested tags are present.
+        - `set` replaces each VM's tag set with the provided list. An empty
+          `tags` array clears all tags.
+
+        Tags are normalised the same way as on `POST /vms` and `PATCH /vms/{id}`:
+        lowercased, trimmed, validated against the tag character set
+        (`[a-z0-9][a-z0-9._:-]*`, ≤32 chars), and de-duplicated. Resulting tag
+        lists are returned in alphabetical order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkVMTagRequest'
+      responses:
+        '200':
+          description: Per-VM bulk tag results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkVMTagResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}:
     get:
       tags: [VMs]
@@ -1379,6 +1415,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
+    BulkVMTagRequest:
+      type: object
+      required: [action, ids, tags]
+      properties:
+        action:
+          type: string
+          enum: [add, remove, set]
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        tags:
+          type: array
+          description: |
+            Tags to apply. Required for `add` and `remove` (must contain at
+            least one valid tag after normalisation); for `set`, an empty
+            array clears all tags on the matched VMs.
+          items:
+            type: string
+    BulkVMTagResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
+          type: string
+        success:
+          type: boolean
+        tags:
+          type: array
+          description: |
+            Resulting tag list after the action; only populated on success.
+          items:
+            type: string
+        code:
+          type: string
+        message:
+          type: string
+    BulkVMTagResponse:
+      type: object
+      required: [action, results]
+      properties:
+        action:
+          type: string
+          enum: [add, remove, set]
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkVMTagResult'
     BulkDeleteSnapshotsRequest:
       type: object
       description: |

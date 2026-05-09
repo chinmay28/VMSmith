@@ -84,6 +84,12 @@ export const vms = {
     })),
   top: ({ metric = 'cpu', limit = 5, state = 'running' }: { metric?: 'cpu' | 'mem' | 'disk_read' | 'disk_write' | 'net_rx' | 'net_tx'; limit?: number; state?: 'running' | 'all' } = {}) =>
     unwrap(apiClient.GET('/vms/stats/top', { params: { query: { metric, limit, state } } })),
+  // bulkTag adds, removes, or replaces tags across multiple VMs in one
+  // request. For `set`, an empty `tags` array clears all tags on every VM in
+  // `ids`. The response carries per-VM results so callers can surface partial
+  // failures.
+  bulkTag: (body: paths['/vms/bulk_tag']['post']['requestBody']['content']['application/json']) =>
+    unwrap(apiClient.POST('/vms/bulk_tag', { body })),
 };
 
 // --- Snapshots ---

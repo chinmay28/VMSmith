@@ -163,6 +163,51 @@ const server = http.createServer(async (req, res) => {
     const vm = vms.get(m[1]);
     return vm ? json(res, 200, vm) : json(res, 404, { error: "not found" });
   }
+  if (p === "/api/v1/vms/bulk_tag" && method === "POST") {
+    const body = await parseBody(req);
+    const action = String(body.action || "").trim().toLowerCase();
+    if (!["add", "remove", "set"].includes(action)) {
+      return json(res, 400, { code: "invalid_bulk_action", message: "action must be one of: add, remove, set" });
+    }
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    if (ids.length === 0) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "ids must contain at least one VM ID" });
+    }
+    const rawTags = Array.isArray(body.tags) ? body.tags : [];
+    const normalized = [...new Set(rawTags.map(t => String(t).trim().toLowerCase()).filter(Boolean))].sort();
+    if (action !== "set" && normalized.length === 0) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "tags must contain at least one tag for add or remove actions" });
+    }
+    const results = ids.map(rawID => {
+      const id = String(rawID).trim();
+      if (id === "") return { id: rawID, success: false, code: "invalid_vm_id", message: "vm id cannot be empty" };
+      const vm = vms.get(id);
+      if (!vm) return { id, success: false, code: "resource_not_found", message: "vm not found" };
+      const current = Array.isArray(vm.tags) ? vm.tags : [];
+      let next;
+      if (action === "set") {
+        next = [...normalized];
+      } else if (action === "add") {
+        const seen = new Set(current.map(t => String(t).toLowerCase()));
+        next = [...current];
+        for (const t of normalized) {
+          if (seen.has(t)) continue;
+          seen.add(t);
+          next.push(t);
+        }
+        next.sort();
+      } else {
+        const drop = new Set(normalized);
+        next = current.filter(t => !drop.has(String(t).toLowerCase()));
+      }
+      vm.tags = next;
+      vm.spec = vm.spec || {};
+      vm.spec.tags = next;
+      vm.updated_at = new Date().toISOString();
+      return { id, success: true, tags: next };
+    });
+    return json(res, 200, { action, results });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)$/)) && method === "PATCH") {
     const vm = vms.get(m[1]);
     if (!vm) return json(res, 404, { error: "not found" });

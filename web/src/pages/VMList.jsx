@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, Tag } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -173,12 +173,14 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
   const startMut = useMutation(vms.start);
   const stopMut = useMutation(vms.stop);
   const deleteMut = useMutation(vms.delete);
+  const bulkTagMut = useMutation(vms.bulkTag);
+  const [tagModal, setTagModal] = useState(null); // 'add' | 'remove' | 'set' | null
 
   const runningCount = selectedVMs.filter(vm => vm.state === 'running').length;
   const stoppedCount = selectedVMs.filter(vm => vm.state === 'stopped').length;
   const hasSelection = selectedVMs.length > 0;
-  const mutationError = startMut.error || stopMut.error || deleteMut.error;
-  const busy = startMut.loading || stopMut.loading || deleteMut.loading;
+  const mutationError = startMut.error || stopMut.error || deleteMut.error || bulkTagMut.error;
+  const busy = startMut.loading || stopMut.loading || deleteMut.loading || bulkTagMut.loading;
 
   const executeBulk = async (action) => {
     if (!hasSelection || busy) return;
@@ -276,13 +278,140 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
             {deleteMut.loading ? <Spinner size={14} /> : <Trash2 size={14} />}
             Delete
           </button>
+          <BulkTagMenu
+            disabled={!hasSelection || busy}
+            onPick={(action) => setTagModal(action)}
+          />
           <button className="btn-ghost" disabled={!hasSelection || busy} onClick={onClearSelection} data-testid="btn-clear-selection">
             Clear
           </button>
         </div>
       </div>
       {mutationError && <p className="mt-3 text-sm text-red-400">Bulk action error: {mutationError}</p>}
+      {tagModal && (
+        <BulkTagModal
+          action={tagModal}
+          selectedVMs={selectedVMs}
+          onClose={() => setTagModal(null)}
+          onSubmit={async (tags) => {
+            try {
+              const ids = selectedVMs.map(v => v.id);
+              const resp = await bulkTagMut.execute({ action: tagModal, ids, tags });
+              const results = resp?.results || [];
+              const success = results.filter(r => r?.success).length;
+              const failure = results.length - success;
+              const parts = [`${success} VM${success === 1 ? '' : 's'} ${tagModal === 'set' ? 'set' : tagModal + 'ed'}`];
+              if (failure > 0) parts.push(`${failure} failed`);
+              setTagModal(null);
+              onClearSelection();
+              onDone(parts.join(' · '));
+            } catch (err) {
+              // Error displayed via mutationError; keep modal open so the user
+              // can amend input and retry without losing it.
+              return false;
+            }
+            return true;
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function BulkTagMenu({ disabled, onPick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        className="btn-secondary"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        data-testid="btn-bulk-tag"
+      >
+        <Tag size={14} />
+        Tags
+      </button>
+      {open && !disabled && (
+        <div className="absolute right-0 mt-1 z-20 min-w-[8rem] rounded-md border border-steel-700/60 bg-steel-900 shadow-lg">
+          {['add', 'remove', 'set'].map(action => (
+            <button
+              key={action}
+              className="block w-full px-3 py-2 text-left text-sm text-steel-200 hover:bg-steel-800"
+              onClick={() => { setOpen(false); onPick(action); }}
+              data-testid={`btn-bulk-tag-${action}`}
+            >
+              {action === 'add' && 'Add tags…'}
+              {action === 'remove' && 'Remove tags…'}
+              {action === 'set' && 'Set tags…'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BulkTagModal({ action, selectedVMs, onClose, onSubmit }) {
+  const [raw, setRaw] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const isClearForm = action === 'set' && raw.trim() === '';
+  const verb = action === 'set' ? 'Replace' : action === 'add' ? 'Add' : 'Remove';
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    setError(null);
+    const tags = raw
+      .split(/[\s,]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+    if (action !== 'set' && tags.length === 0) {
+      setError('Please enter at least one tag.');
+      return;
+    }
+    setSubmitting(true);
+    const ok = await onSubmit(tags);
+    setSubmitting(false);
+    if (ok === false) {
+      setError('Bulk tag request failed; see error above.');
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`${verb} tags on ${selectedVMs.length} VM${selectedVMs.length === 1 ? '' : 's'}`}>
+      <form onSubmit={handleSubmit} data-testid="bulk-tag-modal">
+        <p className="text-sm text-steel-400 mb-3">
+          {action === 'add' && 'Tags entered below will be added to every selected VM.'}
+          {action === 'remove' && 'Tags entered below will be removed from every selected VM.'}
+          {action === 'set' && 'Selected VMs will have their tag set replaced. Leave blank to clear all tags.'}
+        </p>
+        <label className="block text-sm text-steel-300 mb-1" htmlFor="bulk-tag-input">
+          Tags (comma- or space-separated)
+        </label>
+        <input
+          id="bulk-tag-input"
+          autoFocus
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder={action === 'set' ? 'leave empty to clear all tags' : 'prod, edge, web'}
+          className="form-input w-full"
+          data-testid="input-bulk-tags"
+        />
+        {error && <p className="text-sm text-red-400 mt-2">{error}</p>}
+        <div className="flex gap-2 justify-end mt-4">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={submitting || (action !== 'set' && raw.trim() === '')}
+            data-testid="btn-bulk-tag-submit"
+          >
+            {submitting ? 'Applying…' : isClearForm ? 'Clear all tags' : `${verb} tags`}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
