@@ -202,6 +202,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 					r.Get("/", s.ListSnapshots)
 					r.Post("/bulk_delete", s.withRequestBodyLimit(s.BulkDeleteSnapshots))
 					r.Post("/{snapName}/restore", s.RestoreSnapshot)
+					r.Patch("/{snapName}", s.withRequestBodyLimit(s.UpdateSnapshot))
 					r.Delete("/{snapName}", s.DeleteSnapshot)
 				})
 

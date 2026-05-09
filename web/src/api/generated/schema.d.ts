@@ -683,7 +683,46 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update snapshot metadata
+         * @description Edit the description of an existing snapshot. The underlying disk and
+         *     memory state are not touched — only the snapshot's `<description>`
+         *     element is rewritten via libvirt's snapshot REDEFINE primitive.
+         *
+         *     Pass `description: ""` to clear the description; omit the field
+         *     entirely to leave it unchanged.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                    snapName: components["parameters"]["SnapshotName"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateSnapshotRequest"];
+                };
+            };
+            responses: {
+                /** @description Snapshot updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Snapshot"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         trace?: never;
     };
     "/vms/{vmID}/snapshots/bulk_delete": {
@@ -1809,6 +1848,18 @@ export interface components {
             name: string;
             /** @description Optional free-text description for this snapshot. */
             description?: string;
+        };
+        /**
+         * @description Editable metadata for an existing snapshot. Currently only the
+         *     description is editable; the snapshot's underlying disk and memory
+         *     state, parent pointer, and creation timestamp are immutable.
+         *
+         *     A nil/missing description means "leave as-is"; an explicit empty string
+         *     clears the description.
+         */
+        UpdateSnapshotRequest: {
+            /** @description New description for the snapshot. Empty string clears. */
+            description?: string | null;
         };
         AddPortRequest: {
             host_port: number;

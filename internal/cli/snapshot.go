@@ -120,6 +120,52 @@ var snapListCmd = &cobra.Command{
 	},
 }
 
+var snapEditCmd = &cobra.Command{
+	Use:   "edit <vm-id> <snap-name>",
+	Short: "Edit metadata on an existing snapshot",
+	Long: `Edit the description of an existing snapshot. The underlying disk and
+memory state are not touched — only the snapshot's <description> element is
+rewritten via libvirt's snapshot REDEFINE primitive.
+
+Pass --description "" to clear the description. Omit --description entirely
+for a no-op (useful for confirming the snapshot is reachable).`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vmID := args[0]
+		snapName := args[1]
+
+		var descPtr *string
+		if cmd.Flags().Changed("description") {
+			d, _ := cmd.Flags().GetString("description")
+			if len(d) > snapshotDescriptionMaxLen {
+				return fmt.Errorf("description must be at most %d characters", snapshotDescriptionMaxLen)
+			}
+			descPtr = &d
+		}
+
+		logger.Info("cli", "snapshot edit", "vm_id", vmID, "name", snapName)
+
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "snapshot edit: failed to init VM manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		snap, err := mgr.UpdateSnapshot(context.Background(), vmID, snapName, types.SnapshotUpdateSpec{Description: descPtr})
+		if err != nil {
+			logger.Error("cli", "snapshot edit failed", "vm_id", vmID, "name", snapName, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "snapshot updated", "vm_id", vmID, "name", snap.Name)
+		fmt.Printf("Snapshot %s updated\n", snap.Name)
+		if snap.Description != "" {
+			fmt.Printf("Description: %s\n", snap.Description)
+		}
+		return nil
+	},
+}
+
 var snapDeleteCmd = &cobra.Command{
 	Use:   "delete <vm-id>",
 	Short: "Delete a snapshot (or many via --prefix)",
@@ -217,11 +263,14 @@ func init() {
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")
 
+	snapEditCmd.Flags().String("description", "", "new description for the snapshot (pass empty string to clear; max 1024 chars)")
+
 	snapDeleteCmd.Flags().String("name", "", "single snapshot name to delete (mutually exclusive with --prefix)")
 	snapDeleteCmd.Flags().String("prefix", "", "delete every snapshot whose name starts with this prefix (mutually exclusive with --name)")
 
 	snapshotCmd.AddCommand(snapCreateCmd)
 	snapshotCmd.AddCommand(snapRestoreCmd)
 	snapshotCmd.AddCommand(snapListCmd)
+	snapshotCmd.AddCommand(snapEditCmd)
 	snapshotCmd.AddCommand(snapDeleteCmd)
 }

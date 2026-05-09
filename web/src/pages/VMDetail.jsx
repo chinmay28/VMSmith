@@ -504,6 +504,7 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
   const bulkMut    = useMutation((body) => snapshots.bulkDelete(vmId, body));
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   // Drop selections that no longer exist (e.g., after a deletion or list refresh).
   React.useEffect(() => {
@@ -591,6 +592,14 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
+                className="btn-ghost text-xs text-steel-400 hover:text-steel-200"
+                onClick={() => setEditing(snap)}
+                data-testid={`btn-edit-snap-${snap.name}`}
+                title="Edit description"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
                 className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
                 onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
               >
@@ -616,7 +625,63 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
           })()}
         </div>
       )}
+      <EditSnapshotModal
+        vmId={vmId}
+        snapshot={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => { setEditing(null); refreshSnaps(); }}
+      />
     </div>
+  );
+}
+
+// --- Edit Snapshot Modal ---
+function EditSnapshotModal({ vmId, snapshot, onClose, onSaved }) {
+  const [description, setDescription] = useState('');
+  const updateMut = useMutation((args) => snapshots.update(vmId, args.name, { description: args.description }));
+
+  React.useEffect(() => {
+    if (snapshot) setDescription(snapshot.description || '');
+  }, [snapshot]);
+
+  if (!snapshot) return null;
+
+  const handleSubmit = async () => {
+    await updateMut.execute({ name: snapshot.name, description });
+    onSaved();
+  };
+
+  return (
+    <Modal open={!!snapshot} onClose={onClose} title={`Edit ${snapshot.name}`}>
+      <div className="space-y-4">
+        <div>
+          <label className="label">Description</label>
+          <textarea
+            className="input"
+            rows={3}
+            maxLength={1024}
+            placeholder="What is this snapshot for?"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="input-edit-snap-description"
+            autoFocus
+          />
+          <p className="mt-1 text-xs text-steel-500">{description.length}/1024 characters</p>
+        </div>
+        {updateMut.error && <p className="text-sm text-red-400">{updateMut.error}</p>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={updateMut.loading}
+            data-testid="btn-submit-edit-snap"
+          >
+            {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />} Save
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

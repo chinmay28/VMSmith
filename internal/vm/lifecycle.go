@@ -836,6 +836,142 @@ type snapshotXMLDoc struct {
 	CreationTime string   `xml:"creationTime,omitempty"`
 }
 
+// UpdateSnapshot edits the metadata of an existing snapshot. Only the
+// description can change; libvirt has no in-place edit primitive for snapshots,
+// so the implementation round-trips the existing XML through
+// SnapshotCreateXML(REDEFINE) — which preserves disk/memory state, parent
+// pointer, creation timestamp, and runtime state, but swaps out the
+// <description> element. All other SnapshotUpdateSpec fields being nil is a
+// no-op that returns the current snapshot.
+func (m *LibvirtManager) UpdateSnapshot(ctx context.Context, vmID string, snapshotName string, patch types.SnapshotUpdateSpec) (*types.Snapshot, error) {
+	vm, err := m.store.GetVM(vmID)
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return nil, fmt.Errorf("looking up domain: %w", err)
+	}
+	defer dom.Free()
+
+	snap, err := dom.SnapshotLookupByName(snapshotName, 0)
+	if err != nil {
+		return nil, fmt.Errorf("looking up snapshot %s: %w", snapshotName, err)
+	}
+	defer snap.Free()
+
+	rawXML, err := snap.GetXMLDesc(0)
+	if err != nil {
+		return nil, fmt.Errorf("dumping snapshot xml: %w", err)
+	}
+
+	currentDesc, currentCreated, parseErr := parseSnapshotXML(rawXML)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing snapshot xml: %w", parseErr)
+	}
+
+	desc := currentDesc
+	if patch.Description != nil {
+		desc = strings.TrimSpace(*patch.Description)
+	}
+
+	if patch.Description != nil && desc != currentDesc {
+		newXML, err := rewriteSnapshotDescription(rawXML, desc)
+		if err != nil {
+			return nil, fmt.Errorf("rewriting snapshot xml: %w", err)
+		}
+		if _, err := dom.CreateSnapshotXML(newXML, libvirt.DOMAIN_SNAPSHOT_CREATE_REDEFINE); err != nil {
+			return nil, fmt.Errorf("redefining snapshot: %w", err)
+		}
+	}
+
+	return &types.Snapshot{
+		ID:          fmt.Sprintf("%s/%s", vmID, snapshotName),
+		VMID:        vmID,
+		Name:        snapshotName,
+		Description: desc,
+		CreatedAt:   currentCreated,
+	}, nil
+}
+
+// rewriteSnapshotDescription returns a snapshot XML document with the
+// <description> element replaced by newDesc, preserving every other element
+// (creationTime, state, parent, memory, disks, …) verbatim. Used by
+// LibvirtManager.UpdateSnapshot to drive a SnapshotCreateXML(REDEFINE) call
+// without losing fields libvirt needs to keep the on-disk snapshot graph
+// consistent.
+func rewriteSnapshotDescription(raw, newDesc string) (string, error) {
+	type rawSnapshotDoc struct {
+		XMLName xml.Name   `xml:"domainsnapshot"`
+		Attrs   []xml.Attr `xml:",any,attr"`
+		Inner   []byte     `xml:",innerxml"`
+	}
+	var doc rawSnapshotDoc
+	if err := xml.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", err
+	}
+
+	inner := string(doc.Inner)
+	// Strip any existing description element(s) — libvirt schema permits at most one,
+	// but we defensively remove all occurrences before re-injecting.
+	for {
+		start := strings.Index(inner, "<description>")
+		if start == -1 {
+			start = strings.Index(inner, "<description/>")
+			if start == -1 {
+				break
+			}
+			end := start + len("<description/>")
+			inner = inner[:start] + inner[end:]
+			continue
+		}
+		end := strings.Index(inner[start:], "</description>")
+		if end == -1 {
+			break
+		}
+		end = start + end + len("</description>")
+		inner = inner[:start] + inner[end:]
+	}
+
+	if newDesc != "" {
+		var buf strings.Builder
+		buf.WriteString("<description>")
+		if err := xml.EscapeText(&buf, []byte(newDesc)); err != nil {
+			return "", err
+		}
+		buf.WriteString("</description>")
+		// Inject after <name>...</name> if present, so the order matches what
+		// libvirt emits on CreateSnapshotXML; otherwise prepend.
+		if nameEnd := strings.Index(inner, "</name>"); nameEnd != -1 {
+			pos := nameEnd + len("</name>")
+			inner = inner[:pos] + buf.String() + inner[pos:]
+		} else {
+			inner = buf.String() + inner
+		}
+	}
+
+	var out strings.Builder
+	out.WriteString("<domainsnapshot")
+	for _, attr := range doc.Attrs {
+		out.WriteString(" ")
+		if attr.Name.Space != "" {
+			out.WriteString(attr.Name.Space)
+			out.WriteString(":")
+		}
+		out.WriteString(attr.Name.Local)
+		out.WriteString(`="`)
+		if err := xml.EscapeText(&out, []byte(attr.Value)); err != nil {
+			return "", err
+		}
+		out.WriteString(`"`)
+	}
+	out.WriteString(">")
+	out.WriteString(inner)
+	out.WriteString("</domainsnapshot>")
+	return out.String(), nil
+}
+
 // RestoreSnapshot reverts a VM to a previous snapshot.
 func (m *LibvirtManager) RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error {
 	vm, err := m.store.GetVM(vmID)

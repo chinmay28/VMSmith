@@ -384,6 +384,35 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("checkpoint before May deploy");
   });
 
+  test("edit snapshot description", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Pre-existing snapshot before-deploy renders its seeded description.
+    await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("checkpoint before May deploy");
+
+    await page.getByTestId("btn-edit-snap-before-deploy").click();
+    const ta = page.getByTestId("input-edit-snap-description");
+    await expect(ta).toHaveValue("checkpoint before May deploy");
+    await ta.fill("rewritten via UI edit");
+    await page.getByTestId("btn-submit-edit-snap").click();
+
+    // Description updates inline once the modal closes.
+    await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("rewritten via UI edit");
+  });
+
+  test("clear snapshot description via edit", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-snap-before-deploy").click();
+    await page.getByTestId("input-edit-snap-description").fill("");
+    await page.getByTestId("btn-submit-edit-snap").click();
+
+    // Empty description means the description paragraph disappears entirely.
+    await expect(page.getByTestId("snap-desc-before-deploy")).toHaveCount(0);
+  });
+
   test("delete snapshot", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

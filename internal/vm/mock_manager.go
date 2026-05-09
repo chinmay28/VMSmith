@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type MockManager struct {
 	GetErr                error
 	ListErr               error
 	CreateSnapshotErr     error
+	UpdateSnapshotErr     error
 	RestoreSnapshotErr    error
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
@@ -311,6 +313,31 @@ func (m *MockManager) CreateSnapshot(ctx context.Context, vmID string, spec type
 
 	m.snapshots[vmID] = append(m.snapshots[vmID], snap)
 	return snap, nil
+}
+
+func (m *MockManager) UpdateSnapshot(ctx context.Context, vmID string, snapshotName string, patch types.SnapshotUpdateSpec) (*types.Snapshot, error) {
+	if m.UpdateSnapshotErr != nil {
+		return nil, m.UpdateSnapshotErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	snaps, ok := m.snapshots[vmID]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", vmID)
+	}
+
+	for _, s := range snaps {
+		if s.Name == snapshotName {
+			if patch.Description != nil {
+				s.Description = strings.TrimSpace(*patch.Description)
+			}
+			snapCopy := *s
+			return &snapCopy, nil
+		}
+	}
+	return nil, fmt.Errorf("snapshot %s not found", snapshotName)
 }
 
 func (m *MockManager) RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error {

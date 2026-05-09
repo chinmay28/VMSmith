@@ -14,6 +14,16 @@ type createSnapshotRequest struct {
 	Description string `json:"description,omitempty"`
 }
 
+// updateSnapshotRequest carries the editable metadata for an existing
+// snapshot. Description is a pointer so the caller can distinguish between
+// "omit" (leave untouched) and "set to empty string" (clear). Today only
+// description is editable; libvirt has no in-place rename for snapshots, so
+// adding a Name field would require a copy + delete of the underlying disk
+// state and is intentionally out of scope.
+type updateSnapshotRequest struct {
+	Description *string `json:"description,omitempty"`
+}
+
 // bulkDeleteSnapshotsRequest selects snapshots to delete in a single batch.
 //
 // Exactly one of Names or Prefix must be set.  When Prefix is set, every
@@ -91,6 +101,46 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, snaps)
+}
+
+// UpdateSnapshot handles PATCH /api/v1/vms/{vmID}/snapshots/{snapName}.
+//
+// Currently only the snapshot description is editable; the underlying
+// disk/memory state and parent pointer are immutable. A nil Description means
+// "leave as-is"; an explicit empty string clears the description.
+func (s *Server) UpdateSnapshot(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
+	snapName := chi.URLParam(r, "snapName")
+
+	var req updateSnapshotRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+	if err := validateUpdateSnapshotRequest(req.Description); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	patch := types.SnapshotUpdateSpec{Description: req.Description}
+	snap, err := s.vmManager.UpdateSnapshot(r.Context(), vmID, snapName, patch)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+
+	attrs := map[string]string{"snapshot": snapName}
+	if req.Description != nil {
+		attrs["description"] = strings.TrimSpace(*req.Description)
+	}
+	s.publishAppEvent("snapshot.updated", vmID, "snapshot "+snapName+" updated", attrs)
+
+	writeJSON(w, http.StatusOK, snap)
 }
 
 // RestoreSnapshot handles POST /api/v1/vms/{vmID}/snapshots/{snapName}/restore

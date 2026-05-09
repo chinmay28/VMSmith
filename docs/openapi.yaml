@@ -404,6 +404,40 @@ paths:
         default:
           $ref: '#/components/responses/APIError'
   /vms/{vmID}/snapshots/{snapName}:
+    patch:
+      tags: [Snapshots]
+      summary: Update snapshot metadata
+      description: |
+        Edit the description of an existing snapshot. The underlying disk and
+        memory state are not touched — only the snapshot's `<description>`
+        element is rewritten via libvirt's snapshot REDEFINE primitive.
+
+        Pass `description: ""` to clear the description; omit the field
+        entirely to leave it unchanged.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/SnapshotName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSnapshotRequest'
+      responses:
+        '200':
+          description: Snapshot updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
     delete:
       tags: [Snapshots]
       summary: Delete a snapshot
@@ -1367,6 +1401,21 @@ components:
           type: string
           maxLength: 1024
           description: Optional free-text description for this snapshot.
+    UpdateSnapshotRequest:
+      type: object
+      description: |
+        Editable metadata for an existing snapshot. Currently only the
+        description is editable; the snapshot's underlying disk and memory
+        state, parent pointer, and creation timestamp are immutable.
+
+        A nil/missing description means "leave as-is"; an explicit empty string
+        clears the description.
+      properties:
+        description:
+          type: string
+          nullable: true
+          maxLength: 1024
+          description: New description for the snapshot. Empty string clears.
     AddPortRequest:
       type: object
       required: [host_port, guest_port]
