@@ -564,6 +564,51 @@ func TestCLI_VMRestart_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_VMForceStop(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-fs", Name: "wedged", State: types.VMStateRunning})
+
+	out, err := runCLI("vm", "force-stop", "vm-fs")
+	if err != nil {
+		t.Fatalf("vm force-stop: %v", err)
+	}
+	if !strings.Contains(out, "vm-fs") || !strings.Contains(out, "force-stopped") {
+		t.Errorf("expected VM id and 'force-stopped' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-fs")
+	if got.State != types.VMStateStopped {
+		t.Errorf("State = %q, want stopped", got.State)
+	}
+}
+
+func TestCLI_VMForceStop_AlreadyStopped(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-fs2", Name: "stopped", State: types.VMStateStopped})
+
+	_, err := runCLI("vm", "force-stop", "vm-fs2")
+	if err == nil {
+		t.Fatal("expected error for already-stopped VM")
+	}
+	if !strings.Contains(err.Error(), "vm_already_stopped") && !strings.Contains(err.Error(), "already stopped") {
+		t.Errorf("expected vm_already_stopped error, got: %v", err)
+	}
+}
+
+func TestCLI_VMForceStop_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "force-stop", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
 func TestCLI_VMDelete(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

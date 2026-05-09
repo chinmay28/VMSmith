@@ -225,6 +225,30 @@ var vmStopCmd = &cobra.Command{
 	},
 }
 
+var vmForceStopCmd = &cobra.Command{
+	Use:   "force-stop <id>",
+	Short: "Force-stop a VM (immediate destroy, skips ACPI shutdown)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm force-stop", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm force-stop: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.ForceStop(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm force-stop failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "force-stop", "id", id)
+		fmt.Printf("VM %s force-stopped\n", id)
+		return nil
+	},
+}
+
 var vmRestartCmd = &cobra.Command{
 	Use:   "restart <id>",
 	Short: "Restart a VM (graceful stop, then start)",
@@ -949,6 +973,7 @@ Examples:
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmStartCmd)
 	vmCmd.AddCommand(vmStopCmd)
+	vmCmd.AddCommand(vmForceStopCmd)
 	vmCmd.AddCommand(vmRestartCmd)
 	vmCmd.AddCommand(vmDeleteCmd)
 	vmCmd.AddCommand(vmInfoCmd)

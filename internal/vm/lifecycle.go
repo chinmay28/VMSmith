@@ -420,6 +420,41 @@ func (m *LibvirtManager) Stop(ctx context.Context, id string) error {
 	return m.store.PutVM(vm)
 }
 
+// ForceStop immediately destroys the running domain without sending an ACPI
+// shutdown signal.  Equivalent to pulling the power cord — used when the guest
+// OS is unresponsive or the operator deliberately wants to skip graceful
+// shutdown.  Returns a typed vm_already_stopped error (HTTP 409) when the VM
+// is already in a non-running state so callers can distinguish "no-op" from
+// "real failure".
+func (m *LibvirtManager) ForceStop(ctx context.Context, id string) error {
+	vm, err := m.store.GetVM(id)
+	if err != nil {
+		return err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return fmt.Errorf("looking up domain %s: %w", vm.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return fmt.Errorf("getting domain state: %w", err)
+	}
+	if state == libvirt.DOMAIN_SHUTOFF {
+		return types.NewAPIError("vm_already_stopped", "vm is already stopped")
+	}
+
+	if err := dom.Destroy(); err != nil {
+		return fmt.Errorf("force-stopping domain: %w", err)
+	}
+
+	vm.State = types.VMStateStopped
+	vm.UpdatedAt = time.Now()
+	return m.store.PutVM(vm)
+}
+
 // Restart performs a graceful stop followed by a start.  When the VM is already
 // stopped, it just starts it.  The shutdown step falls back to a forced destroy
 // after restartShutdownTimeout so a stuck guest doesn't block the operation.

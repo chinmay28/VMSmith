@@ -205,6 +205,15 @@ const server = http.createServer(async (req, res) => {
     if (vm) { vm.state = "stopped"; return json(res, 200, { status: "stopped" }); }
     return json(res, 404, { error: "not found" });
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/force-stop$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "not found" });
+    if (vm.state === "stopped") {
+      return json(res, 409, { code: "vm_already_stopped", message: "vm is already stopped" });
+    }
+    vm.state = "stopped";
+    return json(res, 200, { status: "force_stopped" });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/restart$/)) && method === "POST") {
     const vm = vms.get(m[1]);
     if (vm) { vm.state = "running"; return json(res, 200, { status: "restarted" }); }

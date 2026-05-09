@@ -194,6 +194,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				r.Delete("/", s.DeleteVM)
 				r.Post("/start", s.StartVM)
 				r.Post("/stop", s.StopVM)
+				r.Post("/force-stop", s.ForceStopVM)
 				r.Post("/restart", s.RestartVM)
 
 				// Snapshots

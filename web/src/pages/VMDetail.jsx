@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, Download, Clock, Pencil, Copy
+  Plus, RotateCcw, Download, Clock, Pencil, Copy, Zap
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -27,10 +27,11 @@ export default function VMDetail() {
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
-  const startMut   = useMutation(vms.start);
-  const stopMut    = useMutation(vms.stop);
-  const restartMut = useMutation(vms.restart);
-  const deleteMut  = useMutation(vms.delete);
+  const startMut     = useMutation(vms.start);
+  const stopMut      = useMutation(vms.stop);
+  const forceStopMut = useMutation(vms.forceStop);
+  const restartMut   = useMutation(vms.restart);
+  const deleteMut    = useMutation(vms.delete);
 
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
   if (error) return <ErrorBanner message={error} />;
@@ -76,6 +77,19 @@ export default function VMDetail() {
           {vm.state === 'running' && (
             <button className="btn-secondary" onClick={() => { stopMut.execute(id).then(refresh); }} data-testid="btn-stop">
               <Square size={14} /> Stop
+            </button>
+          )}
+          {vm.state === 'running' && (
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                if (!window.confirm(`Force-stop ${vm.name}? This skips graceful shutdown and may cause data loss.`)) return;
+                forceStopMut.execute(id).then(refresh);
+              }}
+              data-testid="btn-force-stop"
+              title="Immediate destroy — skips ACPI shutdown"
+            >
+              <Zap size={14} /> Force Stop
             </button>
           )}
           {vm.state === 'running' && (
