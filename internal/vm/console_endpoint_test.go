@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -333,26 +334,10 @@ func TestMockManager_SeedConsoleListener_BindsRealSocket(t *testing.T) {
 	}
 
 	// We should be able to dial the address GetConsoleEndpoint gave us.
-	addr := net.JoinHostPort(endpoint.Host, itoaPort(endpoint.Port))
+	addr := net.JoinHostPort(endpoint.Host, strconv.Itoa(endpoint.Port))
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial seeded listener at %s: %v", addr, err)
 	}
 	conn.Close()
-}
-
-// --- helpers ---
-
-func itoaPort(p int) string {
-	// Avoid pulling in strconv just for one use site.
-	if p == 0 {
-		return "0"
-	}
-	digits := []byte{}
-	n := p
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
