@@ -71,6 +71,117 @@ func TestParseSnapshotXML_NonNumericCreationTime(t *testing.T) {
 	}
 }
 
+func TestRewriteSnapshotDescription_AddsDescription(t *testing.T) {
+	raw := `<domainsnapshot>` +
+		`<name>snap-a</name>` +
+		`<state>running</state>` +
+		`<creationTime>1714694400</creationTime>` +
+		`</domainsnapshot>`
+
+	out, err := rewriteSnapshotDescription(raw, "freshly added")
+	if err != nil {
+		t.Fatalf("rewriteSnapshotDescription: %v", err)
+	}
+	if !strings.Contains(out, "<description>freshly added</description>") {
+		t.Errorf("missing description element: %q", out)
+	}
+	// state and creationTime must survive verbatim
+	if !strings.Contains(out, "<state>running</state>") {
+		t.Errorf("state element lost: %q", out)
+	}
+	if !strings.Contains(out, "<creationTime>1714694400</creationTime>") {
+		t.Errorf("creationTime element lost: %q", out)
+	}
+	desc, created, err := parseSnapshotXML(out)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if desc != "freshly added" {
+		t.Errorf("description = %q", desc)
+	}
+	if created.IsZero() {
+		t.Errorf("created should round-trip, got zero")
+	}
+}
+
+func TestRewriteSnapshotDescription_ReplacesExistingDescription(t *testing.T) {
+	raw := `<domainsnapshot>` +
+		`<name>snap-r</name>` +
+		`<description>OLD</description>` +
+		`<state>running</state>` +
+		`<creationTime>1714694400</creationTime>` +
+		`</domainsnapshot>`
+
+	out, err := rewriteSnapshotDescription(raw, "NEW")
+	if err != nil {
+		t.Fatalf("rewriteSnapshotDescription: %v", err)
+	}
+	if strings.Contains(out, "OLD") {
+		t.Errorf("old description not removed: %q", out)
+	}
+	if !strings.Contains(out, "<description>NEW</description>") {
+		t.Errorf("missing replacement description: %q", out)
+	}
+}
+
+func TestRewriteSnapshotDescription_ClearsDescription(t *testing.T) {
+	raw := `<domainsnapshot>` +
+		`<name>snap-c</name>` +
+		`<description>to be cleared</description>` +
+		`<state>running</state>` +
+		`</domainsnapshot>`
+
+	out, err := rewriteSnapshotDescription(raw, "")
+	if err != nil {
+		t.Fatalf("rewriteSnapshotDescription: %v", err)
+	}
+	if strings.Contains(out, "<description>") {
+		t.Errorf("description element should be absent, got: %q", out)
+	}
+	if !strings.Contains(out, "<state>running</state>") {
+		t.Errorf("state element lost when clearing description: %q", out)
+	}
+}
+
+func TestRewriteSnapshotDescription_PreservesAttributes(t *testing.T) {
+	// libvirt's snapshot dumpxml may include attributes on the root element
+	// (e.g. xmlns). Make sure attributes survive the round-trip.
+	raw := `<domainsnapshot xmlns="http://example/ns" type="external">` +
+		`<name>snap-a</name>` +
+		`<creationTime>1714694400</creationTime>` +
+		`</domainsnapshot>`
+	out, err := rewriteSnapshotDescription(raw, "x")
+	if err != nil {
+		t.Fatalf("rewriteSnapshotDescription: %v", err)
+	}
+	if !strings.Contains(out, `type="external"`) {
+		t.Errorf("type attribute lost: %q", out)
+	}
+}
+
+func TestRewriteSnapshotDescription_EscapesUnsafeText(t *testing.T) {
+	raw := `<domainsnapshot><name>n</name></domainsnapshot>`
+	out, err := rewriteSnapshotDescription(raw, "quote: \" & < tag >")
+	if err != nil {
+		t.Fatalf("rewriteSnapshotDescription: %v", err)
+	}
+	// Re-parse the rewritten doc — if the description wasn't escaped, the
+	// outer XML would be malformed and Unmarshal would fail.
+	desc, _, err := parseSnapshotXML(out)
+	if err != nil {
+		t.Fatalf("re-parse rewritten xml: %v\nxml: %s", err, out)
+	}
+	if desc != "quote: \" & < tag >" {
+		t.Errorf("description = %q", desc)
+	}
+}
+
+func TestRewriteSnapshotDescription_BadXML(t *testing.T) {
+	if _, err := rewriteSnapshotDescription("<not-xml", "x"); err == nil {
+		t.Fatal("expected error for malformed xml")
+	}
+}
+
 func TestSnapshotXMLDoc_RoundTrip(t *testing.T) {
 	doc := snapshotXMLDoc{Name: "snap-1", Description: "rolled back to here"}
 	buf, err := xml.Marshal(doc)

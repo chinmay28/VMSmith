@@ -23,6 +23,7 @@ type Manager interface {
 
 	// Snapshots
 	CreateSnapshot(ctx context.Context, vmID string, spec types.SnapshotSpec) (*types.Snapshot, error)
+	UpdateSnapshot(ctx context.Context, vmID string, snapshotName string, patch types.SnapshotUpdateSpec) (*types.Snapshot, error)
 	RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error
 	ListSnapshots(ctx context.Context, vmID string) ([]*types.Snapshot, error)
 	DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error

@@ -1046,6 +1046,86 @@ func TestCLI_SnapshotDelete_PrefixNoMatchPrintsMessage(t *testing.T) {
 	}
 }
 
+func TestCLI_SnapshotEdit_SetsDescription(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-edit", Name: "snapper"})
+	mock.CreateSnapshot(nil, "vm-edit", types.SnapshotSpec{Name: "snap-x", Description: "old"})
+
+	out, err := runCLI("snapshot", "edit", "vm-edit", "snap-x", "--description", "new desc")
+	if err != nil {
+		t.Fatalf("snapshot edit: %v", err)
+	}
+	if !strings.Contains(out, "snap-x") {
+		t.Errorf("expected snapshot name in output, got: %q", out)
+	}
+	if !strings.Contains(out, "new desc") {
+		t.Errorf("expected new description in output, got: %q", out)
+	}
+
+	snaps, _ := mock.ListSnapshots(nil, "vm-edit")
+	if len(snaps) != 1 || snaps[0].Description != "new desc" {
+		t.Errorf("manager state did not update, got %+v", snaps)
+	}
+}
+
+func TestCLI_SnapshotEdit_ClearsDescription(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-clr", Name: "snapper"})
+	mock.CreateSnapshot(nil, "vm-clr", types.SnapshotSpec{Name: "snap-c", Description: "stale"})
+
+	if _, err := runCLI("snapshot", "edit", "vm-clr", "snap-c", "--description", ""); err != nil {
+		t.Fatalf("snapshot edit: %v", err)
+	}
+	snaps, _ := mock.ListSnapshots(nil, "vm-clr")
+	if len(snaps) != 1 || snaps[0].Description != "" {
+		t.Errorf("expected cleared description, got %+v", snaps)
+	}
+}
+
+func TestCLI_SnapshotEdit_NoFlagIsNoOp(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-noop", Name: "snapper"})
+	mock.CreateSnapshot(nil, "vm-noop", types.SnapshotSpec{Name: "snap-n", Description: "kept"})
+
+	if _, err := runCLI("snapshot", "edit", "vm-noop", "snap-n"); err != nil {
+		t.Fatalf("snapshot edit: %v", err)
+	}
+	snaps, _ := mock.ListSnapshots(nil, "vm-noop")
+	if len(snaps) != 1 || snaps[0].Description != "kept" {
+		t.Errorf("expected description untouched, got %+v", snaps)
+	}
+}
+
+func TestCLI_SnapshotEdit_DescriptionTooLong(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-len", Name: "snapper"})
+	mock.CreateSnapshot(nil, "vm-len", types.SnapshotSpec{Name: "snap-l"})
+
+	long := strings.Repeat("y", 1025)
+	if _, err := runCLI("snapshot", "edit", "vm-len", "snap-l", "--description", long); err == nil {
+		t.Fatal("expected error for description over 1024 chars")
+	}
+}
+
+func TestCLI_SnapshotEdit_NotFound(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-nf", Name: "snapper"})
+
+	if _, err := runCLI("snapshot", "edit", "vm-nf", "missing", "--description", "anything"); err == nil {
+		t.Fatal("expected error for missing snapshot")
+	}
+}
+
 // =====================================================// Image command tests
 // =====================================================
 func TestCLI_ImageList_Empty(t *testing.T) {

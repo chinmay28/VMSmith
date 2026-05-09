@@ -3913,3 +3913,149 @@ func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 		t.Errorf("Tags = %v, want [lab ubuntu]", got)
 	}
 }
+
+// patchJSON issues a PATCH against the test server with a JSON body.  Mirrors
+// the http.Post helper that other tests use for POST + JSON.
+func patchJSON(t *testing.T, url string, body any) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPatch, url, jsonBody(t, body))
+	if err != nil {
+		t.Fatalf("NewRequest PATCH %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH %s: %v", url, err)
+	}
+	return resp
+}
+
+func TestUpdateSnapshot_SetsDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-up", Name: "host", State: types.VMStateRunning})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-up", types.SnapshotSpec{Name: "snap-1", Description: "old"}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	desc := "fresh description"
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-up/snapshots/snap-1", updateSnapshotRequest{Description: &desc})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if snap.Description != "fresh description" {
+		t.Errorf("Description = %q, want fresh description", snap.Description)
+	}
+
+	listed, _ := mockMgr.ListSnapshots(nil, "vm-up")
+	if len(listed) != 1 || listed[0].Description != "fresh description" {
+		t.Errorf("manager state did not pick up new description: %+v", listed)
+	}
+}
+
+func TestUpdateSnapshot_ClearsDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-clr", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-clr", types.SnapshotSpec{Name: "snap-c", Description: "stale text"}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	cleared := ""
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-clr/snapshots/snap-c", updateSnapshotRequest{Description: &cleared})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if snap.Description != "" {
+		t.Errorf("Description = %q, want empty", snap.Description)
+	}
+}
+
+func TestUpdateSnapshot_OmittedDescriptionIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-noop", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-noop", types.SnapshotSpec{Name: "snap-n", Description: "original"}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// Empty body / no description field at all — description must be untouched.
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-noop/snapshots/snap-n", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if snap.Description != "original" {
+		t.Errorf("Description = %q, want original (no-op)", snap.Description)
+	}
+}
+
+func TestUpdateSnapshot_RejectsLongDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-long", Name: "host"})
+	mockMgr.CreateSnapshot(nil, "vm-long", types.SnapshotSpec{Name: "snap"})
+
+	long := strings.Repeat("x", 1025)
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-long/snapshots/snap", updateSnapshotRequest{Description: &long})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_description")
+}
+
+func TestUpdateSnapshot_NotFound(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-nf", Name: "host"})
+	desc := "anything"
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-nf/snapshots/missing", updateSnapshotRequest{Description: &desc})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "resource_not_found")
+}
+
+func TestUpdateSnapshot_BadJSON(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bj", Name: "host"})
+	mockMgr.CreateSnapshot(nil, "vm-bj", types.SnapshotSpec{Name: "snap"})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bj/snapshots/snap", bytes.NewBufferString("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
+}
+
+func TestUpdateSnapshot_ManagerError(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-err", Name: "host"})
+	mockMgr.CreateSnapshot(nil, "vm-err", types.SnapshotSpec{Name: "snap"})
+	mockMgr.UpdateSnapshotErr = errors.New("libvirt: redefine refused")
+
+	desc := "doesn't matter"
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-err/snapshots/snap", updateSnapshotRequest{Description: &desc})
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+}

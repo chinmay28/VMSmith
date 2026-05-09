@@ -136,6 +136,13 @@ func validateCreateSnapshotRequest(name, description string) error {
 	return nil
 }
 
+func validateUpdateSnapshotRequest(description *string) error {
+	if description != nil && len(*description) > maxDescriptionLength {
+		return types.NewAPIError("invalid_description", fmt.Sprintf("description must be at most %d characters", maxDescriptionLength))
+	}
+	return nil
+}
+
 func validateCloneVMRequest(req cloneVMRequest) error {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {

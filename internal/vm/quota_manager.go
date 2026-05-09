@@ -79,6 +79,9 @@ func (m *quotaManager) CreateSnapshot(ctx context.Context, vmID string, spec typ
 
 	return snap, nil
 }
+func (m *quotaManager) UpdateSnapshot(ctx context.Context, vmID string, snapshotName string, patch types.SnapshotUpdateSpec) (*types.Snapshot, error) {
+	return m.base.UpdateSnapshot(ctx, vmID, snapshotName, patch)
+}
 func (m *quotaManager) RestoreSnapshot(ctx context.Context, vmID string, snapshotName string) error {
 	return m.base.RestoreSnapshot(ctx, vmID, snapshotName)
 }

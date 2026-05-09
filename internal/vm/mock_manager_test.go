@@ -240,6 +240,97 @@ func TestMockManager_Snapshots(t *testing.T) {
 	}
 }
 
+func TestMockManager_UpdateSnapshot_SetsDescription(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "edithost"})
+	id := vm.ID
+	if _, err := m.CreateSnapshot(ctx, id, types.SnapshotSpec{Name: "s1", Description: "old"}); err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+
+	desc := "fresh"
+	snap, err := m.UpdateSnapshot(ctx, id, "s1", types.SnapshotUpdateSpec{Description: &desc})
+	if err != nil {
+		t.Fatalf("UpdateSnapshot: %v", err)
+	}
+	if snap.Description != "fresh" {
+		t.Errorf("returned description = %q, want fresh", snap.Description)
+	}
+	listed, _ := m.ListSnapshots(ctx, id)
+	if len(listed) != 1 || listed[0].Description != "fresh" {
+		t.Errorf("manager state did not pick up description: %+v", listed)
+	}
+}
+
+func TestMockManager_UpdateSnapshot_TrimsWhitespace(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "trimhost"})
+	id := vm.ID
+	m.CreateSnapshot(ctx, id, types.SnapshotSpec{Name: "s"})
+
+	desc := "   padded   "
+	snap, err := m.UpdateSnapshot(ctx, id, "s", types.SnapshotUpdateSpec{Description: &desc})
+	if err != nil {
+		t.Fatalf("UpdateSnapshot: %v", err)
+	}
+	if snap.Description != "padded" {
+		t.Errorf("description = %q, want trimmed 'padded'", snap.Description)
+	}
+}
+
+func TestMockManager_UpdateSnapshot_NilDescriptionIsNoOp(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "noop"})
+	id := vm.ID
+	m.CreateSnapshot(ctx, id, types.SnapshotSpec{Name: "s", Description: "kept"})
+
+	if _, err := m.UpdateSnapshot(ctx, id, "s", types.SnapshotUpdateSpec{}); err != nil {
+		t.Fatalf("UpdateSnapshot: %v", err)
+	}
+	listed, _ := m.ListSnapshots(ctx, id)
+	if len(listed) != 1 || listed[0].Description != "kept" {
+		t.Errorf("description should be unchanged, got %+v", listed)
+	}
+}
+
+func TestMockManager_UpdateSnapshot_VMNotFound(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	desc := "anything"
+	if _, err := m.UpdateSnapshot(ctx, "vm-nope", "snap", types.SnapshotUpdateSpec{Description: &desc}); err == nil {
+		t.Fatal("expected error for unknown vm")
+	}
+}
+
+func TestMockManager_UpdateSnapshot_SnapshotNotFound(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+
+	vm, _ := m.Create(ctx, types.VMSpec{Name: "h"})
+	id := vm.ID
+
+	desc := "anything"
+	if _, err := m.UpdateSnapshot(ctx, id, "missing", types.SnapshotUpdateSpec{Description: &desc}); err == nil {
+		t.Fatal("expected error for unknown snapshot")
+	}
+}
+
+func TestMockManager_UpdateSnapshot_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	m.UpdateSnapshotErr = types.ErrTest
+	desc := "x"
+	if _, err := m.UpdateSnapshot(context.Background(), "vm", "snap", types.SnapshotUpdateSpec{Description: &desc}); err != types.ErrTest {
+		t.Errorf("err = %v, want ErrTest", err)
+	}
+}
+
 func TestMockManager_ErrorInjection(t *testing.T) {
 	m := NewMockManager()
 	m.CreateErr = types.ErrTest

@@ -359,6 +359,22 @@ const server = http.createServer(async (req, res) => {
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)\/restore$/)) && method === "POST") {
     return json(res, 200, { status: "restored" });
   }
+  // PATCH /api/v1/vms/{vmID}/snapshots/{snapName}: edit description.
+  // Empty body or missing description = no change. Empty string clears.
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)$/)) && method === "PATCH") {
+    const list = snapshots.get(m[1]) || [];
+    const snap = list.find(s => s.name === m[2]);
+    if (!snap) return json(res, 404, { error: { code: "resource_not_found", message: "snapshot not found" } });
+    const patch = body || {};
+    if (typeof patch.description === "string") {
+      const trimmed = patch.description.trim();
+      if (trimmed.length > 1024) {
+        return json(res, 400, { error: { code: "invalid_description", message: "description too long" } });
+      }
+      snap.description = trimmed;
+    }
+    return json(res, 200, snap);
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)$/)) && method === "DELETE") {
     const list = (snapshots.get(m[1]) || []).filter(s => s.name !== m[2]);
     snapshots.set(m[1], list); res.writeHead(204); return res.end();

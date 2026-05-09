@@ -95,6 +95,13 @@ export const snapshots = {
     ),
   restore: (vmId: string, snapName: string) =>
     unwrap(apiClient.POST('/vms/{vmID}/snapshots/{snapName}/restore', { params: { path: { vmID: vmId, snapName } } })),
+  // update edits snapshot metadata (currently only the description). Pass an
+  // empty string to clear; omit the field entirely to leave it unchanged.
+  update: (vmId: string, snapName: string, body: { description?: string | null }) =>
+    unwrap(apiClient.PATCH('/vms/{vmID}/snapshots/{snapName}', {
+      params: { path: { vmID: vmId, snapName } },
+      body,
+    })),
   delete: (vmId: string, snapName: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/snapshots/{snapName}', { params: { path: { vmID: vmId, snapName } } })),
   // bulkDelete deletes multiple snapshots in a single round-trip. Pass either
