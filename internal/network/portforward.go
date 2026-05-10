@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -80,6 +81,42 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 	}
 
 	return rule, nil
+}
+
+// UpdateOptions carries the editable metadata for an existing port-forward
+// rule. Description is a pointer so callers can distinguish between "leave
+// untouched" (nil) and "clear" (empty string).
+type UpdateOptions struct {
+	Description *string
+}
+
+// Update mutates the metadata of an existing port-forward rule. Today only
+// the description is editable; the underlying iptables 5-tuple
+// (host_port/guest_port/guest_ip/protocol) is immutable, since changing any
+// of those would require deleting + recreating the iptables rule and
+// rotating the rule's stable ID. Returns the updated record. If the id is
+// not known, returns a typed `resource_not_found` error so callers can map
+// it to HTTP 404 without scanning libvirt-specific text.
+func (pf *PortForwarder) Update(id string, opts UpdateOptions) (*types.PortForward, error) {
+	forwards, err := pf.store.ListPortForwards("")
+	if err != nil {
+		return nil, fmt.Errorf("listing port forwards: %w", err)
+	}
+
+	for _, fwd := range forwards {
+		if fwd.ID != id {
+			continue
+		}
+		if opts.Description != nil {
+			fwd.Description = strings.TrimSpace(*opts.Description)
+		}
+		if err := pf.store.PutPortForward(fwd); err != nil {
+			return nil, fmt.Errorf("persisting port forward: %w", err)
+		}
+		return fwd, nil
+	}
+
+	return nil, types.NewAPIError("resource_not_found", "port forward "+id+" not found")
 }
 
 // Remove deletes a port forwarding rule.

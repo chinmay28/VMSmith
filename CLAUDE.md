@@ -41,7 +41,7 @@ vmsmith/
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull (`image delete --tag <tag>` bulk-deletes every image carrying that tag, mirroring the snapshot bulk_delete shape)
 │   │   ├── net.go               # vmsmith net interfaces
-│   │   ├── network.go           # vmsmith port add|remove|list (`port remove` accepts a positional id for single-delete, or `--vm <id> [--protocol tcp|udp]` to bulk-delete every rule on a VM)
+│   │   ├── network.go           # vmsmith port add|edit|remove|list (`port remove` accepts a positional id for single-delete, or `--vm <id> [--protocol tcp|udp]` to bulk-delete every rule on a VM; `port edit <id> --description "..."` mutates the description — pass `""` to clear)
 │   │   └── daemon.go            # vmsmith daemon start
 │   ├── config/config.go         # Config struct, DefaultConfig(), EnsureDirs()
 │   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, graceful shutdown orchestration, logger init
@@ -443,6 +443,7 @@ GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards
 POST   /vms/{id}/ports                 Add port forward (`host_port`, `guest_port`, `protocol?`, `description?` — `description` is an optional free-form label, ≤256 chars)
 POST   /vms/{id}/ports/bulk_delete     Delete multiple port forwards in a single request. Body: `{"ids": [...]}` or `{"protocol": "tcp"|"udp"}` (exactly one). Protocol is always scoped to the URL VM. Returns `{"results": [{id, success, code?, message?}]}`. Emits one `port_forward.removed` event per successful target with `bulk=true`. CLI: `vmsmith port remove --vm <id> [--protocol tcp|udp]`.
+PATCH  /vms/{id}/ports/{portId}        Update editable port-forward metadata (currently only `description`; ≤256 chars). Body: `{"description": "..."}` — empty string clears, missing/null leaves unchanged. The iptables 5-tuple (host_port/guest_port/guest_ip/protocol) is intentionally immutable. The URL VM is the authoritative scope: a `portId` belonging to a different VM returns 404 `resource_not_found`. Emits `port_forward.updated`. CLI: `vmsmith port edit <port-id> --description "..."`.
 DELETE /vms/{id}/ports/{portId}        Remove port forward
 GET    /templates                      List templates (`?tag=<tag>` case-insensitive filter applied before pagination, `?page=<n>&per_page=<n>`; returns `X-Total-Count`); CLI also supports `vmsmith template list --tag <tag>`
 POST   /templates                      Create template (CreateTemplateRequest body; rejects duplicate names)

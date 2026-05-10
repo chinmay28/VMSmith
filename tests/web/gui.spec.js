@@ -582,6 +582,34 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("port-row-pf-seed-http")).not.toBeVisible();
   });
 
+  test("edit port forward description", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seeded SSH rule has a description; verify it renders, then edit it.
+    await expect(page.getByTestId("port-description-pf-seed-ssh")).toBeVisible();
+
+    await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
+    const input = page.getByTestId("input-edit-port-description");
+    await expect(input).toBeVisible();
+    await input.fill("rewritten via UI edit");
+    await page.getByTestId("btn-submit-edit-port").click();
+
+    await expect(page.getByTestId("port-description-pf-seed-ssh")).toHaveText("rewritten via UI edit");
+  });
+
+  test("clear port forward description via edit", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
+    await page.getByTestId("input-edit-port-description").fill("");
+    await page.getByTestId("btn-submit-edit-port").click();
+
+    // An empty description hides the description line entirely (matches snapshot edit pattern).
+    await expect(page.getByTestId("port-description-pf-seed-ssh")).toHaveCount(0);
+  });
+
   test("port modal rejects descriptions over 256 chars", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

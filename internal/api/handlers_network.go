@@ -18,6 +18,16 @@ type addPortRequest struct {
 	Description string         `json:"description,omitempty"`
 }
 
+// updatePortRequest carries the editable metadata for an existing port-forward
+// rule. Description is a pointer so callers can distinguish between "omit"
+// (leave untouched) and "set to empty string" (clear). The 5-tuple
+// (host_port/guest_port/guest_ip/protocol) that drives the underlying iptables
+// rule is intentionally immutable here — changing any of those is a
+// delete-and-re-add operation.
+type updatePortRequest struct {
+	Description *string `json:"description,omitempty"`
+}
+
 // bulkDeletePortsRequest selects port forwards to delete in a single batch.
 //
 // Exactly one of Ids or Protocol must be set. Protocol is scoped to the VM in
@@ -109,6 +119,78 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ports)
+}
+
+// UpdatePort handles PATCH /api/v1/vms/{vmID}/ports/{portID}.
+//
+// Only the description is editable; the underlying iptables 5-tuple
+// (host_port/guest_port/guest_ip/protocol) is immutable. A nil Description
+// means "leave as-is"; an explicit empty string clears the description.
+//
+// As with the bulk-delete handler, the URL VM is the authoritative scope: if
+// the targeted port-forward exists but belongs to a different VM, the response
+// is 404 `resource_not_found` (not a 403). This keeps the safety property
+// symmetric across update/delete and prevents one VM's API surface from
+// mutating another's rules.
+func (s *Server) UpdatePort(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
+	portID := chi.URLParam(r, "portID")
+
+	var req updatePortRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+
+	if req.Description != nil {
+		if err := validatePortForwardDescription(strings.TrimSpace(*req.Description)); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+
+	// Foreign-VM safety: verify the rule belongs to the URL VM before mutating
+	// it. We list the URL VM's forwards and require the target id to be in the
+	// set; any other case (rule missing, rule on a different VM) surfaces as
+	// 404 `resource_not_found`.
+	ports, err := s.portFwd.List(vmID)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+	known := false
+	for _, p := range ports {
+		if p.ID == portID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeAPIError(w, http.StatusNotFound,
+			types.NewAPIError("resource_not_found", "port forward "+portID+" not found"))
+		return
+	}
+
+	updated, err := s.portFwd.Update(portID, network.UpdateOptions{Description: req.Description})
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+
+	attrs := map[string]string{"port_id": portID}
+	if req.Description != nil {
+		attrs["description"] = strings.TrimSpace(*req.Description)
+	}
+	s.publishAppEvent("port_forward.updated", vmID,
+		"port forward "+portID+" updated", attrs)
+
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // RemovePort handles DELETE /api/v1/vms/{vmID}/ports/{portID}

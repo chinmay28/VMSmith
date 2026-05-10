@@ -2143,6 +2143,93 @@ func TestCLI_PortRemove_AllForVM_ProtocolFilter(t *testing.T) {
 	}
 }
 
+func TestCLI_PortEdit_SetsDescription(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-edit", VMID: "vm-e", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	out, err := runCLI("port", "edit", "pf-edit", "--description", "ssh-jumpbox")
+	if err != nil {
+		t.Fatalf("port edit: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "Description: ssh-jumpbox") {
+		t.Errorf("expected description in output, got %q", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-e")
+	if len(stored) != 1 || stored[0].Description != "ssh-jumpbox" {
+		t.Errorf("persisted description = %q, want ssh-jumpbox", stored[0].Description)
+	}
+}
+
+func TestCLI_PortEdit_ClearsDescription(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-clear", VMID: "vm-c", HostPort: 9090, GuestPort: 90, GuestIP: "192.168.100.20", Protocol: types.ProtocolTCP, Description: "stale"})
+
+	out, err := runCLI("port", "edit", "pf-clear", "--description", "")
+	if err != nil {
+		t.Fatalf("port edit (clear): %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "Description cleared") {
+		t.Errorf("expected 'Description cleared' line, got %q", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-c")
+	if len(stored) != 1 || stored[0].Description != "" {
+		t.Errorf("description not cleared: %+v", stored)
+	}
+}
+
+func TestCLI_PortEdit_RequiresFlag(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-x", VMID: "vm-x", HostPort: 1, GuestPort: 1, GuestIP: "192.168.100.30", Protocol: types.ProtocolTCP})
+
+	_, err := runCLI("port", "edit", "pf-x")
+	if err == nil {
+		t.Fatal("expected error when --description is omitted")
+	}
+	if !strings.Contains(err.Error(), "--description is required") {
+		t.Errorf("expected '--description is required' error, got %v", err)
+	}
+}
+
+func TestCLI_PortEdit_DescriptionTooLong(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-long", VMID: "vm-l", HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP})
+
+	_, err := runCLI("port", "edit", "pf-long", "--description", strings.Repeat("x", 257))
+	if err == nil {
+		t.Fatal("expected validation error for over-long description")
+	}
+	if !strings.Contains(err.Error(), "description must be at most") {
+		t.Errorf("expected length error, got %v", err)
+	}
+}
+
+func TestCLI_PortEdit_NotFound(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "edit", "pf-missing", "--description", "x")
+	if err == nil {
+		t.Fatal("expected resource_not_found error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T (%v)", err, err)
+	}
+	if apiErr.Code != "resource_not_found" {
+		t.Errorf("Code = %q, want resource_not_found", apiErr.Code)
+	}
+}
+
 func TestCLI_PortRemove_NoMatchPrintsMessage(t *testing.T) {
 	_, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()

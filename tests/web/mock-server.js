@@ -481,6 +481,23 @@ const server = http.createServer(async (req, res) => {
     const list = portForwards.get(m[1]) || []; list.push(pf); portForwards.set(m[1], list);
     return json(res, 201, pf);
   }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports\/([^/]+)$/)) && method === "PATCH") {
+    const vmId = m[1];
+    const portId = m[2];
+    const body = await parseBody(req);
+    const list = portForwards.get(vmId) || [];
+    const pf = list.find(x => x.id === portId);
+    if (!pf) {
+      return json(res, 404, { code: "resource_not_found", message: "port forward not found" });
+    }
+    if (typeof body.description === "string") {
+      if (body.description.length > 256) {
+        return json(res, 400, { code: "invalid_port_forward", message: "description must be at most 256 characters" });
+      }
+      pf.description = body.description.trim();
+    }
+    return json(res, 200, pf);
+  }
   if (p === "/api/v1/images" && method === "GET") {
     let list = [...images.values()];
     const tag = (url.searchParams.get("tag") || "").trim().toLowerCase();

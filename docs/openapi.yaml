@@ -656,6 +656,42 @@ paths:
         default:
           $ref: '#/components/responses/APIError'
   /vms/{vmID}/ports/{portID}:
+    patch:
+      tags: [Port Forwards]
+      summary: Update editable metadata on a port forward
+      description: |
+        Updates the editable metadata on an existing port forwarding rule.
+        Today only the `description` is editable; the underlying iptables
+        5-tuple (host_port/guest_port/guest_ip/protocol) is intentionally
+        immutable. Omit `description` to leave it unchanged; pass `""` to
+        clear it.
+
+        The `vmID` in the URL is the authoritative scope: a request that
+        targets a port-forward owned by a different VM returns
+        `404 resource_not_found` (mirroring the safety property of
+        bulk_delete).
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/PortID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePortRequest'
+      responses:
+        '200':
+          description: Updated port forward
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortForward'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
     delete:
       tags: [Port Forwards]
       summary: Remove a port forward
@@ -1486,6 +1522,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
+    UpdatePortRequest:
+      type: object
+      description: |
+        Editable metadata for an existing port forwarding rule. Today only
+        `description` is editable; the underlying iptables 5-tuple is
+        immutable. The `description` field is a JSON-pointer style optional
+        — omit it to leave the description unchanged, pass an empty string to
+        clear it.
+      properties:
+        description:
+          type: string
+          maxLength: 256
+          description: Free-form label (max 256 chars). Pass `""` to clear.
     BulkDeletePortsRequest:
       type: object
       description: |

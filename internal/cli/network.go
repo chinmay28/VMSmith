@@ -126,6 +126,58 @@ var portListCmd = &cobra.Command{
 	},
 }
 
+var portEditCmd = &cobra.Command{
+	Use:   "edit <port-forward-id>",
+	Short: "Edit metadata on an existing port forwarding rule",
+	Long: `Edit free-form metadata on an existing port forwarding rule.
+
+Today only the description is editable. Omit --description to make this a
+no-op (and the command will fail with a clear error). Pass an empty string
+("") to clear the description. The 5-tuple driving the iptables rule
+(host_port/guest_port/guest_ip/protocol) is intentionally immutable — to
+change any of those, delete the rule and re-add it.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		portID := args[0]
+
+		descFlag := cmd.Flags().Lookup("description")
+		if descFlag == nil || !descFlag.Changed {
+			return fmt.Errorf("--description is required (pass \"\" to clear)")
+		}
+
+		descRaw, _ := cmd.Flags().GetString("description")
+		desc := strings.TrimSpace(descRaw)
+		if len(desc) > cliMaxPortForwardDescriptionLength {
+			return fmt.Errorf("description must be at most %d characters", cliMaxPortForwardDescriptionLength)
+		}
+
+		logger.Info("cli", "port edit", "id", portID, "description_len", fmt.Sprintf("%d", len(desc)))
+
+		pf, cleanup, err := newPortForwarder()
+		if err != nil {
+			logger.Error("cli", "port edit: failed to init port forwarder", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		updated, err := pf.Update(portID, network.UpdateOptions{Description: &desc})
+		if err != nil {
+			logger.Error("cli", "port edit failed", "id", portID, "error", err.Error())
+			return err
+		}
+
+		logger.Info("cli", "port edited", "id", updated.ID)
+		fmt.Printf("Port forward %s updated (host:%d -> %s:%d/%s)\n",
+			updated.ID, updated.HostPort, updated.GuestIP, updated.GuestPort, updated.Protocol)
+		if updated.Description != "" {
+			fmt.Printf("Description: %s\n", updated.Description)
+		} else {
+			fmt.Println("Description cleared")
+		}
+		return nil
+	},
+}
+
 var portRemoveCmd = &cobra.Command{
 	Use:   "remove [<port-forward-id>]",
 	Short: "Remove a port forwarding rule (or many via --vm)",
@@ -234,8 +286,11 @@ func init() {
 	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
 	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")
 
+	portEditCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars). Pass \"\" to clear.")
+
 	portCmd.AddCommand(portAddCmd)
 	portCmd.AddCommand(portListCmd)
+	portCmd.AddCommand(portEditCmd)
 	portCmd.AddCommand(portRemoveCmd)
 }
 
