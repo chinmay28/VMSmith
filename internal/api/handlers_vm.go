@@ -12,17 +12,65 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
-var supportedBulkVMActions = map[string]func(*Server, *http.Request, string) error{
-	"start": func(s *Server, r *http.Request, id string) error {
-		return s.vmManager.Start(r.Context(), id)
+// bulkVMActionSpec captures the per-action details needed to dispatch a bulk
+// VM operation: the manager call to invoke, the event type to publish on
+// success, and the human-readable verb used in the audit message.
+type bulkVMActionSpec struct {
+	apply     func(*Server, *http.Request, string) error
+	eventType string
+	verb      string
+}
+
+// supportedBulkVMActions lists every action accepted by POST /api/v1/vms/bulk.
+// The map key is the wire value of `action` (lowercase). Adding an entry here
+// is the only change required to extend the bulk endpoint with a new
+// lifecycle verb that already exists on `vm.Manager`.
+var supportedBulkVMActions = map[string]bulkVMActionSpec{
+	"start": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Start(r.Context(), id) },
+		eventType: "vm.start_requested",
+		verb:      "start",
 	},
-	"stop": func(s *Server, r *http.Request, id string) error {
-		return s.vmManager.Stop(r.Context(), id)
+	"stop": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Stop(r.Context(), id) },
+		eventType: "vm.stop_requested",
+		verb:      "stop",
 	},
-	"delete": func(s *Server, r *http.Request, id string) error {
-		return s.vmManager.Delete(r.Context(), id)
+	"delete": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Delete(r.Context(), id) },
+		eventType: "vm.deleted",
+		verb:      "delete",
+	},
+	"restart": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Restart(r.Context(), id) },
+		eventType: "vm.restart_requested",
+		verb:      "restart",
+	},
+	"force-stop": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.ForceStop(r.Context(), id) },
+		eventType: "vm.force_stop_requested",
+		verb:      "force-stop",
+	},
+	"reboot": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Reboot(r.Context(), id) },
+		eventType: "vm.reboot_requested",
+		verb:      "reboot",
+	},
+	"suspend": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Suspend(r.Context(), id) },
+		eventType: "vm.suspend_requested",
+		verb:      "suspend",
+	},
+	"resume": {
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Resume(r.Context(), id) },
+		eventType: "vm.resume_requested",
+		verb:      "resume",
 	},
 }
+
+// supportedBulkVMActionsList returns the action keys in a stable order so
+// error messages and OpenAPI docs are deterministic.
+var supportedBulkVMActionsList = []string{"start", "stop", "delete", "restart", "force-stop", "reboot", "suspend", "resume"}
 
 type bulkVMActionRequest struct {
 	Action string   `json:"action"`
@@ -434,9 +482,10 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Action = strings.TrimSpace(strings.ToLower(req.Action))
-	actionFn, ok := supportedBulkVMActions[req.Action]
+	spec, ok := supportedBulkVMActions[req.Action]
 	if !ok {
-		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_action", "action must be one of: start, stop, delete"))
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_action",
+			"action must be one of: "+strings.Join(supportedBulkVMActionsList, ", ")))
 		return
 	}
 	if len(req.IDs) == 0 {
@@ -457,7 +506,7 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := actionFn(s, r, id); err != nil {
+		if err := spec.apply(s, r, id); err != nil {
 			err = sanitizeManagerError(err)
 			result := bulkVMActionResult{ID: id, Success: false}
 			if apiErr, ok := err.(*types.APIError); ok {
@@ -471,6 +520,9 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		results = append(results, bulkVMActionResult{ID: id, Success: true})
+		s.publishAppEvent(spec.eventType, id,
+			fmt.Sprintf("VM %q %s requested (bulk)", id, spec.verb),
+			map[string]string{"bulk": "true"})
 	}
 
 	writeJSON(w, http.StatusOK, bulkVMActionResponse{Action: req.Action, Results: results})

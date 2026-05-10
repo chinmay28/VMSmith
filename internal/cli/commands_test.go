@@ -814,6 +814,152 @@ func TestCLI_VMResume_NotFound(t *testing.T) {
 	}
 }
 
+// TestCLI_VMLifecycleAll_Verbs covers the `--all` / `--tag` selectors that
+// 2.3.8 adds to restart, force-stop, reboot, suspend, and resume.  Each verb
+// is exercised against a seed mix of running, stopped, and paused VMs to make
+// sure the state filter only acts on eligible machines and that the
+// past-tense label in the output matches the verb.
+func TestCLI_VMLifecycleAll_Verbs(t *testing.T) {
+	cases := []struct {
+		verb         string
+		seed         []*types.VM
+		eligibleIDs  []string
+		ineligibleID string // a VM that exists but should not be touched
+		summary      string // expected substring like "Restarted 2 VM(s):"
+		wantState    types.VMState
+	}{
+		{
+			verb: "restart",
+			seed: []*types.VM{
+				{ID: "vm-1", State: types.VMStateRunning},
+				{ID: "vm-2", State: types.VMStateRunning},
+				{ID: "vm-3", State: types.VMStateStopped},
+			},
+			eligibleIDs:  []string{"vm-1", "vm-2"},
+			ineligibleID: "vm-3",
+			summary:      "Restarted 2 VM(s):",
+			wantState:    types.VMStateRunning,
+		},
+		{
+			verb: "force-stop",
+			seed: []*types.VM{
+				{ID: "vm-1", State: types.VMStateRunning},
+				{ID: "vm-2", State: types.VMStateRunning},
+				{ID: "vm-3", State: types.VMStateStopped},
+			},
+			eligibleIDs:  []string{"vm-1", "vm-2"},
+			ineligibleID: "vm-3",
+			summary:      "Force-stopped 2 VM(s):",
+			wantState:    types.VMStateStopped,
+		},
+		{
+			verb: "reboot",
+			seed: []*types.VM{
+				{ID: "vm-1", State: types.VMStateRunning},
+				{ID: "vm-2", State: types.VMStateStopped},
+			},
+			eligibleIDs:  []string{"vm-1"},
+			ineligibleID: "vm-2",
+			summary:      "Rebooted 1 VM(s):",
+			wantState:    types.VMStateRunning,
+		},
+		{
+			verb: "suspend",
+			seed: []*types.VM{
+				{ID: "vm-1", State: types.VMStateRunning},
+				{ID: "vm-2", State: types.VMStatePaused},
+			},
+			eligibleIDs:  []string{"vm-1"},
+			ineligibleID: "vm-2",
+			summary:      "Suspended 1 VM(s):",
+			wantState:    types.VMStatePaused,
+		},
+		{
+			verb: "resume",
+			seed: []*types.VM{
+				{ID: "vm-1", State: types.VMStatePaused},
+				{ID: "vm-2", State: types.VMStateRunning},
+			},
+			eligibleIDs:  []string{"vm-1"},
+			ineligibleID: "vm-2",
+			summary:      "Resumed 1 VM(s):",
+			wantState:    types.VMStateRunning,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.verb, func(t *testing.T) {
+			mock, cleanup := withMockVM(t)
+			defer cleanup()
+
+			for _, vm := range tc.seed {
+				mock.SeedVM(vm)
+			}
+
+			out, err := runCLI("vm", tc.verb, "--all")
+			if err != nil {
+				t.Fatalf("vm %s --all: %v", tc.verb, err)
+			}
+			if !strings.Contains(out, tc.summary) {
+				t.Fatalf("output %q is missing %q", out, tc.summary)
+			}
+			for _, id := range tc.eligibleIDs {
+				if !strings.Contains(out, id) {
+					t.Fatalf("output %q is missing eligible id %q", out, id)
+				}
+				got, _ := mock.Get(nil, id)
+				if got.State != tc.wantState {
+					t.Fatalf("vm %s state = %q, want %q", id, got.State, tc.wantState)
+				}
+			}
+			if tc.ineligibleID != "" && strings.Contains(out, tc.ineligibleID) {
+				t.Fatalf("output %q unexpectedly mentions ineligible id %q", out, tc.ineligibleID)
+			}
+		})
+	}
+}
+
+func TestCLI_VMRestart_AllWithTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", State: types.VMStateRunning, Tags: []string{"prod"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", State: types.VMStateRunning, Tags: []string{"dev"}})
+
+	out, err := runCLI("vm", "restart", "--all", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("vm restart --all --tag: %v", err)
+	}
+	if !strings.Contains(out, "Restarted 1 VM(s): vm-1") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestCLI_VMSuspend_AllNoMatches(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-stopped", State: types.VMStateStopped})
+
+	out, err := runCLI("vm", "suspend", "--all")
+	if err != nil {
+		t.Fatalf("vm suspend --all (no matches): %v", err)
+	}
+	if !strings.Contains(out, "No suspendable VMs found") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestCLI_VMForceStop_AllRejectsID(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "force-stop", "vm-1", "--all")
+	if err == nil || !strings.Contains(err.Error(), "cannot specify a VM id when using --all") {
+		t.Fatalf("expected --all/id validation error, got %v", err)
+	}
+}
+
 func TestCLI_VMDelete(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

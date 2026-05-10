@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, RotateCcw, RefreshCw, Pause, Zap } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -205,32 +205,57 @@ export default function VMList() {
 function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectAll, onClearSelection, onDone }) {
   const startMut = useMutation(vms.start);
   const stopMut = useMutation(vms.stop);
+  const restartMut = useMutation(vms.restart);
+  const forceStopMut = useMutation(vms.forceStop);
+  const rebootMut = useMutation(vms.reboot);
+  const suspendMut = useMutation(vms.suspend);
+  const resumeMut = useMutation(vms.resume);
   const deleteMut = useMutation(vms.delete);
 
   const runningCount = selectedVMs.filter(vm => vm.state === 'running').length;
   const stoppedCount = selectedVMs.filter(vm => vm.state === 'stopped').length;
+  const pausedCount = selectedVMs.filter(vm => vm.state === 'paused').length;
   const hasSelection = selectedVMs.length > 0;
-  const mutationError = startMut.error || stopMut.error || deleteMut.error;
-  const busy = startMut.loading || stopMut.loading || deleteMut.loading;
+  const mutationError = (
+    startMut.error || stopMut.error || restartMut.error || forceStopMut.error ||
+    rebootMut.error || suspendMut.error || resumeMut.error || deleteMut.error
+  );
+  const busy = (
+    startMut.loading || stopMut.loading || restartMut.loading || forceStopMut.loading ||
+    rebootMut.loading || suspendMut.loading || resumeMut.loading || deleteMut.loading
+  );
+
+  // Per-action eligibility filter and the empty-selection message shown when
+  // no selected VM matches the action's required state.  Adding a new bulk
+  // verb here is a one-row change.
+  const bulkActions = {
+    start:        { mut: startMut,     eligible: vm => vm.state === 'stopped', emptyMsg: 'Nothing to start — selected machines are already running.' },
+    stop:         { mut: stopMut,      eligible: vm => vm.state === 'running', emptyMsg: 'Nothing to stop — selected machines are already stopped.' },
+    restart:      { mut: restartMut,   eligible: vm => vm.state === 'running', emptyMsg: 'Nothing to restart — selected machines are not running.' },
+    'force-stop': { mut: forceStopMut, eligible: vm => vm.state === 'running', emptyMsg: 'Nothing to force-stop — selected machines are not running.' },
+    reboot:       { mut: rebootMut,    eligible: vm => vm.state === 'running', emptyMsg: 'Nothing to reboot — selected machines are not running.' },
+    suspend:      { mut: suspendMut,   eligible: vm => vm.state === 'running', emptyMsg: 'Nothing to suspend — selected machines are not running.' },
+    resume:       { mut: resumeMut,    eligible: vm => vm.state === 'paused',  emptyMsg: 'Nothing to resume — no selected machines are paused.' },
+    delete:       { mut: deleteMut,    eligible: () => true, emptyMsg: '' },
+  };
 
   const executeBulk = async (action) => {
     if (!hasSelection || busy) return;
+    const spec = bulkActions[action];
+    if (!spec) return;
 
     if (action === 'delete') {
       const names = selectedVMs.map(vm => vm.name).join(', ');
       if (!window.confirm(`Delete ${selectedVMs.length} machine(s)?\n\n${names}`)) return;
+    } else if (action === 'force-stop') {
+      const names = selectedVMs.filter(spec.eligible).map(vm => vm.name).join(', ');
+      if (names && !window.confirm(`Force-stop ${selectedVMs.filter(spec.eligible).length} machine(s)? This skips ACPI shutdown and may cause data loss.\n\n${names}`)) return;
     }
 
-    const targets = selectedVMs.filter(vm => {
-      if (action === 'start') return vm.state === 'stopped';
-      if (action === 'stop') return vm.state === 'running';
-      return true;
-    });
-
+    const targets = selectedVMs.filter(spec.eligible);
     const skipped = selectedVMs.length - targets.length;
     if (targets.length === 0) {
-      if (action === 'start') onDone('Nothing to start — selected machines are already running.');
-      if (action === 'stop') onDone('Nothing to stop — selected machines are already stopped.');
+      if (spec.emptyMsg) onDone(spec.emptyMsg);
       return;
     }
 
@@ -239,9 +264,7 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
 
     for (const vm of targets) {
       try {
-        if (action === 'start') await startMut.execute(vm.id);
-        if (action === 'stop') await stopMut.execute(vm.id);
-        if (action === 'delete') await deleteMut.execute(vm.id);
+        await spec.mut.execute(vm.id);
         success += 1;
       } catch {
         failure += 1;
@@ -277,6 +300,7 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
             <div className="flex flex-wrap items-center gap-2 text-xs text-steel-500">
               {runningCount > 0 && <span>{runningCount} running</span>}
               {stoppedCount > 0 && <span>{stoppedCount} stopped</span>}
+              {pausedCount > 0 && <span>{pausedCount} paused</span>}
             </div>
           )}
         </div>
@@ -299,6 +323,56 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
           >
             {stopMut.loading ? <Spinner size={14} /> : <Square size={14} />}
             Stop
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || runningCount === 0}
+            onClick={() => executeBulk('restart')}
+            data-testid="btn-bulk-restart"
+            title="Graceful stop and start"
+          >
+            {restartMut.loading ? <Spinner size={14} /> : <RotateCcw size={14} />}
+            Restart
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || runningCount === 0}
+            onClick={() => executeBulk('reboot')}
+            data-testid="btn-bulk-reboot"
+            title="In-guest ACPI reboot — preserves IP/MAC, no power cycle"
+          >
+            {rebootMut.loading ? <Spinner size={14} /> : <RefreshCw size={14} />}
+            Reboot
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || runningCount === 0}
+            onClick={() => executeBulk('force-stop')}
+            data-testid="btn-bulk-force-stop"
+            title="Immediate destroy — skips ACPI shutdown"
+          >
+            {forceStopMut.loading ? <Spinner size={14} /> : <Zap size={14} />}
+            Force Stop
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || runningCount === 0}
+            onClick={() => executeBulk('suspend')}
+            data-testid="btn-bulk-suspend"
+            title="Pause CPU + memory; resume later without rebooting"
+          >
+            {suspendMut.loading ? <Spinner size={14} /> : <Pause size={14} />}
+            Suspend
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={!hasSelection || busy || pausedCount === 0}
+            onClick={() => executeBulk('resume')}
+            data-testid="btn-bulk-resume"
+            title="Unpause selected paused VMs"
+          >
+            {resumeMut.loading ? <Spinner size={14} /> : <Play size={14} />}
+            Resume
           </button>
           <button
             className="btn-danger"

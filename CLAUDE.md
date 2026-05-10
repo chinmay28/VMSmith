@@ -37,7 +37,7 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|reboot|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm reboot <id>` sends an ACPI reboot signal to the guest OS without power-cycling QEMU; `vm suspend|resume <id>` pause / unpause CPU+memory)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|reboot|suspend|resume|delete|lock|unlock (every lifecycle verb — `start|stop|restart|force-stop|reboot|suspend|resume` — accepts a single VM id or `--all [--tag <t>]` to fan out across the matching state; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm reboot <id>` sends an ACPI reboot signal to the guest OS without power-cycling QEMU; `vm suspend|resume <id>` pause / unpause CPU+memory)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
 │   │   ├── image.go             # vmsmith image list|create|delete|push|pull (`image delete --tag <tag>` bulk-deletes every image carrying that tag, mirroring the snapshot bulk_delete shape)
 │   │   ├── net.go               # vmsmith net interfaces
@@ -78,7 +78,7 @@ vmsmith/
 │   ├── src/api/generated/       # Generated OpenAPI TypeScript schema (`npm run generate:api`)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList also supports bulk-select start/stop/delete UI using existing per-VM endpoints; ImageList includes upload progress UI for image imports)
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList's bulk-action bar fans out start/stop/restart/force-stop/reboot/suspend/resume/delete over the existing per-VM endpoints, with eligibility filtered by VM state; ImageList includes upload progress UI for image imports)
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs (mock server)
@@ -426,6 +426,7 @@ POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace befo
 POST   /vms/{id}/reboot                Reboot a running VM via libvirt's `dom.Reboot()` (ACPI signal to guest, no power cycle). Preserves IP / MAC / DHCP reservation; differs from restart which is stop+start. Returns HTTP 409 `vm_not_running` when the VM is not running. CLI: `vmsmith vm reboot <id>`.
 POST   /vms/{id}/suspend               Suspend a running VM (libvirt pause): freezes CPU + memory without releasing host resources. State becomes `paused`. Returns HTTP 409 `vm_not_running` when stopped or `vm_already_paused` when already paused.
 POST   /vms/{id}/resume                Resume a paused VM, restoring it to `running`. Returns HTTP 409 `vm_not_paused` if the VM is not currently paused.
+POST   /vms/bulk                       Apply a lifecycle action to many VMs in one call. Body: `{"action": "start|stop|delete|restart|force-stop|reboot|suspend|resume", "ids": [...]}`. Returns `{"action": "<verb>", "results": [{id, success, code?, message?}]}` so partial failures (one VM in the wrong state, the rest succeeded) surface together. Each successful per-VM action emits the matching `vm.<action>_requested` (or `vm.deleted`) event with `bulk=true`. CLI mirrors via `vmsmith vm start|stop|restart|force-stop|reboot|suspend|resume --all [--tag <t>]`.
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
 GET    /vms/{id}/snapshots             List snapshots (each entry carries `name`, optional `description`, and a libvirt-parsed `created_at`)
 POST   /vms/{id}/snapshots             Create snapshot (body: `{ "name": "...", "description": "..." }` — description optional, ≤1024 chars; persisted via libvirt's `<description>` element so it round-trips through `dumpxml`)

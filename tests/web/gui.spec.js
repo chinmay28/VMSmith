@@ -252,6 +252,41 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("input-vm-name")).not.toBeVisible();
   });
 
+  // 2.3.8 — bulk lifecycle: select multiple VMs and apply a lifecycle verb
+  // (restart / force-stop / reboot / suspend / resume) from the bulk-action
+  // bar.  The mock seeds web-server (running) and db-server (stopped); only
+  // running VMs are eligible for restart, so the action should leave
+  // db-server alone and the success label should report "1 restarts
+  // succeeded".
+  test("bulk restart only acts on running VMs", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("checkbox-select-all-vms").check();
+    await expect(page.getByTestId("bulk-action-bar")).toContainText("2 selected");
+    await expect(page.getByTestId("bulk-action-bar")).toContainText("1 running");
+    await expect(page.getByTestId("bulk-action-bar")).toContainText("1 stopped");
+
+    await page.getByTestId("btn-bulk-restart").click();
+    // After execution the success summary banner reads "<n> restarts
+    // succeeded · <n> skipped".  The mock seeds 1 running + 1 stopped so we
+    // expect 1 succeeded and 1 skipped.
+    await expect(page.getByText(/1 restart succeeded/)).toBeVisible();
+    await expect(page.getByText(/1 skipped/)).toBeVisible();
+  });
+
+  test("bulk reboot button is disabled when no running VM is selected", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Tick only the stopped VM (db-server).
+    await page.getByTestId("checkbox-select-vm-db-server").check();
+    await expect(page.getByTestId("btn-bulk-reboot")).toBeDisabled();
+    await expect(page.getByTestId("btn-bulk-suspend")).toBeDisabled();
+    // Force-stop also requires a running selection.
+    await expect(page.getByTestId("btn-bulk-force-stop")).toBeDisabled();
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

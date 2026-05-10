@@ -149,8 +149,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a bulk VM action
-         * @description Start, stop, or delete multiple VMs in one request.
+         * Run a bulk VM lifecycle action
+         * @description Apply the same lifecycle action to multiple VMs in a single request.
+         *     Supported actions are `start`, `stop`, `delete`, `restart`,
+         *     `force-stop`, `reboot`, `suspend`, and `resume`. Per-VM successes and
+         *     failures are returned together so partial failures (one VM in the
+         *     wrong state, the rest succeeded) surface in the response without
+         *     stopping the bulk operation. Each successful per-VM action emits the
+         *     same `vm.<action>_requested` (or `vm.deleted`) event as the
+         *     single-VM endpoint, with an extra `bulk=true` attribute so audit
+         *     consumers can distinguish bulk actions from operator clicks.
          */
         post: {
             parameters: {
@@ -2123,8 +2131,15 @@ export interface components {
             name: string;
         };
         BulkVMActionRequest: {
-            /** @enum {string} */
-            action: "start" | "stop" | "delete";
+            /**
+             * @description Lifecycle verb to apply to every VM in `ids`. Maps 1:1 to the
+             *     single-VM endpoints — e.g. `restart` is a graceful stop+start,
+             *     `reboot` issues an in-guest ACPI reboot without power-cycling
+             *     QEMU, `force-stop` is an immediate destroy that skips ACPI,
+             *     `suspend`/`resume` pause/unpause CPU+memory.
+             * @enum {string}
+             */
+            action: "start" | "stop" | "delete" | "restart" | "force-stop" | "reboot" | "suspend" | "resume";
             ids: string[];
         };
         BulkVMActionResult: {

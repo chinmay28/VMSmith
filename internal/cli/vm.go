@@ -243,120 +243,55 @@ var vmStopCmd = &cobra.Command{
 var vmForceStopCmd = &cobra.Command{
 	Use:   "force-stop <id>",
 	Short: "Force-stop a VM (immediate destroy, skips ACPI shutdown)",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm force-stop", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm force-stop: manager init failed", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.ForceStop(cmd.Context(), id); err != nil {
-			logger.Error("cli", "vm force-stop failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm action complete", "action", "force-stop", "id", id)
-		fmt.Printf("VM %s force-stopped\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "force-stop", types.VMStateRunning, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.ForceStop(ctx, id)
+		})
 	},
 }
 
 var vmRestartCmd = &cobra.Command{
 	Use:   "restart <id>",
 	Short: "Restart a VM (graceful stop, then start)",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm restart", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm restart: manager init failed", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Restart(cmd.Context(), id); err != nil {
-			logger.Error("cli", "vm restart failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm action complete", "action", "restart", "id", id)
-		fmt.Printf("VM %s restarted\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "restart", types.VMStateRunning, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Restart(ctx, id)
+		})
 	},
 }
 
 var vmRebootCmd = &cobra.Command{
 	Use:   "reboot <id>",
 	Short: "Reboot a running VM via guest ACPI signal (preserves IP/MAC, no power cycle)",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm reboot", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm reboot: manager init failed", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Reboot(cmd.Context(), id); err != nil {
-			logger.Error("cli", "vm reboot failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm action complete", "action", "reboot", "id", id)
-		fmt.Printf("VM %s rebooted\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "reboot", types.VMStateRunning, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Reboot(ctx, id)
+		})
 	},
 }
 
 var vmSuspendCmd = &cobra.Command{
 	Use:   "suspend <id>",
 	Short: "Suspend a running VM (freeze CPU + memory; resume later)",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm suspend", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm suspend: manager init failed", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Suspend(cmd.Context(), id); err != nil {
-			logger.Error("cli", "vm suspend failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm action complete", "action", "suspend", "id", id)
-		fmt.Printf("VM %s suspended\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "suspend", types.VMStateRunning, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Suspend(ctx, id)
+		})
 	},
 }
 
 var vmResumeCmd = &cobra.Command{
 	Use:   "resume <id>",
 	Short: "Resume a paused VM",
-	Args:  cobra.ExactArgs(1),
+	Args:  validateBulkVMActionArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "vm resume", "id", id)
-		mgr, cleanup, err := newVMManager()
-		if err != nil {
-			logger.Error("cli", "vm resume: manager init failed", "error", err.Error())
-			return err
-		}
-		defer cleanup()
-
-		if err := mgr.Resume(cmd.Context(), id); err != nil {
-			logger.Error("cli", "vm resume failed", "id", id, "error", err.Error())
-			return err
-		}
-		logger.Info("cli", "vm action complete", "action", "resume", "id", id)
-		fmt.Printf("VM %s resumed\n", id)
-		return nil
+		return runBulkVMAction(cmd, args, "resume", types.VMStatePaused, func(ctx context.Context, mgr vm.Manager, id string) error {
+			return mgr.Resume(ctx, id)
+		})
 	},
 }
 
@@ -1044,6 +979,16 @@ Examples:
 	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")
 	vmStopCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmRestartCmd.Flags().Bool("all", false, "restart all running VMs")
+	vmRestartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmForceStopCmd.Flags().Bool("all", false, "force-stop all running VMs")
+	vmForceStopCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmRebootCmd.Flags().Bool("all", false, "reboot all running VMs")
+	vmRebootCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmSuspendCmd.Flags().Bool("all", false, "suspend all running VMs")
+	vmSuspendCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
+	vmResumeCmd.Flags().Bool("all", false, "resume all paused VMs")
+	vmResumeCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmListCmd.Flags().Int("limit", 0, "maximum number of VMs to show (0 = no limit)")
 	vmListCmd.Flags().Int("offset", 0, "number of VMs to skip before printing results")
 
@@ -1237,11 +1182,7 @@ func runBulkVMAction(cmd *cobra.Command, args []string, verb string, requiredSta
 			return err
 		}
 		logger.Info("cli", "vm action complete", "action", verb, "id", id)
-		past := verb + "ed"
-		if verb == "stop" {
-			past = "stopped"
-		}
-		fmt.Printf("VM %s %s\n", id, past)
+		fmt.Printf("VM %s %s\n", id, strings.ToLower(verbPastTense(verb)))
 		return nil
 	}
 
@@ -1274,10 +1215,7 @@ func runBulkVMAction(cmd *cobra.Command, args []string, verb string, requiredSta
 		return matched[i].ID < matched[j].ID
 	})
 
-	adjective := verb + "able"
-	if verb == "stop" {
-		adjective = "stoppable"
-	}
+	adjective := verbAdjective(verb)
 	if len(matched) == 0 {
 		if tagFilter != "" {
 			fmt.Printf("No %s VMs matched tag %q\n", adjective, tagFilter)
@@ -1297,10 +1235,37 @@ func runBulkVMAction(cmd *cobra.Command, args []string, verb string, requiredSta
 	}
 
 	logger.Info("cli", "vm bulk action complete", "action", verb, "count", fmt.Sprintf("%d", len(completed)))
-	label := map[string]string{"start": "Started", "stop": "Stopped"}[verb]
-	if label == "" {
-		label = strings.ToUpper(verb[:1]) + verb[1:] + "ed"
-	}
-	fmt.Printf("%s %d VM(s): %s\n", label, len(completed), strings.Join(completed, ", "))
+	fmt.Printf("%s %d VM(s): %s\n", verbPastTense(verb), len(completed), strings.Join(completed, ", "))
 	return nil
+}
+
+// vmLifecycleVerbLabels maps CLI verbs to their human-readable
+// past-tense / adjective forms used in bulk-action output.  Centralising the
+// table avoids ad-hoc casing bugs (e.g. "Force-stoped" vs "Force-stopped")
+// and keeps the same labels in sync between `--all` reporting and "no
+// matches" messages.
+var vmLifecycleVerbLabels = map[string]struct {
+	past, adjective string
+}{
+	"start":      {"Started", "startable"},
+	"stop":       {"Stopped", "stoppable"},
+	"restart":    {"Restarted", "restartable"},
+	"force-stop": {"Force-stopped", "force-stoppable"},
+	"reboot":     {"Rebooted", "rebootable"},
+	"suspend":    {"Suspended", "suspendable"},
+	"resume":     {"Resumed", "resumable"},
+}
+
+func verbPastTense(verb string) string {
+	if l, ok := vmLifecycleVerbLabels[verb]; ok {
+		return l.past
+	}
+	return strings.ToUpper(verb[:1]) + verb[1:] + "ed"
+}
+
+func verbAdjective(verb string) string {
+	if l, ok := vmLifecycleVerbLabels[verb]; ok {
+		return l.adjective
+	}
+	return verb + "able"
 }
