@@ -118,7 +118,27 @@ const server = http.createServer(async (req, res) => {
 
   // API routes
   if (p === "/api/v1/vms" && method === "GET") {
+    const sortField = url.searchParams.get("sort") || "id";
+    const order = url.searchParams.get("order") || "asc";
+    if (!["id", "name", "created_at", "state"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
+    }
+    if (!["asc", "desc"].includes(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
     const list = [...vms.values()];
+    const cmp = (a, b) => {
+      let l;
+      switch (sortField) {
+        case "name":       l = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
+        case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
+        case "state":      l = (a.state || "").localeCompare(b.state || ""); break;
+        default:           l = 0;
+      }
+      if (l === 0) l = a.id.localeCompare(b.id); // tiebreak on id
+      return order === "desc" ? -l : l;
+    };
+    list.sort(cmp);
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
   }
   if (p === "/api/v1/vms/stats/top" && method === "GET") {

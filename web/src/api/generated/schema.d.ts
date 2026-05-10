@@ -18,6 +18,17 @@ export interface paths {
                     /** @description Case-insensitive tag filter. */
                     tag?: components["parameters"]["TagFilter"];
                     status?: components["parameters"]["StatusFilter"];
+                    /**
+                     * @description Field to sort the VM list by. Defaults to `id`. Unknown values
+                     *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
+                     *     pagination is deterministic across backends.
+                     */
+                    sort?: components["parameters"]["VMSort"];
+                    /**
+                     * @description Sort direction. Defaults to `asc`. Unknown values return 400
+                     *     `invalid_order`.
+                     */
+                    order?: components["parameters"]["SortOrder"];
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };
@@ -37,6 +48,7 @@ export interface paths {
                         "application/json": components["schemas"]["VM"][];
                     };
                 };
+                400: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
             };
         };
@@ -2269,6 +2281,17 @@ export interface components {
         /** @description Case-insensitive tag filter. */
         TagFilter: string;
         StatusFilter: "creating" | "running" | "stopped" | "paused" | "deleted" | "unknown";
+        /**
+         * @description Field to sort the VM list by. Defaults to `id`. Unknown values
+         *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
+         *     pagination is deterministic across backends.
+         */
+        VMSort: "id" | "name" | "created_at" | "state";
+        /**
+         * @description Sort direction. Defaults to `asc`. Unknown values return 400
+         *     `invalid_order`.
+         */
+        SortOrder: "asc" | "desc";
         Page: number;
         PerPage: number;
     };

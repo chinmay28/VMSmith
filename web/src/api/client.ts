@@ -62,8 +62,8 @@ function parseJSONSafe(text: string) {
 
 // --- VMs ---
 export const vms = {
-  list: ({ tag = '', status = '', page, perPage }: { tag?: string; status?: string; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, page, per_page: perPage } } }), { withMeta: true }),
+  list: ({ tag = '', status = '', sort = '', order = '', page, perPage }: { tag?: string; status?: string; sort?: 'id' | 'name' | 'created_at' | 'state' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   get: (id: string) => unwrap(apiClient.GET('/vms/{vmID}', { params: { path: { vmID: id } } })),
   create: (spec: paths['/vms']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/vms', { body: spec })),
