@@ -18,6 +18,26 @@ type addPortRequest struct {
 	Description string         `json:"description,omitempty"`
 }
 
+// bulkDeletePortsRequest selects port forwards to delete in a single batch.
+//
+// Exactly one of Ids or Protocol must be set. Protocol is scoped to the VM in
+// the URL (it can never accidentally delete another VM's rules).
+type bulkDeletePortsRequest struct {
+	IDs      []string       `json:"ids,omitempty"`
+	Protocol types.Protocol `json:"protocol,omitempty"`
+}
+
+type bulkDeletePortResult struct {
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkDeletePortsResponse struct {
+	Results []bulkDeletePortResult `json:"results"`
+}
+
 // AddPort handles POST /api/v1/vms/{vmID}/ports
 func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
@@ -108,6 +128,125 @@ func (s *Server) RemovePort(w http.ResponseWriter, r *http.Request) {
 		})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// BulkDeletePorts handles POST /api/v1/vms/{vmID}/ports/bulk_delete.
+//
+// Accepts either an explicit list of port-forward IDs ("ids") or a protocol
+// selector ("protocol": "tcp"|"udp") that resolves to every forward on the VM
+// matching that protocol. Returns a per-target result list so partial failures
+// (one ID missing, the rest succeeded) surface in a single response — mirroring
+// the snapshot and image bulk_delete shape.
+func (s *Server) BulkDeletePorts(w http.ResponseWriter, r *http.Request) {
+	vmID := chi.URLParam(r, "vmID")
+
+	var req bulkDeletePortsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	cleanedIDs := make([]string, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if t := strings.TrimSpace(id); t != "" {
+			cleanedIDs = append(cleanedIDs, t)
+		}
+	}
+	proto := types.Protocol(strings.TrimSpace(strings.ToLower(string(req.Protocol))))
+
+	if len(cleanedIDs) == 0 && proto == "" {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"exactly one of ids or protocol must be provided"))
+		return
+	}
+	if len(cleanedIDs) > 0 && proto != "" {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"ids and protocol are mutually exclusive"))
+		return
+	}
+	if proto != "" && proto != types.ProtocolTCP && proto != types.ProtocolUDP {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"protocol must be 'tcp' or 'udp'"))
+		return
+	}
+
+	// Resolve targets. For the protocol selector we list this VM's forwards
+	// and match. For the ids path we accept the ids verbatim — missing ones
+	// will surface as resource_not_found per-result.
+	var targets []string
+	if proto != "" {
+		ports, err := s.portFwd.List(vmID)
+		if err != nil {
+			apiErr := sanitizeManagerError(err)
+			writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+			return
+		}
+		for _, p := range ports {
+			if p.Protocol == proto {
+				targets = append(targets, p.ID)
+			}
+		}
+	} else {
+		targets = cleanedIDs
+	}
+
+	// Pre-load the VM's known port-forwards so we can detect "id belongs to a
+	// different VM" without scanning all VMs' rules. The snapshot bulk_delete
+	// handler does this implicitly via DeleteSnapshot's per-VM scope; for
+	// port forwards we have to do it explicitly because the underlying
+	// PortForwarder.Remove looks up globally by ID.
+	known := make(map[string]bool)
+	if len(cleanedIDs) > 0 {
+		ports, err := s.portFwd.List(vmID)
+		if err != nil {
+			apiErr := sanitizeManagerError(err)
+			writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+			return
+		}
+		for _, p := range ports {
+			known[p.ID] = true
+		}
+	}
+
+	results := make([]bulkDeletePortResult, 0, len(targets))
+	for _, id := range targets {
+		// For the explicit-ids path, a port-forward that doesn't belong to
+		// this VM is a per-target resource_not_found rather than a 404 for
+		// the whole request — mirrors how missing snapshot names are
+		// handled in BulkDeleteSnapshots.
+		if len(cleanedIDs) > 0 && !known[id] {
+			results = append(results, bulkDeletePortResult{
+				ID: id, Success: false,
+				Code: "resource_not_found", Message: "port forward not found",
+			})
+			continue
+		}
+		if err := s.portFwd.Remove(id); err != nil {
+			err = sanitizeManagerError(err)
+			result := bulkDeletePortResult{ID: id, Success: false}
+			if apiErr, ok := err.(*types.APIError); ok {
+				result.Code = apiErr.Code
+				result.Message = apiErr.Message
+			} else {
+				result.Code = "resource_not_found"
+				result.Message = err.Error()
+			}
+			results = append(results, result)
+			continue
+		}
+		results = append(results, bulkDeletePortResult{ID: id, Success: true})
+		s.publishAppEvent("port_forward.removed", vmID,
+			"port forward "+id+" removed", map[string]string{
+				"port_id": id,
+				"bulk":    "true",
+			})
+	}
+
+	writeJSON(w, http.StatusOK, bulkDeletePortsResponse{Results: results})
 }
 
 // ListHostInterfaces handles GET /api/v1/host/interfaces

@@ -154,6 +154,11 @@ func withTestPortForwarder(t *testing.T) (*store.Store, *network.PortForwarder, 
 		t.Fatalf("store: %v", err)
 	}
 	pf := network.NewPortForwarder(s)
+	// Tests don't have real iptables; stub the apply hook so add/remove
+	// flows exercise the store path without touching the host.
+	pf.SetApplyRuleFunc(func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	})
 
 	portForwarderOverride = func() (*network.PortForwarder, func(), error) {
 		return pf, func() {}, nil
@@ -1853,6 +1858,102 @@ func TestCLI_PortRemove_NotFound(t *testing.T) {
 	_, err := runCLI("port", "remove", "nonexistent-pf")
 	if err == nil {
 		t.Error("expected error for nonexistent port forward")
+	}
+}
+
+func TestCLI_PortRemove_NoArgsErrors(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "remove")
+	if err == nil {
+		t.Fatal("expected error when neither id nor --vm is given")
+	}
+	if !strings.Contains(err.Error(), "either a port-forward-id") {
+		t.Errorf("error = %v, want id-or-vm hint", err)
+	}
+}
+
+func TestCLI_PortRemove_PositionalAndVMRejected(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "remove", "pf-1", "--vm", "vm-x")
+	if err == nil {
+		t.Fatal("expected error when both id and --vm given")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want mutual-exclusion hint", err)
+	}
+}
+
+func TestCLI_PortRemove_InvalidProtocolRejected(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "remove", "--vm", "vm-x", "--protocol", "sctp")
+	if err == nil {
+		t.Fatal("expected error for invalid protocol")
+	}
+	if !strings.Contains(err.Error(), "tcp") || !strings.Contains(err.Error(), "udp") {
+		t.Errorf("error = %v, want tcp/udp hint", err)
+	}
+}
+
+func TestCLI_PortRemove_AllForVM(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-1", VMID: "vm-bulk", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+	s.PutPortForward(&types.PortForward{ID: "pf-2", VMID: "vm-bulk", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolUDP})
+
+	out, err := runCLI("port", "remove", "--vm", "vm-bulk")
+	if err != nil {
+		t.Fatalf("port remove --vm: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "OK    pf-1") || !strings.Contains(out, "OK    pf-2") {
+		t.Errorf("output missing per-rule OK lines: %q", out)
+	}
+	survivors, _ := s.ListPortForwards("vm-bulk")
+	if len(survivors) != 0 {
+		t.Errorf("expected all rules removed, survivors: %+v", survivors)
+	}
+}
+
+func TestCLI_PortRemove_AllForVM_ProtocolFilter(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	s.PutPortForward(&types.PortForward{ID: "pf-tcp-1", VMID: "vm-bp", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.20", Protocol: types.ProtocolTCP})
+	s.PutPortForward(&types.PortForward{ID: "pf-udp", VMID: "vm-bp", HostPort: 53, GuestPort: 53, GuestIP: "192.168.100.20", Protocol: types.ProtocolUDP})
+
+	out, err := runCLI("port", "remove", "--vm", "vm-bp", "--protocol", "tcp")
+	if err != nil {
+		t.Fatalf("port remove --vm --protocol: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "pf-tcp-1") {
+		t.Errorf("expected pf-tcp-1 in output, got: %q", out)
+	}
+	if strings.Contains(out, "pf-udp") {
+		t.Errorf("expected pf-udp untouched, got: %q", out)
+	}
+
+	survivors, _ := s.ListPortForwards("vm-bp")
+	if len(survivors) != 1 || survivors[0].ID != "pf-udp" {
+		t.Errorf("survivors = %+v, want only pf-udp", survivors)
+	}
+}
+
+func TestCLI_PortRemove_NoMatchPrintsMessage(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	out, err := runCLI("port", "remove", "--vm", "vm-empty", "--protocol", "tcp")
+	if err != nil {
+		t.Fatalf("port remove --vm: %v", err)
+	}
+	if !strings.Contains(out, "No port forwards") {
+		t.Errorf("expected no-match message, got: %q", out)
 	}
 }
 

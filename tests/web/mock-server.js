@@ -31,6 +31,11 @@ function seed() {
     { id: `${vm1.id}/auto-2026-05-06`, vm_id: vm1.id, name: "auto-2026-05-06", created_at: new Date().toISOString() },
     { id: `${vm1.id}/auto-2026-05-07`, vm_id: vm1.id, name: "auto-2026-05-07", created_at: new Date().toISOString() },
   ]);
+  // Seed a few port forwards so bulk-delete UI tests have rows to act on.
+  portForwards.set(vm1.id, [
+    { id: "pf-seed-ssh", vm_id: vm1.id, host_port: 2222, guest_port: 22, guest_ip: vm1.ip, protocol: "tcp", description: "ssh-jumpbox" },
+    { id: "pf-seed-http", vm_id: vm1.id, host_port: 8080, guest_port: 80, guest_ip: vm1.ip, protocol: "tcp" },
+  ]);
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
     size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id,
@@ -405,6 +410,30 @@ const server = http.createServer(async (req, res) => {
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports$/)) && method === "GET") {
     return json(res, 200, portForwards.get(m[1]) || []);
+  }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports\/bulk_delete$/)) && method === "POST") {
+    const vmId = m[1];
+    const body = await parseBody(req);
+    const ids = Array.isArray(body.ids) ? body.ids.filter(x => typeof x === "string" && x.trim() !== "") : [];
+    const proto = typeof body.protocol === "string" ? body.protocol.trim().toLowerCase() : "";
+    if (!ids.length && !proto) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "exactly one of ids or protocol must be provided" });
+    }
+    if (ids.length && proto) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "ids and protocol are mutually exclusive" });
+    }
+    if (proto && proto !== "tcp" && proto !== "udp") {
+      return json(res, 400, { code: "invalid_bulk_request", message: "protocol must be 'tcp' or 'udp'" });
+    }
+    const existing = portForwards.get(vmId) || [];
+    const known = new Set(existing.map(pf => pf.id));
+    const targets = proto ? existing.filter(pf => pf.protocol === proto).map(pf => pf.id) : ids;
+    const remaining = existing.filter(pf => !targets.includes(pf.id));
+    portForwards.set(vmId, remaining);
+    const results = targets.map(id => known.has(id)
+      ? { id, success: true }
+      : { id, success: false, code: "resource_not_found", message: "port forward not found" });
+    return json(res, 200, { results });
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports$/)) && method === "POST") {
     const body = await parseBody(req);

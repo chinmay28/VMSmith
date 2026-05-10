@@ -127,12 +127,33 @@ var portListCmd = &cobra.Command{
 }
 
 var portRemoveCmd = &cobra.Command{
-	Use:   "remove <port-forward-id>",
-	Short: "Remove a port forwarding rule",
-	Args:  cobra.ExactArgs(1),
+	Use:   "remove [<port-forward-id>]",
+	Short: "Remove a port forwarding rule (or many via --vm)",
+	Long: `Remove port forwarding rules.
+
+Single delete:    vmsmith port remove <port-forward-id>
+Bulk by VM:       vmsmith port remove --vm <vm-id>
+Bulk by protocol: vmsmith port remove --vm <vm-id> --protocol tcp
+The positional <port-forward-id> and --vm are mutually exclusive.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		portID := args[0]
-		logger.Info("cli", "port remove", "id", portID)
+		vmID, _ := cmd.Flags().GetString("vm")
+		proto, _ := cmd.Flags().GetString("protocol")
+		vmID = strings.TrimSpace(vmID)
+		proto = strings.TrimSpace(strings.ToLower(proto))
+
+		if len(args) == 0 && vmID == "" {
+			return fmt.Errorf("either a port-forward-id positional or --vm <vm-id> is required")
+		}
+		if len(args) > 0 && vmID != "" {
+			return fmt.Errorf("port-forward-id and --vm are mutually exclusive")
+		}
+		if proto != "" && vmID == "" {
+			return fmt.Errorf("--protocol requires --vm")
+		}
+		if proto != "" && proto != "tcp" && proto != "udp" {
+			return fmt.Errorf("--protocol must be 'tcp' or 'udp'")
+		}
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -141,12 +162,63 @@ var portRemoveCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		if err := pf.Remove(portID); err != nil {
-			logger.Error("cli", "port remove failed", "id", portID, "error", err.Error())
+		if len(args) > 0 {
+			portID := args[0]
+			logger.Info("cli", "port remove", "id", portID)
+			if err := pf.Remove(portID); err != nil {
+				logger.Error("cli", "port remove failed", "id", portID, "error", err.Error())
+				return err
+			}
+			logger.Info("cli", "port removed", "id", portID)
+			fmt.Printf("Port forward %s removed\n", portID)
+			return nil
+		}
+
+		// Bulk path: enumerate the VM's port forwards (optionally filtered
+		// by protocol) and remove each one, printing per-rule status. We
+		// reuse PortForwarder.Remove rather than going through the API
+		// bulk_delete endpoint so vmsmith CLI works without a running
+		// daemon (the existing port commands behave the same way).
+		ports, err := pf.List(vmID)
+		if err != nil {
+			logger.Error("cli", "port remove: list failed", "vm_id", vmID, "error", err.Error())
 			return err
 		}
-		logger.Info("cli", "port removed", "id", portID)
-		fmt.Printf("Port forward %s removed\n", portID)
+		matches := make([]*types.PortForward, 0, len(ports))
+		for _, p := range ports {
+			if proto != "" && string(p.Protocol) != proto {
+				continue
+			}
+			matches = append(matches, p)
+		}
+		if len(matches) == 0 {
+			if proto != "" {
+				fmt.Printf("No port forwards on VM %s match protocol %q\n", vmID, proto)
+			} else {
+				fmt.Printf("No port forwards on VM %s\n", vmID)
+			}
+			return nil
+		}
+
+		successes := 0
+		failures := 0
+		for _, p := range matches {
+			if err := pf.Remove(p.ID); err != nil {
+				fmt.Printf("FAIL  %s (%d/%s): %s\n", p.ID, p.HostPort, p.Protocol, err.Error())
+				failures++
+				continue
+			}
+			fmt.Printf("OK    %s (%d/%s)\n", p.ID, p.HostPort, p.Protocol)
+			successes++
+		}
+		logger.Info("cli", "port bulk remove complete",
+			"vm_id", vmID, "protocol", proto,
+			"matched", fmt.Sprintf("%d", len(matches)),
+			"success", fmt.Sprintf("%d", successes),
+			"failed", fmt.Sprintf("%d", failures))
+		if failures > 0 {
+			return fmt.Errorf("%d of %d port forwards failed to delete", failures, len(matches))
+		}
 		return nil
 	},
 }
@@ -158,6 +230,9 @@ func init() {
 	portAddCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars)")
 	portAddCmd.MarkFlagRequired("host")
 	portAddCmd.MarkFlagRequired("guest")
+
+	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
+	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")
 
 	portCmd.AddCommand(portAddCmd)
 	portCmd.AddCommand(portListCmd)

@@ -345,6 +345,19 @@ async function main() {
       await assertText(p, "snap-bulk-result", "2 of 2 succeeded");
     }, page);
 
+    await runTest("bulk-delete selected port forwards", async (p) => {
+      // Two seeded port forwards on web-server: ssh-jumpbox + http.
+      // Tick the http row, bulk-delete, confirm only ssh-jumpbox remains.
+      await assertVisible(p, "port-row-pf-seed-ssh");
+      await assertVisible(p, "port-row-pf-seed-http");
+      await p.locator('[data-testid="port-checkbox-pf-seed-http"]').check();
+      await p.locator('[data-testid="btn-bulk-delete-ports"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "port-row-pf-seed-http");
+      await assertVisible(p, "port-row-pf-seed-ssh");
+      await assertText(p, "port-bulk-result", "1 of 1 succeeded");
+    }, page);
+
     await runTest("auto-start summary card and edit toggle", async (p) => {
       await assertVisible(p, "vm-detail-auto-start");
       // Open the edit modal and flip the checkbox on.

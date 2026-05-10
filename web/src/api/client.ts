@@ -200,6 +200,15 @@ export const ports = {
   },
   remove: (vmId: string, portId: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/ports/{portID}', { params: { path: { vmID: vmId, portID: portId } } })),
+  bulkDelete: (vmId: string, args: { ids?: string[]; protocol?: 'tcp' | 'udp' }) => {
+    const body: components['schemas']['BulkDeletePortsRequest'] = {};
+    if (args.ids && args.ids.length) body.ids = args.ids;
+    if (args.protocol) body.protocol = args.protocol;
+    return unwrap(apiClient.POST('/vms/{vmID}/ports/bulk_delete', {
+      params: { path: { vmID: vmId } },
+      body,
+    }));
+  },
 };
 
 // --- Templates ---

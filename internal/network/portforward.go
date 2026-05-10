@@ -22,6 +22,17 @@ func NewPortForwarder(store *store.Store) *PortForwarder {
 	return pf
 }
 
+// SetApplyRuleFunc replaces the iptables-applying function. Intended for
+// tests that need to exercise add/remove flows without invoking real
+// iptables. Pass nil to restore the default real-iptables implementation.
+func (pf *PortForwarder) SetApplyRuleFunc(fn func(action string, hostPort, guestPort int, guestIP, proto string) error) {
+	if fn == nil {
+		pf.applyRuleFn = pf.applyRule
+		return
+	}
+	pf.applyRuleFn = fn
+}
+
 // AddOptions carries optional metadata for Add. Description is a free-form
 // string capped at the API boundary (256 chars).
 type AddOptions struct {

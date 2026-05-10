@@ -714,36 +714,115 @@ function EditSnapshotModal({ vmId, snapshot, onClose, onSaved }) {
 // --- Port List ---
 function PortList({ vmId, portList, refreshPorts }) {
   const removeMut = useMutation((portId) => ports.remove(vmId, portId));
+  const bulkMut   = useMutation((body) => ports.bulkDelete(vmId, body));
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkResult, setBulkResult] = useState(null);
+
+  // Drop selections for rows that no longer exist (e.g., after a delete or refresh).
+  React.useEffect(() => {
+    if (!portList?.length) {
+      if (selected.size) setSelected(new Set());
+      return;
+    }
+    const existing = new Set(portList.map(p => p.id));
+    let changed = false;
+    const next = new Set();
+    selected.forEach(id => {
+      if (existing.has(id)) next.add(id);
+      else changed = true;
+    });
+    if (changed) setSelected(next);
+  }, [portList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!portList?.length) {
     return <EmptyState icon={Network} title="No port forwards" description="Expose VM services to the network." />;
   }
 
+  const allSelected = selected.size > 0 && selected.size === portList.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(portList.map(p => p.id)));
+  };
+  const toggleOne = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const handleBulkDelete = async () => {
+    if (!selected.size) return;
+    const result = await bulkMut.execute({ ids: Array.from(selected) });
+    setBulkResult(result);
+    setSelected(new Set());
+    refreshPorts();
+  };
+
   return (
-    <div className="divide-y divide-steel-800/40">
-      {portList.map(pf => (
-        <div key={pf.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors" data-testid={`port-row-${pf.id}`}>
-          <div>
-            <div>
-              <span className="font-mono text-sm text-steel-200">
-                :{pf.host_port} → {pf.guest_ip}:{pf.guest_port}
-              </span>
-              <span className="ml-2 badge bg-steel-800/60 text-steel-500 border-steel-700/40">{pf.protocol}</span>
-            </div>
-            {pf.description && (
-              <div className="mt-0.5 text-xs text-steel-400" data-testid={`port-description-${pf.id}`}>
-                {pf.description}
+    <div>
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-steel-800/40 bg-steel-900/40">
+        <label className="flex items-center gap-2 text-xs text-steel-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = someSelected; }}
+            onChange={toggleAll}
+            data-testid="port-select-all"
+          />
+          {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+        </label>
+        <button
+          className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={handleBulkDelete}
+          disabled={!selected.size || bulkMut.loading}
+          data-testid="btn-bulk-delete-ports"
+        >
+          <Trash2 size={12} /> Delete selected
+        </button>
+      </div>
+      <div className="divide-y divide-steel-800/40">
+        {portList.map(pf => (
+          <div key={pf.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors" data-testid={`port-row-${pf.id}`}>
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <input
+                type="checkbox"
+                checked={selected.has(pf.id)}
+                onChange={() => toggleOne(pf.id)}
+                data-testid={`port-checkbox-${pf.id}`}
+              />
+              <div>
+                <div>
+                  <span className="font-mono text-sm text-steel-200">
+                    :{pf.host_port} → {pf.guest_ip}:{pf.guest_port}
+                  </span>
+                  <span className="ml-2 badge bg-steel-800/60 text-steel-500 border-steel-700/40">{pf.protocol}</span>
+                </div>
+                {pf.description && (
+                  <div className="mt-0.5 text-xs text-steel-400" data-testid={`port-description-${pf.id}`}>
+                    {pf.description}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+            <button
+              className="btn-ghost text-xs text-red-400 hover:text-red-300"
+              onClick={async () => { await removeMut.execute(pf.id); refreshPorts(); }}
+            >
+              <Trash2 size={12} />
+            </button>
           </div>
-          <button
-            className="btn-ghost text-xs text-red-400 hover:text-red-300"
-            onClick={async () => { await removeMut.execute(pf.id); refreshPorts(); }}
-          >
-            <Trash2 size={12} />
-          </button>
+        ))}
+      </div>
+      {bulkResult && (
+        <div className="px-4 py-2 text-xs text-steel-400" data-testid="port-bulk-result">
+          {(() => {
+            const total = bulkResult.results.length;
+            const ok = bulkResult.results.filter(r => r.success).length;
+            return `Bulk delete: ${ok} of ${total} succeeded`;
+          })()}
         </div>
-      ))}
+      )}
     </div>
   );
 }
