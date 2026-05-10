@@ -275,6 +275,31 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/reboot:
+    post:
+      tags: [VMs]
+      summary: Reboot a running VM via guest ACPI signal (no power cycle)
+      description: |
+        Sends an ACPI reboot signal to the guest via libvirt's `dom.Reboot()`.
+        Unlike `restart` (which is a stop+start cycle that power-cycles the
+        QEMU process), `reboot` keeps the libvirt domain alive and asks the
+        guest OS to reboot itself. The IP, MAC, and DHCP reservation are
+        preserved. Returns 409 `vm_not_running` when the VM is not running.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM reboot signal sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/suspend:
     post:
       tags: [VMs]

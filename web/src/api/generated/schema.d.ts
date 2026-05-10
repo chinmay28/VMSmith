@@ -445,6 +445,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/reboot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reboot a running VM via guest ACPI signal (no power cycle)
+         * @description Sends an ACPI reboot signal to the guest via libvirt's `dom.Reboot()`.
+         *     Unlike `restart` (which is a stop+start cycle that power-cycles the
+         *     QEMU process), `reboot` keeps the libvirt domain alive and asks the
+         *     guest OS to reboot itself. The IP, MAC, and DHCP reservation are
+         *     preserved. Returns 409 `vm_not_running` when the VM is not running.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description VM reboot signal sent */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StatusResponse"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/suspend": {
         parameters: {
             query?: never;

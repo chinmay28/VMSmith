@@ -54,6 +54,7 @@ func (m *quotaManager) ForceStop(ctx context.Context, id string) error {
 	return m.base.ForceStop(ctx, id)
 }
 func (m *quotaManager) Restart(ctx context.Context, id string) error { return m.base.Restart(ctx, id) }
+func (m *quotaManager) Reboot(ctx context.Context, id string) error  { return m.base.Reboot(ctx, id) }
 func (m *quotaManager) Suspend(ctx context.Context, id string) error { return m.base.Suspend(ctx, id) }
 func (m *quotaManager) Resume(ctx context.Context, id string) error  { return m.base.Resume(ctx, id) }
 func (m *quotaManager) Delete(ctx context.Context, id string) error  { return m.base.Delete(ctx, id) }

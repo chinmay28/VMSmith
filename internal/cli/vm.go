@@ -288,6 +288,30 @@ var vmRestartCmd = &cobra.Command{
 	},
 }
 
+var vmRebootCmd = &cobra.Command{
+	Use:   "reboot <id>",
+	Short: "Reboot a running VM via guest ACPI signal (preserves IP/MAC, no power cycle)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm reboot", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm reboot: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.Reboot(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm reboot failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "reboot", "id", id)
+		fmt.Printf("VM %s rebooted\n", id)
+		return nil
+	},
+}
+
 var vmSuspendCmd = &cobra.Command{
 	Use:   "suspend <id>",
 	Short: "Suspend a running VM (freeze CPU + memory; resume later)",
@@ -1040,6 +1064,7 @@ Examples:
 	vmCmd.AddCommand(vmStopCmd)
 	vmCmd.AddCommand(vmForceStopCmd)
 	vmCmd.AddCommand(vmRestartCmd)
+	vmCmd.AddCommand(vmRebootCmd)
 	vmCmd.AddCommand(vmSuspendCmd)
 	vmCmd.AddCommand(vmResumeCmd)
 	vmCmd.AddCommand(vmDeleteCmd)
