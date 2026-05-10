@@ -1132,7 +1132,49 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update editable metadata on a port forward
+         * @description Updates the editable metadata on an existing port forwarding rule.
+         *     Today only the `description` is editable; the underlying iptables
+         *     5-tuple (host_port/guest_port/guest_ip/protocol) is intentionally
+         *     immutable. Omit `description` to leave it unchanged; pass `""` to
+         *     clear it.
+         *
+         *     The `vmID` in the URL is the authoritative scope: a request that
+         *     targets a port-forward owned by a different VM returns
+         *     `404 resource_not_found` (mirroring the safety property of
+         *     bulk_delete).
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                    portID: components["parameters"]["PortID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdatePortRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated port forward */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PortForward"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         trace?: never;
     };
     "/vms/{vmID}/console/ticket": {
@@ -2097,6 +2139,17 @@ export interface components {
         BulkVMActionResponse: {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
+        };
+        /**
+         * @description Editable metadata for an existing port forwarding rule. Today only
+         *     `description` is editable; the underlying iptables 5-tuple is
+         *     immutable. The `description` field is a JSON-pointer style optional
+         *     — omit it to leave the description unchanged, pass an empty string to
+         *     clear it.
+         */
+        UpdatePortRequest: {
+            /** @description Free-form label (max 256 chars). Pass `""` to clear. */
+            description?: string;
         };
         /**
          * @description Selector for the port forwards to delete. Exactly one of `ids` or

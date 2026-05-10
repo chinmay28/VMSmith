@@ -723,6 +723,7 @@ function PortList({ vmId, portList, refreshPorts }) {
   const bulkMut   = useMutation((body) => ports.bulkDelete(vmId, body));
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   // Drop selections for rows that no longer exist (e.g., after a delete or refresh).
   React.useEffect(() => {
@@ -811,12 +812,22 @@ function PortList({ vmId, portList, refreshPorts }) {
                 )}
               </div>
             </div>
-            <button
-              className="btn-ghost text-xs text-red-400 hover:text-red-300"
-              onClick={async () => { await removeMut.execute(pf.id); refreshPorts(); }}
-            >
-              <Trash2 size={12} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                className="btn-ghost text-xs text-steel-400 hover:text-steel-200"
+                onClick={() => setEditing(pf)}
+                data-testid={`btn-edit-port-${pf.id}`}
+                title="Edit description"
+              >
+                <Pencil size={12} />
+              </button>
+              <button
+                className="btn-ghost text-xs text-red-400 hover:text-red-300"
+                onClick={async () => { await removeMut.execute(pf.id); refreshPorts(); }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -829,7 +840,66 @@ function PortList({ vmId, portList, refreshPorts }) {
           })()}
         </div>
       )}
+      <EditPortModal
+        vmId={vmId}
+        portForward={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => { setEditing(null); refreshPorts(); }}
+      />
     </div>
+  );
+}
+
+// --- Edit Port Forward Modal ---
+function EditPortModal({ vmId, portForward, onClose, onSaved }) {
+  const [description, setDescription] = useState('');
+  const updateMut = useMutation((args) => ports.update(vmId, args.id, { description: args.description }));
+
+  React.useEffect(() => {
+    if (portForward) setDescription(portForward.description || '');
+  }, [portForward]);
+
+  if (!portForward) return null;
+
+  const handleSubmit = async () => {
+    await updateMut.execute({ id: portForward.id, description });
+    onSaved();
+  };
+
+  return (
+    <Modal open={!!portForward} onClose={onClose} title={`Edit port forward :${portForward.host_port}`}>
+      <div className="space-y-4">
+        <div className="text-xs text-steel-500 font-mono">
+          :{portForward.host_port} → {portForward.guest_ip}:{portForward.guest_port}/{portForward.protocol}
+        </div>
+        <div>
+          <label className="label">Description</label>
+          <input
+            className="input"
+            type="text"
+            maxLength={256}
+            placeholder="e.g. ssh-jumpbox, metrics scrape"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            data-testid="input-edit-port-description"
+            autoFocus
+          />
+          <p className="mt-1 text-xs text-steel-500">{description.length}/256 characters</p>
+        </div>
+        {updateMut.error && <p className="text-sm text-red-400">{updateMut.error}</p>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={updateMut.loading}
+            data-testid="btn-submit-edit-port"
+          >
+            {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />} Save
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

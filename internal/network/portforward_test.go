@@ -354,6 +354,99 @@ func TestPortForwarder_ApplyRule_UnknownAction(t *testing.T) {
 	}
 }
 
+func TestPortForwarder_Update_SetsDescription(t *testing.T) {
+	pf, s := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-1", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+	}
+	if err := s.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	desc := "  ssh-jumpbox  "
+	updated, err := pf.Update("pf-1", UpdateOptions{Description: &desc})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	// TrimSpace applied
+	if updated.Description != "ssh-jumpbox" {
+		t.Errorf("Description = %q, want %q", updated.Description, "ssh-jumpbox")
+	}
+	// 5-tuple untouched
+	if updated.HostPort != 8080 || updated.GuestPort != 80 || updated.Protocol != types.ProtocolTCP {
+		t.Errorf("5-tuple changed unexpectedly: %+v", updated)
+	}
+
+	stored, err := s.ListPortForwards("vm-a")
+	if err != nil {
+		t.Fatalf("ListPortForwards: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Description != "ssh-jumpbox" {
+		t.Errorf("persisted description = %q, want ssh-jumpbox", stored[0].Description)
+	}
+}
+
+func TestPortForwarder_Update_ClearsDescription(t *testing.T) {
+	pf, s := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-1", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+		Description: "to be cleared",
+	}
+	if err := s.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	empty := ""
+	updated, err := pf.Update("pf-1", UpdateOptions{Description: &empty})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Description != "" {
+		t.Errorf("Description = %q, want empty", updated.Description)
+	}
+}
+
+func TestPortForwarder_Update_NilDescriptionIsNoOp(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-1", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+		Description: "leave-me-alone",
+	}
+	if err := pf.store.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	updated, err := pf.Update("pf-1", UpdateOptions{Description: nil})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Description != "leave-me-alone" {
+		t.Errorf("Description = %q, want unchanged", updated.Description)
+	}
+}
+
+func TestPortForwarder_Update_NotFound(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+	desc := "x"
+	_, err := pf.Update("pf-missing", UpdateOptions{Description: &desc})
+	if err == nil {
+		t.Fatal("expected resource_not_found error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T (%v)", err, err)
+	}
+	if apiErr.Code != "resource_not_found" {
+		t.Errorf("Code = %q, want resource_not_found", apiErr.Code)
+	}
+}
+
 func TestPortForwarder_List_AllVMs(t *testing.T) {
 	pf, s := newTestPortForwarder(t)
 

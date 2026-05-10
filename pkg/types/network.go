@@ -65,6 +65,16 @@ type PortForward struct {
 	Description string   `json:"description,omitempty"`
 }
 
+// PortForwardUpdateSpec carries the editable metadata for an existing
+// port-forward rule. Description is a pointer so callers can distinguish
+// between "leave untouched" (nil) and "clear" (empty string). The wire-level
+// fields that affect the underlying iptables rule (HostPort, GuestPort,
+// GuestIP, Protocol) are intentionally not editable — changing any of those
+// is a delete-and-re-add operation.
+type PortForwardUpdateSpec struct {
+	Description *string
+}
+
 func ValidatePortForward(hostPort, guestPort int, proto Protocol) error {
 	if hostPort < 1 || hostPort > 65535 {
 		return NewAPIError("invalid_port_forward", "host_port must be between 1 and 65535")

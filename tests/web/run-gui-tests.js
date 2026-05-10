@@ -358,6 +358,19 @@ async function main() {
       await assertText(p, "port-bulk-result", "1 of 1 succeeded");
     }, page);
 
+    await runTest("edit port forward description", async (p) => {
+      // ssh-jumpbox seeded rule still exists; click its edit button, rewrite
+      // the description, save, and confirm the inline description updated.
+      await assertVisible(p, "port-description-pf-seed-ssh");
+      await p.locator('[data-testid="btn-edit-port-pf-seed-ssh"]').click();
+      await p.waitForTimeout(200);
+      await assertVisible(p, "input-edit-port-description");
+      await p.locator('[data-testid="input-edit-port-description"]').fill("rewritten via JSDOM");
+      await p.locator('[data-testid="btn-submit-edit-port"]').click();
+      await p.waitForTimeout(800);
+      await assertText(p, "port-description-pf-seed-ssh", "rewritten via JSDOM");
+    }, page);
+
     await runTest("auto-start summary card and edit toggle", async (p) => {
       await assertVisible(p, "vm-detail-auto-start");
       // Open the edit modal and flip the checkbox on.

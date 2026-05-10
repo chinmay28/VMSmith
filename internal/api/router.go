@@ -224,6 +224,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 					r.Get("/", s.ListPorts)
 					r.Post("/", s.withRequestBodyLimit(s.AddPort))
 					r.Post("/bulk_delete", s.withRequestBodyLimit(s.BulkDeletePorts))
+					r.Patch("/{portID}", s.withRequestBodyLimit(s.UpdatePort))
 					r.Delete("/{portID}", s.RemovePort)
 				})
 

@@ -4769,6 +4769,166 @@ func seedPortForward(t *testing.T, s *store.Store, pf *types.PortForward) {
 	}
 }
 
+func decodePortForwardResponse(t *testing.T, resp *http.Response) types.PortForward {
+	t.Helper()
+	var out types.PortForward
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode port forward response: %v", err)
+	}
+	return out
+}
+
+func TestUpdatePort_SetsDescription(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-up", VMID: "vm-up", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-up/ports/pf-up",
+		jsonBody(t, map[string]any{"description": "  ssh-jumpbox  "}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if out.Description != "ssh-jumpbox" {
+		t.Errorf("Description = %q, want %q (TrimSpace applied)", out.Description, "ssh-jumpbox")
+	}
+	if out.HostPort != 8080 || out.GuestPort != 80 || out.Protocol != types.ProtocolTCP {
+		t.Errorf("5-tuple changed: %+v", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-up")
+	if len(stored) != 1 || stored[0].Description != "ssh-jumpbox" {
+		t.Errorf("persisted description = %q, want ssh-jumpbox", stored[0].Description)
+	}
+}
+
+func TestUpdatePort_ClearsDescription(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-cl", VMID: "vm-cl", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.11", Protocol: types.ProtocolTCP, Description: "stale"})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-cl/ports/pf-cl",
+		jsonBody(t, map[string]any{"description": ""}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if out.Description != "" {
+		t.Errorf("Description = %q, want empty", out.Description)
+	}
+}
+
+func TestUpdatePort_OmittedDescriptionIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-noop", VMID: "vm-noop", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.12", Protocol: types.ProtocolTCP, Description: "leave-me"})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-noop/ports/pf-noop",
+		jsonBody(t, map[string]any{}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if out.Description != "leave-me" {
+		t.Errorf("Description = %q, want unchanged 'leave-me'", out.Description)
+	}
+}
+
+func TestUpdatePort_RejectsLongDescription(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-long", VMID: "vm-long", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.13", Protocol: types.ProtocolTCP})
+
+	tooLong := strings.Repeat("x", 257)
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-long/ports/pf-long",
+		jsonBody(t, map[string]any{"description": tooLong}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+	if apiErr.Code != "invalid_port_forward" {
+		t.Errorf("Code = %q, want invalid_port_forward", apiErr.Code)
+	}
+}
+
+func TestUpdatePort_NotFound(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-nf/ports/pf-missing",
+		jsonBody(t, map[string]any{"description": "x"}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+	if apiErr.Code != "resource_not_found" {
+		t.Errorf("Code = %q, want resource_not_found", apiErr.Code)
+	}
+}
+
+func TestUpdatePort_PortForwardOnDifferentVM_NotFound(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	// Two VMs, each with their own rule. PATCH against /vms/A/ports/B-id must
+	// 404 — and must leave B's rule completely untouched.
+	seedPortForward(t, s, &types.PortForward{ID: "pf-A", VMID: "vm-A", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-B", VMID: "vm-B", HostPort: 9090, GuestPort: 90, GuestIP: "192.168.100.60", Protocol: types.ProtocolTCP, Description: "B-rule"})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-A/ports/pf-B",
+		jsonBody(t, map[string]any{"description": "tampered"}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	// vm-B's rule must be untouched.
+	stored, _ := s.ListPortForwards("vm-B")
+	if len(stored) != 1 || stored[0].Description != "B-rule" {
+		t.Errorf("vm-B rule mutated: %+v", stored)
+	}
+}
+
+func TestUpdatePort_BadJSON(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-bj", VMID: "vm-bj", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.14", Protocol: types.ProtocolTCP})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bj/ports/pf-bj",
+		bytes.NewBufferString("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+	if apiErr.Code != "invalid_request_body" {
+		t.Errorf("Code = %q, want invalid_request_body", apiErr.Code)
+	}
+}
+
 func TestBulkDeletePorts_ByIDs(t *testing.T) {
 	ts, _, s, _, cleanup := testServerWithPortFwd(t)
 	defer cleanup()
