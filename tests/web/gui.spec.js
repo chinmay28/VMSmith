@@ -553,6 +553,35 @@ test.describe("VM Detail", () => {
     await expect(newDescription).toBeVisible();
   });
 
+  test("bulk delete selected port forwards", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Two seeded port forwards on web-server
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+
+    await page.getByTestId("port-checkbox-pf-seed-http").check();
+    await page.getByTestId("btn-bulk-delete-ports").click();
+
+    // The HTTP rule should be gone; SSH rule should still be there.
+    await expect(page.getByTestId("port-row-pf-seed-http")).not.toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+
+    await expect(page.getByTestId("port-bulk-result")).toContainText("1 of 1 succeeded");
+  });
+
+  test("bulk delete via select-all port forwards", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("port-select-all").check();
+    await page.getByTestId("btn-bulk-delete-ports").click();
+
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).not.toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).not.toBeVisible();
+  });
+
   test("port modal rejects descriptions over 256 chars", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

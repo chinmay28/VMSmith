@@ -223,6 +223,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				r.Route("/ports", func(r chi.Router) {
 					r.Get("/", s.ListPorts)
 					r.Post("/", s.withRequestBodyLimit(s.AddPort))
+					r.Post("/bulk_delete", s.withRequestBodyLimit(s.BulkDeletePorts))
 					r.Delete("/{portID}", s.RemovePort)
 				})
 

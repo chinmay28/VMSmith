@@ -624,6 +624,37 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/ports/bulk_delete:
+    post:
+      tags: [Port Forwards]
+      summary: Delete multiple port forwards in a single request
+      description: |
+        Delete a batch of port forwards either by explicit ID list or by
+        protocol selector (`tcp` / `udp`). Returns a per-target result so
+        partial failures are visible. Exactly one of `ids` or `protocol`
+        must be provided. The protocol selector is always scoped to the VM
+        in the URL — it never deletes another VM's rules.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDeletePortsRequest'
+      responses:
+        '200':
+          description: Per-port-forward delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeletePortsResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/ports/{portID}:
     delete:
       tags: [Port Forwards]
@@ -1455,6 +1486,42 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BulkVMActionResult'
+    BulkDeletePortsRequest:
+      type: object
+      description: |
+        Selector for the port forwards to delete. Exactly one of `ids` or
+        `protocol` must be set; the request is rejected with HTTP 400
+        `invalid_bulk_request` when both or neither are present.
+      properties:
+        ids:
+          type: array
+          description: Explicit list of port-forward IDs to delete.
+          items:
+            type: string
+        protocol:
+          type: string
+          enum: [tcp, udp]
+          description: Match every port forward on this VM with this protocol.
+    BulkDeletePortsResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDeletePortResult'
+    BulkDeletePortResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
     BulkDeleteSnapshotsRequest:
       type: object
       description: |

@@ -2015,6 +2015,43 @@ func TestCreateVM_WithNetworks(t *testing.T) {
 // for test cases that need to seed data directly.
 // ============================================================
 
+// testServerWithPortFwd is like testServerFull but also returns the
+// PortForwarder so tests can stub the iptables hook.
+func testServerWithPortFwd(t *testing.T) (*httptest.Server, *vm.MockManager, *store.Store, *network.PortForwarder, func()) {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	// Tests need port-forward add/remove to succeed without real iptables.
+	portFwd.SetApplyRuleFunc(func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	})
+
+	apiServer := NewServer(mockMgr, storageMgr, portFwd, s)
+	ts := httptest.NewServer(apiServer)
+
+	cleanup := func() {
+		ts.Close()
+		s.Close()
+	}
+	return ts, mockMgr, s, portFwd, cleanup
+}
+
 func testServerFull(t *testing.T) (*httptest.Server, *vm.MockManager, *store.Store, func()) {
 	t.Helper()
 
@@ -4709,5 +4746,222 @@ func TestUpdateSnapshot_ManagerError(t *testing.T) {
 	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-err/snapshots/snap", updateSnapshotRequest{Description: &desc})
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// ============================================================
+// Bulk port-forward delete handler tests (2.3.7)
+// ============================================================
+
+func decodeBulkPortResponse(t *testing.T, resp *http.Response) bulkDeletePortsResponse {
+	t.Helper()
+	var out bulkDeletePortsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode bulk port response: %v", err)
+	}
+	return out
+}
+
+func seedPortForward(t *testing.T, s *store.Store, pf *types.PortForward) {
+	t.Helper()
+	if err := s.PutPortForward(pf); err != nil {
+		t.Fatalf("seed port forward %s: %v", pf.ID, err)
+	}
+}
+
+func TestBulkDeletePorts_ByIDs(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-keep", VMID: "vm-bd", HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-1", VMID: "vm-bd", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-2", VMID: "vm-bd", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	body := jsonBody(t, bulkDeletePortsRequest{IDs: []string{"pf-1", "pf-2"}})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-bd/ports/bulk_delete", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST bulk_delete: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	for _, r := range out.Results {
+		if !r.Success {
+			t.Errorf("expected success for %q, got code=%q msg=%q", r.ID, r.Code, r.Message)
+		}
+	}
+
+	survivors, _ := s.ListPortForwards("vm-bd")
+	if len(survivors) != 1 || survivors[0].ID != "pf-keep" {
+		t.Errorf("survivors = %+v, want only pf-keep", survivors)
+	}
+}
+
+func TestBulkDeletePorts_ByProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-tcp-1", VMID: "vm-bp", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.20", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-tcp-2", VMID: "vm-bp", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.20", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-udp", VMID: "vm-bp", HostPort: 53, GuestPort: 53, GuestIP: "192.168.100.20", Protocol: types.ProtocolUDP})
+
+	body := jsonBody(t, bulkDeletePortsRequest{Protocol: types.ProtocolTCP})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-bp/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+
+	survivors, _ := s.ListPortForwards("vm-bp")
+	if len(survivors) != 1 || survivors[0].ID != "pf-udp" {
+		t.Errorf("survivors = %+v, want only pf-udp", survivors)
+	}
+}
+
+func TestBulkDeletePorts_ProtocolCaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-tcp", VMID: "vm-ci", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.30", Protocol: types.ProtocolTCP})
+
+	body := jsonBody(t, map[string]any{"protocol": "TCP"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-ci/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	if len(out.Results) != 1 || !out.Results[0].Success {
+		t.Errorf("expected one successful result, got %+v", out.Results)
+	}
+}
+
+func TestBulkDeletePorts_PartialFailure(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-real", VMID: "vm-pf", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP})
+
+	body := jsonBody(t, bulkDeletePortsRequest{IDs: []string{"pf-real", "pf-missing"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-pf/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	by := map[string]bulkDeletePortResult{}
+	for _, r := range out.Results {
+		by[r.ID] = r
+	}
+	if !by["pf-real"].Success {
+		t.Errorf("expected pf-real to succeed, got %+v", by["pf-real"])
+	}
+	if by["pf-missing"].Success {
+		t.Errorf("expected pf-missing to fail")
+	}
+	if by["pf-missing"].Code != "resource_not_found" {
+		t.Errorf("missing.Code = %q, want resource_not_found", by["pf-missing"].Code)
+	}
+}
+
+func TestBulkDeletePorts_IDForOtherVM_NotDeleted(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	// Two VMs each own their own port forward. The bulk request targets
+	// vm-A but tries to also delete vm-B's id; it must surface as
+	// resource_not_found and leave vm-B's rule untouched.
+	seedPortForward(t, s, &types.PortForward{ID: "pf-A", VMID: "vm-A", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-B", VMID: "vm-B", HostPort: 9090, GuestPort: 90, GuestIP: "192.168.100.60", Protocol: types.ProtocolTCP})
+
+	body := jsonBody(t, bulkDeletePortsRequest{IDs: []string{"pf-A", "pf-B"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-A/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	by := map[string]bulkDeletePortResult{}
+	for _, r := range out.Results {
+		by[r.ID] = r
+	}
+	if !by["pf-A"].Success {
+		t.Errorf("pf-A should have been deleted, got %+v", by["pf-A"])
+	}
+	if by["pf-B"].Success {
+		t.Errorf("pf-B should NOT have been deleted via vm-A's bulk request")
+	}
+	if by["pf-B"].Code != "resource_not_found" {
+		t.Errorf("pf-B.Code = %q, want resource_not_found", by["pf-B"].Code)
+	}
+
+	// Verify vm-B's rule is still in the store.
+	survivorsB, _ := s.ListPortForwards("vm-B")
+	if len(survivorsB) != 1 || survivorsB[0].ID != "pf-B" {
+		t.Errorf("vm-B survivors = %+v, expected pf-B intact", survivorsB)
+	}
+}
+
+func TestBulkDeletePorts_EmptyRequestRejected(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeletePortsRequest{})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-empty/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeletePorts_BothIDsAndProtocolRejected(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeletePortsRequest{IDs: []string{"pf-1"}, Protocol: types.ProtocolTCP})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-both/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeletePorts_UnknownProtocolRejected(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	body := jsonBody(t, map[string]any{"protocol": "sctp"})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-bad/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeletePorts_ProtocolNoMatchEmptyResponse(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-tcp", VMID: "vm-nm", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.70", Protocol: types.ProtocolTCP})
+
+	body := jsonBody(t, bulkDeletePortsRequest{Protocol: types.ProtocolUDP})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-nm/ports/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkPortResponse(t, resp)
+	if len(out.Results) != 0 {
+		t.Errorf("results = %d, want 0", len(out.Results))
+	}
+	survivors, _ := s.ListPortForwards("vm-nm")
+	if len(survivors) != 1 {
+		t.Errorf("survivors = %d, want 1 (tcp untouched)", len(survivors))
 	}
 }

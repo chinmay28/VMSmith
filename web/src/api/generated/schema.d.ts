@@ -1044,6 +1044,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/ports/bulk_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete multiple port forwards in a single request
+         * @description Delete a batch of port forwards either by explicit ID list or by
+         *     protocol selector (`tcp` / `udp`). Returns a per-target result so
+         *     partial failures are visible. Exactly one of `ids` or `protocol`
+         *     must be provided. The protocol selector is always scoped to the VM
+         *     in the URL — it never deletes another VM's rules.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulkDeletePortsRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-port-forward delete results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkDeletePortsResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/ports/{portID}": {
         parameters: {
             query?: never;
@@ -2045,6 +2097,29 @@ export interface components {
         BulkVMActionResponse: {
             action: string;
             results: components["schemas"]["BulkVMActionResult"][];
+        };
+        /**
+         * @description Selector for the port forwards to delete. Exactly one of `ids` or
+         *     `protocol` must be set; the request is rejected with HTTP 400
+         *     `invalid_bulk_request` when both or neither are present.
+         */
+        BulkDeletePortsRequest: {
+            /** @description Explicit list of port-forward IDs to delete. */
+            ids?: string[];
+            /**
+             * @description Match every port forward on this VM with this protocol.
+             * @enum {string}
+             */
+            protocol?: "tcp" | "udp";
+        };
+        BulkDeletePortsResponse: {
+            results: components["schemas"]["BulkDeletePortResult"][];
+        };
+        BulkDeletePortResult: {
+            id: string;
+            success: boolean;
+            code?: string;
+            message?: string;
         };
         /**
          * @description Selector for the snapshots to delete. Exactly one of `names` or `prefix`
