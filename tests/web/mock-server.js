@@ -123,7 +123,27 @@ const server = http.createServer(async (req, res) => {
 
   // API routes
   if (p === "/api/v1/vms" && method === "GET") {
+    const sortField = url.searchParams.get("sort") || "id";
+    const order = url.searchParams.get("order") || "asc";
+    if (!["id", "name", "created_at", "state"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
+    }
+    if (!["asc", "desc"].includes(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
     const list = [...vms.values()];
+    const cmp = (a, b) => {
+      let l;
+      switch (sortField) {
+        case "name":       l = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
+        case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
+        case "state":      l = (a.state || "").localeCompare(b.state || ""); break;
+        default:           l = 0;
+      }
+      if (l === 0) l = a.id.localeCompare(b.id); // tiebreak on id
+      return order === "desc" ? -l : l;
+    };
+    list.sort(cmp);
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
   }
   if (p === "/api/v1/vms/stats/top" && method === "GET") {
@@ -223,6 +243,12 @@ const server = http.createServer(async (req, res) => {
     const vm = vms.get(m[1]);
     if (vm) { vm.state = "running"; return json(res, 200, { status: "restarted" }); }
     return json(res, 404, { error: "not found" });
+  }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/reboot$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state !== "running") return json(res, 409, { code: "vm_not_running", message: "vm must be running to reboot" });
+    return json(res, 200, { status: "rebooted" });
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/suspend$/)) && method === "POST") {
     const vm = vms.get(m[1]);
@@ -462,6 +488,32 @@ const server = http.createServer(async (req, res) => {
       list = list.filter(img => (img.tags || []).some(t => String(t).toLowerCase() === tag));
     }
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
+  }
+  if (p === "/api/v1/images/bulk_delete" && method === "POST") {
+    const body = await parseBody(req);
+    const ids = Array.isArray(body.ids) ? body.ids.filter(s => typeof s === "string" && s.trim() !== "") : [];
+    const tag = typeof body.tag === "string" ? body.tag.trim() : "";
+    if (!ids.length && !tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "exactly one of ids or tag must be provided" });
+    }
+    if (ids.length && tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "ids and tag are mutually exclusive" });
+    }
+    let targets = ids;
+    if (tag) {
+      const lc = tag.toLowerCase();
+      targets = [...images.values()]
+        .filter(img => (img.tags || []).some(t => String(t).toLowerCase() === lc))
+        .map(img => img.id);
+    }
+    const results = targets.map(id => {
+      if (images.has(id)) {
+        images.delete(id);
+        return { id, success: true };
+      }
+      return { id, success: false, code: "resource_not_found", message: "image not found" };
+    });
+    return json(res, 200, { results });
   }
   {
     const m = p.match(/^\/api\/v1\/images\/([^/]+)$/);

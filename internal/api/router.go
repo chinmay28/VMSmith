@@ -196,6 +196,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				r.Post("/stop", s.StopVM)
 				r.Post("/force-stop", s.ForceStopVM)
 				r.Post("/restart", s.RestartVM)
+				r.Post("/reboot", s.RebootVM)
 				r.Post("/suspend", s.SuspendVM)
 				r.Post("/resume", s.ResumeVM)
 
@@ -237,6 +238,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Get("/", s.ListImages)
 			r.Post("/", s.withRequestBodyLimit(s.CreateImage))
 			r.Post("/upload", s.withUploadBodyLimit(s.UploadImage))
+			r.Post("/bulk_delete", s.withRequestBodyLimit(s.BulkDeleteImages))
 			r.Patch("/{imageID}", s.withRequestBodyLimit(s.UpdateImage))
 			r.Delete("/{imageID}", s.DeleteImage)
 			r.Get("/{imageID}/download", s.DownloadImage)

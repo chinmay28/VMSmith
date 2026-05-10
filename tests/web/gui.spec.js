@@ -251,6 +251,28 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-cancel-create").click();
     await expect(page.getByTestId("input-vm-name")).not.toBeVisible();
   });
+
+  test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Default sort=id asc; the seeded "vm-1" (web-server) is rendered before vm-2 (db-server).
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(2);
+    const idAscIds = await cards().evaluateAll(els => els.map(el => el.getAttribute("data-testid")));
+    expect(idAscIds[0]).toBe("vm-card-web-server");
+    expect(idAscIds[1]).toBe("vm-card-db-server");
+
+    // Switch to sort=name asc -> "db-server" comes before "web-server".
+    await page.getByTestId("vm-list-sort-field").selectOption("name");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Switch order to desc and verify the URL captures the change.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=name");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
 });
 
 // ============================================================
@@ -367,6 +389,20 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
     await expect(page.getByTestId("btn-force-stop")).toHaveCount(0);
     await expect(page.getByTestId("btn-start")).toBeVisible();
+  });
+
+  test("reboot running VM keeps it running", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+
+    // Reboot button only appears while running.
+    await expect(page.getByTestId("btn-reboot")).toBeVisible();
+    await page.getByTestId("btn-reboot").click();
+
+    // Reboot keeps the VM in running state (in-guest reboot, no power cycle).
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
+    await expect(page.getByTestId("btn-reboot")).toBeVisible();
   });
 
   test("suspend running VM and resume", async ({ page }) => {
@@ -865,6 +901,33 @@ test.describe("Images", () => {
     const tags = page.getByTestId("image-tags-rocky-experimental");
     await expect(tags).toContainText("rocky");
     await expect(tags).toContainText("rc");
+  });
+
+  test("bulk delete selected images", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Two seeded images visible
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    await page.getByTestId("image-checkbox-rocky-experimental").check();
+    await page.getByTestId("btn-bulk-delete-images").click();
+
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-bulk-result")).toContainText("1 of 1 succeeded");
+  });
+
+  test("bulk delete via select-all images", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("image-select-all").check();
+    await page.getByTestId("btn-bulk-delete-images").click();
+
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
   });
 });
 

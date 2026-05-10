@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -239,6 +240,58 @@ func TestMockManager_Restart_ErrorInjection(t *testing.T) {
 	m.RestartErr = fmt.Errorf("restart boom")
 	if err := m.Restart(context.Background(), vm.ID); err == nil || err.Error() != "restart boom" {
 		t.Fatalf("err = %v, want restart boom", err)
+	}
+}
+
+func TestMockManager_Reboot(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	v, _ := m.Create(ctx, types.VMSpec{Name: "reboot-me"})
+
+	before, _ := m.Get(ctx, v.ID)
+	time.Sleep(time.Millisecond)
+	if err := m.Reboot(ctx, v.ID); err != nil {
+		t.Fatalf("Reboot: %v", err)
+	}
+	after, _ := m.Get(ctx, v.ID)
+	if after.State != types.VMStateRunning {
+		t.Errorf("after Reboot: State = %q, want running", after.State)
+	}
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Error("expected UpdatedAt to advance after Reboot")
+	}
+}
+
+func TestMockManager_Reboot_NotRunning(t *testing.T) {
+	m := NewMockManager()
+	ctx := context.Background()
+	v, _ := m.Create(ctx, types.VMSpec{Name: "stopped"})
+	if err := m.Stop(ctx, v.ID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	err := m.Reboot(ctx, v.ID)
+	if err == nil {
+		t.Fatal("expected error rebooting a stopped VM")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "vm_not_running" {
+		t.Fatalf("err = %v, want vm_not_running APIError", err)
+	}
+}
+
+func TestMockManager_Reboot_NotFound(t *testing.T) {
+	m := NewMockManager()
+	if err := m.Reboot(context.Background(), "vm-missing"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestMockManager_Reboot_ErrorInjection(t *testing.T) {
+	m := NewMockManager()
+	vm, _ := m.Create(context.Background(), types.VMSpec{Name: "boom"})
+	m.RebootErr = fmt.Errorf("reboot boom")
+	if err := m.Reboot(context.Background(), vm.ID); err == nil || err.Error() != "reboot boom" {
+		t.Fatalf("err = %v, want reboot boom", err)
 	}
 }
 

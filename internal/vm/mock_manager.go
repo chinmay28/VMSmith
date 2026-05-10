@@ -28,6 +28,7 @@ type MockManager struct {
 	StopErr               error
 	ForceStopErr          error
 	RestartErr            error
+	RebootErr             error
 	SuspendErr            error
 	ResumeErr             error
 	DeleteErr             error
@@ -257,6 +258,26 @@ func (m *MockManager) Restart(ctx context.Context, id string) error {
 	}
 
 	vm.State = types.VMStateRunning
+	vm.UpdatedAt = time.Now()
+	return nil
+}
+
+func (m *MockManager) Reboot(ctx context.Context, id string) error {
+	if m.RebootErr != nil {
+		return m.RebootErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	vm, ok := m.vms[id]
+	if !ok {
+		return fmt.Errorf("vms/%s: not found", id)
+	}
+	if vm.State != types.VMStateRunning {
+		return types.NewAPIError("vm_not_running", "vm must be running to reboot")
+	}
+
 	vm.UpdatedAt = time.Now()
 	return nil
 }

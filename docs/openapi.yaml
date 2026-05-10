@@ -31,6 +31,8 @@ paths:
       parameters:
         - $ref: '#/components/parameters/TagFilter'
         - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/VMSort'
+        - $ref: '#/components/parameters/SortOrder'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -45,6 +47,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
     post:
@@ -268,6 +272,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
         '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/reboot:
+    post:
+      tags: [VMs]
+      summary: Reboot a running VM via guest ACPI signal (no power cycle)
+      description: |
+        Sends an ACPI reboot signal to the guest via libvirt's `dom.Reboot()`.
+        Unlike `restart` (which is a stop+start cycle that power-cycles the
+        QEMU process), `reboot` keeps the libvirt domain alive and asks the
+        guest OS to reboot itself. The IP, MAC, and DHCP reservation are
+        preserved. Returns 409 `vm_not_running` when the VM is not running.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: VM reboot signal sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
@@ -758,6 +787,32 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /images/bulk_delete:
+    post:
+      tags: [Images]
+      summary: Delete multiple images in a single request
+      description: |
+        Delete a batch of images either by explicit ID list or by tag selector.
+        Returns a per-target result so partial failures (one image missing,
+        the rest succeeded) surface in a single response. Exactly one of
+        `ids` or `tag` must be provided.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDeleteImagesRequest'
+      responses:
+        '200':
+          description: Per-image delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeleteImagesResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /images/{imageID}:
     patch:
       tags: [Images]
@@ -1210,6 +1265,27 @@ components:
       schema:
         type: string
         enum: [creating, running, stopped, paused, deleted, unknown]
+    VMSort:
+      name: sort
+      in: query
+      description: |
+        Field to sort the VM list by. Defaults to `id`. Unknown values
+        return 400 `invalid_sort`. All comparators tiebreak on `id` so
+        pagination is deterministic across backends.
+      schema:
+        type: string
+        enum: [id, name, created_at, state]
+        default: id
+    SortOrder:
+      name: order
+      in: query
+      description: |
+        Sort direction. Defaults to `asc`. Unknown values return 400
+        `invalid_order`.
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
     Page:
       name: page
       in: query
@@ -1474,6 +1550,41 @@ components:
       required: [name, success]
       properties:
         name:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+    BulkDeleteImagesRequest:
+      type: object
+      description: |
+        Selector for the images to delete. Exactly one of `ids` or `tag` must
+        be set; the request is rejected with HTTP 400 `invalid_bulk_request`
+        when both or neither are present. Tag matching is case-insensitive.
+      properties:
+        ids:
+          type: array
+          description: Explicit list of image IDs to delete.
+          items:
+            type: string
+        tag:
+          type: string
+          description: Match every image whose tag list contains this tag (case-insensitive).
+    BulkDeleteImagesResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDeleteImageResult'
+    BulkDeleteImageResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
           type: string
         success:
           type: boolean

@@ -62,8 +62,8 @@ function parseJSONSafe(text: string) {
 
 // --- VMs ---
 export const vms = {
-  list: ({ tag = '', status = '', page, perPage }: { tag?: string; status?: string; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, page, per_page: perPage } } }), { withMeta: true }),
+  list: ({ tag = '', status = '', sort = '', order = '', page, perPage }: { tag?: string; status?: string; sort?: 'id' | 'name' | 'created_at' | 'state' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   get: (id: string) => unwrap(apiClient.GET('/vms/{vmID}', { params: { path: { vmID: id } } })),
   create: (spec: paths['/vms']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/vms', { body: spec })),
@@ -75,6 +75,7 @@ export const vms = {
   stop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/stop', { params: { path: { vmID: id } } })),
   forceStop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/force-stop', { params: { path: { vmID: id } } })),
   restart: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/restart', { params: { path: { vmID: id } } })),
+  reboot: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/reboot', { params: { path: { vmID: id } } })),
   suspend: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/suspend', { params: { path: { vmID: id } } })),
   resume: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/resume', { params: { path: { vmID: id } } })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
@@ -172,6 +173,11 @@ export const images = {
   upload: (file: File, name: string, options: { description?: string; tags?: string[] } = {}, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) =>
     uploadImageWithProgress(file, name, options, onProgress),
   delete: (id: string) => unwrap(apiClient.DELETE('/images/{imageID}', { params: { path: { imageID: id } } })),
+  // bulkDelete deletes multiple images in a single round-trip. Pass either
+  // {ids: [...]} for explicit IDs or {tag: "..."} to delete every image
+  // carrying that tag (case-insensitive).
+  bulkDelete: (body: { ids?: string[]; tag?: string }) =>
+    unwrap(apiClient.POST('/images/bulk_delete', { body })),
   downloadUrl: (id: string) => `${BASE}/images/${id}/download`,
 };
 

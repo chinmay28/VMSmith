@@ -23,9 +23,11 @@ export default function VMList() {
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
+  const [sort, setSort] = useState(searchParams.get('sort') || 'id');
+  const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, page, perPage }),
-    [tagFilter, page, perPage],
+    () => vms.list({ tag: tagFilter, sort, order, page, perPage }),
+    [tagFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -58,7 +60,14 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter]);
+  }, [tagFilter, sort, order]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
+    if (order && order !== 'asc') next.set('order', order); else next.delete('order');
+    setSearchParams(next, { replace: true });
+  }, [sort, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -107,6 +116,30 @@ export default function VMList() {
           ))}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-steel-400" data-testid="vm-list-sort-controls">
+        <span>Sort by</span>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-sort-field"
+        >
+          <option value="id">ID</option>
+          <option value="name">Name</option>
+          <option value="created_at">Created</option>
+          <option value="state">State</option>
+        </select>
+        <select
+          value={order}
+          onChange={(e) => setOrder(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-sort-order"
+        >
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </div>
 
       {!!visibleVMs.length && (
         <BulkActionBar

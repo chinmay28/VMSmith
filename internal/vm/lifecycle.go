@@ -496,6 +496,40 @@ func (m *LibvirtManager) Restart(ctx context.Context, id string) error {
 	return m.store.PutVM(vm)
 }
 
+// Reboot signals the guest OS to perform an in-guest reboot via libvirt's
+// dom.Reboot(). Unlike Restart (which is a stop+start cycle that power-cycles
+// the QEMU process), Reboot keeps the domain alive and asks the guest to
+// reboot itself. The IP, MAC, and DHCP reservation are preserved with no risk
+// of the cloud-init ISO being re-applied. Refuses if the VM is not currently
+// running so the caller gets a clear typed error.
+func (m *LibvirtManager) Reboot(ctx context.Context, id string) error {
+	vm, err := m.store.GetVM(id)
+	if err != nil {
+		return err
+	}
+
+	dom, err := m.conn.LookupDomainByName(vm.Name)
+	if err != nil {
+		return fmt.Errorf("looking up domain %s: %w", vm.Name, err)
+	}
+	defer dom.Free()
+
+	state, _, err := dom.GetState()
+	if err != nil {
+		return fmt.Errorf("getting domain state: %w", err)
+	}
+	if state != libvirt.DOMAIN_RUNNING {
+		return types.NewAPIError("vm_not_running", "vm must be running to reboot")
+	}
+
+	if err := dom.Reboot(0); err != nil {
+		return fmt.Errorf("rebooting domain: %w", err)
+	}
+
+	vm.UpdatedAt = time.Now()
+	return m.store.PutVM(vm)
+}
+
 // Suspend pauses a running VM, freezing CPU + memory state without releasing
 // resources. The VM keeps its IP, open files, and RAM contents — Resume picks
 // up exactly where Suspend left off. Refuses if the VM is not currently

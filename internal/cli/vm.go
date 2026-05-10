@@ -137,10 +137,30 @@ var vmListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
+		sortField, _ := cmd.Flags().GetString("sort")
+		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		if sortField == "" {
+			sortField = types.VMSortID
+		}
+		switch sortField {
+		case types.VMSortID, types.VMSortName, types.VMSortCreatedAt, types.VMSortState:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state", sortField)
+		}
+		orderField = strings.TrimSpace(strings.ToLower(orderField))
+		if orderField == "" {
+			orderField = types.SortOrderAsc
+		}
+		switch orderField {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", orderField)
+		}
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
@@ -182,12 +202,7 @@ var vmListCmd = &cobra.Command{
 			vms = filtered
 		}
 
-		sort.SliceStable(vms, func(i, j int) bool {
-			if !vms[i].CreatedAt.Equal(vms[j].CreatedAt) {
-				return vms[i].CreatedAt.Before(vms[j].CreatedAt)
-			}
-			return vms[i].ID < vms[j].ID
-		})
+		types.SortVMs(vms, sortField, orderField)
 
 		vms = paginateSlice(vms, limit, offset)
 		logger.Info("cli", "vm list result", "count", fmt.Sprintf("%d", len(vms)))
@@ -269,6 +284,30 @@ var vmRestartCmd = &cobra.Command{
 		}
 		logger.Info("cli", "vm action complete", "action", "restart", "id", id)
 		fmt.Printf("VM %s restarted\n", id)
+		return nil
+	},
+}
+
+var vmRebootCmd = &cobra.Command{
+	Use:   "reboot <id>",
+	Short: "Reboot a running VM via guest ACPI signal (preserves IP/MAC, no power cycle)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm reboot", "id", id)
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm reboot: manager init failed", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		if err := mgr.Reboot(cmd.Context(), id); err != nil {
+			logger.Error("cli", "vm reboot failed", "id", id, "error", err.Error())
+			return err
+		}
+		logger.Info("cli", "vm action complete", "action", "reboot", "id", id)
+		fmt.Printf("VM %s rebooted\n", id)
 		return nil
 	},
 }
@@ -999,6 +1038,8 @@ Examples:
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
+	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
+	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
 	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")
@@ -1023,6 +1064,7 @@ Examples:
 	vmCmd.AddCommand(vmStopCmd)
 	vmCmd.AddCommand(vmForceStopCmd)
 	vmCmd.AddCommand(vmRestartCmd)
+	vmCmd.AddCommand(vmRebootCmd)
 	vmCmd.AddCommand(vmSuspendCmd)
 	vmCmd.AddCommand(vmResumeCmd)
 	vmCmd.AddCommand(vmDeleteCmd)

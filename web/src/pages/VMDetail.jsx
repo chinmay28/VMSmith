@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, Download, Clock, Pencil, Copy, Zap, Pause
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -31,6 +31,7 @@ export default function VMDetail() {
   const stopMut      = useMutation(vms.stop);
   const forceStopMut = useMutation(vms.forceStop);
   const restartMut   = useMutation(vms.restart);
+  const rebootMut    = useMutation(vms.reboot);
   const suspendMut   = useMutation(vms.suspend);
   const resumeMut    = useMutation(vms.resume);
   const deleteMut    = useMutation(vms.delete);
@@ -97,6 +98,11 @@ export default function VMDetail() {
           {vm.state === 'running' && (
             <button className="btn-secondary" onClick={() => { restartMut.execute(id).then(refresh); }} data-testid="btn-restart" title="Graceful stop and start">
               <RotateCcw size={14} /> Restart
+            </button>
+          )}
+          {vm.state === 'running' && (
+            <button className="btn-secondary" onClick={() => { rebootMut.execute(id).then(refresh); }} data-testid="btn-reboot" title="Reboot the guest OS in-place (preserves IP/MAC, no power cycle)">
+              <RefreshCw size={14} /> Reboot
             </button>
           )}
           {vm.state === 'running' && (

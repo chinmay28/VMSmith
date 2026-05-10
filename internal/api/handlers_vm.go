@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -203,6 +202,12 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 
 // ListVMs handles GET /api/v1/vms
 func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
+	sortField, order, err := parseVMSort(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -235,11 +240,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		vms = filtered
 	}
 
-	// Sort by ID so pagination is deterministic across backends.
-	// LibvirtManager already returns VMs in bbolt key order (which is by ID),
-	// but MockManager iterates a Go map, so without an explicit sort the order
-	// is non-deterministic and pagination tests flake.
-	sort.Slice(vms, func(i, j int) bool { return vms[i].ID < vms[j].ID })
+	types.SortVMs(vms, sortField, order)
 
 	total := len(vms)
 	pagination := parsePagination(r)
@@ -373,6 +374,22 @@ func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
 	}
 	s.publishAppEvent("vm.restart_requested", id, fmt.Sprintf("VM %q restart requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
+}
+
+// RebootVM handles POST /api/v1/vms/{vmID}/reboot.  Sends an ACPI reboot
+// signal to the running guest via libvirt's dom.Reboot().  Unlike Restart
+// (stop+start, which power-cycles QEMU), Reboot keeps the domain alive and
+// preserves the IP / MAC / DHCP reservation.  Returns 409 `vm_not_running`
+// when the VM is not currently running.
+func (s *Server) RebootVM(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "vmID")
+	if err := s.vmManager.Reboot(r.Context(), id); err != nil {
+		err = sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
+		return
+	}
+	s.publishAppEvent("vm.reboot_requested", id, fmt.Sprintf("VM %q reboot requested", id), nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rebooted"})
 }
 
 // SuspendVM handles POST /api/v1/vms/{vmID}/suspend.  Pauses CPU+memory of a

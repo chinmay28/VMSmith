@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -664,6 +665,165 @@ func TestListVMs_WithData(t *testing.T) {
 	if len(vms) != 2 {
 		t.Errorf("expected 2 VMs, got %d", len(vms))
 	}
+}
+
+func TestListVMs_SortByName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %v)", i, vm.Name, want[i], namesOf(got))
+		}
+	}
+}
+
+func TestListVMs_SortByNameDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"Charlie", "Bravo", "alpha"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByCreatedAtDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "first", CreatedAt: t0})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "second", CreatedAt: t0.Add(time.Hour)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "third", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=created_at&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"third", "second", "first"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByState(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=state&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 3 {
+		t.Fatalf("want 3 vms, got %d", len(got))
+	}
+	// "running" < "stopped" lexicographically; equal-state ties break on ID.
+	if got[0].State != types.VMStateRunning || got[1].State != types.VMStateRunning || got[2].State != types.VMStateStopped {
+		t.Fatalf("state order wrong: %v", []types.VMState{got[0].State, got[1].State, got[2].State})
+	}
+	if got[0].ID != "vm-1" || got[1].ID != "vm-2" {
+		t.Errorf("equal-state tie should break on id: got %q,%q", got[0].ID, got[1].ID)
+	}
+}
+
+func TestListVMs_SortPaginationDeterministic(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("vm-%d", i)
+		mockMgr.SeedVM(&types.VM{ID: id, Name: id})
+	}
+
+	// page 1
+	resp1, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc&page=1&per_page=2")
+	var page1 []*types.VM
+	decodeJSON(t, resp1, &page1)
+	if got := resp1.Header.Get("X-Total-Count"); got != "5" {
+		t.Fatalf("X-Total-Count = %q, want 5", got)
+	}
+
+	// page 2
+	resp2, _ := http.Get(ts.URL + "/api/v1/vms?sort=name&order=desc&page=2&per_page=2")
+	var page2 []*types.VM
+	decodeJSON(t, resp2, &page2)
+
+	gotOrder := []string{page1[0].Name, page1[1].Name, page2[0].Name, page2[1].Name}
+	want := []string{"vm-4", "vm-3", "vm-2", "vm-1"}
+	for i, n := range gotOrder {
+		if n != want[i] {
+			t.Fatalf("page-spanning order[%d] = %q, want %q (full: %v)", i, n, want[i], gotOrder)
+		}
+	}
+}
+
+func TestListVMs_RejectsInvalidSort(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=ram_mb")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+}
+
+func TestListVMs_RejectsInvalidOrder(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_order" {
+		t.Errorf("code = %q, want invalid_order", apiErr.Code)
+	}
+}
+
+func namesOf(vms []*types.VM) []string {
+	out := make([]string, len(vms))
+	for i, vm := range vms {
+		out[i] = vm.Name
+	}
+	return out
 }
 
 func TestListVMs_PaginationSetsTotalCount(t *testing.T) {
@@ -1992,6 +2152,73 @@ func TestRestartVM_Error(t *testing.T) {
 	}
 }
 
+func TestRebootVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-rb", Name: "rebooter", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-rb/reboot", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "rebooted" {
+		t.Errorf("status field = %q, want rebooted", body["status"])
+	}
+
+	got, _ := mockMgr.Get(nil, "vm-rb")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestRebootVM_NotRunning_Returns409(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-rbs", State: types.VMStateStopped})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-rbs/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["code"] != "vm_not_running" {
+		t.Errorf("code = %v, want vm_not_running", body["code"])
+	}
+}
+
+func TestRebootVM_NotFound_Returns404(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-missing/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestRebootVM_Error(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-x", State: types.VMStateRunning})
+	mockMgr.RebootErr = types.ErrTest
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-x/reboot", "application/json", nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
 func TestStartVM_Error(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -2702,6 +2929,180 @@ func TestDownloadImage_Found(t *testing.T) {
 	cd := resp.Header.Get("Content-Disposition")
 	if !strings.Contains(cd, "test-image.qcow2") {
 		t.Errorf("Content-Disposition = %q, want filename containing test-image.qcow2", cd)
+	}
+}
+
+// ============================================================
+// Image bulk-delete tests
+// ============================================================
+
+func decodeBulkImageResponse(t *testing.T, resp *http.Response) bulkDeleteImagesResponse {
+	t.Helper()
+	var out bulkDeleteImagesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode bulk response: %v", err)
+	}
+	return out
+}
+
+// seedImageFile writes a tiny qcow2-shaped file under the storage manager's
+// images dir and registers it in the store so DeleteImage's os.Remove finds
+// the file. Returns the registered image ID.
+func seedImageFile(t *testing.T, s *store.Store, dir, id, name string, tags []string) {
+	t.Helper()
+	path := filepath.Join(dir, name+".qcow2")
+	if err := os.WriteFile(path, []byte("seed"), 0o644); err != nil {
+		t.Fatalf("write seed image: %v", err)
+	}
+	if err := s.PutImage(&types.Image{
+		ID: id, Name: name, Path: path, SizeBytes: 4, Format: "qcow2",
+		Tags: tags, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+}
+
+func TestBulkDeleteImages_ByIDs(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-1", "keep", nil)
+	seedImageFile(t, s, dir, "img-2", "del-a", nil)
+	seedImageFile(t, s, dir, "img-3", "del-b", nil)
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-2", "img-3"}})
+	resp, err := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST bulk_delete: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	for _, r := range out.Results {
+		if !r.Success {
+			t.Errorf("expected success for %q, got code=%q msg=%q", r.ID, r.Code, r.Message)
+		}
+	}
+
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 || imgs[0].ID != "img-1" {
+		t.Errorf("survivors = %v, want only img-1", imgs)
+	}
+}
+
+func TestBulkDeleteImages_ByTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-1", "keeper", []string{"prod"})
+	seedImageFile(t, s, dir, "img-2", "rc-a", []string{"rc-2026-05"})
+	seedImageFile(t, s, dir, "img-3", "rc-b", []string{"rc-2026-05", "linux"})
+	seedImageFile(t, s, dir, "img-4", "rc-old", []string{"rc-2026-04"})
+
+	body := jsonBody(t, bulkDeleteImagesRequest{Tag: "RC-2026-05"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2 (got %+v)", len(out.Results), out.Results)
+	}
+
+	imgs, _ := s.ListImages()
+	survivors := map[string]bool{}
+	for _, img := range imgs {
+		survivors[img.ID] = true
+	}
+	if !survivors["img-1"] || !survivors["img-4"] || len(survivors) != 2 {
+		t.Errorf("survivors = %v, want img-1+img-4", survivors)
+	}
+}
+
+func TestBulkDeleteImages_PartialFailure(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-real", "real", nil)
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-real", "img-missing"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	gotByID := map[string]bulkDeleteImageResult{}
+	for _, r := range out.Results {
+		gotByID[r.ID] = r
+	}
+	if !gotByID["img-real"].Success {
+		t.Errorf("expected img-real to succeed, got %+v", gotByID["img-real"])
+	}
+	if gotByID["img-missing"].Success {
+		t.Errorf("expected img-missing to fail")
+	}
+	if gotByID["img-missing"].Code != "resource_not_found" {
+		t.Errorf("img-missing.Code = %q, want resource_not_found", gotByID["img-missing"].Code)
+	}
+}
+
+func TestBulkDeleteImages_EmptyRequestRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteImagesRequest{})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteImages_BothIDsAndTagRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-1"}, Tag: "rc"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteImages_TagNoMatchEmptyResponse(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-keep", "keeper", []string{"prod"})
+
+	body := jsonBody(t, bulkDeleteImagesRequest{Tag: "nope"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 0 {
+		t.Errorf("results = %d, want 0", len(out.Results))
+	}
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 {
+		t.Errorf("survivors = %d, want 1 (img-keep untouched)", len(imgs))
 	}
 }
 

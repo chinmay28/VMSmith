@@ -375,6 +375,77 @@ func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_SortByName(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "Charlie", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "Bravo", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "name")
+	if err != nil {
+		t.Fatalf("vm list --sort name: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByCreatedAtDesc(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	base := time.Unix(1_700_000_000, 0)
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "first", CreatedAt: base, State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "second", CreatedAt: base.Add(time.Hour), State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "third", CreatedAt: base.Add(2 * time.Hour), State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "created_at", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"third", "second", "first"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidSort(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "ram_mb")
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidOrder(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--order", "sideways")
+	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("expected invalid --order error, got %v", err)
+	}
+}
+
 func TestCLI_VMList_InvalidOffset(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()
@@ -564,6 +635,51 @@ func TestCLI_VMRestart_NotFound(t *testing.T) {
 	defer cleanup()
 
 	_, err := runCLI("vm", "restart", "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent VM")
+	}
+}
+
+func TestCLI_VMReboot(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-rb", Name: "rebooter", State: types.VMStateRunning})
+
+	out, err := runCLI("vm", "reboot", "vm-rb")
+	if err != nil {
+		t.Fatalf("vm reboot: %v", err)
+	}
+	if !strings.Contains(out, "vm-rb") || !strings.Contains(out, "rebooted") {
+		t.Errorf("expected VM id and 'rebooted' in output, got: %q", out)
+	}
+
+	got, _ := mock.Get(nil, "vm-rb")
+	if got.State != types.VMStateRunning {
+		t.Errorf("State = %q, want running", got.State)
+	}
+}
+
+func TestCLI_VMReboot_NotRunning(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-stopped", State: types.VMStateStopped})
+
+	_, err := runCLI("vm", "reboot", "vm-stopped")
+	if err == nil {
+		t.Fatal("expected error for non-running VM")
+	}
+	if !strings.Contains(err.Error(), "vm_not_running") && !strings.Contains(err.Error(), "must be running") {
+		t.Errorf("expected vm_not_running error, got: %v", err)
+	}
+}
+
+func TestCLI_VMReboot_NotFound(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "reboot", "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent VM")
 	}
@@ -1391,6 +1507,89 @@ func TestCLI_ImageDelete_NotFound(t *testing.T) {
 	_, err := runCLI("image", "delete", "nonexistent-img")
 	if err == nil {
 		t.Error("expected error for nonexistent image")
+	}
+}
+
+func TestCLI_ImageDelete_NoArgsErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("image", "delete"); err == nil {
+		t.Error("expected error when neither image-id nor --tag is provided")
+	}
+}
+
+func TestCLI_ImageDelete_BothIDAndTagErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("image", "delete", "img-x", "--tag", "rc"); err == nil {
+		t.Error("expected error when both image-id and --tag are provided")
+	}
+}
+
+func TestCLI_ImageDelete_TagDeletesAllMatching(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	dir := t.TempDir()
+	for _, spec := range []struct {
+		id, name string
+		tags     []string
+	}{
+		{"img-prod", "prod", []string{"prod"}},
+		{"img-rc-a", "rc-a", []string{"rc-2026-05"}},
+		{"img-rc-b", "rc-b", []string{"rc-2026-05", "linux"}},
+		{"img-rc-old", "rc-old", []string{"rc-2026-04"}},
+	} {
+		path := filepath.Join(dir, spec.name+".qcow2")
+		os.WriteFile(path, []byte("seed"), 0o644)
+		s.PutImage(&types.Image{
+			ID: spec.id, Name: spec.name, Path: path, SizeBytes: 4, Format: "qcow2",
+			Tags: spec.tags, CreatedAt: time.Now(),
+		})
+	}
+
+	out, err := runCLI("image", "delete", "--tag", "RC-2026-05")
+	if err != nil {
+		t.Fatalf("image delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "img-rc-a") || !strings.Contains(out, "img-rc-b") {
+		t.Errorf("expected both deleted ids in output, got: %q", out)
+	}
+
+	survivors, _ := s.ListImages()
+	want := map[string]bool{"img-prod": true, "img-rc-old": true}
+	if len(survivors) != 2 {
+		t.Fatalf("survivors = %d, want 2", len(survivors))
+	}
+	for _, img := range survivors {
+		if !want[img.ID] {
+			t.Errorf("unexpected survivor: %s", img.ID)
+		}
+	}
+}
+
+func TestCLI_ImageDelete_TagNoMatchPrintsMessage(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	s.PutImage(&types.Image{
+		ID: "img-keep", Name: "keep", Path: "/tmp/keep.qcow2", SizeBytes: 4,
+		Format: "qcow2", Tags: []string{"prod"}, CreatedAt: time.Now(),
+	})
+
+	out, err := runCLI("image", "delete", "--tag", "missing")
+	if err != nil {
+		t.Fatalf("image delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "No images carry tag") {
+		t.Errorf("expected no-match message, got: %q", out)
+	}
+
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 {
+		t.Errorf("survivors = %d, want 1 (img-keep untouched)", len(imgs))
 	}
 }
 

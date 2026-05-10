@@ -37,9 +37,9 @@ vmsmith/
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
-│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm suspend|resume <id>` pause / unpause CPU+memory)
+│   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|reboot|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm reboot <id>` sends an ACPI reboot signal to the guest OS without power-cycling QEMU; `vm suspend|resume <id>` pause / unpause CPU+memory)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
-│   │   ├── image.go             # vmsmith image list|create|delete|push|pull
+│   │   ├── image.go             # vmsmith image list|create|delete|push|pull (`image delete --tag <tag>` bulk-deletes every image carrying that tag, mirroring the snapshot bulk_delete shape)
 │   │   ├── net.go               # vmsmith net interfaces
 │   │   ├── network.go           # vmsmith port add|remove|list (`port remove` accepts a positional id for single-delete, or `--vm <id> [--protocol tcp|udp]` to bulk-delete every rule on a VM)
 │   │   └── daemon.go            # vmsmith daemon start
@@ -414,7 +414,7 @@ Additional docs routes:
 - `GET /api/version` — public build identification (`version`, `commit`, `build_date`, `go_version`, `os`, `arch`). Sits outside the authenticated `/api/v1` tree so health checks and the GUI footer can read it without an API key. Values are populated at link time via `-X github.com/vmsmith/vmsmith/pkg/version.Version=…` (see `Makefile`); on an unconfigured build the response carries `version: "dev"`, `commit: "unknown"`, `build_date: "unknown"`. The CLI exposes the same payload via `vmsmith version` (human-readable) or `vmsmith version --json`.
 
 ```
-GET    /vms                            List all VMs (`?tag=<tag>` and `?status=<state>` filters supported); CLI also supports local `--limit` / `--offset` pagination on `vmsmith vm list`
+GET    /vms                            List all VMs. Filters: `?tag=<tag>`, `?status=<state>`. Sorting: `?sort=<id|name|created_at|state>` (default `id`) and `?order=<asc|desc>` (default `asc`); unknown values return 400 `invalid_sort` / `invalid_order`. All comparators tiebreak on `id` so paginated responses are deterministic. CLI mirrors via `vmsmith vm list --tag --status --sort --order --limit --offset`
 POST   /vms                            Create VM (VMSpec JSON body: name, image, cpus, ram_mb, disk_gb, ssh_pub_key, default_user, networks, auto_start, locked; VM names must be unique, 1-64 chars, alphanumeric/hyphen). When `auto_start=true`, the daemon will start this VM automatically at boot via the auto-start sweep. When `locked=true`, the VM is delete-protected; deletion returns HTTP 409 `vm_locked`.
 GET    /vms/{id}                       Get VM
 POST   /vms/{id}/clone                 Clone VM (body: `{ "name": "clone-name" }`; validates the new name and returns the cloned VM in stopped state)
@@ -423,6 +423,7 @@ POST   /vms/{id}/start                 Start VM
 POST   /vms/{id}/stop                  Stop VM
 POST   /vms/{id}/force-stop            Force-stop VM (immediate `dom.Destroy()`, skips ACPI shutdown — equivalent to pulling the power cord). Returns HTTP 409 `vm_already_stopped` when the VM is not running. CLI: `vmsmith vm force-stop <id>`.
 POST   /vms/{id}/restart               Restart VM (graceful stop, 30s grace before forced destroy, then start)
+POST   /vms/{id}/reboot                Reboot a running VM via libvirt's `dom.Reboot()` (ACPI signal to guest, no power cycle). Preserves IP / MAC / DHCP reservation; differs from restart which is stop+start. Returns HTTP 409 `vm_not_running` when the VM is not running. CLI: `vmsmith vm reboot <id>`.
 POST   /vms/{id}/suspend               Suspend a running VM (libvirt pause): freezes CPU + memory without releasing host resources. State becomes `paused`. Returns HTTP 409 `vm_not_running` when stopped or `vm_already_paused` when already paused.
 POST   /vms/{id}/resume                Resume a paused VM, restoring it to `running`. Returns HTTP 409 `vm_not_paused` if the VM is not currently paused.
 DELETE /vms/{id}                       Delete VM (returns HTTP 409 `vm_locked` if `Spec.Locked=true`; unlock first via PATCH or `vmsmith vm unlock`)
@@ -437,6 +438,7 @@ POST   /images                         Create image from VM (`vm_id`, `name`, op
 POST   /images/upload                  Upload qcow2 file (multipart `file` + `name` + optional `description` + repeated `tags` form fields, or a single comma-separated `tags` value)
 PATCH  /images/{id}                    Update image `description` and/or `tags`. Empty description = no change; nil tags = no change; `[]` clears tags.
 DELETE /images/{id}                    Delete image
+POST   /images/bulk_delete             Delete multiple images in a single request. Body: `{"ids": [...]}` or `{"tag": "..."}` (exactly one). Tag matching is case-insensitive. Returns `{"results": [{id, success, code?, message?}]}`. Emits one `image.deleted` event per successful target with `bulk=true`. CLI: `vmsmith image delete --tag <tag>`.
 GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards
 POST   /vms/{id}/ports                 Add port forward (`host_port`, `guest_port`, `protocol?`, `description?` — `description` is an optional free-form label, ≤256 chars)
