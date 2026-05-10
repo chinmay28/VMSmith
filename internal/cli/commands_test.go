@@ -1389,6 +1389,89 @@ func TestCLI_ImageDelete_NotFound(t *testing.T) {
 	}
 }
 
+func TestCLI_ImageDelete_NoArgsErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("image", "delete"); err == nil {
+		t.Error("expected error when neither image-id nor --tag is provided")
+	}
+}
+
+func TestCLI_ImageDelete_BothIDAndTagErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("image", "delete", "img-x", "--tag", "rc"); err == nil {
+		t.Error("expected error when both image-id and --tag are provided")
+	}
+}
+
+func TestCLI_ImageDelete_TagDeletesAllMatching(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	dir := t.TempDir()
+	for _, spec := range []struct {
+		id, name string
+		tags     []string
+	}{
+		{"img-prod", "prod", []string{"prod"}},
+		{"img-rc-a", "rc-a", []string{"rc-2026-05"}},
+		{"img-rc-b", "rc-b", []string{"rc-2026-05", "linux"}},
+		{"img-rc-old", "rc-old", []string{"rc-2026-04"}},
+	} {
+		path := filepath.Join(dir, spec.name+".qcow2")
+		os.WriteFile(path, []byte("seed"), 0o644)
+		s.PutImage(&types.Image{
+			ID: spec.id, Name: spec.name, Path: path, SizeBytes: 4, Format: "qcow2",
+			Tags: spec.tags, CreatedAt: time.Now(),
+		})
+	}
+
+	out, err := runCLI("image", "delete", "--tag", "RC-2026-05")
+	if err != nil {
+		t.Fatalf("image delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "img-rc-a") || !strings.Contains(out, "img-rc-b") {
+		t.Errorf("expected both deleted ids in output, got: %q", out)
+	}
+
+	survivors, _ := s.ListImages()
+	want := map[string]bool{"img-prod": true, "img-rc-old": true}
+	if len(survivors) != 2 {
+		t.Fatalf("survivors = %d, want 2", len(survivors))
+	}
+	for _, img := range survivors {
+		if !want[img.ID] {
+			t.Errorf("unexpected survivor: %s", img.ID)
+		}
+	}
+}
+
+func TestCLI_ImageDelete_TagNoMatchPrintsMessage(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	s.PutImage(&types.Image{
+		ID: "img-keep", Name: "keep", Path: "/tmp/keep.qcow2", SizeBytes: 4,
+		Format: "qcow2", Tags: []string{"prod"}, CreatedAt: time.Now(),
+	})
+
+	out, err := runCLI("image", "delete", "--tag", "missing")
+	if err != nil {
+		t.Fatalf("image delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "No images carry tag") {
+		t.Errorf("expected no-match message, got: %q", out)
+	}
+
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 {
+		t.Errorf("survivors = %d, want 1 (img-keep untouched)", len(imgs))
+	}
+}
+
 func TestCLI_ImageEdit_DescriptionAndTags(t *testing.T) {
 	s, _, cleanup := withTestStorage(t)
 	defer cleanup()

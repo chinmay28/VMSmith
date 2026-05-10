@@ -727,6 +727,32 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /images/bulk_delete:
+    post:
+      tags: [Images]
+      summary: Delete multiple images in a single request
+      description: |
+        Delete a batch of images either by explicit ID list or by tag selector.
+        Returns a per-target result so partial failures (one image missing,
+        the rest succeeded) surface in a single response. Exactly one of
+        `ids` or `tag` must be provided.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDeleteImagesRequest'
+      responses:
+        '200':
+          description: Per-image delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeleteImagesResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /images/{imageID}:
     patch:
       tags: [Images]
@@ -1407,6 +1433,41 @@ components:
       required: [name, success]
       properties:
         name:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+    BulkDeleteImagesRequest:
+      type: object
+      description: |
+        Selector for the images to delete. Exactly one of `ids` or `tag` must
+        be set; the request is rejected with HTTP 400 `invalid_bulk_request`
+        when both or neither are present. Tag matching is case-insensitive.
+      properties:
+        ids:
+          type: array
+          description: Explicit list of image IDs to delete.
+          items:
+            type: string
+        tag:
+          type: string
+          description: Match every image whose tag list contains this tag (case-insensitive).
+    BulkDeleteImagesResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDeleteImageResult'
+    BulkDeleteImageResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
           type: string
         success:
           type: boolean

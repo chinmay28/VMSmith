@@ -39,7 +39,7 @@ vmsmith/
 │   │   ├── root.go              # Root Cobra command, global --config flag
 │   │   ├── vm.go                # vmsmith vm create|edit|list|start|stop|force-stop|restart|suspend|resume|delete|lock|unlock (including bulk `start|stop --all [--tag]` helpers; `vm lock|unlock <id>` toggle delete-protection; `vm force-stop <id>` does an immediate libvirt destroy without ACPI shutdown; `vm suspend|resume <id>` pause / unpause CPU+memory)
 │   │   ├── snapshot.go          # vmsmith snapshot create|restore|list|edit|delete
-│   │   ├── image.go             # vmsmith image list|create|delete|push|pull
+│   │   ├── image.go             # vmsmith image list|create|delete|push|pull (`image delete --tag <tag>` bulk-deletes every image carrying that tag, mirroring the snapshot bulk_delete shape)
 │   │   ├── net.go               # vmsmith net interfaces
 │   │   ├── network.go           # vmsmith port add|remove|list
 │   │   └── daemon.go            # vmsmith daemon start
@@ -437,6 +437,7 @@ POST   /images                         Create image from VM (`vm_id`, `name`, op
 POST   /images/upload                  Upload qcow2 file (multipart `file` + `name` + optional `description` + repeated `tags` form fields, or a single comma-separated `tags` value)
 PATCH  /images/{id}                    Update image `description` and/or `tags`. Empty description = no change; nil tags = no change; `[]` clears tags.
 DELETE /images/{id}                    Delete image
+POST   /images/bulk_delete             Delete multiple images in a single request. Body: `{"ids": [...]}` or `{"tag": "..."}` (exactly one). Tag matching is case-insensitive. Returns `{"results": [{id, success, code?, message?}]}`. Emits one `image.deleted` event per successful target with `bulk=true`. CLI: `vmsmith image delete --tag <tag>`.
 GET    /images/{id}/download           Download image file
 GET    /vms/{id}/ports                 List port forwards
 POST   /vms/{id}/ports                 Add port forward (`host_port`, `guest_port`, `protocol?`, `description?` — `description` is an optional free-form label, ≤256 chars)

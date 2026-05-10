@@ -233,12 +233,30 @@ var imagePullCmd = &cobra.Command{
 }
 
 var imageDeleteCmd = &cobra.Command{
-	Use:   "delete <image-id>",
-	Short: "Delete an image",
-	Args:  cobra.ExactArgs(1),
+	Use:   "delete [image-id]",
+	Short: "Delete an image (or many via --tag)",
+	Long: `Delete an image.
+
+Single delete:    vmsmith image delete <image-id>
+Bulk by tag:      vmsmith image delete --tag rc-2026-05
+Exactly one of <image-id> or --tag is required.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-		logger.Info("cli", "image delete", "id", id)
+		tag, _ := cmd.Flags().GetString("tag")
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		var id string
+		if len(args) == 1 {
+			id = strings.TrimSpace(args[0])
+		}
+
+		if id == "" && tag == "" {
+			return fmt.Errorf("exactly one of <image-id> or --tag is required")
+		}
+		if id != "" && tag != "" {
+			return fmt.Errorf("<image-id> and --tag are mutually exclusive")
+		}
+
+		logger.Info("cli", "image delete", "id", id, "tag", tag)
 
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
@@ -247,14 +265,56 @@ var imageDeleteCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		if err := mgr.DeleteImage(id); err != nil {
-			logger.Error("cli", "image delete failed", "id", id, "error", err.Error())
-			return err
+		if id != "" {
+			if err := mgr.DeleteImage(id); err != nil {
+				logger.Error("cli", "image delete failed", "id", id, "error", err.Error())
+				return err
+			}
+			logger.Info("cli", "image deleted", "id", id)
+			fmt.Printf("Image %s deleted\n", id)
+			return nil
 		}
-		logger.Info("cli", "image deleted", "id", id)
-		fmt.Printf("Image %s deleted\n", id)
-		return nil
+
+		// Tag path: enumerate matches first, then delete one by one.
+		// We accept partial failures (one missing image doesn't abort the
+		// rest) and print a per-image status — same shape as the API
+		// bulk_delete endpoint.
+		return runImageTagDelete(mgr, tag)
 	},
+}
+
+func runImageTagDelete(mgr *storage.Manager, tag string) error {
+	imgs, err := mgr.ListImages()
+	if err != nil {
+		logger.Error("cli", "image delete: list failed", "tag", tag, "error", err.Error())
+		return err
+	}
+	matches := storage.FilterImagesByTag(imgs, tag)
+	if len(matches) == 0 {
+		fmt.Printf("No images carry tag %q\n", tag)
+		return nil
+	}
+
+	successes := 0
+	failures := 0
+	for _, img := range matches {
+		if err := mgr.DeleteImage(img.ID); err != nil {
+			fmt.Printf("FAIL  %s (%s): %s\n", img.ID, img.Name, err.Error())
+			failures++
+			continue
+		}
+		fmt.Printf("OK    %s (%s)\n", img.ID, img.Name)
+		successes++
+	}
+	logger.Info("cli", "image bulk delete complete",
+		"tag", tag,
+		"matched", fmt.Sprintf("%d", len(matches)),
+		"success", fmt.Sprintf("%d", successes),
+		"failed", fmt.Sprintf("%d", failures))
+	if failures > 0 {
+		return fmt.Errorf("%d of %d images failed to delete", failures, len(matches))
+	}
+	return nil
 }
 
 func init() {
@@ -269,6 +329,8 @@ func init() {
 
 	imageEditCmd.Flags().String("description", "", "new description (omit to leave unchanged; empty value cannot clear the field)")
 	imageEditCmd.Flags().StringArray("tag", nil, "tag value (repeatable; provide --tag with no value or omit any --tag to leave tags unchanged; pass --tag '' once to clear)")
+
+	imageDeleteCmd.Flags().String("tag", "", "delete every image carrying this tag (mutually exclusive with image-id; case-insensitive)")
 
 	imageCmd.AddCommand(imageListCmd)
 	imageCmd.AddCommand(imageCreateCmd)

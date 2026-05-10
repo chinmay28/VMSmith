@@ -837,6 +837,33 @@ test.describe("Images", () => {
     await expect(tags).toContainText("rocky");
     await expect(tags).toContainText("rc");
   });
+
+  test("bulk delete selected images", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Two seeded images visible
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    await page.getByTestId("image-checkbox-rocky-experimental").check();
+    await page.getByTestId("btn-bulk-delete-images").click();
+
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-bulk-result")).toContainText("1 of 1 succeeded");
+  });
+
+  test("bulk delete via select-all images", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("image-select-all").check();
+    await page.getByTestId("btn-bulk-delete-images").click();
+
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+  });
 });
 
 // ============================================================

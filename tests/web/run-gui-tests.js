@@ -471,6 +471,19 @@ async function main() {
       await assertNotVisible(p, "edit-image-modal");
     }, page);
 
+    await runTest("bulk-delete selected images", async (p) => {
+      // After the edit test above, both seeded images are still on screen.
+      // Tick the rocky one and confirm only it is removed.
+      await assertVisible(p, "image-row-rocky-experimental");
+      await assertVisible(p, "image-row-ubuntu-base");
+      await p.locator('[data-testid="image-checkbox-rocky-experimental"]').check();
+      await p.locator('[data-testid="btn-bulk-delete-images"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "image-row-rocky-experimental");
+      await assertVisible(p, "image-row-ubuntu-base");
+      await assertText(p, "image-bulk-result", "1 of 1 succeeded");
+    }, page);
+
     await page.close();
 
     // ================== Navigation Tests ==================

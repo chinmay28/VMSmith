@@ -172,6 +172,11 @@ export const images = {
   upload: (file: File, name: string, options: { description?: string; tags?: string[] } = {}, onProgress?: (progress: { loaded: number; total: number; percent: number }) => void) =>
     uploadImageWithProgress(file, name, options, onProgress),
   delete: (id: string) => unwrap(apiClient.DELETE('/images/{imageID}', { params: { path: { imageID: id } } })),
+  // bulkDelete deletes multiple images in a single round-trip. Pass either
+  // {ids: [...]} for explicit IDs or {tag: "..."} to delete every image
+  // carrying that tag (case-insensitive).
+  bulkDelete: (body: { ids?: string[]; tag?: string }) =>
+    unwrap(apiClient.POST('/images/bulk_delete', { body })),
   downloadUrl: (id: string) => `${BASE}/images/${id}/download`,
 };
 
