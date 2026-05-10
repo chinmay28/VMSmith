@@ -12,12 +12,15 @@ export default function ImageList() {
   const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
     () => imagesApi.list({ page, perPage, tag: tagFilter }),
     [page, perPage, tagFilter],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
+  const bulkMut = useMutation(imagesApi.bulkDelete);
   const imageList = imageResponse?.data || [];
   const totalImages = imageResponse?.meta?.totalCount ?? imageList.length;
   const allTags = useMemo(
@@ -27,11 +30,49 @@ export default function ImageList() {
 
   useEffect(() => { setPage(1); }, [tagFilter]);
 
+  // Drop selections that are no longer visible (page/filter/refresh churn).
+  useEffect(() => {
+    if (!imageList.length) {
+      if (selected.size) setSelected(new Set());
+      return;
+    }
+    const existing = new Set(imageList.map(img => img.id));
+    let changed = false;
+    const next = new Set();
+    selected.forEach(id => {
+      if (existing.has(id)) next.add(id);
+      else changed = true;
+    });
+    if (changed) setSelected(next);
+  }, [imageList]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Delete image "${name}"?`)) return;
     await deleteMut.execute(id);
     refresh();
   };
+
+  const allSelected = selected.size > 0 && selected.size === imageList.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(imageList.map(img => img.id)));
+  };
+  const toggleOne = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const handleBulkDelete = async () => {
+    if (!selected.size) return;
+    const result = await bulkMut.execute({ ids: Array.from(selected) });
+    setBulkResult(result);
+    setSelected(new Set());
+    refresh();
+  };
+  const dismissBulkResult = () => setBulkResult(null);
 
   const humanSize = (bytes) => {
     if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -90,9 +131,46 @@ export default function ImageList() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-1.5 border-b border-steel-800/40 bg-steel-900/40">
+            <label className="flex items-center gap-2 text-xs text-steel-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={toggleAll}
+                data-testid="image-select-all"
+              />
+              {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+            </label>
+            <button
+              className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleBulkDelete}
+              disabled={!selected.size || bulkMut.loading}
+              data-testid="btn-bulk-delete-images"
+            >
+              <Trash2 size={12} /> Delete selected
+            </button>
+          </div>
+          {bulkResult && (
+            <div
+              className="px-4 py-2 border-b border-steel-800/40 bg-steel-900/40 text-xs text-steel-400 flex items-center justify-between"
+              data-testid="image-bulk-result"
+            >
+              <span>
+                {(bulkResult.results || []).filter(r => r.success).length} of {(bulkResult.results || []).length} succeeded
+                {bulkResult.results?.some(r => !r.success) && (
+                  <span className="text-red-400">
+                    {' '}· {bulkResult.results.filter(r => !r.success).length} failed
+                  </span>
+                )}
+              </span>
+              <button className="btn-ghost text-xs" onClick={dismissBulkResult}>Dismiss</button>
+            </div>
+          )}
           <table className="w-full" data-testid="image-table">
             <thead>
               <tr className="border-b border-steel-800/40">
+                <th className="table-header table-cell w-8"></th>
                 <th className="table-header table-cell">Name</th>
                 <th className="table-header table-cell">Tags</th>
                 <th className="table-header table-cell">Format</th>
@@ -104,6 +182,14 @@ export default function ImageList() {
             <tbody>
               {imageList.map(img => (
                 <tr key={img.id} className="hover:bg-steel-800/20 transition-colors" data-testid={`image-row-${img.name}`}>
+                  <td className="table-cell">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(img.id)}
+                      onChange={() => toggleOne(img.id)}
+                      data-testid={`image-checkbox-${img.name}`}
+                    />
+                  </td>
                   <td className="table-cell">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded bg-steel-800/60 border border-steel-700/30 flex items-center justify-center">

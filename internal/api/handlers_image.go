@@ -20,6 +20,27 @@ type createImageRequest struct {
 	Tags        []string `json:"tags,omitempty"`
 }
 
+// bulkDeleteImagesRequest selects images to delete in a single batch.
+//
+// Exactly one of IDs or Tag must be set. When Tag is set, every image whose
+// (case-insensitive) tag list contains that tag is targeted — the cheap way
+// to clean up a release cohort ("rc-2026-05") without enumerating IDs.
+type bulkDeleteImagesRequest struct {
+	IDs []string `json:"ids,omitempty"`
+	Tag string   `json:"tag,omitempty"`
+}
+
+type bulkDeleteImageResult struct {
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkDeleteImagesResponse struct {
+	Results []bulkDeleteImageResult `json:"results"`
+}
+
 // CreateImage handles POST /api/v1/images
 func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	var req createImageRequest
@@ -150,6 +171,79 @@ func (s *Server) DeleteImage(w http.ResponseWriter, r *http.Request) {
 		"image_id": id,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// BulkDeleteImages handles POST /api/v1/images/bulk_delete.
+//
+// Accepts either an explicit list of image IDs ("ids") or a tag selector
+// ("tag"). Returns a per-target result list so partial failures (one image
+// missing, the rest succeeded) surface in a single response — mirroring the
+// snapshot bulk-delete shape.
+func (s *Server) BulkDeleteImages(w http.ResponseWriter, r *http.Request) {
+	var req bulkDeleteImagesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	tag := strings.TrimSpace(req.Tag)
+	cleanedIDs := make([]string, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if t := strings.TrimSpace(id); t != "" {
+			cleanedIDs = append(cleanedIDs, t)
+		}
+	}
+
+	if tag == "" && len(cleanedIDs) == 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"exactly one of ids or tag must be provided"))
+		return
+	}
+	if tag != "" && len(cleanedIDs) > 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"ids and tag are mutually exclusive"))
+		return
+	}
+
+	targets := cleanedIDs
+	if tag != "" {
+		imgs, err := s.storageMgr.ListImages()
+		if err != nil {
+			apiErr := sanitizeManagerError(err)
+			writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+			return
+		}
+		for _, img := range storage.FilterImagesByTag(imgs, tag) {
+			targets = append(targets, img.ID)
+		}
+	}
+
+	results := make([]bulkDeleteImageResult, 0, len(targets))
+	for _, id := range targets {
+		if err := s.storageMgr.DeleteImage(id); err != nil {
+			err = sanitizeManagerError(err)
+			result := bulkDeleteImageResult{ID: id, Success: false}
+			if apiErr, ok := err.(*types.APIError); ok {
+				result.Code = apiErr.Code
+				result.Message = apiErr.Message
+			} else {
+				result.Message = err.Error()
+			}
+			results = append(results, result)
+			continue
+		}
+		results = append(results, bulkDeleteImageResult{ID: id, Success: true})
+		s.publishAppEvent("image.deleted", "", "image "+id+" deleted", map[string]string{
+			"image_id": id,
+			"bulk":     "true",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, bulkDeleteImagesResponse{Results: results})
 }
 
 var availableStorageBytes = func(path string) (uint64, error) {

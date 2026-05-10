@@ -460,6 +460,32 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
   }
+  if (p === "/api/v1/images/bulk_delete" && method === "POST") {
+    const body = await parseBody(req);
+    const ids = Array.isArray(body.ids) ? body.ids.filter(s => typeof s === "string" && s.trim() !== "") : [];
+    const tag = typeof body.tag === "string" ? body.tag.trim() : "";
+    if (!ids.length && !tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "exactly one of ids or tag must be provided" });
+    }
+    if (ids.length && tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "ids and tag are mutually exclusive" });
+    }
+    let targets = ids;
+    if (tag) {
+      const lc = tag.toLowerCase();
+      targets = [...images.values()]
+        .filter(img => (img.tags || []).some(t => String(t).toLowerCase() === lc))
+        .map(img => img.id);
+    }
+    const results = targets.map(id => {
+      if (images.has(id)) {
+        images.delete(id);
+        return { id, success: true };
+      }
+      return { id, success: false, code: "resource_not_found", message: "image not found" };
+    });
+    return json(res, 200, { results });
+  }
   {
     const m = p.match(/^\/api\/v1\/images\/([^/]+)$/);
     if (m && method === "PATCH") {

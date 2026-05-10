@@ -2896,6 +2896,180 @@ func TestDownloadImage_Found(t *testing.T) {
 }
 
 // ============================================================
+// Image bulk-delete tests
+// ============================================================
+
+func decodeBulkImageResponse(t *testing.T, resp *http.Response) bulkDeleteImagesResponse {
+	t.Helper()
+	var out bulkDeleteImagesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode bulk response: %v", err)
+	}
+	return out
+}
+
+// seedImageFile writes a tiny qcow2-shaped file under the storage manager's
+// images dir and registers it in the store so DeleteImage's os.Remove finds
+// the file. Returns the registered image ID.
+func seedImageFile(t *testing.T, s *store.Store, dir, id, name string, tags []string) {
+	t.Helper()
+	path := filepath.Join(dir, name+".qcow2")
+	if err := os.WriteFile(path, []byte("seed"), 0o644); err != nil {
+		t.Fatalf("write seed image: %v", err)
+	}
+	if err := s.PutImage(&types.Image{
+		ID: id, Name: name, Path: path, SizeBytes: 4, Format: "qcow2",
+		Tags: tags, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+}
+
+func TestBulkDeleteImages_ByIDs(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-1", "keep", nil)
+	seedImageFile(t, s, dir, "img-2", "del-a", nil)
+	seedImageFile(t, s, dir, "img-3", "del-b", nil)
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-2", "img-3"}})
+	resp, err := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST bulk_delete: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	for _, r := range out.Results {
+		if !r.Success {
+			t.Errorf("expected success for %q, got code=%q msg=%q", r.ID, r.Code, r.Message)
+		}
+	}
+
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 || imgs[0].ID != "img-1" {
+		t.Errorf("survivors = %v, want only img-1", imgs)
+	}
+}
+
+func TestBulkDeleteImages_ByTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-1", "keeper", []string{"prod"})
+	seedImageFile(t, s, dir, "img-2", "rc-a", []string{"rc-2026-05"})
+	seedImageFile(t, s, dir, "img-3", "rc-b", []string{"rc-2026-05", "linux"})
+	seedImageFile(t, s, dir, "img-4", "rc-old", []string{"rc-2026-04"})
+
+	body := jsonBody(t, bulkDeleteImagesRequest{Tag: "RC-2026-05"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2 (got %+v)", len(out.Results), out.Results)
+	}
+
+	imgs, _ := s.ListImages()
+	survivors := map[string]bool{}
+	for _, img := range imgs {
+		survivors[img.ID] = true
+	}
+	if !survivors["img-1"] || !survivors["img-4"] || len(survivors) != 2 {
+		t.Errorf("survivors = %v, want img-1+img-4", survivors)
+	}
+}
+
+func TestBulkDeleteImages_PartialFailure(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-real", "real", nil)
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-real", "img-missing"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	gotByID := map[string]bulkDeleteImageResult{}
+	for _, r := range out.Results {
+		gotByID[r.ID] = r
+	}
+	if !gotByID["img-real"].Success {
+		t.Errorf("expected img-real to succeed, got %+v", gotByID["img-real"])
+	}
+	if gotByID["img-missing"].Success {
+		t.Errorf("expected img-missing to fail")
+	}
+	if gotByID["img-missing"].Code != "resource_not_found" {
+		t.Errorf("img-missing.Code = %q, want resource_not_found", gotByID["img-missing"].Code)
+	}
+}
+
+func TestBulkDeleteImages_EmptyRequestRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteImagesRequest{})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteImages_BothIDsAndTagRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteImagesRequest{IDs: []string{"img-1"}, Tag: "rc"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteImages_TagNoMatchEmptyResponse(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	dir := filepath.Join(t.TempDir(), "imgs")
+	os.MkdirAll(dir, 0o755)
+
+	seedImageFile(t, s, dir, "img-keep", "keeper", []string{"prod"})
+
+	body := jsonBody(t, bulkDeleteImagesRequest{Tag: "nope"})
+	resp, _ := http.Post(ts.URL+"/api/v1/images/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkImageResponse(t, resp)
+	if len(out.Results) != 0 {
+		t.Errorf("results = %d, want 0", len(out.Results))
+	}
+	imgs, _ := s.ListImages()
+	if len(imgs) != 1 {
+		t.Errorf("survivors = %d, want 1 (img-keep untouched)", len(imgs))
+	}
+}
+
+// ============================================================
 // Port forward handler tests
 // ============================================================
 

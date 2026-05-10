@@ -1256,6 +1256,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/images/bulk_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete multiple images in a single request
+         * @description Delete a batch of images either by explicit ID list or by tag selector.
+         *     Returns a per-target result so partial failures (one image missing,
+         *     the rest succeeded) surface in a single response. Exactly one of
+         *     `ids` or `tag` must be provided.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteImagesRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-image delete results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkDeleteImagesResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images/{imageID}": {
         parameters: {
             query?: never;
@@ -2014,6 +2062,26 @@ export interface components {
         };
         BulkDeleteSnapshotResult: {
             name: string;
+            success: boolean;
+            code?: string;
+            message?: string;
+        };
+        /**
+         * @description Selector for the images to delete. Exactly one of `ids` or `tag` must
+         *     be set; the request is rejected with HTTP 400 `invalid_bulk_request`
+         *     when both or neither are present. Tag matching is case-insensitive.
+         */
+        BulkDeleteImagesRequest: {
+            /** @description Explicit list of image IDs to delete. */
+            ids?: string[];
+            /** @description Match every image whose tag list contains this tag (case-insensitive). */
+            tag?: string;
+        };
+        BulkDeleteImagesResponse: {
+            results: components["schemas"]["BulkDeleteImageResult"][];
+        };
+        BulkDeleteImageResult: {
+            id: string;
             success: boolean;
             code?: string;
             message?: string;
