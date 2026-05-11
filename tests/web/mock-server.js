@@ -376,7 +376,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
-    return json(res, 200, snapshots.get(m[1]) || []);
+    const sortField = url.searchParams.get("sort") || "id";
+    const order = url.searchParams.get("order") || "asc";
+    if (!["id", "name", "created_at"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at" });
+    }
+    if (!["asc", "desc"].includes(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
+    const list = [...(snapshots.get(m[1]) || [])];
+    const cmp = (a, b) => {
+      let l;
+      switch (sortField) {
+        case "name":       l = (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()); break;
+        case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
+        default:           l = 0; // id == vmID/name, so handled by tiebreak
+      }
+      if (l === 0) l = (a.name || "").localeCompare(b.name || "");
+      return order === "desc" ? -l : l;
+    };
+    list.sort(cmp);
+    return json(res, 200, list);
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "POST") {
     const body = await parseBody(req);

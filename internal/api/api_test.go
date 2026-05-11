@@ -2841,6 +2841,127 @@ func TestListSnapshots_VMNotFound(t *testing.T) {
 	assertAPIErrorCode(t, resp, "resource_not_found")
 }
 
+func TestListSnapshots_SortByName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-sort", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-sort", Name: "Charlie"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-sort", Name: "alpha"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-sort", Name: "Bravo"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-snap-sort/snapshots?sort=name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, snap.Name, want[i])
+		}
+	}
+}
+
+func TestListSnapshots_SortByNameDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-desc"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc", Name: "alpha"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc", Name: "Bravo"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc", Name: "Charlie"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-desc/snapshots?sort=name&order=desc")
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"Charlie", "Bravo", "alpha"}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, snap.Name, want[i])
+		}
+	}
+}
+
+func TestListSnapshots_SortByCreatedAtDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-time"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-time", Name: "first", CreatedAt: t0})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-time", Name: "second", CreatedAt: t0.Add(time.Hour)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-time", Name: "third", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-time/snapshots?sort=created_at&order=desc")
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"third", "second", "first"}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, snap.Name, want[i])
+		}
+	}
+}
+
+func TestListSnapshots_SortPaginationDeterministic(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-page"})
+	// Insert in arbitrary order to exercise the sort.
+	for _, name := range []string{"snap-3", "snap-1", "snap-4", "snap-2", "snap-5"} {
+		mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-page", Name: name})
+	}
+
+	resp1, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-page/snapshots?sort=name&order=desc&page=1&per_page=2")
+	if got := resp1.Header.Get("X-Total-Count"); got != "5" {
+		t.Fatalf("X-Total-Count = %q, want 5", got)
+	}
+	var page1 []*types.Snapshot
+	decodeJSON(t, resp1, &page1)
+
+	resp2, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-page/snapshots?sort=name&order=desc&page=2&per_page=2")
+	var page2 []*types.Snapshot
+	decodeJSON(t, resp2, &page2)
+
+	got := []string{page1[0].Name, page1[1].Name, page2[0].Name, page2[1].Name}
+	want := []string{"snap-5", "snap-4", "snap-3", "snap-2"}
+	for i, n := range got {
+		if n != want[i] {
+			t.Fatalf("page-spanning order[%d] = %q, want %q (full: %v)", i, n, want[i], got)
+		}
+	}
+}
+
+func TestListSnapshots_RejectsInvalidSort(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-bad-sort"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-bad-sort/snapshots?sort=description")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_sort")
+}
+
+func TestListSnapshots_RejectsInvalidOrder(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-bad-order"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-bad-order/snapshots?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_order")
+}
+
 func TestRestoreSnapshot_SnapshotNotFound(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

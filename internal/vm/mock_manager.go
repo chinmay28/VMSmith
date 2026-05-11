@@ -549,6 +549,19 @@ func (m *MockManager) SeedVM(vm *types.VM) {
 	m.vms[vm.ID] = vm
 }
 
+// SeedSnapshot injects a snapshot under the given VM with a caller-controlled
+// timestamp.  CreateSnapshot stamps CreatedAt with the wall clock; tests that
+// exercise sort-by-created_at need deterministic timestamps that don't depend
+// on wall-clock ordering of consecutive calls.
+func (m *MockManager) SeedSnapshot(snap *types.Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if snap.ID == "" {
+		snap.ID = fmt.Sprintf("%s/%s", snap.VMID, snap.Name)
+	}
+	m.snapshots[snap.VMID] = append(m.snapshots[snap.VMID], snap)
+}
+
 // VMCount returns the number of tracked VMs.
 func (m *MockManager) VMCount() int {
 	m.mu.RLock()

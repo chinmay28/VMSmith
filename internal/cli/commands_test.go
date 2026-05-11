@@ -1410,6 +1410,81 @@ func TestCLI_SnapshotCreate_DescriptionTooLong(t *testing.T) {
 	}
 }
 
+func TestCLI_SnapshotList_SortByName(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-sort", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-sort", Name: "Charlie"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-sort", Name: "alpha"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-sort", Name: "Bravo"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-sort", "--sort", "name")
+	if err != nil {
+		t.Fatalf("snapshot list --sort name: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_SnapshotList_SortByCreatedAtDesc(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mock.SeedVM(&types.VM{ID: "vm-s-time", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-time", Name: "first", CreatedAt: base})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-time", Name: "second", CreatedAt: base.Add(time.Hour)})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-time", Name: "third", CreatedAt: base.Add(2 * time.Hour)})
+
+	out, err := runCLI("snapshot", "list", "vm-s-time", "--sort", "created_at", "--order", "desc")
+	if err != nil {
+		t.Fatalf("snapshot list --sort created_at --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	want := []string{"third", "second", "first"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCLI_SnapshotList_RejectsInvalidSort(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-bad-sort"})
+
+	_, err := runCLI("snapshot", "list", "vm-bad-sort", "--sort", "description")
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+}
+
+func TestCLI_SnapshotList_RejectsInvalidOrder(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-bad-order"})
+
+	_, err := runCLI("snapshot", "list", "vm-bad-order", "--order", "sideways")
+	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("expected invalid --order error, got %v", err)
+	}
+}
+
 func TestCLI_SnapshotRestore(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
