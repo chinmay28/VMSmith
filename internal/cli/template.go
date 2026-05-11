@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -119,6 +118,26 @@ var templateListCmd = &cobra.Command{
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter, _ := cmd.Flags().GetString("tag")
+		sortField, _ := cmd.Flags().GetString("sort")
+		orderField, _ := cmd.Flags().GetString("order")
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		if sortField == "" {
+			sortField = types.TemplateSortID
+		}
+		switch sortField {
+		case types.TemplateSortID, types.TemplateSortName, types.TemplateSortCreatedAt:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at", sortField)
+		}
+		orderField = strings.TrimSpace(strings.ToLower(orderField))
+		if orderField == "" {
+			orderField = types.SortOrderAsc
+		}
+		switch orderField {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", orderField)
+		}
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
@@ -139,12 +158,7 @@ var templateListCmd = &cobra.Command{
 		if tagFilter = strings.TrimSpace(tagFilter); tagFilter != "" {
 			templates = filterTemplatesByTag(templates, tagFilter)
 		}
-		sort.SliceStable(templates, func(i, j int) bool {
-			if !templates[i].CreatedAt.Equal(templates[j].CreatedAt) {
-				return templates[i].CreatedAt.Before(templates[j].CreatedAt)
-			}
-			return templates[i].ID < templates[j].ID
-		})
+		types.SortTemplates(templates, sortField, orderField)
 		templates = paginateSlice(templates, limit, offset)
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -287,6 +301,8 @@ func init() {
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
 	templateListCmd.Flags().String("tag", "", "filter templates by tag (case-insensitive)")
+	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
+	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
 	templateEditCmd.Flags().String("description", "", "new template description (omit to keep current)")
 	templateEditCmd.Flags().StringSlice("tag", nil, "replace template tags (repeatable; omit to keep current)")

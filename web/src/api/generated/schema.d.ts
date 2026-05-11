@@ -1562,8 +1562,20 @@ export interface paths {
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                     /**
+                     * @description Field to sort the template list by. Defaults to `id`. Unknown
+                     *     values return 400 `invalid_sort`. All comparators tiebreak on
+                     *     `id` so paginated requests return the same set across two
+                     *     independent fetches.
+                     */
+                    sort?: components["parameters"]["TemplateSort"];
+                    /**
+                     * @description Sort direction. Defaults to `asc`. Unknown values return 400
+                     *     `invalid_order`.
+                     */
+                    order?: components["parameters"]["SortOrder"];
+                    /**
                      * @description Case-insensitive filter; only templates carrying this tag are
-                     *     returned. Filtering is applied before pagination, so
+                     *     returned. Filtering is applied before sort + pagination, so
                      *     X-Total-Count reflects the filtered population.
                      */
                     tag?: string;
@@ -2651,6 +2663,13 @@ export interface components {
          *     tiebreak on `name` so pagination is deterministic across backends.
          */
         SnapshotSort: "id" | "name" | "created_at";
+        /**
+         * @description Field to sort the template list by. Defaults to `id`. Unknown
+         *     values return 400 `invalid_sort`. All comparators tiebreak on
+         *     `id` so paginated requests return the same set across two
+         *     independent fetches.
+         */
+        TemplateSort: "id" | "name" | "created_at";
         /**
          * @description Sort direction. Defaults to `asc`. Unknown values return 400
          *     `invalid_order`.

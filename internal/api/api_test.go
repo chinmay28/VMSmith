@@ -5691,3 +5691,157 @@ func TestBulkDeletePorts_ProtocolNoMatchEmptyResponse(t *testing.T) {
 		t.Errorf("survivors = %d, want 1 (tcp untouched)", len(survivors))
 	}
 }
+
+// --- Template list sort (5.4.7) ---
+
+// seedStoredTemplate stamps a template directly into the underlying store
+// with caller-controlled ID and CreatedAt so sort tests aren't at the mercy
+// of wall-clock ordering between rapid POST /templates calls.
+func seedStoredTemplate(t *testing.T, s *store.Store, tpl *types.VMTemplate) {
+	t.Helper()
+	if tpl.UpdatedAt.IsZero() {
+		tpl.UpdatedAt = tpl.CreatedAt
+	}
+	if err := s.PutTemplate(tpl); err != nil {
+		t.Fatalf("seed template: %v", err)
+	}
+}
+
+func decodeTemplateList(t *testing.T, resp *http.Response) []*types.VMTemplate {
+	t.Helper()
+	var out []*types.VMTemplate
+	decodeJSON(t, resp, &out)
+	return out
+}
+
+func TestListTemplates_SortByName(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "Charlie", Image: "rocky9.qcow2", CreatedAt: t0.Add(2 * time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "Bravo", Image: "rocky9.qcow2", CreatedAt: t0.Add(time.Hour)})
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?sort=name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	want := []string{"alpha", "Bravo", "Charlie"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortByNameDesc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "Bravo", Image: "rocky9.qcow2", CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "Charlie", Image: "rocky9.qcow2", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=name&order=desc")
+	got := decodeTemplateList(t, resp)
+	want := []string{"Charlie", "Bravo", "alpha"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortByCreatedAtDesc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "bravo", Image: "rocky9.qcow2", CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "charlie", Image: "rocky9.qcow2", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=created_at&order=desc")
+	got := decodeTemplateList(t, resp)
+	want := []string{"tmpl-3", "tmpl-2", "tmpl-1"}
+	for i, tpl := range got {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, tpl.ID, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortCombinesWithTagFilter(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "bravo", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "charlie", Image: "rocky9.qcow2", Tags: []string{"dev"}, CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?tag=prod&sort=name&order=desc")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (tag filter dropped the dev template)", len(got))
+	}
+	want := []string{"bravo", "alpha"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortPaginationDeterministic(t *testing.T) {
+	// Equal-name input: stable pagination only holds if the comparator
+	// tiebreaks on ID. Without that, two fetches see different orderings
+	// across Go map iteration runs.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-4", Name: "shared", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "shared", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "shared", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "shared", Image: "rocky9.qcow2", CreatedAt: t0})
+
+	page1, _ := http.Get(ts.URL + "/api/v1/templates?sort=name&per_page=2&page=1")
+	page2, _ := http.Get(ts.URL + "/api/v1/templates?sort=name&per_page=2&page=2")
+	got1 := decodeTemplateList(t, page1)
+	got2 := decodeTemplateList(t, page2)
+	if len(got1) != 2 || len(got2) != 2 {
+		t.Fatalf("got1=%d got2=%d, want both 2", len(got1), len(got2))
+	}
+	combined := []string{got1[0].ID, got1[1].ID, got2[0].ID, got2[1].ID}
+	want := []string{"tmpl-1", "tmpl-2", "tmpl-3", "tmpl-4"}
+	for i, id := range combined {
+		if id != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, id, want[i], combined)
+		}
+	}
+}
+
+func TestListTemplates_RejectsInvalidSort(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=ram_mb")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_sort")
+}
+
+func TestListTemplates_RejectsInvalidOrder(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_order")
+}
