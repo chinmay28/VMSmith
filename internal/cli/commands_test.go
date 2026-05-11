@@ -356,6 +356,88 @@ func TestCLI_VMList_FilterByTagAndStatus(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_FilterBySearch_MatchesName(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "db-primary", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "web-staging", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--search", "web")
+	if err != nil {
+		t.Fatalf("vm list --search: %v", err)
+	}
+	if !strings.Contains(out, "web-prod-01") || !strings.Contains(out, "web-staging") || strings.Contains(out, "db-primary") {
+		t.Fatalf("unexpected filtered output: %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterBySearch_MatchesDescription(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Description: "Customer A jumpbox", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Description: "Internal tooling", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--search", "customer")
+	if err != nil {
+		t.Fatalf("vm list --search: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha (customer-* description), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterBySearch_MatchesTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"team-storage"}, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"experiment"}, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--search", "team-")
+	if err != nil {
+		t.Fatalf("vm list --search: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha (team-* tag), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterBySearch_NoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("vm list --search: %v", err)
+	}
+	if strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected no matching rows, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterBySearch_CombinesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "web-staging", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "db-primary", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--search", "web", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --search --status: %v", err)
+	}
+	if !strings.Contains(out, "web-prod-01") || strings.Contains(out, "web-staging") || strings.Contains(out, "db-primary") {
+		t.Fatalf("expected only web-prod-01 (web + running), got %q", out)
+	}
+}
+
 func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

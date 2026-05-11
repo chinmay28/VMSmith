@@ -19,6 +19,14 @@ export interface paths {
                     tag?: components["parameters"]["TagFilter"];
                     status?: components["parameters"]["StatusFilter"];
                     /**
+                     * @description Case-insensitive substring filter applied across the VM's name,
+                     *     description, and tags. Combine with `tag` and `status` for narrower
+                     *     scoping; an empty value matches every VM. ID is intentionally excluded
+                     *     from the match — the opaque `vm-<unix-nano>` form rarely matches a
+                     *     useful operator query.
+                     */
+                    search?: components["parameters"]["SearchFilter"];
+                    /**
                      * @description Field to sort the VM list by. Defaults to `id`. Unknown values
                      *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
                      *     pagination is deterministic across backends.
@@ -2540,6 +2548,14 @@ export interface components {
         /** @description Case-insensitive tag filter. */
         TagFilter: string;
         StatusFilter: "creating" | "running" | "stopped" | "paused" | "deleted" | "unknown";
+        /**
+         * @description Case-insensitive substring filter applied across the VM's name,
+         *     description, and tags. Combine with `tag` and `status` for narrower
+         *     scoping; an empty value matches every VM. ID is intentionally excluded
+         *     from the match — the opaque `vm-<unix-nano>` form rarely matches a
+         *     useful operator query.
+         */
+        SearchFilter: string;
         /**
          * @description Field to sort the VM list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

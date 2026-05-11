@@ -137,12 +137,14 @@ var vmListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
+		searchFilter, _ := cmd.Flags().GetString("search")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
+		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField == "" {
 			sortField = types.VMSortID
@@ -179,7 +181,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -196,6 +198,9 @@ var vmListCmd = &cobra.Command{
 					if !matchedTag {
 						continue
 					}
+				}
+				if searchFilter != "" && !types.VMMatchesSearch(v, searchFilter) {
+					continue
 				}
 				filtered = append(filtered, v)
 			}
@@ -973,6 +978,7 @@ Examples:
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
+	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")

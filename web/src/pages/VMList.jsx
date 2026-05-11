@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, RotateCcw, RefreshCw, Pause, Zap } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, RotateCcw, RefreshCw, Pause, Zap, Search } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -19,6 +19,8 @@ export default function VMList() {
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
   const [actionMenu, setActionMenu] = useState(null);
   const [tagFilter, setTagFilter] = useState('');
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
+  const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
@@ -26,8 +28,8 @@ export default function VMList() {
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
   const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, sort, order, page, perPage }),
-    [tagFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -60,14 +62,25 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, sort, order]);
+  }, [tagFilter, searchFilter, sort, order]);
+
+  // Debounce the free-text search box. The committed `searchFilter` drives the
+  // useFetch dependency above; `searchInput` is what the user types.
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const handle = setTimeout(() => {
+      setSearchFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
+    if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     setSearchParams(next, { replace: true });
-  }, [sort, order]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -105,6 +118,32 @@ export default function VMList() {
           <ErrorBanner message={bulkMessage} onRetry={() => setBulkMessage(null)} />
         </div>
       )}
+
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative flex-1 max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name, description, or tag…"
+            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            data-testid="vm-list-search"
+            aria-label="Search machines"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setSearchInput('')}
+              data-testid="vm-list-search-clear"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
 
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">

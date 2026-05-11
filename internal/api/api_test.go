@@ -630,6 +630,159 @@ func TestListVMs_FilterByStatus_IsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestListVMs_FilterBySearch_MatchesName(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "db-primary", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "web-staging", State: types.VMStateStopped})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=web")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 web-* vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if !strings.Contains(vm.Name, "web") {
+			t.Fatalf("unexpected vm in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterBySearch_MatchesDescription(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Description: "Customer A jumpbox"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Description: "Internal tooling"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Description: "Customer B builder"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=customer")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 customer-* vms, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Tags: []string{"team-storage", "prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Tags: []string{"team-network"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Tags: []string{"experiment"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=team-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 team-* vms, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "Web-Prod-01", Description: "Customer Site"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=WEB")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "Web-Prod-01" {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=needle-not-present")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected no matches, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_CombinesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-staging", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-primary", State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=web&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "web-prod-01" {
+		t.Fatalf("expected exactly web-prod-01 (running web-*), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_CombinesWithTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", Tags: []string{"prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-staging", Tags: []string{"dev"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-prod", Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=web&tag=prod")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "web-prod-01" {
+		t.Fatalf("expected exactly web-prod-01 (web + prod tag), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterBySearch_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?search=%20%20alpha%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected whitespace-trimmed match for alpha, got %+v", vms)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
