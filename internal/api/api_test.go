@@ -1141,7 +1141,7 @@ func TestBulkVMAction_InvalidRequest(t *testing.T) {
 		wantState int
 	}{
 		{name: "bad json", body: "{", wantCode: "", wantState: http.StatusBadRequest},
-		{name: "invalid action", body: `{"action":"reboot","ids":["vm-1"]}`, wantCode: "invalid_bulk_action", wantState: http.StatusBadRequest},
+		{name: "invalid action", body: `{"action":"explode","ids":["vm-1"]}`, wantCode: "invalid_bulk_action", wantState: http.StatusBadRequest},
 		{name: "missing ids", body: `{"action":"start","ids":[]}`, wantCode: "invalid_bulk_request", wantState: http.StatusBadRequest},
 	}
 
@@ -1167,6 +1167,136 @@ func TestBulkVMAction_InvalidRequest(t *testing.T) {
 				t.Fatalf("error = %q, want invalid request body", errResp.Error)
 			}
 		})
+	}
+}
+
+// TestBulkVMAction_LifecycleVerbs exercises every lifecycle verb that 2.3.8
+// adds to the bulk endpoint (restart / force-stop / reboot / suspend /
+// resume).  Each subtest seeds VMs in the appropriate state, fires the bulk
+// action, and asserts the result list + post-action state.
+func TestBulkVMAction_LifecycleVerbs(t *testing.T) {
+	cases := []struct {
+		action    string
+		seedState types.VMState
+		wantState types.VMState
+	}{
+		{action: "restart", seedState: types.VMStateRunning, wantState: types.VMStateRunning},
+		{action: "force-stop", seedState: types.VMStateRunning, wantState: types.VMStateStopped},
+		{action: "reboot", seedState: types.VMStateRunning, wantState: types.VMStateRunning},
+		{action: "suspend", seedState: types.VMStateRunning, wantState: types.VMStatePaused},
+		{action: "resume", seedState: types.VMStatePaused, wantState: types.VMStateRunning},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.action, func(t *testing.T) {
+			ts, mockMgr, cleanup := testServer(t)
+			defer cleanup()
+
+			ids := []string{"vm-a", "vm-b"}
+			for _, id := range ids {
+				mockMgr.SeedVM(&types.VM{ID: id, Name: id, State: tc.seedState})
+			}
+
+			body := jsonBody(t, map[string]any{"action": tc.action, "ids": ids})
+			resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+			if err != nil {
+				t.Fatalf("POST /vms/bulk %s: %v", tc.action, err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+
+			var got bulkVMActionResponse
+			decodeJSON(t, resp, &got)
+			if got.Action != tc.action {
+				t.Fatalf("action = %q, want %q", got.Action, tc.action)
+			}
+			if len(got.Results) != len(ids) {
+				t.Fatalf("results = %d, want %d", len(got.Results), len(ids))
+			}
+			for _, r := range got.Results {
+				if !r.Success {
+					t.Fatalf("result for %s unsuccessful: %+v", r.ID, r)
+				}
+				vm, err := mockMgr.Get(nil, r.ID)
+				if err != nil {
+					t.Fatalf("Get(%s): %v", r.ID, err)
+				}
+				if vm.State != tc.wantState {
+					t.Fatalf("vm %s state = %q, want %q", r.ID, vm.State, tc.wantState)
+				}
+			}
+		})
+	}
+}
+
+// TestBulkVMAction_SuspendPartialFailure exercises the partial-failure path
+// for the new lifecycle verbs: when one VM is in the wrong state for the
+// action (e.g. suspend on a stopped VM), the bulk endpoint must surface the
+// per-VM 409 code without halting the rest of the batch.
+func TestBulkVMAction_SuspendPartialFailure(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-stopped", Name: "stopped", State: types.VMStateStopped})
+
+	body := jsonBody(t, map[string]any{
+		"action": "suspend",
+		"ids":    []string{"vm-running", "vm-stopped"},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got bulkVMActionResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(got.Results))
+	}
+	if !got.Results[0].Success {
+		t.Fatalf("first result = %+v, want success", got.Results[0])
+	}
+	if got.Results[1].Success || got.Results[1].Code != "vm_not_running" {
+		t.Fatalf("second result = %+v, want vm_not_running failure", got.Results[1])
+	}
+
+	// The successful target was actually suspended.
+	if vm, _ := mockMgr.Get(nil, "vm-running"); vm.State != types.VMStatePaused {
+		t.Fatalf("vm-running state = %q, want paused", vm.State)
+	}
+	// The skipped target stays in its original state.
+	if vm, _ := mockMgr.Get(nil, "vm-stopped"); vm.State != types.VMStateStopped {
+		t.Fatalf("vm-stopped state = %q, want stopped", vm.State)
+	}
+}
+
+// TestBulkVMAction_InvalidActionMessageListsAllVerbs locks in that the error
+// message points operators at the full list of supported actions so a typo
+// like "shutdown" produces a self-documenting response.
+func TestBulkVMAction_InvalidActionMessageListsAllVerbs(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json",
+		bytes.NewBufferString(`{"action":"shutdown","ids":["vm-1"]}`))
+	if err != nil {
+		t.Fatalf("POST /vms/bulk: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	decodeJSON(t, resp, &errResp)
+	for _, want := range []string{"start", "stop", "delete", "restart", "force-stop", "reboot", "suspend", "resume"} {
+		if !strings.Contains(errResp.Error, want) {
+			t.Fatalf("error %q is missing %q", errResp.Error, want)
+		}
 	}
 }
 
