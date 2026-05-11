@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2639,5 +2640,175 @@ func TestCLI_VMTop_FormatsByteRates(t *testing.T) {
 	}
 	if !strings.Contains(out, "MB/s") {
 		t.Errorf("expected MB/s output for byte rate, got:\n%s", out)
+	}
+}
+
+// =====================================================
+// webhook edit tests (CLI hits a fake daemon PATCH /api/v1/webhooks/{id})
+// =====================================================
+
+// fakeWebhookDaemon returns an httptest.Server that captures the most recent
+// PATCH request body and returns canned responses based on the configured
+// status code.  Each test mutates the per-request hooks via the returned
+// struct to drive different code paths.
+type fakeWebhookDaemon struct {
+	lastBody   []byte
+	lastMethod string
+	status     int
+	respBody   string
+}
+
+func newFakeWebhookDaemon(t *testing.T, status int, body string) (*httptest.Server, *fakeWebhookDaemon) {
+	t.Helper()
+	state := &fakeWebhookDaemon{status: status, respBody: body}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state.lastMethod = r.Method
+		state.lastBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(state.status)
+		w.Write([]byte(state.respBody))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, state
+}
+
+func TestCLI_WebhookEdit_SetsURL(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-1","url":"https://new.example.com/x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "edit", "wh-1", "--api-url", srv.URL, "--url", "https://new.example.com/x")
+	if err != nil {
+		t.Fatalf("webhook edit: %v\nout: %s", err, out)
+	}
+	if state.lastMethod != http.MethodPatch {
+		t.Fatalf("expected PATCH, got %s", state.lastMethod)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v\nbody=%s", err, state.lastBody)
+	}
+	if sent.URL == nil || *sent.URL != "https://new.example.com/x" {
+		t.Errorf("URL not set in PATCH body: %+v", sent)
+	}
+	if sent.Secret != nil || sent.EventTypes != nil || sent.Active != nil {
+		t.Errorf("unexpected fields populated: %+v", sent)
+	}
+	if !strings.Contains(out, "Webhook updated: wh-1") {
+		t.Errorf("expected confirmation in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_RotatesSecret(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-2","url":"https://x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	if _, err := runCLI("webhook", "edit", "wh-2", "--api-url", srv.URL, "--secret", "newsecret"); err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.Secret == nil || *sent.Secret != "newsecret" {
+		t.Errorf("Secret not sent in PATCH body: %+v", sent)
+	}
+}
+
+func TestCLI_WebhookEdit_TogglesActive(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-3","url":"https://x","active":false,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "edit", "wh-3", "--api-url", srv.URL, "--active=false")
+	if err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.Active == nil || *sent.Active != false {
+		t.Errorf("Active=false not sent: %+v", sent)
+	}
+	if !strings.Contains(out, "Active: false") {
+		t.Errorf("expected active=false in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_SetsEventTypes(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-4","url":"https://x","active":true,"event_types":["vm.started","vm.stopped"],"created_at":"2024-01-01T00:00:00Z"}`)
+
+	if _, err := runCLI("webhook", "edit", "wh-4", "--api-url", srv.URL, "--event-types", "vm.started,vm.stopped"); err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.EventTypes == nil {
+		t.Fatalf("EventTypes not sent in PATCH body: %s", state.lastBody)
+	}
+	if len(*sent.EventTypes) != 2 {
+		t.Errorf("EventTypes len = %d, want 2: %v", len(*sent.EventTypes), *sent.EventTypes)
+	}
+}
+
+func TestCLI_WebhookEdit_ClearsEventTypes(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-5","url":"https://x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "edit", "wh-5", "--api-url", srv.URL, "--clear-event-types")
+	if err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.EventTypes == nil {
+		t.Fatalf("EventTypes not sent (nil): %s", state.lastBody)
+	}
+	if len(*sent.EventTypes) != 0 {
+		t.Errorf("EventTypes should be empty slice, got %v", *sent.EventTypes)
+	}
+	if !strings.Contains(out, "(all events)") {
+		t.Errorf("expected '(all events)' in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_RejectsConflictingEventTypeFlags(t *testing.T) {
+	srv, _ := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-c","url":"https://x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	_, err := runCLI("webhook", "edit", "wh-c", "--api-url", srv.URL,
+		"--event-types", "vm.started", "--clear-event-types")
+	if err == nil {
+		t.Fatal("expected error when both flags are passed")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want 'mutually exclusive'", err)
+	}
+}
+
+func TestCLI_WebhookEdit_RejectsNoFlags(t *testing.T) {
+	_, err := runCLI("webhook", "edit", "wh-noop", "--api-url", "http://invalid")
+	if err == nil {
+		t.Fatal("expected error when no fields are passed")
+	}
+	if !strings.Contains(err.Error(), "no fields to update") {
+		t.Errorf("error = %v, want 'no fields to update'", err)
+	}
+}
+
+func TestCLI_WebhookEdit_PropagatesDaemonError(t *testing.T) {
+	srv, _ := newFakeWebhookDaemon(t, http.StatusNotFound,
+		`{"code":"resource_not_found","message":"webhook not found"}`)
+
+	_, err := runCLI("webhook", "edit", "wh-missing", "--api-url", srv.URL, "--active=false")
+	if err == nil {
+		t.Fatal("expected error when daemon returns 404")
+	}
+	if !strings.Contains(err.Error(), "HTTP 404") || !strings.Contains(err.Error(), "resource_not_found") {
+		t.Errorf("error = %v, want 'HTTP 404' + 'resource_not_found'", err)
 	}
 }

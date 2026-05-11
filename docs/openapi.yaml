@@ -1106,6 +1106,45 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+    patch:
+      tags: [Webhooks]
+      summary: Update editable webhook fields
+      description: >
+        Mutates one or more editable fields on an existing webhook.  Every
+        field in the request body is optional — omit a key to leave it
+        unchanged.  At least one editable field must be present; an empty
+        body returns 400 `noop_update`.
+
+        On success the in-memory delivery worker is bounced so subsequent
+        deliveries pick up the new URL / secret / event-type filters /
+        active flag.  Setting `active: false` stops the worker; setting
+        it back to `true` re-registers it.
+
+        Secrets are accepted but never returned; the response carries the
+        same redacted shape as `GET /webhooks/{id}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookUpdateSpec'
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
     delete:
       tags: [Webhooks]
       summary: Delete a webhook
@@ -2015,6 +2054,31 @@ components:
           type: array
           items:
             type: string
+    WebhookUpdateSpec:
+      type: object
+      description: >
+        Partial-update payload for `PATCH /webhooks/{id}`.  All fields are
+        optional; omit a key to leave the corresponding field unchanged.
+        `event_types: []` clears the filter so the webhook matches every
+        event; `event_types` omitted leaves the current list intact.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Replace the receiver URL.  Must use http or https.
+        secret:
+          type: string
+          description: >
+            Rotate the HMAC signing secret.  Empty string is rejected — an
+            unsigned webhook would defeat receiver-side verification.
+        event_types:
+          type: array
+          items:
+            type: string
+          description: Replace the event-type filter list.  Pass `[]` to clear.
+        active:
+          type: boolean
+          description: Toggle delivery on or off without deleting the registration.
     WebhookTestResult:
       type: object
       required: [success, duration_ms, attempted_at]

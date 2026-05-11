@@ -1897,7 +1897,43 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update editable webhook fields
+         * @description Mutates one or more editable fields on an existing webhook.  Every field in the request body is optional — omit a key to leave it unchanged.  At least one editable field must be present; an empty body returns 400 `noop_update`.
+         *     On success the in-memory delivery worker is bounced so subsequent deliveries pick up the new URL / secret / event-type filters / active flag.  Setting `active: false` stops the worker; setting it back to `true` re-registers it.
+         *     Secrets are accepted but never returned; the response carries the same redacted shape as `GET /webhooks/{id}`.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    webhookID: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["WebhookUpdateSpec"];
+                };
+            };
+            responses: {
+                /** @description Webhook */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Webhook"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         trace?: never;
     };
     "/webhooks/{webhookID}/test": {
@@ -2423,6 +2459,20 @@ export interface components {
             /** @description HMAC-SHA256 signing secret. Never returned in responses. */
             secret: string;
             event_types?: string[];
+        };
+        /** @description Partial-update payload for `PATCH /webhooks/{id}`.  All fields are optional; omit a key to leave the corresponding field unchanged. `event_types: []` clears the filter so the webhook matches every event; `event_types` omitted leaves the current list intact. */
+        WebhookUpdateSpec: {
+            /**
+             * Format: uri
+             * @description Replace the receiver URL.  Must use http or https.
+             */
+            url?: string;
+            /** @description Rotate the HMAC signing secret.  Empty string is rejected — an unsigned webhook would defeat receiver-side verification. */
+            secret?: string;
+            /** @description Replace the event-type filter list.  Pass `[]` to clear. */
+            event_types?: string[];
+            /** @description Toggle delivery on or off without deleting the registration. */
+            active?: boolean;
         };
         WebhookTestResult: {
             /** @description True iff the receiver returned a 2xx HTTP status. */

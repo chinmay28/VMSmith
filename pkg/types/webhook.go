@@ -35,6 +35,29 @@ type WebhookCreateRequest struct {
 	EventTypes []string `json:"event_types,omitempty"`
 }
 
+// WebhookUpdateSpec is the JSON body accepted by PATCH /api/v1/webhooks/{id}.
+//
+// All fields are pointers so the caller can express "leave this alone" by
+// omitting the JSON key.  Semantics per field:
+//
+//   - URL: nil = no change.  Empty string after trim is rejected with
+//     invalid_url.  Must use http:// or https://.
+//   - Secret: nil = no change.  Empty string after trim is rejected with
+//     missing_secret (secrets can be rotated but not cleared — an unsigned
+//     webhook would defeat HMAC verification on the receiver side).
+//   - EventTypes: nil = no change.  An explicit empty slice ([]) clears the
+//     filter list so the webhook matches every event again.
+//   - Active: nil = no change.  Toggling false stops the in-memory worker;
+//     toggling true (re-)starts it.
+//
+// At least one of these must be present; an empty body returns 400 noop_update.
+type WebhookUpdateSpec struct {
+	URL        *string   `json:"url,omitempty"`
+	Secret     *string   `json:"secret,omitempty"`
+	EventTypes *[]string `json:"event_types,omitempty"`
+	Active     *bool     `json:"active,omitempty"`
+}
+
 // WebhookTestResult is the response from POST /api/v1/webhooks/{id}/test.
 // The endpoint synthesises a `system.webhook_test` event, delivers it once
 // (no retries — the UI wants a quick answer), and reports the outcome so the

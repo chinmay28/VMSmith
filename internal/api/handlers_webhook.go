@@ -176,6 +176,120 @@ func (s *Server) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// UpdateWebhook handles PATCH /api/v1/webhooks/{id}.
+//
+// Pointer-typed fields on WebhookUpdateSpec express "no change" via JSON-key
+// absence:
+//   - url / secret: trimmed; empty rejected
+//   - event_types: nil = no change; [] = clear filter list
+//   - active: nil = no change
+//
+// Any successful change unregisters the in-memory worker and re-registers it
+// with the new config so live deliveries pick up the change without a daemon
+// restart.  Active=false leaves the worker stopped.
+func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWebhookStore(w) {
+		return
+	}
+	id := chi.URLParam(r, "webhookID")
+	current, err := s.webhookStore.GetWebhook(id)
+	if err != nil {
+		writeErrorCode(w, http.StatusNotFound, "resource_not_found", "webhook not found")
+		return
+	}
+
+	var req types.WebhookUpdateSpec
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+
+	if req.URL == nil && req.Secret == nil && req.EventTypes == nil && req.Active == nil {
+		writeErrorCode(w, http.StatusBadRequest, "noop_update", "no fields to update")
+		return
+	}
+
+	updated := *current
+	changed := false
+
+	if req.URL != nil {
+		nextURL := strings.TrimSpace(*req.URL)
+		if nextURL == "" {
+			writeErrorCode(w, http.StatusBadRequest, "invalid_url", "url is required")
+			return
+		}
+		if !strings.HasPrefix(nextURL, "http://") && !strings.HasPrefix(nextURL, "https://") {
+			writeErrorCode(w, http.StatusBadRequest, "invalid_url", "url must use http or https scheme")
+			return
+		}
+		if nextURL != updated.URL {
+			updated.URL = nextURL
+			changed = true
+		}
+	}
+
+	if req.Secret != nil {
+		nextSecret := strings.TrimSpace(*req.Secret)
+		if nextSecret == "" {
+			writeErrorCode(w, http.StatusBadRequest, "missing_secret", "secret cannot be empty")
+			return
+		}
+		if nextSecret != updated.Secret {
+			updated.Secret = nextSecret
+			changed = true
+		}
+	}
+
+	if req.EventTypes != nil {
+		next := normalizeEventTypes(*req.EventTypes)
+		if !stringSlicesEqual(next, updated.EventTypes) {
+			updated.EventTypes = next
+			changed = true
+		}
+	}
+
+	if req.Active != nil && *req.Active != updated.Active {
+		updated.Active = *req.Active
+		changed = true
+	}
+
+	if !changed {
+		writeJSON(w, http.StatusOK, redactWebhook(&updated))
+		return
+	}
+
+	if err := s.webhookStore.PutWebhook(&updated); err != nil {
+		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to persist webhook")
+		return
+	}
+	if s.webhookManager != nil {
+		// Tear down the in-memory worker (idempotent) and re-register so the
+		// next delivery uses the new URL/secret/filters/Active state.  When
+		// Active=false the register call is a no-op, leaving no worker — which
+		// is what we want.
+		s.webhookManager.Unregister(updated.ID)
+		s.webhookManager.Register(&updated)
+	}
+
+	writeJSON(w, http.StatusOK, redactWebhook(&updated))
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // DeleteWebhook handles DELETE /api/v1/webhooks/{id}.
 func (s *Server) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWebhookStore(w) {

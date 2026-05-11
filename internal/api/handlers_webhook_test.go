@@ -291,10 +291,10 @@ func readAllBody(r *http.Response) ([]byte, error) {
 // pre-configured result.  When err != nil it is returned instead of the
 // result, simulating ErrWebhookNotFound or transport failures.
 type fakeWebhookTester struct {
-	mu      sync.Mutex
-	called  []string
-	result  *types.WebhookTestResult
-	err     error
+	mu     sync.Mutex
+	called []string
+	result *types.WebhookTestResult
+	err    error
 }
 
 func (f *fakeWebhookTester) TestDeliver(_ context.Context, id string) (*types.WebhookTestResult, error) {
@@ -377,5 +377,252 @@ func TestTestWebhook_NoTesterReturns503(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+// patchWebhook is a small helper for PATCH /api/v1/webhooks/{id} tests.
+// It marshals the spec, sends the request, and returns the response so each
+// test can decode + assert on status and body.
+func patchWebhook(t *testing.T, baseURL, id string, spec types.WebhookUpdateSpec) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPatch, baseURL+"/api/v1/webhooks/"+id, jsonBody(t, spec))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	return resp
+}
+
+func ptrStr(s string) *string          { return &s }
+func ptrBool(b bool) *bool             { return &b }
+func ptrStrSlice(s []string) *[]string { return &s }
+
+func TestUpdateWebhook_SetsURL(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-u1", URL: "https://old.example.com/x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-u1", types.WebhookUpdateSpec{URL: ptrStr("https://new.example.com/x")})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.URL != "https://new.example.com/x" {
+		t.Fatalf("url not updated: %q", got.URL)
+	}
+	if got.Secret != "" {
+		t.Fatalf("response leaked secret: %q", got.Secret)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.hooks["wh-u1"].URL != "https://new.example.com/x" {
+		t.Fatalf("persisted url: %q", fake.hooks["wh-u1"].URL)
+	}
+	if len(fake.unregistered) != 1 || fake.unregistered[0] != "wh-u1" {
+		t.Fatalf("manager.Unregister not called: %v", fake.unregistered)
+	}
+	if len(fake.registered) != 1 || fake.registered[0] != "wh-u1" {
+		t.Fatalf("manager.Register not called after update: %v", fake.registered)
+	}
+}
+
+func TestUpdateWebhook_RotatesSecret(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-s", URL: "https://x", Secret: "old", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-s", types.WebhookUpdateSpec{Secret: ptrStr("  newsecret  ")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.Secret != "" {
+		t.Fatalf("response leaked secret: %q", got.Secret)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.hooks["wh-s"].Secret != "newsecret" {
+		t.Fatalf("persisted secret = %q, want trimmed 'newsecret'", fake.hooks["wh-s"].Secret)
+	}
+}
+
+func TestUpdateWebhook_SetsEventTypes(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-e", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-e", types.WebhookUpdateSpec{
+		EventTypes: ptrStrSlice([]string{"vm.started", " vm.stopped ", "vm.started"}),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if len(got.EventTypes) != 2 || got.EventTypes[0] != "vm.started" || got.EventTypes[1] != "vm.stopped" {
+		t.Fatalf("event_types normalisation failed: %v", got.EventTypes)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-e"].EventTypes
+	fake.mu.Unlock()
+	if len(persisted) != 2 {
+		t.Fatalf("persisted event_types = %v, want 2 entries", persisted)
+	}
+}
+
+func TestUpdateWebhook_ClearsEventTypes(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-clr", URL: "https://x", Secret: "k", Active: true,
+		EventTypes: []string{"vm.started", "vm.stopped"},
+	})
+
+	resp := patchWebhook(t, ts.URL, "wh-clr", types.WebhookUpdateSpec{
+		EventTypes: ptrStrSlice([]string{}),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if len(got.EventTypes) != 0 {
+		t.Fatalf("event_types not cleared: %v", got.EventTypes)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-clr"].EventTypes
+	fake.mu.Unlock()
+	if persisted != nil {
+		t.Fatalf("persisted event_types not nil: %v", persisted)
+	}
+}
+
+func TestUpdateWebhook_TogglesActive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-tog", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-tog", types.WebhookUpdateSpec{Active: ptrBool(false)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.Active {
+		t.Fatalf("expected active=false")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.hooks["wh-tog"].Active {
+		t.Fatalf("persisted active still true")
+	}
+	if len(fake.unregistered) != 1 || fake.unregistered[0] != "wh-tog" {
+		t.Fatalf("manager.Unregister not called after disable: %v", fake.unregistered)
+	}
+}
+
+func TestUpdateWebhook_RejectsEmptyBody(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-noop", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-noop", types.WebhookUpdateSpec{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_RejectsInvalidURL(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-bad", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-bad", types.WebhookUpdateSpec{URL: ptrStr("ftp://nope.example")})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp2 := patchWebhook(t, ts.URL, "wh-bad", types.WebhookUpdateSpec{URL: ptrStr("   ")})
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty url: status = %d, want 400", resp2.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_RejectsEmptySecret(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-es", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-es", types.WebhookUpdateSpec{Secret: ptrStr("   ")})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_NotFound(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	resp := patchWebhook(t, ts.URL, "wh-missing", types.WebhookUpdateSpec{URL: ptrStr("https://x")})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_NoOpWhenValueEqualsCurrent(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-eq", URL: "https://x", Secret: "k", Active: true, EventTypes: []string{"vm.started"}})
+
+	resp := patchWebhook(t, ts.URL, "wh-eq", types.WebhookUpdateSpec{
+		URL:    ptrStr("https://x"),
+		Active: ptrBool(true),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	// Manager should not be bounced when there's nothing to do.
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.unregistered) != 0 {
+		t.Fatalf("manager.Unregister called for no-op update: %v", fake.unregistered)
+	}
+}
+
+func TestUpdateWebhook_RejectsBadJSON(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-bj", URL: "https://x", Secret: "k", Active: true})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/webhooks/wh-bj",
+		bytes.NewBufferString("{this-is-not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_ReactivatesStoppedWorker(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-react", URL: "https://x", Secret: "k", Active: false})
+
+	resp := patchWebhook(t, ts.URL, "wh-react", types.WebhookUpdateSpec{Active: ptrBool(true)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.registered) != 1 || fake.registered[0] != "wh-react" {
+		t.Fatalf("manager.Register not called on reactivation: %v", fake.registered)
 	}
 }

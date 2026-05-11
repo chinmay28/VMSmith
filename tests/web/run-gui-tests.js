@@ -625,6 +625,80 @@ async function main() {
 
     await page.close();
 
+    // 2.2.14 — editable webhook config: round-trip the edit modal through
+    // PATCH /api/v1/webhooks/{id} and verify the row reflects the new URL
+    // and event-type filters.  The mock server applies the same validation
+    // (rejecting non-http(s), empty secret, etc.) as the real daemon.
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+
+    await runTest("edit webhook URL and event-type filter via PATCH", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      // Seed a webhook.
+      await p.locator('[data-testid="add-webhook-btn"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="webhook-url-input"]').fill("https://example.com/hook");
+      await p.locator('[data-testid="webhook-secret-input"]').fill("topsecret");
+      await p.locator('[data-testid="webhook-event-types-input"]').fill("vm.started");
+      await p.locator('[data-testid="webhook-create-submit"]').click();
+      await p.waitForTimeout(600);
+
+      const row = p.locator('[data-testid^="webhook-row-"]').first();
+      await row.waitFor({ state: "visible", timeout: 5000 });
+      const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+      // Open the edit modal.
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "edit-webhook-form");
+
+      // URL field is pre-populated with the current value.
+      const urlInput = p.locator('[data-testid="edit-webhook-url-input"]');
+      await assert(
+        (await urlInput.inputValue()) === "https://example.com/hook",
+        "edit modal should pre-fill current URL",
+      );
+
+      // Replace URL and event-type filter list.
+      await urlInput.fill("https://example.com/new-hook");
+      await p.locator('[data-testid="edit-webhook-event-types-input"]').fill("vm.created, vm.deleted");
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+
+      // Modal closes and the row reflects the new URL + filter chips.
+      const stillOpen = p.locator('[data-testid="edit-webhook-form"]');
+      await assert(!(await stillOpen.isVisible()), "edit modal should close on success");
+
+      const refreshed = p.locator(`[data-testid="webhook-row-${rowID}"]`);
+      const rowText = (await refreshed.textContent()) || "";
+      await assert(rowText.includes("https://example.com/new-hook"), `row should show new URL, got: ${rowText}`);
+      await assert(rowText.includes("vm.created"), `row should show vm.created filter chip, got: ${rowText}`);
+      await assert(rowText.includes("vm.deleted"), `row should show vm.deleted filter chip, got: ${rowText}`);
+    }, page);
+
+    await runTest("edit webhook can clear filter to subscribe-all", async (p) => {
+      // Reuse the previous row (a webhook is already registered).  Click Edit,
+      // toggle the "subscribe to every event" checkbox, save, and assert the
+      // row falls back to the "all events" placeholder.
+      const row = p.locator('[data-testid^="webhook-row-"]').first();
+      const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="edit-webhook-subscribe-all"]').check();
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+
+      const refreshed = p.locator(`[data-testid="webhook-row-${rowID}"]`);
+      const rowText = (await refreshed.textContent()) || "";
+      await assert(/all events/i.test(rowText), `row should show 'all events' after clearing, got: ${rowText}`);
+    }, page);
+
+    await page.close();
+
     // ================== Full Lifecycle E2E ==================
     console.log("\nFull Lifecycle E2E:");
 
