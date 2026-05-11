@@ -992,6 +992,29 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
   });
+
+  test("sort controls reorder the image list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Default sort=id asc; the seeded "img-1" (ubuntu-base) renders before img-2 (rocky-experimental).
+    const rows = () => page.getByTestId(/^image-row-/);
+    await expect(rows()).toHaveCount(2);
+    const idAsc = await rows().evaluateAll(els => els.map(el => el.getAttribute("data-testid")));
+    expect(idAsc[0]).toBe("image-row-ubuntu-base");
+    expect(idAsc[1]).toBe("image-row-rocky-experimental");
+
+    // Switch to sort=name asc -> "rocky-experimental" (r < u) comes first.
+    await page.getByTestId("image-list-sort-field").selectOption("name");
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+
+    // sort=size desc -> rocky (2 GB) before ubuntu (1 GB). URL captures the change.
+    await page.getByTestId("image-list-sort-field").selectOption("size");
+    await page.getByTestId("image-list-sort-order").selectOption("desc");
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=size");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
 });
 
 // ============================================================

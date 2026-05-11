@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { HardDrive, Download, Trash2, Upload, Pencil } from 'lucide-react';
 import { images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -7,16 +8,19 @@ import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls
 const DEFAULT_PER_PAGE = 25;
 
 export default function ImageList() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showUpload, setShowUpload] = useState(false);
   const [editing, setEditing] = useState(null);
   const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
+  const [sort, setSort] = useState(searchParams.get('sort') || 'id');
+  const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage, tag: tagFilter }),
-    [page, perPage, tagFilter],
+    () => imagesApi.list({ page, perPage, tag: tagFilter, sort, order }),
+    [page, perPage, tagFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
@@ -28,7 +32,14 @@ export default function ImageList() {
     [imageList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter]);
+  useEffect(() => { setPage(1); }, [tagFilter, sort, order]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
+    if (order && order !== 'asc') next.set('order', order); else next.delete('order');
+    setSearchParams(next, { replace: true });
+  }, [sort, order]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -118,6 +129,30 @@ export default function ImageList() {
           ))}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-steel-400" data-testid="image-list-sort-controls">
+        <span>Sort by</span>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="image-list-sort-field"
+        >
+          <option value="id">ID</option>
+          <option value="name">Name</option>
+          <option value="size">Size</option>
+          <option value="created_at">Created</option>
+        </select>
+        <select
+          value={order}
+          onChange={(e) => setOrder(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="image-list-sort-order"
+        >
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </div>
 
       {loading && !imageList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>

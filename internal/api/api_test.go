@@ -4696,6 +4696,168 @@ func TestListImages_FilterByTag(t *testing.T) {
 	}
 }
 
+// seedStoredImageFull writes an image record with explicit timing/size so the
+// sort tests can assert deterministic order on size and created_at.
+func seedStoredImageFull(t *testing.T, s *store.Store, id, name string, size int64, created time.Time) *types.Image {
+	t.Helper()
+	img := &types.Image{
+		ID:        id,
+		Name:      name,
+		Path:      "/tmp/" + name + ".qcow2",
+		SizeBytes: size,
+		Format:    "qcow2",
+		CreatedAt: created,
+		UpdatedAt: created,
+	}
+	if err := s.PutImage(img); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+	return img
+}
+
+func TestListImages_SortByName(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-3", "Charlie", 100, t0)
+	seedStoredImageFull(t, s, "img-1", "alpha", 100, t0)
+	seedStoredImageFull(t, s, "img-2", "Bravo", 100, t0)
+
+	resp, err := http.Get(ts.URL + "/api/v1/images?sort=name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i, img := range got {
+		if img.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, img.Name, want[i])
+		}
+	}
+}
+
+func TestListImages_SortBySizeDesc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-small", "small", 1024, t0)
+	seedStoredImageFull(t, s, "img-big", "big", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-mid", "mid", 1<<20, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?sort=size&order=desc")
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	want := []string{"big", "mid", "small"}
+	for i, img := range got {
+		if img.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, img.Name, want[i])
+		}
+	}
+}
+
+func TestListImages_SortByCreatedAtDesc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "first", 100, t0)
+	seedStoredImageFull(t, s, "img-2", "second", 100, t0.Add(time.Hour))
+	seedStoredImageFull(t, s, "img-3", "third", 100, t0.Add(2*time.Hour))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?sort=created_at&order=desc")
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	want := []string{"third", "second", "first"}
+	for i, img := range got {
+		if img.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, img.Name, want[i])
+		}
+	}
+}
+
+func TestListImages_SortCombinesWithTagFilter(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-prod-1", "alpha-prod", "", []string{"prod"})
+	seedStoredImage(t, s, "img-qa-1", "alpha-qa", "", []string{"qa"})
+	seedStoredImage(t, s, "img-prod-2", "Zeta-prod", "", []string{"prod"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?tag=prod&sort=name&order=desc")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (filter applies before sort)", got)
+	}
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("want 2 images, got %d", len(got))
+	}
+	if got[0].Name != "Zeta-prod" || got[1].Name != "alpha-prod" {
+		t.Errorf("order = %q,%q, want Zeta-prod,alpha-prod", got[0].Name, got[1].Name)
+	}
+}
+
+func TestListImages_SortPaginationDeterministic(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("img-%d", i)
+		seedStoredImageFull(t, s, id, id, 100, t0)
+	}
+
+	resp1, _ := http.Get(ts.URL + "/api/v1/images?sort=name&order=desc&page=1&per_page=2")
+	var page1 []*types.Image
+	decodeJSON(t, resp1, &page1)
+	if got := resp1.Header.Get("X-Total-Count"); got != "5" {
+		t.Fatalf("X-Total-Count = %q, want 5", got)
+	}
+
+	resp2, _ := http.Get(ts.URL + "/api/v1/images?sort=name&order=desc&page=2&per_page=2")
+	var page2 []*types.Image
+	decodeJSON(t, resp2, &page2)
+
+	gotOrder := []string{page1[0].Name, page1[1].Name, page2[0].Name, page2[1].Name}
+	want := []string{"img-4", "img-3", "img-2", "img-1"}
+	for i, n := range gotOrder {
+		if n != want[i] {
+			t.Fatalf("page-spanning order[%d] = %q, want %q (full: %v)", i, n, want[i], gotOrder)
+		}
+	}
+}
+
+func TestListImages_RejectsInvalidSort(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/images?sort=format")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_sort")
+}
+
+func TestListImages_RejectsInvalidOrder(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_order")
+}
+
 func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
