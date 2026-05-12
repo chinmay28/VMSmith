@@ -3041,3 +3041,89 @@ func TestCLI_WebhookEdit_PropagatesDaemonError(t *testing.T) {
 		t.Errorf("error = %v, want 'HTTP 404' + 'resource_not_found'", err)
 	}
 }
+
+// --- Template list sort (5.4.7) ---
+
+func TestCLI_TemplateList_SortByName(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "Charlie", Image: "ubuntu", CreatedAt: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2025, 1, 1, 2, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "ubuntu", CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "Bravo", Image: "ubuntu", CreatedAt: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "name")
+	if err != nil {
+		t.Fatalf("template list --sort: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want header + 3", len(rows))
+	}
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByCreatedAtDesc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "first", Image: "ubuntu", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "second", Image: "ubuntu", CreatedAt: t0.Add(time.Hour), UpdatedAt: t0.Add(time.Hour)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "third", Image: "ubuntu", CreatedAt: t0.Add(2 * time.Hour), UpdatedAt: t0.Add(2 * time.Hour)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "created_at", "--order", "desc")
+	if err != nil {
+		t.Fatalf("template list: %v", err)
+	}
+	rows := tableRows(t, out)
+	want := []string{"third", "second", "first"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("template", "list", "--sort", "ram_mb")
+	if err == nil {
+		t.Fatal("expected error for unsupported --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Errorf("error = %v, want it to mention 'invalid --sort'", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidOrder(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("template", "list", "--order", "sideways")
+	if err == nil {
+		t.Fatal("expected error for unsupported --order, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --order") {
+		t.Errorf("error = %v, want it to mention 'invalid --order'", err)
+	}
+}

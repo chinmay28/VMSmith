@@ -59,8 +59,22 @@ function seed() {
     tags: ["starter", "ubuntu"],
     default_user: "ubuntu",
     networks: [],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+  });
+  templates.set("tmpl-2", {
+    id: "tmpl-2",
+    name: "big-rocky",
+    image: "/images/rocky9.qcow2",
+    cpus: 8,
+    ram_mb: 16384,
+    disk_gb: 80,
+    description: "Big Rocky template",
+    tags: ["prod", "rocky"],
+    default_user: "root",
+    networks: [],
+    created_at: "2025-02-01T00:00:00Z",
+    updated_at: "2025-02-01T00:00:00Z",
   });
 }
 
@@ -612,6 +626,29 @@ const server = http.createServer(async (req, res) => {
       const lc = tag.toLowerCase();
       list = list.filter(t => (t.tags || []).some(x => String(x).toLowerCase() === lc));
     }
+    const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
+    const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
+    const allowedSort = ["id", "name", "created_at"];
+    if (!allowedSort.includes(sort)) {
+      return json(res, 400, { error: "sort must be one of: id, name, created_at", code: "invalid_sort" });
+    }
+    if (order !== "asc" && order !== "desc") {
+      return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
+    }
+    const desc = order === "desc";
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sort === "name") {
+        cmp = String(a.name || "").toLowerCase().localeCompare(String(b.name || "").toLowerCase());
+        if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else if (sort === "created_at") {
+        cmp = String(a.created_at || "").localeCompare(String(b.created_at || ""));
+        if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else {
+        cmp = String(a.id).localeCompare(String(b.id));
+      }
+      return desc ? -cmp : cmp;
+    });
     return json(res, 200, list, { "X-Total-Count": String(list.length) });
   }
   // PATCH /api/v1/templates/{id}: edit description and/or tags. Mirror server

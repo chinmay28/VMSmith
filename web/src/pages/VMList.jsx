@@ -539,7 +539,7 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const [activeTab, setActiveTab] = useState('basic');
   const createMut = useMutation(vms.create);
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
-  const { data: templateResponse } = useFetch(() => templatesApi.list(), [], 0);
+  const { data: templateResponse } = useFetch(() => templatesApi.list({ sort: 'name' }), [], 0);
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
   const imageList = safeArray(imageResponse?.data || imageResponse);
   const templates = safeArray(templateResponse?.data || templateResponse);

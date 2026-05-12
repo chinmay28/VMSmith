@@ -243,6 +243,29 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("template-tag-chips")).toHaveCount(0);
   });
 
+  test("template selector lists templates alphabetically", async ({ page }) => {
+    // The Create-VM modal asks the API for `?sort=name` so the dropdown
+    // is alphabetical regardless of insertion order. The mock-server seeds
+    // tmpl-1 (small-ubuntu) before tmpl-2 (big-rocky), so without the
+    // server-side sort the dropdown would show small-ubuntu first.
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    const select = page.getByTestId("input-vm-template");
+    await expect(select).toBeVisible();
+    // Wait for the second template to appear; otherwise the assertion
+    // can race the API fetch.
+    await expect(select.locator("option")).toHaveCount(3);
+    const options = await select.locator("option").evaluateAll((nodes) =>
+      nodes.map((n) => ({ value: n.value, text: n.textContent || "" })),
+    );
+    // Skip the leading "No template" placeholder.
+    expect(options[0].value).toBe("");
+    expect(options[1].text).toBe("big-rocky");
+    expect(options[2].text).toBe("small-ubuntu");
+  });
+
   test("cancel create modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

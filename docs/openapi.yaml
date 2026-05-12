@@ -929,12 +929,14 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/TemplateSort'
+        - $ref: '#/components/parameters/SortOrder'
         - in: query
           name: tag
           schema: { type: string }
           description: |
             Case-insensitive filter; only templates carrying this tag are
-            returned. Filtering is applied before pagination, so
+            returned. Filtering is applied before sort + pagination, so
             X-Total-Count reflects the filtered population.
       responses:
         '200':
@@ -1397,6 +1399,18 @@ components:
         VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
         name-asc. Unknown values return 400 `invalid_sort`. All comparators
         tiebreak on `name` so pagination is deterministic across backends.
+      schema:
+        type: string
+        enum: [id, name, created_at]
+        default: id
+    TemplateSort:
+      name: sort
+      in: query
+      description: |
+        Field to sort the template list by. Defaults to `id`. Unknown
+        values return 400 `invalid_sort`. All comparators tiebreak on
+        `id` so paginated requests return the same set across two
+        independent fetches.
       schema:
         type: string
         enum: [id, name, created_at]

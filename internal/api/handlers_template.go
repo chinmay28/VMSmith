@@ -83,11 +83,22 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 // ListTemplates handles GET /api/v1/templates.
 //
 // Optional query params:
-//   - tag=<value>   case-insensitive filter; only templates carrying this
-//     tag are returned. Filtering happens before pagination so the
-//     X-Total-Count header reflects the filtered population.
+//   - tag=<value>            case-insensitive filter; only templates carrying
+//     this tag are returned. Filtering happens before sort + pagination so
+//     the X-Total-Count header reflects the filtered population.
+//   - sort=<id|name|created_at>  default id; case-insensitive
+//   - order=<asc|desc>       default asc
 //   - page / per_page (see parsePagination)
+//
+// All comparators tiebreak on `id` so paginated requests return the same
+// set across two independent fetches.
 func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	sortField, order, err := parseTemplateSort(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	templates, err := s.storageMgr.ListTemplates()
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -98,6 +109,8 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	if tagFilter := strings.TrimSpace(r.URL.Query().Get("tag")); tagFilter != "" {
 		templates = filterTemplatesByTag(templates, tagFilter)
 	}
+
+	types.SortTemplates(templates, sortField, order)
 
 	total := len(templates)
 	pagination := parsePagination(r)
