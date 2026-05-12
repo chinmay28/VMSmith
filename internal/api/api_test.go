@@ -4763,6 +4763,194 @@ func TestListEvents_InvalidSince(t *testing.T) {
 	}
 }
 
+// seedSearchableEvents writes a small set of events covering message /
+// attribute / actor matches so the ?search= tests can assert on each axis
+// independently. Returned in append order; IDs are "1".."4".
+func seedSearchableEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{
+			VMID:       "vm-1",
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			Message:    "started vm web-prod-01",
+			Actor:      "system",
+			OccurredAt: base.Add(-30 * time.Minute),
+		},
+		{
+			VMID:       "vm-2",
+			Type:       "snapshot.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			Message:    "created snapshot before-deploy",
+			Actor:      "ops-alice",
+			Attributes: map[string]string{"snapshot": "before-deploy"},
+			OccurredAt: base.Add(-20 * time.Minute),
+		},
+		{
+			VMID:       "vm-3",
+			Type:       "port_forward.added",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			Message:    "added port forward",
+			Attributes: map[string]string{"host_port": "22001", "guest_port": "22", "protocol": "tcp"},
+			OccurredAt: base.Add(-10 * time.Minute),
+		},
+		{
+			Type:       "dhcp.exhausted",
+			Source:     types.EventSourceSystem,
+			Severity:   types.EventSeverityError,
+			Message:    "DHCP pool exhausted",
+			OccurredAt: base.Add(-5 * time.Minute),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func decodeEvents(t *testing.T, resp *http.Response) []*types.Event {
+	t.Helper()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out []*types.Event
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	return out
+}
+
+func TestListEvents_FilterBySearch_MatchesMessage(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=web-prod")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "vm.started" {
+		t.Fatalf("expected single vm.started match, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_MatchesAttributeValue(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=22001")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "port_forward.added" {
+		t.Fatalf("expected single port_forward.added match, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_MatchesActor(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=alice")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Actor != "ops-alice" {
+		t.Fatalf("expected single ops-alice match, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=DHCP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "dhcp.exhausted" {
+		t.Fatalf("expected DHCP match via case-insensitive search, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=%20%20web-prod%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 match after whitespace trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=needle-not-present")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_CombinesWithSource(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	// "snapshot" appears in the app-source event's message + attribute; the
+	// libvirt-source events do not carry the word. Adding source=app narrows
+	// the result the same way it would without search.
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=snapshot&source=app")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Source != types.EventSourceApp {
+		t.Fatalf("expected 1 app-source snapshot match, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterBySearch_CombinesWithVMID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	// "snapshot" hits the app event scoped to vm-2; narrowing by vm_id=vm-1
+	// should yield zero results even though vm-1 has an event.
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=snapshot&vm_id=vm-1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results when narrowing to vm-1, got %d", len(got))
+	}
+}
+
 // ============================================================
 // Image metadata: description + tags + PATCH + ?tag= filter
 // ============================================================

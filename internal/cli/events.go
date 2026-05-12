@@ -43,6 +43,7 @@ or daemon-side filtering, query GET /api/v1/events instead.`,
 		typeFilter, _ := cmd.Flags().GetString("type")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
+		searchFilter, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		limit, _ := cmd.Flags().GetInt("limit")
 
@@ -68,6 +69,7 @@ or daemon-side filtering, query GET /api/v1/events instead.`,
 			typeStr:  strings.TrimSpace(typeFilter),
 			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
 			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
+			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
 			since:    sinceTime,
 		})
 
@@ -106,7 +108,9 @@ type eventFilter struct {
 	typeStr  string
 	source   string
 	severity string
-	since    time.Time
+	// search is a lower-cased substring needle applied via types.EventMatchesSearch.
+	search string
+	since  time.Time
 }
 
 func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
@@ -128,6 +132,9 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 			continue
 		}
 		if !f.since.IsZero() && eventTimestamp(e).Before(f.since) {
+			continue
+		}
+		if f.search != "" && !types.EventMatchesSearch(e, f.search) {
 			continue
 		}
 		out = append(out, e)
@@ -230,6 +237,7 @@ Examples:
 		typeFilter, _ := cmd.Flags().GetString("type")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
+		searchFilter, _ := cmd.Flags().GetString("search")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		if apiURL == "" {
 			cfg, err := config.Load(cfgFile)
@@ -245,6 +253,7 @@ Examples:
 			typeStr:  strings.TrimSpace(typeFilter),
 			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
 			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
+			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -425,6 +434,9 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	if f.severity != "" && !strings.EqualFold(e.Severity, f.severity) {
 		return false
 	}
+	if f.search != "" && !types.EventMatchesSearch(e, f.search) {
+		return false
+	}
 	return true
 }
 
@@ -460,6 +472,7 @@ func init() {
 	eventsListCmd.Flags().String("type", "", "filter events by type (e.g. vm_started)")
 	eventsListCmd.Flags().String("source", "", "filter events by source (libvirt|app|system)")
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
+	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsListCmd.Flags().String("since", "", "show events since (Go duration like 5m, or RFC3339 timestamp)")
 	eventsListCmd.Flags().Int("limit", 100, "maximum number of events to show")
 
@@ -467,6 +480,7 @@ func init() {
 	eventsFollowCmd.Flags().String("type", "", "only print events of this type (exact match)")
 	eventsFollowCmd.Flags().String("source", "", "only print events from this source (libvirt|app|system)")
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
+	eventsFollowCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsFollowCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
 
 	eventsCmd.AddCommand(eventsListCmd)

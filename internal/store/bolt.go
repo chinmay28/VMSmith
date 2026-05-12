@@ -454,6 +454,9 @@ type EventFilter struct {
 	Type     string
 	Source   string
 	Severity string
+	// Search is a lowercase needle applied via types.EventMatchesSearch.
+	// Callers are responsible for trimming + lowercasing.
+	Search   string
 	Since    interface{} // time.Time or uint64 seq; zero/0 = no lower bound
 	UntilSeq uint64      // exclusive upper bound on seq ID; 0 = no upper bound
 	Page     int
@@ -533,6 +536,9 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 				if !ts.After(sinceTime) {
 					continue
 				}
+			}
+			if filter.Search != "" && !types.EventMatchesSearch(&evt, filter.Search) {
+				continue
 			}
 
 			all = append(all, &evt)
