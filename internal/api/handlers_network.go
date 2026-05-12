@@ -108,8 +108,20 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListPorts handles GET /api/v1/vms/{vmID}/ports
+//
+// Supports `?sort=` (id|host_port|guest_port|protocol|description) and
+// `?order=` (asc|desc). Unknown values return 400 `invalid_sort` /
+// `invalid_order`. Comparators tiebreak on `id` so repeated requests return
+// a deterministic order.
 func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
+
+	sortField, order, sortErr := parsePortForwardSort(r)
+	if sortErr != nil {
+		apiErr := sortErr.(*types.APIError)
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 
 	ports, err := s.portFwd.List(vmID)
 	if err != nil {
@@ -117,6 +129,8 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+
+	types.SortPortForwards(ports, sortField, order)
 
 	writeJSON(w, http.StatusOK, ports)
 }

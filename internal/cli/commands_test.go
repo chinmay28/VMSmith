@@ -2344,6 +2344,104 @@ func TestCLI_PortList_WithForwards(t *testing.T) {
 	}
 }
 
+func seedPortListFixtures(t *testing.T, s *store.Store) {
+	t.Helper()
+	pfs := []*types.PortForward{
+		{ID: "vm-s/22001", VMID: "vm-s", HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "ssh jumpbox"},
+		{ID: "vm-s/8081", VMID: "vm-s", HostPort: 8081, GuestPort: 80, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "web frontend"},
+		{ID: "vm-s/9090", VMID: "vm-s", HostPort: 9090, GuestPort: 9090, GuestIP: "192.168.100.40", Protocol: types.ProtocolUDP, Description: "Metrics scrape"},
+	}
+	for _, p := range pfs {
+		if err := s.PutPortForward(p); err != nil {
+			t.Fatalf("seed %s: %v", p.ID, err)
+		}
+	}
+}
+
+func TestCLI_PortList_SortByHostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--sort", "host_port")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 4 {
+		t.Fatalf("expected header + 3 rows, got %d rows from %q", len(rows), out)
+	}
+	wantHostPorts := []string{"8081", "9090", "22001"}
+	for i, hp := range wantHostPorts {
+		if rows[i+1][1] != hp {
+			t.Errorf("row %d host_port = %q, want %q (full: %v)", i, rows[i+1][1], hp, rows[i+1])
+		}
+	}
+}
+
+func TestCLI_PortList_SortByHostPortDesc(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--sort", "host_port", "--order", "desc")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	wantHostPorts := []string{"22001", "9090", "8081"}
+	for i, hp := range wantHostPorts {
+		if rows[i+1][1] != hp {
+			t.Errorf("row %d host_port = %q, want %q", i, rows[i+1][1], hp)
+		}
+	}
+}
+
+func TestCLI_PortList_SortByDescription(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--sort", "description")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	// case-insensitive: "metrics" < "ssh" < "web"
+	wantDescriptions := []string{"Metrics scrape", "ssh jumpbox", "web frontend"}
+	for i, d := range wantDescriptions {
+		if rows[i+1][4] != d {
+			t.Errorf("row %d description = %q, want %q", i, rows[i+1][4], d)
+		}
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidSort(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "list", "vm-s", "--sort", "guest_ip")
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort")
+	}
+	if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Errorf("err = %v, want 'invalid --sort'", err)
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidOrder(t *testing.T) {
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+
+	_, err := runCLI("port", "list", "vm-s", "--order", "sideways")
+	if err == nil {
+		t.Fatalf("expected error for invalid --order")
+	}
+	if !strings.Contains(err.Error(), "invalid --order") {
+		t.Errorf("err = %v, want 'invalid --order'", err)
+	}
+}
+
 func TestCLI_PortAdd_NoIP(t *testing.T) {
 	mock, vmCleanup := withMockVM(t)
 	defer vmCleanup()

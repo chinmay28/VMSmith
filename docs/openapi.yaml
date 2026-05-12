@@ -597,8 +597,29 @@ paths:
     get:
       tags: [Port Forwards]
       summary: List a VM's port forwards
+      description: |
+        `sort` accepts `id` (default), `host_port`, `guest_port`, `protocol`, or
+        `description`; the description sort is case-insensitive. `order` accepts
+        `asc` (default) or `desc`. All comparators tiebreak on `id` so
+        repeated requests return a deterministic order.
       parameters:
         - $ref: '#/components/parameters/VMID'
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [id, host_port, guest_port, protocol, description]
+            default: id
+          required: false
+          description: Field to sort by.
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          required: false
+          description: Sort direction.
       responses:
         '200':
           description: Port forward list
@@ -608,6 +629,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/PortForward'
+        '400':
+          $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
     post:

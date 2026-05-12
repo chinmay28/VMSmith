@@ -99,7 +99,32 @@ var portListCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
-		logger.Info("cli", "port list", "vm_id", vmID)
+		sortField, _ := cmd.Flags().GetString("sort")
+		order, _ := cmd.Flags().GetString("order")
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		order = strings.TrimSpace(strings.ToLower(order))
+		if sortField == "" {
+			sortField = types.PortForwardSortID
+		}
+		switch sortField {
+		case types.PortForwardSortID,
+			types.PortForwardSortHostPort,
+			types.PortForwardSortGuestPort,
+			types.PortForwardSortProtocol,
+			types.PortForwardSortDescription:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, host_port, guest_port, protocol, description", sortField)
+		}
+		if order == "" {
+			order = types.SortOrderAsc
+		}
+		switch order {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
+		}
+
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order)
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -113,6 +138,7 @@ var portListCmd = &cobra.Command{
 			logger.Error("cli", "port list failed", "vm_id", vmID, "error", err.Error())
 			return err
 		}
+		types.SortPortForwards(ports, sortField, order)
 		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -282,6 +308,9 @@ func init() {
 	portAddCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars)")
 	portAddCmd.MarkFlagRequired("host")
 	portAddCmd.MarkFlagRequired("guest")
+
+	portListCmd.Flags().String("sort", types.PortForwardSortID, "sort field: id, host_port, guest_port, protocol, description")
+	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
 	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
 	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")

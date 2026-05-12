@@ -723,6 +723,40 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("port-row-pf-seed-http")).not.toBeVisible();
   });
 
+  test("port forward sort dropdowns reorder the list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Default sort=id asc — both seeded rows are visible in id order.
+    // ID "pf-seed-http" < "pf-seed-ssh" lexicographically.
+    const rows = () => page.locator('[data-testid^="port-row-"]');
+    await expect(rows()).toHaveCount(2);
+    let firstId = await rows().first().getAttribute("data-testid");
+    expect(firstId).toBe("port-row-pf-seed-http");
+
+    // Switch to sort=host_port asc → 2222 (ssh) < 8080 (http).
+    await page.getByTestId("port-sort-field").selectOption("host_port");
+    await expect(rows().first()).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
+    await expect.poll(() => new URL(page.url()).search).toContain("port_sort=host_port");
+
+    // Flip to desc → 8080 (http) first.
+    await page.getByTestId("port-sort-order").selectOption("desc");
+    await expect(rows().first()).toHaveAttribute("data-testid", "port-row-pf-seed-http");
+    await expect.poll(() => new URL(page.url()).search).toContain("port_order=desc");
+  });
+
+  test("port sort by description orders alphabetically (case-insensitive)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("port-sort-field").selectOption("description");
+    // pf-seed-ssh has description "ssh-jumpbox"; pf-seed-http has no description.
+    // Empty string sorts before "ssh-jumpbox" so pf-seed-http comes first.
+    const rows = () => page.locator('[data-testid^="port-row-"]');
+    await expect(rows().first()).toHaveAttribute("data-testid", "port-row-pf-seed-http");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
+  });
+
   test("edit port forward description", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

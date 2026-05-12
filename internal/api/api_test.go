@@ -6033,3 +6033,173 @@ func TestListTemplates_RejectsInvalidOrder(t *testing.T) {
 	}
 	assertAPIErrorCode(t, resp, "invalid_order")
 }
+
+// listPortsWithQuery is a small helper that GETs /vms/{vmID}/ports?<query>
+// and decodes the JSON body into a slice. Tests for sort ordering use it.
+func listPortsWithQuery(t *testing.T, ts *httptest.Server, vmID, query string) []types.PortForward {
+	t.Helper()
+	url := ts.URL + "/api/v1/vms/" + vmID + "/ports"
+	if query != "" {
+		url += "?" + query
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var ports []types.PortForward
+	if err := json.NewDecoder(resp.Body).Decode(&ports); err != nil {
+		t.Fatalf("decode ports: %v", err)
+	}
+	return ports
+}
+
+func seedSortPortFixtures(t *testing.T, s *store.Store, vmID string) {
+	t.Helper()
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8081", VMID: vmID, HostPort: 8081, GuestPort: 80, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "web frontend"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22001", VMID: vmID, HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "ssh jumpbox"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/9090", VMID: vmID, HostPort: 9090, GuestPort: 9090, GuestIP: "192.168.100.40", Protocol: types.ProtocolUDP, Description: "Metrics scrape"})
+}
+
+func TestListPorts_SortDefaultIsIDAsc(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "")
+	// IDs are "vm-sort/22001", "vm-sort/8081", "vm-sort/9090" — string compare
+	// puts "22001" before "8081" before "9090" lexicographically.
+	want := []int{22001, 8081, 9090}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, hp := range want {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: HostPort = %d, want %d (full: %v)", i, got[i].HostPort, hp, got)
+		}
+	}
+}
+
+func TestListPorts_SortByHostPortAsc(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "sort=host_port")
+	want := []int{8081, 9090, 22001}
+	for i, hp := range want {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: HostPort = %d, want %d", i, got[i].HostPort, hp)
+		}
+	}
+}
+
+func TestListPorts_SortByHostPortDesc(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "sort=host_port&order=desc")
+	want := []int{22001, 9090, 8081}
+	for i, hp := range want {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: HostPort = %d, want %d", i, got[i].HostPort, hp)
+		}
+	}
+}
+
+func TestListPorts_SortByGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "sort=guest_port")
+	want := []int{22, 80, 9090}
+	for i, gp := range want {
+		if got[i].GuestPort != gp {
+			t.Errorf("idx %d: GuestPort = %d, want %d", i, got[i].GuestPort, gp)
+		}
+	}
+}
+
+func TestListPorts_SortByProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "sort=protocol")
+	// "tcp" < "udp"; tcp pair tiebreaks on id (vm-sort/22001 < vm-sort/8081)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	wantProto := []types.Protocol{types.ProtocolTCP, types.ProtocolTCP, types.ProtocolUDP}
+	wantHostPort := []int{22001, 8081, 9090}
+	for i := range wantProto {
+		if got[i].Protocol != wantProto[i] {
+			t.Errorf("idx %d: protocol = %q, want %q", i, got[i].Protocol, wantProto[i])
+		}
+		if got[i].HostPort != wantHostPort[i] {
+			t.Errorf("idx %d: host_port = %d, want %d", i, got[i].HostPort, wantHostPort[i])
+		}
+	}
+}
+
+func TestListPorts_SortByDescription_CaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-sort")
+
+	got := listPortsWithQuery(t, ts, "vm-sort", "sort=description")
+	// case-insensitive: "metrics" < "ssh" < "web"
+	want := []int{9090, 22001, 8081}
+	for i, hp := range want {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: HostPort = %d, want %d", i, got[i].HostPort, hp)
+		}
+	}
+}
+
+func TestListPorts_RejectsInvalidSort(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-x/ports?sort=guest_ip")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", body.Code)
+	}
+}
+
+func TestListPorts_RejectsInvalidOrder(t *testing.T) {
+	ts, _, _, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-x/ports?order=sideways")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "invalid_order" {
+		t.Errorf("code = %q, want invalid_order", body.Code)
+	}
+}
