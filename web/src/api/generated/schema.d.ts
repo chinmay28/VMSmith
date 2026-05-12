@@ -1255,6 +1255,17 @@ export interface paths {
                 query?: {
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
+                    /**
+                     * @description Field to sort the image list by. Defaults to `id`. Unknown values
+                     *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
+                     *     pagination is deterministic across backends.
+                     */
+                    sort?: components["parameters"]["ImageSort"];
+                    /**
+                     * @description Sort direction. Defaults to `asc`. Unknown values return 400
+                     *     `invalid_order`.
+                     */
+                    order?: components["parameters"]["SortOrder"];
                     /** @description Filter to images carrying this tag (case-insensitive). */
                     tag?: string;
                 };
@@ -2562,6 +2573,12 @@ export interface components {
          *     pagination is deterministic across backends.
          */
         VMSort: "id" | "name" | "created_at" | "state";
+        /**
+         * @description Field to sort the image list by. Defaults to `id`. Unknown values
+         *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
+         *     pagination is deterministic across backends.
+         */
+        ImageSort: "id" | "name" | "size" | "created_at";
         /**
          * @description Sort direction. Defaults to `asc`. Unknown values return 400
          *     `invalid_order`.

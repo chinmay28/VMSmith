@@ -1666,6 +1666,78 @@ func TestCLI_ImageList_WithImages(t *testing.T) {
 	}
 }
 
+func TestCLI_ImageList_SortByName(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-3", Name: "Charlie", Path: "/t/c.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-1", Name: "alpha", Path: "/t/a.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "Bravo", Path: "/t/b.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "name")
+	if err != nil {
+		t.Fatalf("image list --sort name: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"alpha", "Bravo", "Charlie"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_ImageList_SortBySizeDesc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-small", Name: "small", Path: "/t/s.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-big", Name: "big", Path: "/t/b.qcow2", SizeBytes: 1 << 30, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-mid", Name: "mid", Path: "/t/m.qcow2", SizeBytes: 1 << 20, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "size", "--order", "desc")
+	if err != nil {
+		t.Fatalf("image list --sort size --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d", len(rows))
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"big", "mid", "small"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCLI_ImageList_RejectsInvalidSort(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--sort", "format")
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+}
+
+func TestCLI_ImageList_RejectsInvalidOrder(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--order", "sideways")
+	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("expected invalid --order error, got %v", err)
+	}
+}
+
 func TestCLI_ImageList_LimitAndOffset(t *testing.T) {
 	s, _, cleanup := withTestStorage(t)
 	defer cleanup()

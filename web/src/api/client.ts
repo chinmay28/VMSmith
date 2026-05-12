@@ -164,8 +164,8 @@ function uploadImageWithProgress(file: File, name: string, options: { descriptio
 
 // --- Images ---
 export const images = {
-  list: ({ page, perPage, tag = '' }: { page?: number; perPage?: number; tag?: string } = {}) =>
-    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage, tag: tag || undefined } as any } }), { withMeta: true }),
+  list: ({ page, perPage, tag = '', sort, order }: { page?: number; perPage?: number; tag?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage, tag: tag || undefined, sort, order } as any } }), { withMeta: true }),
   create: (vmId: string, name: string, options: { description?: string; tags?: string[] } = {}) =>
     unwrap(apiClient.POST('/images', { body: { vm_id: vmId, name, description: options.description, tags: options.tags } })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>

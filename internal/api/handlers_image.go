@@ -94,6 +94,12 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 
 // ListImages handles GET /api/v1/images
 func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
+	sortField, order, err := parseImageSort(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	imgs, err := s.storageMgr.ListImages()
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -105,6 +111,8 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 	if tagFilter != "" {
 		imgs = storage.FilterImagesByTag(imgs, tagFilter)
 	}
+
+	types.SortImages(imgs, sortField, order)
 
 	total := len(imgs)
 	pagination := parsePagination(r)

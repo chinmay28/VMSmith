@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -31,11 +30,31 @@ var imageListCmd = &cobra.Command{
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
+		sortField, _ := cmd.Flags().GetString("sort")
+		order, _ := cmd.Flags().GetString("order")
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		if sortField == "" {
+			sortField = types.ImageSortID
+		}
+		switch sortField {
+		case types.ImageSortID, types.ImageSortName, types.ImageSortSize, types.ImageSortCreatedAt:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, size, created_at", sortField)
+		}
+		order = strings.TrimSpace(strings.ToLower(order))
+		if order == "" {
+			order = types.SortOrderAsc
+		}
+		switch order {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
+		}
 		limit, offset, err := normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
-		logger.Info("cli", "image list", "tag", tagFilter)
+		logger.Info("cli", "image list", "tag", tagFilter, "sort", sortField, "order", order)
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
 			logger.Error("cli", "image list: failed to init storage manager", "error", err.Error())
@@ -51,12 +70,7 @@ var imageListCmd = &cobra.Command{
 		if tagFilter != "" {
 			imgs = storage.FilterImagesByTag(imgs, tagFilter)
 		}
-		sort.SliceStable(imgs, func(i, j int) bool {
-			if !imgs[i].CreatedAt.Equal(imgs[j].CreatedAt) {
-				return imgs[i].CreatedAt.Before(imgs[j].CreatedAt)
-			}
-			return imgs[i].ID < imgs[j].ID
-		})
+		types.SortImages(imgs, sortField, order)
 		imgs = paginateSlice(imgs, limit, offset)
 		logger.Info("cli", "image list result", "count", fmt.Sprintf("%d", len(imgs)))
 
@@ -326,6 +340,8 @@ func init() {
 	imageListCmd.Flags().Int("limit", 0, "maximum number of images to show (0 = no limit)")
 	imageListCmd.Flags().Int("offset", 0, "number of images to skip before printing results")
 	imageListCmd.Flags().String("tag", "", "filter to images carrying this tag")
+	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at")
+	imageListCmd.Flags().String("order", "asc", "order: asc or desc")
 
 	imageEditCmd.Flags().String("description", "", "new description (omit to leave unchanged; empty value cannot clear the field)")
 	imageEditCmd.Flags().StringArray("tag", nil, "tag value (repeatable; provide --tag with no value or omit any --tag to leave tags unchanged; pass --tag '' once to clear)")
