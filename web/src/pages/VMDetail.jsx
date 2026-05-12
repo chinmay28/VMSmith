@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -19,11 +19,27 @@ export default function VMDetail() {
   const { data: vm, loading, error, refresh } = useFetch(() => vms.get(id), [id], 5000);
   const [snapSort, setSnapSort] = useState('id');
   const [snapOrder, setSnapOrder] = useState('asc');
+  const [snapSearchInput, setSnapSearchInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_search') || '';
+  });
+  const [snapSearch, setSnapSearch] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_search') || '';
+  });
   const { data: snapList, refresh: refreshSnaps } = useFetch(
-    () => snapshots.list(id, { sort: snapSort, order: snapOrder }),
-    [id, snapSort, snapOrder],
+    () => snapshots.list(id, { sort: snapSort, order: snapOrder, search: snapSearch }),
+    [id, snapSort, snapOrder, snapSearch],
     10000,
   );
+
+  // Debounce the snapshot search box. `snapSearchInput` is the live value the
+  // user types; `snapSearch` is the committed query that drives the API call.
+  useEffect(() => {
+    const trimmed = snapSearchInput.trim();
+    const t = setTimeout(() => setSnapSearch(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [snapSearchInput]);
   const [portSort, setPortSort] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_sort') || 'id';
@@ -42,10 +58,11 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
     if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
+    if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder]);
+  }, [portSort, portOrder, snapSearch]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -264,7 +281,32 @@ export default function VMDetail() {
               </button>
             </div>
           </div>
-          <SnapshotList vmId={id} snapList={snapList} refreshSnaps={refreshSnaps} />
+          <div className="px-4 pt-3">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+              <input
+                type="search"
+                value={snapSearchInput}
+                onChange={(e) => setSnapSearchInput(e.target.value)}
+                placeholder="Search by name or description…"
+                className="input w-full pl-8 pr-7 py-1.5 text-xs"
+                data-testid="snap-list-search"
+                aria-label="Search snapshots"
+              />
+              {snapSearchInput && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+                  onClick={() => setSnapSearchInput('')}
+                  data-testid="snap-list-search-clear"
+                  aria-label="Clear snapshot search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+          <SnapshotList vmId={id} snapList={snapList} refreshSnaps={refreshSnaps} snapSearch={snapSearch} />
         </div>
 
         {/* Port Forwards */}
@@ -605,7 +647,7 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
 }
 
 // --- Snapshot List ---
-function SnapshotList({ vmId, snapList, refreshSnaps }) {
+function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
   const restoreMut = useMutation((name) => snapshots.restore(vmId, name));
   const deleteMut  = useMutation((name) => snapshots.delete(vmId, name));
   const bulkMut    = useMutation((body) => snapshots.bulkDelete(vmId, body));
@@ -630,7 +672,17 @@ function SnapshotList({ vmId, snapList, refreshSnaps }) {
   }, [snapList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!snapList?.length) {
-    return <EmptyState icon={Camera} title="No snapshots" description="Capture the VM state at any point." />;
+    return (
+      <EmptyState
+        icon={Camera}
+        title="No snapshots"
+        description={
+          snapSearch
+            ? `No snapshots match "${snapSearch}".`
+            : 'Capture the VM state at any point.'
+        }
+      />
+    );
   }
 
   const allSelected = selected.size > 0 && selected.size === snapList.length;

@@ -398,7 +398,15 @@ const server = http.createServer(async (req, res) => {
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
-    const list = [...(snapshots.get(m[1]) || [])];
+    let list = [...(snapshots.get(m[1]) || [])];
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    if (search) {
+      list = list.filter(s => {
+        if ((s.name || "").toLowerCase().includes(search)) return true;
+        if (s.description && s.description.toLowerCase().includes(search)) return true;
+        return false;
+      });
+    }
     const cmp = (a, b) => {
       let l;
       switch (sortField) {
@@ -410,6 +418,7 @@ const server = http.createServer(async (req, res) => {
       return order === "desc" ? -l : l;
     };
     list.sort(cmp);
+    res.setHeader("X-Total-Count", String(list.length));
     return json(res, 200, list);
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "POST") {

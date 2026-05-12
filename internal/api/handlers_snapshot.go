@@ -81,7 +81,15 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, snap)
 }
 
-// ListSnapshots handles GET /api/v1/vms/{vmID}/snapshots
+// ListSnapshots handles GET /api/v1/vms/{vmID}/snapshots.
+//
+// Optional query params:
+//   - search=<needle>            case-insensitive substring filter on name and
+//     description. Applied before sort + pagination so X-Total-Count reflects
+//     the post-search population.
+//   - sort=<id|name|created_at>  default id; case-insensitive
+//   - order=<asc|desc>           default asc
+//   - page / per_page (see parsePagination)
 func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
 
@@ -96,6 +104,17 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if searchFilter != "" {
+		filtered := snaps[:0]
+		for _, snap := range snaps {
+			if types.SnapshotMatchesSearch(snap, searchFilter) {
+				filtered = append(filtered, snap)
+			}
+		}
+		snaps = filtered
 	}
 
 	types.SortSnapshots(snaps, sortField, order)
