@@ -89,7 +89,18 @@ export const vms = {
 
 // --- Snapshots ---
 export const snapshots = {
-  list: (vmId: string) => unwrap(apiClient.GET('/vms/{vmID}/snapshots', { params: { path: { vmID: vmId } } })),
+  list: (
+    vmId: string,
+    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc' } = {},
+  ) =>
+    unwrap(
+      apiClient.GET('/vms/{vmID}/snapshots', {
+        params: {
+          path: { vmID: vmId },
+          query: { sort: opts.sort, order: opts.order },
+        },
+      }),
+    ),
   create: (vmId: string, name: string, description?: string) =>
     unwrap(
       apiClient.POST('/vms/{vmID}/snapshots', {

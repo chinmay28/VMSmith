@@ -90,7 +90,29 @@ var snapListCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
-		logger.Info("cli", "snapshot list", "vm_id", vmID)
+
+		sortField, _ := cmd.Flags().GetString("sort")
+		order, _ := cmd.Flags().GetString("order")
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		order = strings.TrimSpace(strings.ToLower(order))
+		if sortField == "" {
+			sortField = types.SnapshotSortID
+		}
+		switch sortField {
+		case types.SnapshotSortID, types.SnapshotSortName, types.SnapshotSortCreatedAt:
+		default:
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at", sortField)
+		}
+		if order == "" {
+			order = types.SortOrderAsc
+		}
+		switch order {
+		case types.SortOrderAsc, types.SortOrderDesc:
+		default:
+			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
+		}
+
+		logger.Info("cli", "snapshot list", "vm_id", vmID, "sort", sortField, "order", order)
 
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -104,6 +126,7 @@ var snapListCmd = &cobra.Command{
 			logger.Error("cli", "snapshot list failed", "vm_id", vmID, "error", err.Error())
 			return err
 		}
+		types.SortSnapshots(snaps, sortField, order)
 		logger.Info("cli", "snapshot list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(snaps)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -262,6 +285,9 @@ func init() {
 
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")
+
+	snapListCmd.Flags().String("sort", types.SnapshotSortID, "sort field: id, name, or created_at")
+	snapListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
 	snapEditCmd.Flags().String("description", "", "new description for the snapshot (pass empty string to clear; max 1024 chars)")
 

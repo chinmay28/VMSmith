@@ -345,6 +345,36 @@ async function main() {
       await assertText(p, "snap-bulk-result", "2 of 2 succeeded");
     }, page);
 
+    await runTest("sort snapshots by name desc", async (p) => {
+      // Re-seed all three snapshots via creates so the prior bulk-delete
+      // test doesn't leave the list in an emptied state.
+      for (const name of ["before-deploy", "auto-2026-05-06", "auto-2026-05-07"]) {
+        await p.locator('[data-testid="btn-new-snapshot"]').click();
+        await p.waitForTimeout(200);
+        await p.locator('[data-testid="input-snap-name"]').fill(name);
+        await p.locator('[data-testid="btn-submit-snapshot"]').click();
+        await p.waitForTimeout(400);
+      }
+      // Sort by name desc -> before-deploy moves to the top, auto-* below.
+      await p.locator('[data-testid="snap-sort-field"]').selectOption("name");
+      await p.locator('[data-testid="snap-sort-order"]').selectOption("desc");
+      await p.waitForTimeout(400);
+      const order = await p.evaluate(() => {
+        const seeded = ["before-deploy", "auto-2026-05-06", "auto-2026-05-07"];
+        return seeded
+          .map((n) => {
+            const el = document.querySelector(`[data-testid="snap-${n}"]`);
+            return { name: n, top: el ? el.getBoundingClientRect().top : Infinity };
+          })
+          .sort((a, b) => a.top - b.top)
+          .map((r) => r.name);
+      });
+      const expected = ["before-deploy", "auto-2026-05-07", "auto-2026-05-06"];
+      if (JSON.stringify(order) !== JSON.stringify(expected)) {
+        throw new Error(`sort desc order = ${JSON.stringify(order)}, want ${JSON.stringify(expected)}`);
+      }
+    }, page);
+
     await runTest("bulk-delete selected port forwards", async (p) => {
       // Two seeded port forwards on web-server: ssh-jumpbox + http.
       // Tick the http row, bulk-delete, confirm only ssh-jumpbox remains.

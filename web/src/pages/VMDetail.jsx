@@ -17,7 +17,13 @@ export default function VMDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { data: vm, loading, error, refresh } = useFetch(() => vms.get(id), [id], 5000);
-  const { data: snapList, refresh: refreshSnaps } = useFetch(() => snapshots.list(id), [id], 10000);
+  const [snapSort, setSnapSort] = useState('id');
+  const [snapOrder, setSnapOrder] = useState('asc');
+  const { data: snapList, refresh: refreshSnaps } = useFetch(
+    () => snapshots.list(id, { sort: snapSort, order: snapOrder }),
+    [id, snapSort, snapOrder],
+    10000,
+  );
   const { data: portList, refresh: refreshPorts } = useFetch(() => ports.list(id), [id], 10000);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
@@ -210,9 +216,32 @@ export default function VMDetail() {
               <Camera size={14} className="text-steel-500" />
               <h2 className="text-sm font-display font-semibold text-steel-300">Snapshots</h2>
             </div>
-            <button className="btn-ghost text-xs" onClick={() => setShowSnapModal(true)} data-testid="btn-new-snapshot">
-              <Plus size={13} /> New
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={snapSort}
+                onChange={(e) => setSnapSort(e.target.value)}
+                className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-xs text-steel-200"
+                data-testid="snap-sort-field"
+                aria-label="Sort snapshots by"
+              >
+                <option value="id">ID</option>
+                <option value="name">Name</option>
+                <option value="created_at">Created</option>
+              </select>
+              <select
+                value={snapOrder}
+                onChange={(e) => setSnapOrder(e.target.value)}
+                className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-xs text-steel-200"
+                data-testid="snap-sort-order"
+                aria-label="Sort order"
+              >
+                <option value="asc">Asc</option>
+                <option value="desc">Desc</option>
+              </select>
+              <button className="btn-ghost text-xs" onClick={() => setShowSnapModal(true)} data-testid="btn-new-snapshot">
+                <Plus size={13} /> New
+              </button>
+            </div>
           </div>
           <SnapshotList vmId={id} snapList={snapList} refreshSnaps={refreshSnaps} />
         </div>

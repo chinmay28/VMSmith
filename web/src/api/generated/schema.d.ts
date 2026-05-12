@@ -763,7 +763,22 @@ export interface paths {
         /** List VM snapshots */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
+                    /**
+                     * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
+                     *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
+                     *     name-asc. Unknown values return 400 `invalid_sort`. All comparators
+                     *     tiebreak on `name` so pagination is deterministic across backends.
+                     */
+                    sort?: components["parameters"]["SnapshotSort"];
+                    /**
+                     * @description Sort direction. Defaults to `asc`. Unknown values return 400
+                     *     `invalid_order`.
+                     */
+                    order?: components["parameters"]["SortOrder"];
+                };
                 header?: never;
                 path: {
                     vmID: components["parameters"]["VMID"];
@@ -2629,6 +2644,13 @@ export interface components {
          *     pagination is deterministic across backends.
          */
         ImageSort: "id" | "name" | "size" | "created_at";
+        /**
+         * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
+         *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
+         *     name-asc. Unknown values return 400 `invalid_sort`. All comparators
+         *     tiebreak on `name` so pagination is deterministic across backends.
+         */
+        SnapshotSort: "id" | "name" | "created_at";
         /**
          * @description Sort direction. Defaults to `asc`. Unknown values return 400
          *     `invalid_order`.

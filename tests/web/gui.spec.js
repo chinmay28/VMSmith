@@ -603,6 +603,59 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("snap-auto-2026-05-07")).not.toBeVisible();
   });
 
+  test("sort controls reorder the snapshot list", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // All three seeded snapshots render before we touch the dropdowns.
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // Helper that pulls every snapshot-row testid in DOM order — each row's
+    // testid is exactly `snap-<name>`, with no extra hyphen-segmented suffix
+    // (snap-checkbox-*, snap-desc-*, btn-edit-snap-*, snap-bulk-result, ...).
+    const rowOrder = () =>
+      page.evaluate(() => {
+        const seeded = ["before-deploy", "auto-2026-05-06", "auto-2026-05-07"];
+        return seeded
+          .map((n) => {
+            const el = document.querySelector(`[data-testid="snap-${n}"]`);
+            return { name: n, top: el ? el.getBoundingClientRect().top : Infinity };
+          })
+          .sort((a, b) => a.top - b.top)
+          .map((r) => r.name);
+      });
+
+    // Sort by name ascending -> the two auto-* names come before
+    // before-deploy alphabetically.
+    await page.getByTestId("snap-sort-field").selectOption("name");
+    await page.getByTestId("snap-sort-order").selectOption("asc");
+    await expect.poll(rowOrder).toEqual([
+      "auto-2026-05-06",
+      "auto-2026-05-07",
+      "before-deploy",
+    ]);
+
+    // Switch to name desc -> before-deploy moves to the top.
+    await page.getByTestId("snap-sort-order").selectOption("desc");
+    await expect.poll(rowOrder).toEqual([
+      "before-deploy",
+      "auto-2026-05-07",
+      "auto-2026-05-06",
+    ]);
+  });
+
+  test("snapshot list rejects invalid sort with API error surfaced", async ({ page }) => {
+    // The mock-server returns 400 invalid_sort if anything but the whitelisted
+    // values is supplied. The UI never sends an invalid value directly, but
+    // this test asserts the mock-server contract used by other suites.
+    const resp = await page.request.get(`${BASE_URL}/api/v1/vms/vm-1/snapshots?sort=description`);
+    expect(resp.status()).toBe(400);
+    const body = await resp.json();
+    expect(body.code).toBe("invalid_sort");
+  });
+
   test("add port forward with description and see it inline", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

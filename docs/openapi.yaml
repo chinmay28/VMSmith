@@ -459,6 +459,10 @@ paths:
       summary: List VM snapshots
       parameters:
         - $ref: '#/components/parameters/VMID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/SnapshotSort'
+        - $ref: '#/components/parameters/SortOrder'
       responses:
         '200':
           description: Snapshot list
@@ -1384,6 +1388,18 @@ components:
       schema:
         type: string
         enum: [id, name, size, created_at]
+        default: id
+    SnapshotSort:
+      name: sort
+      in: query
+      description: |
+        Field to sort the snapshot list by. Defaults to `id`. Within a single
+        VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
+        name-asc. Unknown values return 400 `invalid_sort`. All comparators
+        tiebreak on `name` so pagination is deterministic across backends.
+      schema:
+        type: string
+        enum: [id, name, created_at]
         default: id
     SortOrder:
       name: order

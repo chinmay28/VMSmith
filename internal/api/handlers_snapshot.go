@@ -85,12 +85,20 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
 
+	sortField, order, err := parseSnapshotSort(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
 	snaps, err := s.vmManager.ListSnapshots(r.Context(), vmID)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
 	}
+
+	types.SortSnapshots(snaps, sortField, order)
 
 	total := len(snaps)
 	pagination := parsePagination(r)
