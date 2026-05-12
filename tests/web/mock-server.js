@@ -125,13 +125,21 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/vms" && method === "GET") {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
-    const list = [...vms.values()];
+    let list = [...vms.values()];
+    if (search) {
+      list = list.filter(vm => {
+        if (vm.name && String(vm.name).toLowerCase().includes(search)) return true;
+        if (vm.description && String(vm.description).toLowerCase().includes(search)) return true;
+        return Array.isArray(vm.tags) && vm.tags.some(t => String(t).toLowerCase().includes(search));
+      });
+    }
     const cmp = (a, b) => {
       let l;
       switch (sortField) {

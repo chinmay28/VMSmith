@@ -265,7 +265,8 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 
 	tagFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("tag")))
 	statusFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("status")))
-	if tagFilter != "" || statusFilter != "" {
+	searchFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("search")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -282,6 +283,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				if !matchedTag {
 					continue
 				}
+			}
+			if searchFilter != "" && !types.VMMatchesSearch(vm, searchFilter) {
+				continue
 			}
 			filtered = append(filtered, vm)
 		}
