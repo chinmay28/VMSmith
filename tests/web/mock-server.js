@@ -477,7 +477,45 @@ const server = http.createServer(async (req, res) => {
     snapshots.set(m[1], list); res.writeHead(204); return res.end();
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports$/)) && method === "GET") {
-    return json(res, 200, portForwards.get(m[1]) || []);
+    const sortField = (url.searchParams.get("sort") || "id").toLowerCase().trim();
+    const order = (url.searchParams.get("order") || "asc").toLowerCase().trim();
+    const allowedSort = ["id", "host_port", "guest_port", "protocol", "description"];
+    if (!allowedSort.includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, host_port, guest_port, protocol, description" });
+    }
+    if (!["asc", "desc"].includes(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
+    const list = (portForwards.get(m[1]) || []).slice();
+    const cmp = (a, b) => {
+      let l;
+      switch (sortField) {
+        case "host_port":
+          if (a.host_port !== b.host_port) l = a.host_port < b.host_port ? -1 : 1;
+          else l = (a.id || "").localeCompare(b.id || "");
+          break;
+        case "guest_port":
+          if (a.guest_port !== b.guest_port) l = a.guest_port < b.guest_port ? -1 : 1;
+          else l = (a.id || "").localeCompare(b.id || "");
+          break;
+        case "protocol":
+          if ((a.protocol || "") !== (b.protocol || "")) l = (a.protocol || "") < (b.protocol || "") ? -1 : 1;
+          else l = (a.id || "").localeCompare(b.id || "");
+          break;
+        case "description": {
+          const ad = (a.description || "").toLowerCase();
+          const bd = (b.description || "").toLowerCase();
+          if (ad !== bd) l = ad < bd ? -1 : 1;
+          else l = (a.id || "").localeCompare(b.id || "");
+          break;
+        }
+        default: // id
+          l = (a.id || "").localeCompare(b.id || "");
+      }
+      return order === "desc" ? -l : l;
+    };
+    list.sort(cmp);
+    return json(res, 200, list);
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports\/bulk_delete$/)) && method === "POST") {
     const vmId = m[1];

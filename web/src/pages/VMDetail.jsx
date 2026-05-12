@@ -24,7 +24,28 @@ export default function VMDetail() {
     [id, snapSort, snapOrder],
     10000,
   );
-  const { data: portList, refresh: refreshPorts } = useFetch(() => ports.list(id), [id], 10000);
+  const [portSort, setPortSort] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_sort') || 'id';
+  });
+  const [portOrder, setPortOrder] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_order') || 'asc';
+  });
+  const { data: portList, refresh: refreshPorts } = useFetch(
+    () => ports.list(id, { sort: portSort, order: portOrder }),
+    [id, portSort, portOrder],
+    10000,
+  );
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
+    if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
+    const qs = sp.toString();
+    const next = window.location.pathname + (qs ? `?${qs}` : '');
+    window.history.replaceState(null, '', next);
+  }, [portSort, portOrder]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -253,9 +274,34 @@ export default function VMDetail() {
               <Network size={14} className="text-steel-500" />
               <h2 className="text-sm font-display font-semibold text-steel-300">Port Forwards</h2>
             </div>
-            <button className="btn-ghost text-xs" onClick={() => setShowPortModal(true)} data-testid="btn-new-port">
-              <Plus size={13} /> Add
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                className="form-select text-xs"
+                value={portSort}
+                onChange={(e) => setPortSort(e.target.value)}
+                data-testid="port-sort-field"
+                aria-label="Sort port forwards by"
+              >
+                <option value="id">ID</option>
+                <option value="host_port">Host port</option>
+                <option value="guest_port">Guest port</option>
+                <option value="protocol">Protocol</option>
+                <option value="description">Description</option>
+              </select>
+              <select
+                className="form-select text-xs"
+                value={portOrder}
+                onChange={(e) => setPortOrder(e.target.value)}
+                data-testid="port-sort-order"
+                aria-label="Sort port forwards order"
+              >
+                <option value="asc">Asc</option>
+                <option value="desc">Desc</option>
+              </select>
+              <button className="btn-ghost text-xs" onClick={() => setShowPortModal(true)} data-testid="btn-new-port">
+                <Plus size={13} /> Add
+              </button>
+            </div>
           </div>
           <PortList vmId={id} portList={portList} refreshPorts={refreshPorts} />
         </div>

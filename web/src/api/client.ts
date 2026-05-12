@@ -194,7 +194,17 @@ export const images = {
 
 // --- Port Forwards ---
 export const ports = {
-  list: (vmId: string) => unwrap(apiClient.GET('/vms/{vmID}/ports', { params: { path: { vmID: vmId } } })),
+  list: (
+    vmId: string,
+    opts: { sort?: string; order?: string } = {},
+  ) => {
+    const query: Record<string, string> = {};
+    if (opts.sort)  query.sort  = opts.sort;
+    if (opts.order) query.order = opts.order;
+    return unwrap(apiClient.GET('/vms/{vmID}/ports', {
+      params: { path: { vmID: vmId }, query: query as any },
+    } as any));
+  },
   add: (
     vmId: string,
     hostPort: number,

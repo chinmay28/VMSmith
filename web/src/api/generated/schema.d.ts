@@ -1012,10 +1012,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List a VM's port forwards */
+        /**
+         * List a VM's port forwards
+         * @description `sort` accepts `id` (default), `host_port`, `guest_port`, `protocol`, or
+         *     `description`; the description sort is case-insensitive. `order` accepts
+         *     `asc` (default) or `desc`. All comparators tiebreak on `id` so
+         *     repeated requests return a deterministic order.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Field to sort by. */
+                    sort?: "id" | "host_port" | "guest_port" | "protocol" | "description";
+                    /** @description Sort direction. */
+                    order?: "asc" | "desc";
+                };
                 header?: never;
                 path: {
                     vmID: components["parameters"]["VMID"];
@@ -1033,6 +1044,7 @@ export interface paths {
                         "application/json": components["schemas"]["PortForward"][];
                     };
                 };
+                400: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
             };
         };
