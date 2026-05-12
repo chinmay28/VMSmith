@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { HardDrive, Download, Trash2, Upload, Pencil } from 'lucide-react';
+import { HardDrive, Download, Trash2, Upload, Pencil, Search, X } from 'lucide-react';
 import { images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
@@ -12,6 +12,8 @@ export default function ImageList() {
   const [showUpload, setShowUpload] = useState(false);
   const [editing, setEditing] = useState(null);
   const [tagFilter, setTagFilter] = useState('');
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
+  const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -19,8 +21,8 @@ export default function ImageList() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage, tag: tagFilter, sort, order }),
-    [page, perPage, tagFilter, sort, order],
+    () => imagesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
@@ -32,14 +34,25 @@ export default function ImageList() {
     [imageList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sort, order]);
+
+  // Debounce the free-text search box. The committed `searchFilter` drives the
+  // useFetch dependency above; `searchInput` is what the user types.
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const id = setTimeout(() => {
+      setSearchFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [searchInput]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
+    if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     setSearchParams(next, { replace: true });
-  }, [sort, order]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -108,6 +121,32 @@ export default function ImageList() {
       <UploadImageModal open={showUpload} onClose={() => setShowUpload(false)} onUploaded={refresh} />
       <EditImageModal image={editing} onClose={() => setEditing(null)} onSaved={refresh} />
 
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative flex-1 max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name, description, or tag…"
+            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            data-testid="image-list-search"
+            aria-label="Search images"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setSearchInput('')}
+              data-testid="image-list-search-clear"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4" data-testid="image-tag-filter">
           <button
@@ -161,7 +200,13 @@ export default function ImageList() {
           <EmptyState
             icon={HardDrive}
             title="No images"
-            description={tagFilter ? `No images carry tag "${tagFilter}".` : 'Export a VM to create a portable disk image.'}
+            description={
+              searchFilter
+                ? `No images match "${searchFilter}".`
+                : tagFilter
+                ? `No images carry tag "${tagFilter}".`
+                : 'Export a VM to create a portable disk image.'
+            }
           />
         </div>
       ) : (

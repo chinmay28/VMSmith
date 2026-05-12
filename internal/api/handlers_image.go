@@ -112,6 +112,17 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		imgs = storage.FilterImagesByTag(imgs, tagFilter)
 	}
 
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if searchFilter != "" {
+		filtered := imgs[:0]
+		for _, img := range imgs {
+			if types.ImageMatchesSearch(img, searchFilter) {
+				filtered = append(filtered, img)
+			}
+		}
+		imgs = filtered
+	}
+
 	types.SortImages(imgs, sortField, order)
 
 	total := len(imgs)
