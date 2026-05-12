@@ -1295,6 +1295,13 @@ export interface paths {
                     order?: components["parameters"]["SortOrder"];
                     /** @description Filter to images carrying this tag (case-insensitive). */
                     tag?: string;
+                    /**
+                     * @description Case-insensitive substring filter on image name, description, and
+                     *     tags. Whitespace is trimmed; ID is intentionally excluded so opaque
+                     *     `img-<unix-nano>` strings don't produce numeric false positives.
+                     *     Composes additively with `tag`, `sort`, and pagination.
+                     */
+                    search?: string;
                 };
                 header?: never;
                 path?: never;

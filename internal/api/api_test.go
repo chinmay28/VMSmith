@@ -5320,6 +5320,148 @@ func TestListImages_RejectsInvalidOrder(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_order")
 }
 
+// --- Image free-text search filter (5.4.9) ---
+
+func TestListImages_FilterBySearch_MatchesName(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "rocky9-base", "", nil)
+	seedStoredImage(t, s, "img-b", "ubuntu-22", "", nil)
+
+	resp, err := http.Get(ts.URL + "/api/v1/images?search=rocky")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "rocky9-base" {
+		t.Errorf("filter = %+v, want only rocky9-base", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_MatchesDescription(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "rocky9-base", "Hardened CIS-1 build", nil)
+	seedStoredImage(t, s, "img-b", "ubuntu-22", "Stock cloud image", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=hardened")
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "rocky9-base" {
+		t.Errorf("filter = %+v, want only rocky9-base via description", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "rocky9-base", "", []string{"team-storage", "prod"})
+	seedStoredImage(t, s, "img-b", "ubuntu-22", "", []string{"team-net"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=storage")
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "rocky9-base" {
+		t.Errorf("filter = %+v, want only rocky9-base via tag", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "Rocky9-Base", "", nil)
+	seedStoredImage(t, s, "img-b", "ubuntu-22", "", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=ROCKY")
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "Rocky9-Base" {
+		t.Errorf("filter = %+v, want only Rocky9-Base case-insensitive", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "alpha", "", nil)
+	seedStoredImage(t, s, "img-b", "beta", "", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=%20%20alpha%20%20")
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "alpha" {
+		t.Errorf("filter = %+v, want only alpha after trim", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "alpha", "", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=needle-not-present")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with empty list", resp.StatusCode)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 0 {
+		t.Errorf("filter = %+v, want empty list", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_CombinesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-a", "rocky9-prod", "", []string{"prod"})
+	seedStoredImage(t, s, "img-b", "rocky9-qa", "", []string{"qa"})
+	seedStoredImage(t, s, "img-c", "ubuntu-prod", "", []string{"prod"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=rocky&tag=prod")
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "rocky9-prod" {
+		t.Errorf("filter = %+v, want only rocky9-prod (intersection of search+tag)", imgs)
+	}
+}
+
+func TestListImages_FilterBySearch_CombinesWithSort(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "rocky9-charlie", 100, t0)
+	seedStoredImageFull(t, s, "img-2", "rocky9-alpha", 100, t0.Add(time.Hour))
+	seedStoredImageFull(t, s, "img-3", "ubuntu-22", 100, t0.Add(2*time.Hour))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?search=rocky&sort=name&order=asc")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (only rocky after search)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	want := []string{"rocky9-alpha", "rocky9-charlie"}
+	if len(imgs) != len(want) {
+		t.Fatalf("len = %d, want %d", len(imgs), len(want))
+	}
+	for i, img := range imgs {
+		if img.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, img.Name, want[i])
+		}
+	}
+}
+
 func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

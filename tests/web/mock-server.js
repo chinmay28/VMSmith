@@ -592,6 +592,14 @@ const server = http.createServer(async (req, res) => {
     if (tag) {
       list = list.filter(img => (img.tags || []).some(t => String(t).toLowerCase() === tag));
     }
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    if (search) {
+      list = list.filter(img => {
+        if ((img.name || "").toLowerCase().includes(search)) return true;
+        if ((img.description || "").toLowerCase().includes(search)) return true;
+        return (img.tags || []).some(t => String(t).toLowerCase().includes(search));
+      });
+    }
     const cmp = (a, b) => {
       let l;
       switch (sortField) {

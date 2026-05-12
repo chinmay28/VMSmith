@@ -783,6 +783,15 @@ paths:
           schema:
             type: string
           description: Filter to images carrying this tag (case-insensitive).
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: |
+            Case-insensitive substring filter on image name, description, and
+            tags. Whitespace is trimmed; ID is intentionally excluded so opaque
+            `img-<unix-nano>` strings don't produce numeric false positives.
+            Composes additively with `tag`, `sort`, and pagination.
       responses:
         '200':
           description: Image list

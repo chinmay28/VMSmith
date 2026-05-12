@@ -2035,6 +2035,99 @@ func TestCLI_ImageList_FilterByTag(t *testing.T) {
 	}
 }
 
+// --- Image list --search (5.4.9) ---
+
+func TestCLI_ImageList_FilterBySearch_MatchesName(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-rocky", Name: "rocky9-base", Path: "/tmp/r.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-ubuntu", Name: "ubuntu-22", Path: "/tmp/u.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--search", "rocky")
+	if err != nil {
+		t.Fatalf("image list --search: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base") {
+		t.Fatalf("expected rocky9-base in output, got %q", out)
+	}
+	if strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("did not expect ubuntu-22 in output, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySearch_MatchesDescription(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "alpha", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", Description: "Hardened CIS-1 build", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "beta", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", Description: "Stock cloud image", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--search", "hardened")
+	if err != nil {
+		t.Fatalf("image list --search: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("filter on description failed, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySearch_MatchesTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "alpha", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"team-storage"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "beta", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"team-net"}, CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--search", "storage")
+	if err != nil {
+		t.Fatalf("image list --search: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("filter on tag failed, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySearch_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "alpha", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("image list --search: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySearch_CombinesWithTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-1", Name: "rocky9-prod", Path: "/tmp/1.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"prod"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-2", Name: "rocky9-qa", Path: "/tmp/2.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"qa"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-3", Name: "ubuntu-prod", Path: "/tmp/3.qcow2", SizeBytes: 1024, Format: "qcow2", Tags: []string{"prod"}, CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--search", "rocky", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("image list --search --tag: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-prod") {
+		t.Fatalf("expected rocky9-prod (intersection of search+tag), got %q", out)
+	}
+	if strings.Contains(out, "rocky9-qa") || strings.Contains(out, "ubuntu-prod") {
+		t.Fatalf("did not expect non-intersecting images, got %q", out)
+	}
+}
+
 func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
 	s, _, cleanup := withTestStorage(t)
 	defer cleanup()

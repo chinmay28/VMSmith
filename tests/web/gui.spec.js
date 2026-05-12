@@ -1155,6 +1155,35 @@ test.describe("Images", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("sort=size");
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
+
+  test("search input filters the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Both seeded images visible initially.
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Type "rocky" — the ubuntu row drops out after the debounce settles.
+    await page.getByTestId("image-list-search").fill("rocky");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).toContain("search=rocky");
+
+    // Clear the search — the ubuntu row comes back and the URL drops `search=`.
+    await page.getByTestId("image-list-search-clear").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("search=");
+  });
+
+  test("search input matches no images when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("image-list-search").fill("needle-not-present");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+  });
 });
 
 // ============================================================
