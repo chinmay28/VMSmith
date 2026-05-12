@@ -1271,6 +1271,16 @@ paths:
             type: string
             enum: [info, warn, error]
           description: Filter by severity.
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: |
+            Case-insensitive substring match across `message`, `type`, `source`,
+            `severity`, `actor`, `vm_id`, `resource_id`, and every value in
+            `attributes`. Combines additively with the other filters.
+            The numeric event ID is intentionally excluded from the haystack so
+            short numeric queries don't produce noisy matches.
         - name: since
           in: query
           schema:

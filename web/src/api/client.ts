@@ -280,18 +280,19 @@ export const webhooks = {
 // --- Events ---
 // Filter params line up 1:1 with GET /api/v1/events query params.
 export const events = {
-  list: ({ vmId = '', type = '', source = '', severity = '', since = '', until = '', page, perPage }: {
+  list: ({ vmId = '', type = '', source = '', severity = '', search = '', since = '', until = '', page, perPage }: {
     vmId?: string;
     type?: string;
     source?: 'libvirt' | 'app' | 'system' | '';
     severity?: 'info' | 'warn' | 'error' | '';
+    search?: string;
     since?: string;
     until?: string;
     page?: number;
     perPage?: number;
   } = {}) =>
     unwrap(apiClient.GET('/events', {
-      params: { query: { vm_id: vmId, type, source: source || undefined, severity: severity || undefined, since, until, page, per_page: perPage } as any },
+      params: { query: { vm_id: vmId, type, source: source || undefined, severity: severity || undefined, search: search || undefined, since, until, page, per_page: perPage } as any },
     }), { withMeta: true }),
 };
 

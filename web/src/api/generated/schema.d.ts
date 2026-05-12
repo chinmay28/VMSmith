@@ -2077,6 +2077,14 @@ export interface paths {
                     source?: "libvirt" | "app" | "system";
                     /** @description Filter by severity. */
                     severity?: "info" | "warn" | "error";
+                    /**
+                     * @description Case-insensitive substring match across `message`, `type`, `source`,
+                     *     `severity`, `actor`, `vm_id`, `resource_id`, and every value in
+                     *     `attributes`. Combines additively with the other filters.
+                     *     The numeric event ID is intentionally excluded from the haystack so
+                     *     short numeric queries don't produce noisy matches.
+                     */
+                    search?: string;
                     /** @description Return only events with `occurred_at` after this RFC3339 timestamp. */
                     since?: string;
                     /** @description Cursor — exclude events with sequence ID >= this uint64. */

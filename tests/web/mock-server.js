@@ -671,19 +671,34 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/events" && method === "GET") {
     const allEvents = [
-      { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", message: "VM 'web-server-prod' started", created_at: new Date(Date.now() - 30_000).toISOString() },
-      { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", message: "VM 'web-server-prod' created", created_at: new Date(Date.now() - 60_000).toISOString() },
-      { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
+      { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", actor: "system",    message: "VM 'web-server-prod' started",            created_at: new Date(Date.now() - 30_000).toISOString() },
+      { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", actor: "ops-alice", message: "VM 'web-server-prod' created", attributes: { template: "rocky9-base" }, created_at: new Date(Date.now() - 60_000).toISOString() },
+      { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", actor: "system",    message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
     ];
     const vmFilter = (url.searchParams.get("vm_id") || "").trim();
     const sourceFilter = (url.searchParams.get("source") || "").trim();
     const severityFilter = (url.searchParams.get("severity") || "").trim();
     const typeFilter = (url.searchParams.get("type") || "").trim();
+    const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const matchesSearch = (e) => {
+      if (!searchFilter) return true;
+      const haystacks = [e.message, e.type, e.source, e.severity, e.actor, e.vm_id, e.resource_id];
+      for (const h of haystacks) {
+        if (h && String(h).toLowerCase().includes(searchFilter)) return true;
+      }
+      if (e.attributes) {
+        for (const v of Object.values(e.attributes)) {
+          if (v && String(v).toLowerCase().includes(searchFilter)) return true;
+        }
+      }
+      return false;
+    };
     let filtered = allEvents.filter(e =>
       (!vmFilter || e.vm_id === vmFilter) &&
       (!sourceFilter || e.source === sourceFilter) &&
       (!severityFilter || e.severity === severityFilter) &&
-      (!typeFilter || e.type === typeFilter)
+      (!typeFilter || e.type === typeFilter) &&
+      matchesSearch(e)
     );
     const total = filtered.length;
     return json(res, 200, filtered, { "X-Total-Count": String(total) });

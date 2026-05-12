@@ -1276,6 +1276,47 @@ test.describe("Activity", () => {
     await page.getByTestId("tab-activity").click();
     await expect(page.getByTestId("vm-detail-activity")).toBeVisible();
   });
+
+  test("search input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // All three seeded events visible before typing.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    // Type a substring that only matches evt-1's message ("database-staging").
+    await page.getByTestId("activity-filter-search").fill("database-staging");
+
+    // Debounce settles after 250 ms; evt-1 stays, evt-2 and evt-3 go away.
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+
+    // The committed query lands in the URL so the filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBe("database-staging");
+
+    // Clearing via the in-input X removes the param and restores the list.
+    await page.getByTestId("btn-activity-clear-search").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBe(null);
+  });
+
+  test("search input matches no events when query has no hits", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-search").fill("needle-not-present");
+    // Empty-state copy shows up after the debounced fetch returns zero rows.
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
+  test("search input matches against attribute values", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // The mock server seeds evt-2 with attributes.template = "rocky9-base"; a
+    // substring match should keep evt-2 and hide the others.
+    await page.getByTestId("activity-filter-search").fill("rocky9");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+  });
 });
 
 // ============================================================

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { RefreshCw, Activity as ActivityIcon } from 'lucide-react';
+import { RefreshCw, Activity as ActivityIcon, Search, X } from 'lucide-react';
 import { events as eventsApi, vms as vmsApi } from '../api/client';
 import { PageHeader, Spinner, ErrorBanner, EmptyState, PaginationControls, SeverityBadge } from '../components/Shared';
 
 const DEFAULT_PER_PAGE = 50;
 const POLL_INTERVAL_MS = 5000;
+const SEARCH_DEBOUNCE_MS = 250;
 
 const sourceLabel = (source) => {
   switch (source) {
@@ -41,13 +42,19 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         type:     searchParams.get('type')    || '',
         source:   searchParams.get('source')  || '',
         severity: searchParams.get('severity') || '',
+        search:   searchParams.get('search')  || '',
       }
-    : { vmId: vmIdProp, type: '', source: '', severity: '' };
+    : { vmId: vmIdProp, type: '', source: '', severity: '', search: '' };
 
   const [vmFilter, setVmFilter] = useState(initial.vmId);
   const [typeFilter, setTypeFilter] = useState(initial.type);
   const [sourceFilter, setSourceFilter] = useState(initial.source);
   const [severityFilter, setSeverityFilter] = useState(initial.severity);
+  // searchInput is the live <input> value; searchFilter is the debounced /
+  // committed value that drives the fetch. Splitting them prevents a fetch
+  // per keystroke while letting the input feel responsive.
+  const [searchInput, setSearchInput] = useState(initial.search);
+  const [searchFilter, setSearchFilter] = useState(initial.search);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
 
@@ -67,8 +74,18 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     if (typeFilter)     next.set('type', typeFilter);
     if (sourceFilter)   next.set('source', sourceFilter);
     if (severityFilter) next.set('severity', severityFilter);
+    if (searchFilter)   next.set('search', searchFilter);
     setSearchParams(next, { replace: true });
-  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, setSearchParams]);
+  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, setSearchParams]);
+
+  // Debounce the search input: a fetch per keystroke would fan out one
+  // request per character. 250 ms is the sweet spot between "feels live"
+  // and "doesn't hammer the daemon".
+  useEffect(() => {
+    if (searchInput === searchFilter) return;
+    const id = setTimeout(() => setSearchFilter(searchInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [searchInput, searchFilter]);
 
   // When the parent prop changes (different VM in the embedded tab), reset.
   useEffect(() => {
@@ -86,6 +103,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         type: typeFilter,
         source: sourceFilter,
         severity: severityFilter,
+        search: searchFilter,
         page,
         perPage,
       });
@@ -98,7 +116,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     } finally {
       setLoading(false);
     }
-  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, page, perPage]);
+  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, page, perPage]);
 
   useEffect(() => {
     setLoading(true);
@@ -110,7 +128,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // Reset to page 1 when filters change.
   useEffect(() => {
     setPage(1);
-  }, [vmFilter, typeFilter, sourceFilter, severityFilter]);
+  }, [vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter]);
 
   // Lazily build a VM ID → name map so the timeline can render names.
   // Only top-level Activity needs this; the embedded tab already knows the VM.
@@ -157,6 +175,28 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
 
       {!embedded && (
         <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative" data-testid="activity-search-wrap">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+            <input
+              type="search"
+              className="input py-1 text-xs w-60 pl-7 pr-7"
+              placeholder="Search message, type, attrs…"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              data-testid="activity-filter-search"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200 p-1"
+                onClick={() => setSearchInput('')}
+                aria-label="Clear search"
+                data-testid="btn-activity-clear-search"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
           <input
             className="input py-1 text-xs w-44"
             placeholder="Filter by VM ID"
@@ -195,10 +235,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="">All types</option>
             {distinctTypes.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter) && (
+          {(vmFilter || typeFilter || sourceFilter || severityFilter || searchInput) && (
             <button
               className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); }}
+              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setSearchInput(''); }}
               data-testid="btn-activity-clear-filters"
             >
               Clear

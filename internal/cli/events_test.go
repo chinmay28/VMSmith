@@ -194,6 +194,94 @@ func TestCLI_EventsList_InvalidSince(t *testing.T) {
 	}
 }
 
+func TestCLI_EventsList_FilterBySearch_MatchesMessage(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", VMID: "vm-A", Message: "started vm web-prod-01", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_stopped", VMID: "vm-B", Message: "stopped vm db-staging", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--search", "web-prod")
+	if err != nil {
+		t.Fatalf("events list --search: %v", err)
+	}
+	if !strings.Contains(out, "vm_started") || strings.Contains(out, "vm_stopped") {
+		t.Errorf("--search did not narrow output:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterBySearch_MatchesAttributeValue(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{
+		ID:         "evt-1",
+		Type:       "port_forward_added",
+		Attributes: map[string]string{"host_port": "22001"},
+		CreatedAt:  now,
+	})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_started", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--search", "22001")
+	if err != nil {
+		t.Fatalf("events list --search: %v", err)
+	}
+	if !strings.Contains(out, "port_forward_added") || strings.Contains(out, "vm_started") {
+		t.Errorf("attribute-value search did not narrow output:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "dhcp_exhausted", Message: "DHCP pool exhausted", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--search", "DHCP")
+	if err != nil {
+		t.Fatalf("events list --search: %v", err)
+	}
+	if !strings.Contains(out, "dhcp_exhausted") {
+		t.Errorf("expected DHCP match via case-insensitive search:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterBySearch_NoMatch(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", Message: "ok", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("events list --search: %v", err)
+	}
+	if !strings.Contains(out, "No events.") {
+		t.Errorf("expected 'No events.' for no-match search:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterBySearch_CombinesWithSource(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "snapshot_created", Source: "app", Message: "snapshot before-deploy", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_stopped", Source: "libvirt", Message: "stopped snapshot host", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--search", "snapshot", "--source", "app")
+	if err != nil {
+		t.Fatalf("events list --search --source: %v", err)
+	}
+	if !strings.Contains(out, "snapshot_created") || strings.Contains(out, "vm_stopped") {
+		t.Errorf("--search did not compose with --source:\n%s", out)
+	}
+}
+
 // --- events follow tests ---
 
 // sseEventTestServer serves a deterministic SSE stream for testing.
