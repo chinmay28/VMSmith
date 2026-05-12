@@ -91,13 +91,13 @@ export const vms = {
 export const snapshots = {
   list: (
     vmId: string,
-    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc' } = {},
+    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc'; search?: string } = {},
   ) =>
     unwrap(
       apiClient.GET('/vms/{vmID}/snapshots', {
         params: {
           path: { vmID: vmId },
-          query: { sort: opts.sort, order: opts.order },
+          query: { sort: opts.sort, order: opts.order, search: opts.search || undefined } as any,
         },
       }),
     ),

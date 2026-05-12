@@ -679,6 +679,54 @@ test.describe("VM Detail", () => {
     expect(body.code).toBe("invalid_sort");
   });
 
+  test("snapshot search input filters the snapshot list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // All three seeded snapshots are visible before typing.
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // Typing "auto" should leave only the auto-* rows.
+    await page.getByTestId("snap-list-search").fill("auto");
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+    await expect(page.getByTestId("snap-before-deploy")).toHaveCount(0);
+
+    // The committed query is persisted to the URL via ?snap_search=.
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_search")).toBe("auto");
+
+    // Clearing the input restores all three.
+    await page.getByTestId("snap-list-search-clear").click();
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_search")).toBeNull();
+  });
+
+  test("snapshot search input matches the description field", async ({ page }) => {
+    // 'before-deploy' has description "checkpoint before May deploy" — the
+    // word "checkpoint" only appears in the description, not in any name.
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("snap-list-search").fill("checkpoint");
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toHaveCount(0);
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toHaveCount(0);
+  });
+
+  test("snapshot search input shows empty state when no snapshots match", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("snap-list-search").fill("needle-not-present");
+    // All three rows disappear; the empty-state card surfaces the needle in
+    // its description.
+    await expect(page.getByTestId("snap-before-deploy")).toHaveCount(0);
+    await expect(page.getByText(/No snapshots match "needle-not-present"/)).toBeVisible();
+  });
+
   test("add port forward with description and see it inline", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

@@ -1485,6 +1485,109 @@ func TestCLI_SnapshotList_RejectsInvalidOrder(t *testing.T) {
 	}
 }
 
+func TestCLI_SnapshotList_SearchByName(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-search", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-search", Name: "pre-upgrade"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-search", Name: "rollback-point"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-search", Name: "weekly-backup"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-search", "--search", "upgrade")
+	if err != nil {
+		t.Fatalf("snapshot list --search: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 match, got %d rows: %v", len(rows), rows)
+	}
+	if rows[1][0] != "pre-upgrade" {
+		t.Fatalf("expected match pre-upgrade, got %q", rows[1][0])
+	}
+}
+
+func TestCLI_SnapshotList_SearchByDescription(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-sdesc", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-sdesc", Name: "snap-001", Description: "Before applying CIS hardening playbook"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-sdesc", Name: "snap-002", Description: "Routine nightly cut"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-sdesc", "--search", "hardening")
+	if err != nil {
+		t.Fatalf("snapshot list --search hardening: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 match, got %d rows: %v", len(rows), rows)
+	}
+	if rows[1][0] != "snap-001" {
+		t.Fatalf("expected match snap-001, got %q", rows[1][0])
+	}
+}
+
+func TestCLI_SnapshotList_SearchCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-scase", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-scase", Name: "Pre-Upgrade"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-scase", "--search", "UPGRADE")
+	if err != nil {
+		t.Fatalf("snapshot list --search UPGRADE: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 match (case-insensitive), got %d rows: %v", len(rows), rows)
+	}
+}
+
+func TestCLI_SnapshotList_SearchNoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-snomatch", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-snomatch", Name: "alpha"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-snomatch", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("snapshot list --search no-match: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 1 {
+		t.Fatalf("expected header-only output for no match, got %d rows: %v", len(rows), rows)
+	}
+}
+
+func TestCLI_SnapshotList_SearchComposesWithSort(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-scompose", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-scompose", Name: "upgrade-beta"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-scompose", Name: "rollback"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-scompose", Name: "upgrade-alpha"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-scompose", "--search", "upgrade", "--sort", "name")
+	if err != nil {
+		t.Fatalf("snapshot list --search + --sort: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 matches, got %d rows: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0]}
+	want := []string{"upgrade-alpha", "upgrade-beta"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestCLI_SnapshotRestore(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

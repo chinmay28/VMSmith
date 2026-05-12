@@ -778,6 +778,16 @@ export interface paths {
                      *     `invalid_order`.
                      */
                     order?: components["parameters"]["SortOrder"];
+                    /**
+                     * @description Case-insensitive substring filter applied to the snapshot's
+                     *     `name` and `description`. The needle is trimmed and lowercased
+                     *     before matching. Filtering happens before sort + pagination so
+                     *     `X-Total-Count` reflects the post-search population. The
+                     *     snapshot ID (`<vmID>/<name>`) and `vm_id` are intentionally
+                     *     excluded from the haystack to avoid noisy false positives on
+                     *     short numeric queries.
+                     */
+                    search?: string;
                 };
                 header?: never;
                 path: {

@@ -2962,6 +2962,140 @@ func TestListSnapshots_RejectsInvalidOrder(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_order")
 }
 
+func TestListSnapshots_FilterBySearch_Name(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-search"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-search", Name: "pre-upgrade"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-search", Name: "rollback-point"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-search", Name: "weekly-backup"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-snap-search/snapshots?search=upgrade")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1", got)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].Name != "pre-upgrade" {
+		t.Fatalf("expected only pre-upgrade, got %+v", got)
+	}
+}
+
+func TestListSnapshots_FilterBySearch_Description(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-desc-search"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-search", Name: "snap-001", Description: "Before applying CIS hardening playbook"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-search", Name: "snap-002", Description: "Routine nightly cut"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-desc-search/snapshots?search=hardening")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].Name != "snap-001" {
+		t.Fatalf("expected only snap-001, got %+v", got)
+	}
+}
+
+func TestListSnapshots_FilterBySearch_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-case"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-case", Name: "Pre-Upgrade"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-case/snapshots?search=UPGRADE")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 {
+		t.Fatalf("expected uppercase needle to match case-insensitively, got %d snapshots", len(got))
+	}
+}
+
+func TestListSnapshots_FilterBySearch_WhitespaceTrimmed(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-trim"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-trim", Name: "alpha"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-trim", Name: "beta"})
+
+	// The handler must trim leading/trailing whitespace before searching;
+	// otherwise the needle "  alpha  " would never match any snapshot.
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-trim/snapshots?search=%20%20alpha%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].Name != "alpha" {
+		t.Fatalf("expected only alpha after trim, got %+v", got)
+	}
+}
+
+func TestListSnapshots_FilterBySearch_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-empty"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-empty", Name: "alpha"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-empty/snapshots?search=needle-not-present")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	if len(got) != 0 {
+		t.Fatalf("expected empty list, got %+v", got)
+	}
+}
+
+func TestListSnapshots_FilterBySearch_ComposesWithSort(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-compose"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-compose", Name: "upgrade-beta"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-compose", Name: "rollback"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-compose", Name: "upgrade-alpha"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-compose/snapshots?search=upgrade&sort=name")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-search)", got)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"upgrade-alpha", "upgrade-beta"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d snapshots, got %d", len(want), len(got))
+	}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, snap.Name, want[i])
+		}
+	}
+}
+
 func TestRestoreSnapshot_SnapshotNotFound(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

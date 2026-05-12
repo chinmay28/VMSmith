@@ -93,6 +93,8 @@ var snapListCmd = &cobra.Command{
 
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
+		searchFilter, _ := cmd.Flags().GetString("search")
+		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
 		if sortField == "" {
@@ -112,7 +114,7 @@ var snapListCmd = &cobra.Command{
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
 
-		logger.Info("cli", "snapshot list", "vm_id", vmID, "sort", sortField, "order", order)
+		logger.Info("cli", "snapshot list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter)
 
 		mgr, cleanup, err := newVMManager()
 		if err != nil {
@@ -125,6 +127,15 @@ var snapListCmd = &cobra.Command{
 		if err != nil {
 			logger.Error("cli", "snapshot list failed", "vm_id", vmID, "error", err.Error())
 			return err
+		}
+		if searchFilter != "" {
+			filtered := snaps[:0]
+			for _, snap := range snaps {
+				if types.SnapshotMatchesSearch(snap, searchFilter) {
+					filtered = append(filtered, snap)
+				}
+			}
+			snaps = filtered
 		}
 		types.SortSnapshots(snaps, sortField, order)
 		logger.Info("cli", "snapshot list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(snaps)))
@@ -288,6 +299,7 @@ func init() {
 
 	snapListCmd.Flags().String("sort", types.SnapshotSortID, "sort field: id, name, or created_at")
 	snapListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
+	snapListCmd.Flags().String("search", "", "case-insensitive substring filter on snapshot name and description")
 
 	snapEditCmd.Flags().String("description", "", "new description for the snapshot (pass empty string to clear; max 1024 chars)")
 
