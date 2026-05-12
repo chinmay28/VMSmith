@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Webhook, Trash2, Plus, Send, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { webhooks as webhooksApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal } from '../components/Shared';
 
 export default function Settings() {
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [testResults, setTestResults] = useState({});
   const [testingID, setTestingID] = useState(null);
 
@@ -58,6 +59,12 @@ export default function Settings() {
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
 
       <AddWebhookModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={refresh} />
+      <EditWebhookModal
+        webhook={editing}
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        onUpdated={refresh}
+      />
 
       {loading && !hookList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
@@ -134,6 +141,14 @@ export default function Settings() {
                         >
                           {testingID === wh.id ? <Spinner size={13} /> : <Send size={13} />}
                           {testingID === wh.id ? 'Sending…' : 'Test'}
+                        </button>
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => setEditing(wh)}
+                          data-testid={`webhook-edit-${wh.id}`}
+                          title="Edit webhook"
+                        >
+                          <Pencil size={13} />
                         </button>
                         <button
                           className="btn-ghost btn-sm text-red-400 hover:text-red-300"
@@ -280,6 +295,170 @@ function AddWebhookModal({ open, onClose, onCreated }) {
           <button type="submit" className="btn-primary" disabled={submitting} data-testid="webhook-create-submit">
             {submitting ? <Spinner size={13} /> : null}
             {submitting ? 'Creating…' : 'Create webhook'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// EditWebhookModal lets operators update an existing webhook's URL, secret,
+// event-type filters, and active flag.  Each form field tracks both its
+// initial value and a "changed" flag — only fields the user actually touches
+// are sent on the PATCH so omitted keys keep their server-side value.
+//
+// Semantics that mirror the PATCH endpoint:
+//   - URL: required, must use http:// or https://
+//   - Secret: optional rotation.  Empty input means "leave alone"; the user
+//     must type a new secret to rotate it.
+//   - Event types: comma-separated.  Toggling "Subscribe to every event"
+//     sends event_types=[] which clears the filter list server-side.
+//   - Active: boolean toggle.
+function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
+  const [url, setUrl] = useState('');
+  const [secret, setSecret] = useState('');
+  const [eventTypes, setEventTypes] = useState('');
+  const [subscribeAll, setSubscribeAll] = useState(false);
+  const [active, setActive] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // Reset form state whenever the modal opens for a new webhook.
+  useEffect(() => {
+    if (!webhook) return;
+    setUrl(webhook.url || '');
+    setSecret('');
+    const initialTypes = webhook.event_types?.length ? webhook.event_types.join(', ') : '';
+    setEventTypes(initialTypes);
+    setSubscribeAll(!webhook.event_types?.length);
+    setActive(Boolean(webhook.active));
+    setErr(null);
+    setSubmitting(false);
+  }, [webhook]);
+
+  if (!webhook) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr(null);
+    const spec = {};
+    const trimmedURL = url.trim();
+    if (trimmedURL !== webhook.url) {
+      spec.url = trimmedURL;
+    }
+    const trimmedSecret = secret.trim();
+    if (trimmedSecret !== '') {
+      spec.secret = trimmedSecret;
+    }
+    if (subscribeAll) {
+      // "every event" only needs to be sent when the webhook currently has a
+      // filter — otherwise omitting the field is a true no-op.
+      if (webhook.event_types?.length) {
+        spec.event_types = [];
+      }
+    } else {
+      const next = eventTypes
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const current = (webhook.event_types || []).slice();
+      const same = next.length === current.length && next.every((t, i) => t === current[i]);
+      if (!same) {
+        spec.event_types = next;
+      }
+    }
+    if (active !== Boolean(webhook.active)) {
+      spec.active = active;
+    }
+
+    if (Object.keys(spec).length === 0) {
+      setErr('No fields changed.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await webhooksApi.update(webhook.id, spec);
+      onUpdated?.();
+      onClose();
+    } catch (e2) {
+      setErr(e2?.message || 'failed to update webhook');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Edit webhook (${webhook.id})`}>
+      <form onSubmit={handleSubmit} className="space-y-3" data-testid="edit-webhook-form">
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Receiver URL</label>
+          <input
+            className="input w-full"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            required
+            data-testid="edit-webhook-url-input"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Rotate HMAC secret</label>
+          <input
+            className="input w-full"
+            type="password"
+            placeholder="Leave blank to keep the current secret"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            data-testid="edit-webhook-secret-input"
+          />
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Secrets cannot be cleared — only rotated.
+          </p>
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-xs font-mono text-steel-300 mb-1">
+            <input
+              type="checkbox"
+              checked={subscribeAll}
+              onChange={(e) => setSubscribeAll(e.target.checked)}
+              data-testid="edit-webhook-subscribe-all"
+            />
+            Subscribe to every event
+          </label>
+          {!subscribeAll && (
+            <input
+              className="input w-full"
+              placeholder="vm.started, system.*"
+              value={eventTypes}
+              onChange={(e) => setEventTypes(e.target.value)}
+              data-testid="edit-webhook-event-types-input"
+            />
+          )}
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-xs font-mono text-steel-300">
+            <input
+              type="checkbox"
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+              data-testid="edit-webhook-active-toggle"
+            />
+            Deliveries enabled
+          </label>
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Disable to pause the worker without deleting the registration.
+          </p>
+        </div>
+
+        {err && <ErrorBanner message={err} />}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={submitting} data-testid="edit-webhook-submit">
+            {submitting ? <Spinner size={13} /> : null}
+            {submitting ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </form>

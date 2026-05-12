@@ -265,6 +265,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Get("/", s.ListWebhooks)
 			r.Post("/", s.withRequestBodyLimit(s.CreateWebhook))
 			r.Get("/{webhookID}", s.GetWebhook)
+			r.Patch("/{webhookID}", s.withRequestBodyLimit(s.UpdateWebhook))
 			r.Delete("/{webhookID}", s.DeleteWebhook)
 			r.Post("/{webhookID}/test", s.TestWebhook)
 		})

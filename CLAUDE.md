@@ -455,6 +455,7 @@ POST   /vms/{id}/console/ticket        Issue a single-use console ticket. Return
 GET    /logs                           Query log entries (level, limit, since, source)
 GET    /webhooks                       List registered webhooks (secrets redacted)
 POST   /webhooks                       Register webhook (URL + HMAC secret + optional event_types filters)
+PATCH  /webhooks/{id}                  Update editable fields on an existing webhook (`url`, `secret`, `event_types`, `active`). All four fields use pointer semantics — omit a key to leave it unchanged; `event_types: []` clears the filter so the webhook matches every event again; rotating `secret` cannot be cleared (empty string returns 400 `missing_secret`). The in-memory delivery worker is bounced on success so the next event is delivered with the new config. Returns 400 `noop_update` when no editable field is present. CLI: `vmsmith webhook edit <id> [--url --secret --event-types --clear-event-types --active]`.
 DELETE /webhooks/{id}                  Unregister webhook
 POST   /webhooks/{id}/test             Synthesise a `system.webhook_test` event and deliver it once; returns `WebhookTestResult` with success / status_code / duration / error and updates `last_delivery_at` / `last_status` / `last_error`. Used by the Settings page "Test" button.
 ```

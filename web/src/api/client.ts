@@ -269,6 +269,8 @@ export const webhooks = {
   list: () => unwrap(apiClient.GET('/webhooks', {})),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
+  update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>
+    unwrap(apiClient.PATCH('/webhooks/{webhookID}', { params: { path: { webhookID: id } }, body: spec })),
   delete: (id: string) =>
     unwrap(apiClient.DELETE('/webhooks/{webhookID}', { params: { path: { webhookID: id } } })),
   test: (id: string) =>

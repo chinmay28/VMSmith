@@ -1125,6 +1125,59 @@ test.describe("Settings — Webhooks", () => {
     await page.getByTestId(`webhook-test-${rowID}`).click();
     await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500|failed|500/i);
   });
+
+  // 2.2.14 — editable webhook config (URL / secret / event types / active).
+  test("edit webhook URL and event-type filter via PATCH modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/hook");
+    await page.getByTestId("webhook-secret-input").fill("topsecret");
+    await page.getByTestId("webhook-event-types-input").fill("vm.started");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await expect(page.getByTestId("edit-webhook-form")).toBeVisible();
+
+    // The form pre-fills the current URL.
+    await expect(page.getByTestId("edit-webhook-url-input")).toHaveValue("https://example.com/hook");
+
+    // Mutate URL and replace event-type filter list.
+    await page.getByTestId("edit-webhook-url-input").fill("https://example.com/new-hook");
+    await page.getByTestId("edit-webhook-event-types-input").fill("vm.created, vm.deleted");
+    await page.getByTestId("edit-webhook-submit").click();
+
+    // Modal closes and the row reflects the new URL + filter chips.
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    await expect(row).toContainText("https://example.com/new-hook");
+    await expect(row).toContainText("vm.created");
+    await expect(row).toContainText("vm.deleted");
+  });
+
+  test("edit webhook can clear event-type filter to subscribe-all", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/clear");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    await page.getByTestId("webhook-event-types-input").fill("vm.stopped");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await page.getByTestId("edit-webhook-subscribe-all").check();
+    await page.getByTestId("edit-webhook-submit").click();
+
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    await expect(row).toContainText(/all events/i);
+  });
 });
 
 // ============================================================

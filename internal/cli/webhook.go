@@ -142,6 +142,105 @@ var webhookListCmd = &cobra.Command{
 	},
 }
 
+var webhookEditCmd = &cobra.Command{
+	Use:   "edit <id>",
+	Short: "Update fields on an existing webhook",
+	Long: `Update one or more editable fields on an existing webhook.  All
+flags are optional, but at least one must be set — running 'webhook edit'
+with no fields is rejected with a clear error.
+
+Field semantics:
+
+  --url <url>            Replace the receiver URL.  Must use http:// or https://.
+  --secret <s>           Rotate the HMAC signing secret.  Empty string is rejected
+                         (an unsigned webhook would defeat receiver-side HMAC checks).
+  --event-types a,b,c    Replace the filter list.  Use --clear-event-types to
+                         subscribe to every event.  --event-types and --clear-event-types
+                         are mutually exclusive.
+  --clear-event-types    Clear the event filter so the webhook fires on every event.
+  --active true|false    Toggle delivery.  --active=false stops the worker
+                         without deleting the registration.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := strings.TrimSpace(args[0])
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+
+		spec := types.WebhookUpdateSpec{}
+
+		if f := cmd.Flags().Lookup("url"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetString("url")
+			spec.URL = &v
+		}
+		if f := cmd.Flags().Lookup("secret"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetString("secret")
+			spec.Secret = &v
+		}
+		eventTypesChanged := false
+		if f := cmd.Flags().Lookup("event-types"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetStringSlice("event-types")
+			spec.EventTypes = &v
+			eventTypesChanged = true
+		}
+		if clear, _ := cmd.Flags().GetBool("clear-event-types"); clear {
+			if eventTypesChanged {
+				return fmt.Errorf("--event-types and --clear-event-types are mutually exclusive")
+			}
+			empty := []string{}
+			spec.EventTypes = &empty
+		}
+		if f := cmd.Flags().Lookup("active"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetBool("active")
+			spec.Active = &v
+		}
+
+		if spec.URL == nil && spec.Secret == nil && spec.EventTypes == nil && spec.Active == nil {
+			return fmt.Errorf("no fields to update: pass --url, --secret, --event-types, --clear-event-types, or --active")
+		}
+
+		body, err := json.Marshal(spec)
+		if err != nil {
+			return err
+		}
+
+		resolved := resolveAPIURL(apiURL)
+		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPatch,
+			resolved+"/api/v1/webhooks/"+id, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Error("cli", "webhook edit failed", "error", err.Error())
+			return err
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("daemon rejected edit (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		}
+
+		var wh types.Webhook
+		if err := json.Unmarshal(respBody, &wh); err != nil {
+			return fmt.Errorf("decoding webhook response: %w", err)
+		}
+		fmt.Printf("Webhook updated: %s\n  URL:    %s\n  Active: %t\n",
+			wh.ID, wh.URL, wh.Active)
+		if len(wh.EventTypes) > 0 {
+			fmt.Printf("  Types:  %s\n", strings.Join(wh.EventTypes, ","))
+		} else {
+			fmt.Println("  Types:  (all events)")
+		}
+		return nil
+	},
+}
+
 var webhookDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a registered webhook",
@@ -191,12 +290,19 @@ func init() {
 	webhookAddCmd.Flags().String("url", "", "target URL (http or https) — required")
 	webhookAddCmd.Flags().String("secret", "", "HMAC secret — required")
 	webhookAddCmd.Flags().StringSlice("event-types", nil, "comma-separated event-type filters (e.g. vm.started,system.*)")
-	for _, c := range []*cobra.Command{webhookAddCmd, webhookListCmd, webhookDeleteCmd} {
+
+	webhookEditCmd.Flags().String("url", "", "replace receiver URL")
+	webhookEditCmd.Flags().String("secret", "", "rotate HMAC signing secret (cannot be empty)")
+	webhookEditCmd.Flags().StringSlice("event-types", nil, "replace event-type filter list (comma-separated)")
+	webhookEditCmd.Flags().Bool("clear-event-types", false, "clear the event filter so the webhook fires on every event")
+	webhookEditCmd.Flags().Bool("active", true, "toggle delivery on/off (only takes effect when explicitly set)")
+
+	for _, c := range []*cobra.Command{webhookAddCmd, webhookListCmd, webhookEditCmd, webhookDeleteCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 	}
 	webhookCmd.AddCommand(webhookAddCmd)
 	webhookCmd.AddCommand(webhookListCmd)
+	webhookCmd.AddCommand(webhookEditCmd)
 	webhookCmd.AddCommand(webhookDeleteCmd)
 }
-

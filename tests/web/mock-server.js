@@ -720,6 +720,48 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204);
     return res.end();
   }
+  if ((m = p.match(/^\/api\/v1\/webhooks\/([^/]+)$/)) && method === "PATCH") {
+    const wh = webhookList.get(m[1]);
+    if (!wh) {
+      return json(res, 404, { code: "resource_not_found", message: "webhook not found" });
+    }
+    const body = await parseBody(req);
+    const hasURL = Object.prototype.hasOwnProperty.call(body, "url");
+    const hasSecret = Object.prototype.hasOwnProperty.call(body, "secret");
+    const hasEventTypes = Object.prototype.hasOwnProperty.call(body, "event_types");
+    const hasActive = Object.prototype.hasOwnProperty.call(body, "active");
+    if (!hasURL && !hasSecret && !hasEventTypes && !hasActive) {
+      return json(res, 400, { code: "noop_update", message: "no fields to update" });
+    }
+    if (hasURL) {
+      const next = (body.url || "").trim();
+      if (!next || (!next.startsWith("http://") && !next.startsWith("https://"))) {
+        return json(res, 400, { code: "invalid_url", message: "url must be http(s)" });
+      }
+      wh.url = next;
+    }
+    if (hasSecret) {
+      const next = (body.secret || "").trim();
+      if (!next) {
+        return json(res, 400, { code: "missing_secret", message: "secret cannot be empty" });
+      }
+      // Server-side rotation; secret is never echoed back.
+    }
+    if (hasEventTypes) {
+      if (!Array.isArray(body.event_types)) {
+        return json(res, 400, { code: "invalid_event_types", message: "event_types must be an array" });
+      }
+      const next = body.event_types
+        .map((s) => (typeof s === "string" ? s.trim() : ""))
+        .filter(Boolean);
+      wh.event_types = next.length ? next : null;
+    }
+    if (hasActive) {
+      wh.active = Boolean(body.active);
+    }
+    webhookList.set(wh.id, wh);
+    return json(res, 200, wh);
+  }
   if ((m = p.match(/^\/api\/v1\/webhooks\/([^/]+)\/test$/)) && method === "POST") {
     const wh = webhookList.get(m[1]);
     if (!wh) {
