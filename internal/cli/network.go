@@ -101,8 +101,10 @@ var portListCmd = &cobra.Command{
 		vmID := args[0]
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
+		searchRaw, _ := cmd.Flags().GetString("search")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
+		searchFilter := strings.ToLower(strings.TrimSpace(searchRaw))
 		if sortField == "" {
 			sortField = types.PortForwardSortID
 		}
@@ -124,7 +126,7 @@ var portListCmd = &cobra.Command{
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
 
-		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order)
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter)
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -137,6 +139,15 @@ var portListCmd = &cobra.Command{
 		if err != nil {
 			logger.Error("cli", "port list failed", "vm_id", vmID, "error", err.Error())
 			return err
+		}
+		if searchFilter != "" {
+			filtered := ports[:0]
+			for _, p := range ports {
+				if types.PortForwardMatchesSearch(p, searchFilter) {
+					filtered = append(filtered, p)
+				}
+			}
+			ports = filtered
 		}
 		types.SortPortForwards(ports, sortField, order)
 		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
@@ -311,6 +322,7 @@ func init() {
 
 	portListCmd.Flags().String("sort", types.PortForwardSortID, "sort field: id, host_port, guest_port, protocol, description")
 	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
+	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, and guest_ip")
 
 	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
 	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")

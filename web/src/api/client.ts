@@ -196,11 +196,12 @@ export const images = {
 export const ports = {
   list: (
     vmId: string,
-    opts: { sort?: string; order?: string } = {},
+    opts: { sort?: string; order?: string; search?: string } = {},
   ) => {
     const query: Record<string, string> = {};
-    if (opts.sort)  query.sort  = opts.sort;
-    if (opts.order) query.order = opts.order;
+    if (opts.sort)   query.sort   = opts.sort;
+    if (opts.order)  query.order  = opts.order;
+    if (opts.search) query.search = opts.search;
     return unwrap(apiClient.GET('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId }, query: query as any },
     } as any));

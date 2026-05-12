@@ -615,6 +615,12 @@ paths:
         `description`; the description sort is case-insensitive. `order` accepts
         `asc` (default) or `desc`. All comparators tiebreak on `id` so
         repeated requests return a deterministic order.
+
+        `search` is an optional case-insensitive substring filter applied
+        before sort across `description`, `protocol`, `host_port`,
+        `guest_port`, and `guest_ip`. The rule ID (`{vmID}/{host}`) and
+        `vm_id` are intentionally excluded from the haystack — they're the
+        URL scope or redundant with the host port match.
       parameters:
         - $ref: '#/components/parameters/VMID'
         - in: query
@@ -633,6 +639,15 @@ paths:
             default: asc
           required: false
           description: Sort direction.
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+          description: |
+            Case-insensitive substring filter applied before sort across
+            description, protocol, host_port, guest_port, and guest_ip.
+            Leading/trailing whitespace is trimmed.
       responses:
         '200':
           description: Port forward list
