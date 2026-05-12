@@ -611,6 +611,34 @@ func TestUpdateWebhook_RejectsBadJSON(t *testing.T) {
 	}
 }
 
+func TestUpdateWebhook_EventTypeReorderIsNoOp(t *testing.T) {
+	// Filter lists are semantically sets — a PATCH that only reorders the
+	// existing entries should not churn the in-memory worker.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-reorder", URL: "https://x", Secret: "k", Active: true,
+		EventTypes: []string{"vm.started", "vm.stopped"},
+	})
+
+	resp := patchWebhook(t, ts.URL, "wh-reorder", types.WebhookUpdateSpec{
+		EventTypes: ptrStrSlice([]string{"vm.stopped", "vm.started"}),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.unregistered) != 0 {
+		t.Fatalf("manager.Unregister called for reorder-only patch: %v", fake.unregistered)
+	}
+	// The persisted slice should retain the *original* order (no write happened).
+	persisted := fake.hooks["wh-reorder"].EventTypes
+	if len(persisted) != 2 || persisted[0] != "vm.started" || persisted[1] != "vm.stopped" {
+		t.Fatalf("persisted order should be unchanged on reorder-only no-op, got %v", persisted)
+	}
+}
+
 func TestUpdateWebhook_ReactivatesStoppedWorker(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()

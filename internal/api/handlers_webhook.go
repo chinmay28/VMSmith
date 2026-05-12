@@ -246,7 +246,7 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	if req.EventTypes != nil {
 		next := normalizeEventTypes(*req.EventTypes)
-		if !stringSlicesEqual(next, updated.EventTypes) {
+		if !eventTypeSetsEqual(next, updated.EventTypes) {
 			updated.EventTypes = next
 			changed = true
 		}
@@ -278,14 +278,24 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, redactWebhook(&updated))
 }
 
-func stringSlicesEqual(a, b []string) bool {
+// eventTypeSetsEqual is the no-op detector for the EventTypes patch path.
+// Filter lists are semantically sets — `["a","b"]` and `["b","a"]` glob-match
+// the same events — so a reorder-only PATCH should not bounce the worker.
+// Both inputs are already deduplicated by `normalizeEventTypes`, so a simple
+// counting compare suffices.
+func eventTypeSetsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	seen := make(map[string]int, len(a))
+	for _, s := range a {
+		seen[s]++
+	}
+	for _, s := range b {
+		if seen[s] == 0 {
 			return false
 		}
+		seen[s]--
 	}
 	return true
 }
