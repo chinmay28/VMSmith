@@ -1028,6 +1028,12 @@ export interface paths {
          *     `description`; the description sort is case-insensitive. `order` accepts
          *     `asc` (default) or `desc`. All comparators tiebreak on `id` so
          *     repeated requests return a deterministic order.
+         *
+         *     `search` is an optional case-insensitive substring filter applied
+         *     before sort across `description`, `protocol`, `host_port`,
+         *     `guest_port`, and `guest_ip`. The rule ID (`{vmID}/{host}`) and
+         *     `vm_id` are intentionally excluded from the haystack — they're the
+         *     URL scope or redundant with the host port match.
          */
         get: {
             parameters: {
@@ -1036,6 +1042,12 @@ export interface paths {
                     sort?: "id" | "host_port" | "guest_port" | "protocol" | "description";
                     /** @description Sort direction. */
                     order?: "asc" | "desc";
+                    /**
+                     * @description Case-insensitive substring filter applied before sort across
+                     *     description, protocol, host_port, guest_port, and guest_ip.
+                     *     Leading/trailing whitespace is trimmed.
+                     */
+                    search?: string;
                 };
                 header?: never;
                 path: {

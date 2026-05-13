@@ -495,7 +495,18 @@ const server = http.createServer(async (req, res) => {
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
-    const list = (portForwards.get(m[1]) || []).slice();
+    let list = (portForwards.get(m[1]) || []).slice();
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    if (search) {
+      list = list.filter(pf => {
+        if (pf.description && pf.description.toLowerCase().includes(search)) return true;
+        if ((pf.protocol || "").toLowerCase().includes(search)) return true;
+        if (String(pf.host_port || "").includes(search)) return true;
+        if (String(pf.guest_port || "").includes(search)) return true;
+        if (pf.guest_ip && pf.guest_ip.toLowerCase().includes(search)) return true;
+        return false;
+      });
+    }
     const cmp = (a, b) => {
       let l;
       switch (sortField) {

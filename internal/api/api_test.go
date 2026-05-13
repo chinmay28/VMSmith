@@ -6479,3 +6479,124 @@ func TestListPorts_RejectsInvalidOrder(t *testing.T) {
 		t.Errorf("code = %q, want invalid_order", body.Code)
 	}
 }
+
+// --- Port forward search filter (5.4.11) ---
+
+func TestListPorts_FilterBySearch_Description(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=ssh")
+	if len(got) != 1 || got[0].HostPort != 22001 {
+		t.Fatalf("expected only ssh jumpbox rule, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_Protocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=udp")
+	if len(got) != 1 || got[0].Protocol != types.ProtocolUDP {
+		t.Fatalf("expected only the udp rule, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_HostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=8081")
+	if len(got) != 1 || got[0].HostPort != 8081 {
+		t.Fatalf("expected host_port 8081, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_GuestIP(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=192.168.100.40")
+	// every seeded rule shares the guest IP; the search should return all of them
+	if len(got) != 3 {
+		t.Fatalf("expected all 3 rules to match guest_ip, got %d (%+v)", len(got), got)
+	}
+}
+
+func TestListPorts_FilterBySearch_CaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	// "Metrics scrape" description on the udp rule; uppercase needle must match.
+	got := listPortsWithQuery(t, ts, "vm-search", "search=METRICS")
+	if len(got) != 1 || got[0].HostPort != 9090 {
+		t.Fatalf("expected only the metrics rule, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	// %20%20web%20%20 trimmed becomes "web", which matches "web frontend".
+	got := listPortsWithQuery(t, ts, "vm-search", "search=%20%20web%20%20")
+	if len(got) != 1 || got[0].HostPort != 8081 {
+		t.Fatalf("expected only the web frontend rule after trim, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_NoMatch(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=needle-not-present")
+	if len(got) != 0 {
+		t.Fatalf("expected empty list, got %+v", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_ComposesWithSort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-search")
+	// Add a second tcp rule whose description also matches "web" so the
+	// sort step has something to do after the search filter.
+	seedPortForward(t, s, &types.PortForward{ID: "vm-search/8082", VMID: "vm-search", HostPort: 8082, GuestPort: 81, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "web backend"})
+
+	got := listPortsWithQuery(t, ts, "vm-search", "search=web&sort=host_port")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 matches, got %d (%+v)", len(got), got)
+	}
+	if got[0].HostPort != 8081 || got[1].HostPort != 8082 {
+		t.Fatalf("expected host_port asc 8081,8082 — got %d,%d", got[0].HostPort, got[1].HostPort)
+	}
+}
+
+func TestListPorts_FilterBySearch_IDAndVMIDNotInHaystack(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	// The ID embeds the VM-id and host port; the search must not match on the
+	// VM-id portion (it's URL scope, not operator-useful needle).
+	seedPortForward(t, s, &types.PortForward{
+		ID:          "vm-1741234567890123/8080",
+		VMID:        "vm-1741234567890123",
+		HostPort:    8080,
+		GuestPort:   80,
+		GuestIP:     "192.168.100.10",
+		Protocol:    types.ProtocolTCP,
+		Description: "production frontend",
+	})
+
+	got := listPortsWithQuery(t, ts, "vm-1741234567890123", "search=1741234")
+	if len(got) != 0 {
+		t.Fatalf("expected VM-id substring to be excluded from haystack, got %+v", got)
+	}
+}

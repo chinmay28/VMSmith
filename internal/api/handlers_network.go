@@ -109,10 +109,16 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 
 // ListPorts handles GET /api/v1/vms/{vmID}/ports
 //
-// Supports `?sort=` (id|host_port|guest_port|protocol|description) and
-// `?order=` (asc|desc). Unknown values return 400 `invalid_sort` /
-// `invalid_order`. Comparators tiebreak on `id` so repeated requests return
-// a deterministic order.
+// Optional query params:
+//   - search=<needle>            case-insensitive substring filter across
+//     description, protocol, host_port, guest_port, and guest_ip. Applied
+//     before sort.
+//   - sort=<id|host_port|guest_port|protocol|description>   default id
+//   - order=<asc|desc>           default asc
+//
+// Unknown sort/order values return 400 `invalid_sort` / `invalid_order`.
+// Comparators tiebreak on `id` so repeated requests return a deterministic
+// order.
 func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
 
@@ -128,6 +134,17 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if searchFilter != "" {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			if types.PortForwardMatchesSearch(pf, searchFilter) {
+				filtered = append(filtered, pf)
+			}
+		}
+		ports = filtered
 	}
 
 	types.SortPortForwards(ports, sortField, order)

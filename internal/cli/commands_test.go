@@ -2638,6 +2638,122 @@ func TestCLI_PortList_RejectsInvalidOrder(t *testing.T) {
 	}
 }
 
+// --- Port forward search filter (5.4.11) ---
+
+func TestCLI_PortList_FilterBySearch_Description(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--search", "ssh")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "22001" {
+		t.Errorf("row host_port = %q, want 22001", rows[1][1])
+	}
+}
+
+func TestCLI_PortList_FilterBySearch_Protocol(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--search", "udp")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][3] != "udp" {
+		t.Errorf("row protocol = %q, want udp", rows[1][3])
+	}
+}
+
+func TestCLI_PortList_FilterBySearch_HostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--search", "8081")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "8081" {
+		t.Errorf("row host_port = %q, want 8081", rows[1][1])
+	}
+}
+
+func TestCLI_PortList_FilterBySearch_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	// "Metrics scrape" description on the udp rule; uppercase needle must match.
+	out, err := runCLI("port", "list", "vm-s", "--search", "METRICS")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "9090" {
+		t.Errorf("row host_port = %q, want 9090", rows[1][1])
+	}
+}
+
+func TestCLI_PortList_FilterBySearch_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 1 {
+		t.Fatalf("expected header only, got %d rows from %q", len(rows), out)
+	}
+}
+
+func TestCLI_PortList_FilterBySearch_ComposesWithSort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+	// Add a second tcp rule whose description also contains "web" so the
+	// sort step has something to do after the search filter.
+	if err := s.PutPortForward(&types.PortForward{
+		ID: "vm-s/8082", VMID: "vm-s", HostPort: 8082, GuestPort: 81,
+		GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "web backend",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("port", "list", "vm-s", "--search", "web", "--sort", "host_port")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "8081" || rows[2][1] != "8082" {
+		t.Errorf("rows host_port = (%q,%q), want (8081,8082)", rows[1][1], rows[2][1])
+	}
+}
+
 func TestCLI_PortAdd_NoIP(t *testing.T) {
 	mock, vmCleanup := withMockVM(t)
 	defer vmCleanup()

@@ -48,21 +48,38 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_order') || 'asc';
   });
+  const [portSearchInput, setPortSearchInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_search') || '';
+  });
+  const [portSearch, setPortSearch] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_search') || '';
+  });
   const { data: portList, refresh: refreshPorts } = useFetch(
-    () => ports.list(id, { sort: portSort, order: portOrder }),
-    [id, portSort, portOrder],
+    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch }),
+    [id, portSort, portOrder, portSearch],
     10000,
   );
+
+  // Debounce the port-forward search box. `portSearchInput` is what the user
+  // types; `portSearch` is the committed query that drives the API call.
+  useEffect(() => {
+    const trimmed = portSearchInput.trim();
+    const t = setTimeout(() => setPortSearch(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [portSearchInput]);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
     if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
+    if (portSearch) sp.set('port_search', portSearch); else sp.delete('port_search');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, snapSearch]);
+  }, [portSort, portOrder, portSearch, snapSearch]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -345,7 +362,32 @@ export default function VMDetail() {
               </button>
             </div>
           </div>
-          <PortList vmId={id} portList={portList} refreshPorts={refreshPorts} />
+          <div className="px-4 pt-3">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+              <input
+                type="search"
+                value={portSearchInput}
+                onChange={(e) => setPortSearchInput(e.target.value)}
+                placeholder="Search by description, protocol, or port…"
+                className="input w-full pl-8 pr-7 py-1.5 text-xs"
+                data-testid="port-list-search"
+                aria-label="Search port forwards"
+              />
+              {portSearchInput && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+                  onClick={() => setPortSearchInput('')}
+                  data-testid="port-list-search-clear"
+                  aria-label="Clear port forward search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+          <PortList vmId={id} portList={portList} refreshPorts={refreshPorts} portSearch={portSearch} />
         </div>
       </div>
 
@@ -845,7 +887,7 @@ function EditSnapshotModal({ vmId, snapshot, onClose, onSaved }) {
 }
 
 // --- Port List ---
-function PortList({ vmId, portList, refreshPorts }) {
+function PortList({ vmId, portList, refreshPorts, portSearch }) {
   const removeMut = useMutation((portId) => ports.remove(vmId, portId));
   const bulkMut   = useMutation((body) => ports.bulkDelete(vmId, body));
   const [selected, setSelected] = useState(() => new Set());
@@ -869,6 +911,15 @@ function PortList({ vmId, portList, refreshPorts }) {
   }, [portList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!portList?.length) {
+    if (portSearch) {
+      return (
+        <EmptyState
+          icon={Network}
+          title={`No port forwards match "${portSearch}"`}
+          description="Try a different keyword, or clear the search to see every rule."
+        />
+      );
+    }
     return <EmptyState icon={Network} title="No port forwards" description="Expose VM services to the network." />;
   }
 

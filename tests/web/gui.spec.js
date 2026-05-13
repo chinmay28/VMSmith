@@ -805,6 +805,47 @@ test.describe("VM Detail", () => {
     await expect(rows().nth(1)).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
   });
 
+  test("port forward search input filters the list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Both seeded port forwards visible before typing.
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+
+    // Type "jumpbox" — only the ssh rule has that in description.
+    await page.getByTestId("port-list-search").fill("jumpbox");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_search")).toBe("jumpbox");
+
+    // Clearing restores both rows.
+    await page.getByTestId("port-list-search-clear").click();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_search")).toBeNull();
+  });
+
+  test("port forward search matches by host port", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // pf-seed-http has host_port 8080; pf-seed-ssh has 2222. Searching 8080
+    // should leave only the http rule.
+    await page.getByTestId("port-list-search").fill("8080");
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+  });
+
+  test("port forward search shows empty state when no rules match", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("port-list-search").fill("needle-not-present");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect(page.getByText(/No port forwards match "needle-not-present"/)).toBeVisible();
+  });
+
   test("edit port forward description", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
