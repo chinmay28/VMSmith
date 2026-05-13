@@ -266,6 +266,62 @@ test.describe("VM List", () => {
     expect(options[2].text).toBe("small-ubuntu");
   });
 
+  // 5.4.12 — template search filter narrows the Create-VM template dropdown.
+  // Mirrors the 5.4.9 / 5.4.10 / 5.4.11 search filter shape: debounced 250 ms
+  // input above the dropdown, case-insensitive substring match across name,
+  // description, and tags, with an X clear button.
+  test("template search filter narrows the template dropdown", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    const select = page.getByTestId("input-vm-template");
+    await expect(select.locator("option")).toHaveCount(3); // placeholder + 2 templates
+
+    // Search for "rocky" — should reduce the dropdown to big-rocky only.
+    await page.getByTestId("template-search-input").fill("rocky");
+    await expect(select.locator("option")).toHaveCount(2);
+    await expect(select.locator("option").nth(1)).toHaveText("big-rocky");
+
+    // Clear via the X button and the full list comes back.
+    await page.getByTestId("template-search-clear").click();
+    await expect(select.locator("option")).toHaveCount(3);
+  });
+
+  test("template search filter is case-insensitive and matches description", async ({ page }) => {
+    // The mock-server seeds two templates with descriptions: "Small Ubuntu
+    // template" and "Big Rocky template". A case-insensitive needle that
+    // only appears in one description should reduce the dropdown to that
+    // template — confirming the haystack covers description, not just name.
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    const select = page.getByTestId("input-vm-template");
+    await expect(select.locator("option")).toHaveCount(3);
+
+    await page.getByTestId("template-search-input").fill("UBUNTU");
+    await expect(select.locator("option")).toHaveCount(2);
+    await expect(select.locator("option").nth(1)).toHaveText("small-ubuntu");
+  });
+
+  test("template search shows empty-state hint when no templates match", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    const select = page.getByTestId("input-vm-template");
+    await expect(select.locator("option")).toHaveCount(3);
+
+    await page.getByTestId("template-search-input").fill("needle-not-present");
+    // Only the placeholder remains; its label is updated to reflect the
+    // current needle so the user can see why the list is empty.
+    await expect(select.locator("option")).toHaveCount(1);
+    await expect(select.locator("option").first()).toHaveText(
+      /No templates match "needle-not-present"/
+    );
+  });
+
   test("cancel create modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

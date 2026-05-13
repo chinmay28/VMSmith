@@ -6310,6 +6310,144 @@ func TestListTemplates_RejectsInvalidOrder(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_order")
 }
 
+func TestListTemplates_FilterBySearch_MatchesName(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?search=rocky")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky9-base" {
+		t.Errorf("filter = %+v, want only rocky9-base", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_MatchesDescription(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", Description: "Hardened CIS-1 build"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "large", Image: "rocky9.qcow2", Description: "Stock cloud image"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=hardened")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "small" {
+		t.Errorf("filter = %+v, want only small via description", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", Tags: []string{"team-storage", "prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "large", Image: "rocky9.qcow2", Tags: []string{"team-net"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=storage")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "small" {
+		t.Errorf("filter = %+v, want only small via tag", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "Rocky9-Base", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=ROCKY")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "Rocky9-Base" {
+		t.Errorf("filter = %+v, want only Rocky9-Base case-insensitive", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "beta", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=%20%20alpha%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "alpha" {
+		t.Errorf("filter = %+v, want only alpha after trim", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=needle-not-present")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with empty list", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_CombinesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky9-prod", Image: "rocky9.qcow2", Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky9-qa", Image: "rocky9.qcow2", Tags: []string{"qa"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-prod", Image: "ubuntu.qcow2", Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=rocky&tag=prod")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky9-prod" {
+		t.Errorf("filter = %+v, want only rocky9-prod (intersection of search+tag)", got)
+	}
+}
+
+func TestListTemplates_FilterBySearch_CombinesWithSort(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky9-charlie", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky9-alpha", Image: "rocky9.qcow2", CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0.Add(2 * time.Hour)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=rocky&sort=name&order=asc")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (only rocky after search)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	want := []string{"rocky9-alpha", "rocky9-charlie"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_FilterBySearch_IDNotInHaystack(t *testing.T) {
+	// IDs are opaque `tmpl-<unix-nano>` strings; searching for a substring
+	// of an ID should not match. Locks the contract in.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1741234567890123", Name: "alpha", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?search=1741234567890123")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list (ID excluded from haystack)", got)
+	}
+}
+
 // listPortsWithQuery is a small helper that GETs /vms/{vmID}/ports?<query>
 // and decodes the JSON body into a slice. Tests for sort ordering use it.
 func listPortsWithQuery(t *testing.T, ts *httptest.Server, vmID, query string) []types.PortForward {

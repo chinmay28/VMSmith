@@ -3537,3 +3537,132 @@ func TestCLI_TemplateList_RejectsInvalidOrder(t *testing.T) {
 		t.Errorf("error = %v, want it to mention 'invalid --order'", err)
 	}
 }
+
+func TestCLI_TemplateList_FilterBySearch_MatchesName(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "rocky")
+	if err != nil {
+		t.Fatalf("template list --search: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base") {
+		t.Fatalf("expected rocky9-base in output, got %q", out)
+	}
+	if strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("did not expect ubuntu-22 in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySearch_MatchesDescription(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", Description: "Hardened CIS-1 build", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "large", Image: "rocky9.qcow2", Description: "Stock cloud image", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "hardened")
+	if err != nil {
+		t.Fatalf("template list --search: %v", err)
+	}
+	if !strings.Contains(out, "small") || strings.Contains(out, "large") {
+		t.Fatalf("filter on description failed, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySearch_MatchesTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", Tags: []string{"team-storage"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "large", Image: "rocky9.qcow2", Tags: []string{"team-net"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "storage")
+	if err != nil {
+		t.Fatalf("template list --search: %v", err)
+	}
+	if !strings.Contains(out, "small") || strings.Contains(out, "large") {
+		t.Fatalf("filter on tag failed, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySearch_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "Rocky9-Base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "ROCKY")
+	if err != nil {
+		t.Fatalf("template list --search: %v", err)
+	}
+	if !strings.Contains(out, "Rocky9-Base") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySearch_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("template list --search: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySearch_CombinesWithTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-prod", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "rocky9-qa", Image: "rocky9.qcow2", Tags: []string{"qa"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-prod", Image: "ubuntu.qcow2", Tags: []string{"prod"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--search", "rocky", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("template list --search --tag: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-prod") {
+		t.Fatalf("expected rocky9-prod (intersection of search+tag), got %q", out)
+	}
+	if strings.Contains(out, "rocky9-qa") || strings.Contains(out, "ubuntu-prod") {
+		t.Fatalf("did not expect non-intersecting templates, got %q", out)
+	}
+}

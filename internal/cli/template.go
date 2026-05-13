@@ -118,6 +118,7 @@ var templateListCmd = &cobra.Command{
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter, _ := cmd.Flags().GetString("tag")
+		searchFlag, _ := cmd.Flags().GetString("search")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -157,6 +158,15 @@ var templateListCmd = &cobra.Command{
 		}
 		if tagFilter = strings.TrimSpace(tagFilter); tagFilter != "" {
 			templates = filterTemplatesByTag(templates, tagFilter)
+		}
+		if searchQuery := strings.ToLower(strings.TrimSpace(searchFlag)); searchQuery != "" {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if types.TemplateMatchesSearch(tpl, searchQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
 		}
 		types.SortTemplates(templates, sortField, orderField)
 		templates = paginateSlice(templates, limit, offset)
@@ -301,6 +311,7 @@ func init() {
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
 	templateListCmd.Flags().String("tag", "", "filter templates by tag (case-insensitive)")
+	templateListCmd.Flags().String("search", "", "case-insensitive substring filter applied to name, description, and tags")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
