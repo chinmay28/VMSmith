@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
@@ -22,6 +23,10 @@ type logsResponse struct {
 //	limit     – alias for per_page
 //	since     – RFC3339 timestamp; only return entries after this time
 //	source    – filter by source: cli | api | daemon (empty = all)
+//	search    – case-insensitive substring match over message, source,
+//	            level, and every value in the structured fields map.
+//	            Whitespace-trimmed; field *keys* are intentionally
+//	            excluded from the haystack.
 func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -43,6 +48,16 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		filtered := entries[:0]
 		for _, e := range entries {
 			if e.Source == src {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
+
+	if search := strings.ToLower(strings.TrimSpace(q.Get("search"))); search != "" {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if logger.EntryMatchesSearch(e, search) {
 				filtered = append(filtered, e)
 			}
 		}

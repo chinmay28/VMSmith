@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { RefreshCw, ChevronDown } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { RefreshCw, ChevronDown, Search, X } from 'lucide-react';
 import { logs as logsApi } from '../api/client';
 import { PageHeader, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
 
@@ -25,12 +26,15 @@ const sourceBadge = (source) => {
 const DEFAULT_PER_PAGE = 100;
 
 export default function LogViewer() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [entries, setEntries] = useState([]);
   const [totalEntries, setTotalEntries] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [levelFilter, setLevelFilter] = useState('debug');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
+  const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -45,7 +49,13 @@ export default function LogViewer() {
   const fetchLogs = useCallback(async () => {
     if (paused) return;
     try {
-      const response = await logsApi.list({ level: levelFilter, page, perPage, source: sourceFilter });
+      const response = await logsApi.list({
+        level: levelFilter,
+        page,
+        perPage,
+        source: sourceFilter,
+        search: searchFilter,
+      });
       const nextEntries = response?.data?.entries || [];
       setEntries(nextEntries);
       setTotalEntries(response?.meta?.totalCount ?? response?.data?.total ?? nextEntries.length);
@@ -55,7 +65,7 @@ export default function LogViewer() {
     } finally {
       setLoading(false);
     }
-  }, [levelFilter, page, perPage, sourceFilter, paused]);
+  }, [levelFilter, page, perPage, sourceFilter, searchFilter, paused]);
 
   // Initial load + polling every 3 seconds.
   useEffect(() => {
@@ -67,7 +77,25 @@ export default function LogViewer() {
 
   useEffect(() => {
     setPage(1);
-  }, [levelFilter, sourceFilter]);
+  }, [levelFilter, sourceFilter, searchFilter]);
+
+  // Debounce the free-text search box. The committed `searchFilter` drives the
+  // useFetch dependency above; `searchInput` is what the user types.
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const id = setTimeout(() => {
+      setSearchFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  // Mirror committed search query in the URL so the filtered view is
+  // shareable / bookmarkable / survives a refresh.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    setSearchParams(next, { replace: true });
+  }, [searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom when new entries arrive — only when the user
   // is already pinned to the bottom. Use direct scrollTop (not smooth
@@ -156,6 +184,32 @@ export default function LogViewer() {
 
       {error && <div className="mb-3"><ErrorBanner message={error} onRetry={fetchLogs} /></div>}
 
+      <div className="mb-3 flex items-center gap-2">
+        <div className="relative flex-1 max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search messages, sources, levels, fields…"
+            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            data-testid="log-search"
+            aria-label="Search log entries"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setSearchInput('')}
+              data-testid="log-search-clear"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Log table */}
       <div
         ref={listRef}
@@ -167,7 +221,11 @@ export default function LogViewer() {
         {loading && filtered.length === 0 ? (
           <div className="flex justify-center py-20"><Spinner size={18} /></div>
         ) : filtered.length === 0 ? (
-          <p className="text-center text-steel-500 py-20">No log entries yet.</p>
+          <p className="text-center text-steel-500 py-20" data-testid="log-empty-state">
+            {searchFilter
+              ? `No log entries match "${searchFilter}".`
+              : 'No log entries yet.'}
+          </p>
         ) : (
           <table className="w-full border-collapse">
             <thead className="sticky top-0 z-10 bg-steel-900/95 border-b border-steel-800/60">

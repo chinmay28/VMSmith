@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -4611,6 +4612,178 @@ func TestGetLogs_MaxLimitCapped(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-Total-Count"); got == "" {
 		t.Fatalf("X-Total-Count header missing")
+	}
+}
+
+func TestGetLogs_FilterBySearch_MessageSubstring(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "VM smith logs search-filter wired through")
+	logger.Info("daemon", "unrelated start-up message")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=search-filter")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one matching entry")
+	}
+	for _, e := range result.Entries {
+		hay := strings.ToLower(e.Message + " " + e.Source + " " + e.Level)
+		matchedField := false
+		for _, v := range e.Fields {
+			if strings.Contains(strings.ToLower(v), "search-filter") {
+				matchedField = true
+				break
+			}
+		}
+		if !matchedField && !strings.Contains(hay, "search-filter") {
+			t.Errorf("entry without needle returned: msg=%q source=%q level=%q fields=%v",
+				e.Message, e.Source, e.Level, e.Fields)
+		}
+	}
+}
+
+func TestGetLogs_FilterBySearch_CaseInsensitive(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "WARNINGS encountered during startup")
+	logger.Info("daemon", "ok")
+
+	// Uppercase needle should still match the lowercase haystack.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=WARNINGS")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one match for case-insensitive search")
+	}
+	found := false
+	for _, e := range result.Entries {
+		if strings.Contains(strings.ToLower(e.Message), "warnings") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected at least one entry whose message contained 'warnings'")
+	}
+}
+
+func TestGetLogs_FilterBySearch_WhitespaceTrimmed(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "trimming test marker abcd1234")
+
+	// Padded with leading/trailing spaces — handler must trim.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=%20%20abcd1234%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one match after whitespace trim")
+	}
+}
+
+func TestGetLogs_FilterBySearch_NoMatch(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "totally generic message")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=needle-not-present-anywhere")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 0 {
+		t.Errorf("expected zero entries for non-existent needle, got %d", len(result.Entries))
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Errorf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestGetLogs_FilterBySearch_FieldValueMatches(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "request handled", "vm_id", "vm-search-target-9999")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=vm-search-target")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one match against field value")
+	}
+}
+
+func TestGetLogs_FilterBySearch_ComposesWithLevel(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "info-tier search-compose marker")
+	logger.Warn("daemon", "warn-tier search-compose marker")
+
+	// Restrict to warn+; should only return the warn entry.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=warn&search=search-compose")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one entry")
+	}
+	for _, e := range result.Entries {
+		if e.Level == "info" || e.Level == "debug" {
+			t.Errorf("level=warn filter returned entry with level %q", e.Level)
+		}
+		if !strings.Contains(strings.ToLower(e.Message), "search-compose") {
+			t.Errorf("search filter did not narrow entry: %q", e.Message)
+		}
+	}
+}
+
+func TestGetLogs_FilterBySearch_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "search-count needle one")
+	logger.Info("daemon", "search-count needle two")
+	logger.Info("daemon", "irrelevant noise that does not match")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=search-count&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	total := resp.Header.Get("X-Total-Count")
+	if total == "" {
+		t.Fatal("X-Total-Count header missing")
+	}
+	if total != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (only the two needle entries)", total)
 	}
 }
 
