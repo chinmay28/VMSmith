@@ -1462,6 +1462,72 @@ test.describe("Settings — Webhooks", () => {
     await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
     await expect(row).toContainText(/all events/i);
   });
+
+  // Search filter: 250 ms-debounced free-text filter applied across URL and
+  // event-type strings. Mirrors the 5.4.x symmetric search surface (VMs,
+  // images, events, snapshots, port forwards, templates, logs).
+  test("search input filters the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    // Seed three webhooks: one whose URL contains "audit", one whose URL
+    // contains "metrics", and one whose event-type filter contains
+    // "image.created".
+    const seed = async (url, types) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (types) await page.getByTestId("webhook-event-types-input").fill(types);
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://hooks.example.com/audit", "vm.started, vm.stopped");
+    await seed("https://metrics.example.com/in", "image.created");
+    await seed("https://otherhost.example.com/x", "");
+
+    // All three rows are visible to start.
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Search by a URL substring — only the audit row should remain.
+    await page.getByTestId("webhook-list-search").fill("audit");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("hooks.example.com/audit");
+
+    // URL round-trip — ?search=audit is reflected in the address bar.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("search")).toBe("audit");
+
+    // Clear button restores the unfiltered view.
+    await page.getByTestId("webhook-list-search-clear").click();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+    await expect.poll(async () => new URL(page.url()).searchParams.get("search")).toBe(null);
+
+    // Search by an event-type substring — only the metrics row should remain
+    // (its filter contains "image.created").
+    await page.getByTestId("webhook-list-search").fill("image.created");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("metrics.example.com");
+  });
+
+  test("search shows empty state when no webhooks match", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://hooks.example.com/audit");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    await page.getByTestId("webhook-create-submit").click();
+
+    await page.getByTestId("webhook-list-search").fill("needle-not-anywhere");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(0);
+    await expect(page.getByText(/No webhooks match your search/i)).toBeVisible();
+  });
 });
 
 // ============================================================

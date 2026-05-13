@@ -115,6 +115,15 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListWebhooks handles GET /api/v1/webhooks.
+//
+// Optional query params:
+//   - search=<value>  case-insensitive substring filter applied to `url` and
+//     `event_types`. Trimmed + lowercased once before delegating to the
+//     shared predicate. Mirrors the symmetric search surface across VMs
+//     (2.2.13), images (5.4.9), snapshots (5.4.10), port forwards (5.4.11),
+//     templates (5.4.12), events (4.2.20), and logs (5.4.13). Secret, ID,
+//     and last_error are intentionally excluded from the haystack — see
+//     pkg/types/webhook_search.go.
 func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWebhookStore(w) {
 		return
@@ -130,8 +139,14 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(hooks, func(i, j int) bool {
 		return hooks[i].CreatedAt.Before(hooks[j].CreatedAt)
 	})
+
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+
 	out := make([]*types.Webhook, 0, len(hooks))
 	for _, h := range hooks {
+		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {
+			continue
+		}
 		out = append(out, redactWebhook(h))
 	}
 	writeJSON(w, http.StatusOK, out)

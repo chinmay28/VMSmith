@@ -1163,6 +1163,20 @@ paths:
     get:
       tags: [Webhooks]
       summary: List registered webhooks (secrets redacted)
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+          description: |
+            Case-insensitive substring filter applied across each webhook's
+            URL and event-type filters. Whitespace is trimmed before
+            matching. Secret, ID, and last_error are intentionally
+            excluded from the haystack — secrets must never appear in
+            response bodies, IDs are opaque `wh-<unix-nano>` strings, and
+            last_error is operator-noise surfaced via `last_status` /
+            status badges instead.
       responses:
         '200':
           description: Webhook list

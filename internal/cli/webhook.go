@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -93,13 +94,26 @@ var webhookAddCmd = &cobra.Command{
 var webhookListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered webhooks",
+	Long: `List registered webhooks (secrets are always redacted).
+
+Optional filter:
+
+  --search <q>   Case-insensitive substring filter applied to each webhook's
+                 URL and event-type list.  IDs, secrets, and last_error are
+                 intentionally excluded from the haystack.  Trimmed and
+                 lowercased before being forwarded to the daemon.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
+		search, _ := cmd.Flags().GetString("search")
 
 		resolved := resolveAPIURL(apiURL)
+		endpoint := resolved + "/api/v1/webhooks"
+		if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
+			endpoint += "?search=" + url.QueryEscape(needle)
+		}
 		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet,
-			resolved+"/api/v1/webhooks", nil)
+			endpoint, nil)
 		if err != nil {
 			return err
 		}
@@ -290,6 +304,8 @@ func init() {
 	webhookAddCmd.Flags().String("url", "", "target URL (http or https) — required")
 	webhookAddCmd.Flags().String("secret", "", "HMAC secret — required")
 	webhookAddCmd.Flags().StringSlice("event-types", nil, "comma-separated event-type filters (e.g. vm.started,system.*)")
+
+	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL and event-type names)")
 
 	webhookEditCmd.Flags().String("url", "", "replace receiver URL")
 	webhookEditCmd.Flags().String("secret", "", "rotate HMAC signing secret (cannot be empty)")

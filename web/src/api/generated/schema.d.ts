@@ -1930,7 +1930,18 @@ export interface paths {
         /** List registered webhooks (secrets redacted) */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /**
+                     * @description Case-insensitive substring filter applied across each webhook's
+                     *     URL and event-type filters. Whitespace is trimmed before
+                     *     matching. Secret, ID, and last_error are intentionally
+                     *     excluded from the haystack — secrets must never appear in
+                     *     response bodies, IDs are opaque `wh-<unix-nano>` strings, and
+                     *     last_error is operator-noise surfaced via `last_status` /
+                     *     status badges instead.
+                     */
+                    search?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;

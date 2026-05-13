@@ -1,18 +1,39 @@
 import { useEffect, useState } from 'react';
-import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock, Search, X } from 'lucide-react';
 import { webhooks as webhooksApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal } from '../components/Shared';
 
 export default function Settings() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [testResults, setTestResults] = useState({});
   const [testingID, setTestingID] = useState(null);
 
+  // Free-text search across URL + event_types. `searchInput` is the live
+  // input value; `searchFilter` is the debounced value that drives the
+  // useFetch dependency below. Mirrors the 5.4.x pattern used for VMs,
+  // images, events, snapshots, port forwards, templates, and logs.
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
+  const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
+
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const id = setTimeout(() => setSearchFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    setSearchParams(next, { replace: true });
+  }, [searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: hookList, loading, error, refresh } = useFetch(
-    () => webhooksApi.list(),
-    [],
+    () => webhooksApi.list({ search: searchFilter }),
+    [searchFilter],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -66,15 +87,49 @@ export default function Settings() {
         onUpdated={refresh}
       />
 
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative flex-1 max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by URL or event type…"
+            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            data-testid="webhook-list-search"
+            aria-label="Search webhooks"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setSearchInput('')}
+              data-testid="webhook-list-search-clear"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
       {loading && !hookList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : hooks.length === 0 ? (
         <div className="card">
-          <EmptyState
-            icon={Webhook}
-            title="No webhooks registered"
-            description="Webhooks deliver event-bus traffic to external HTTP receivers signed with HMAC-SHA256."
-          />
+          {searchFilter ? (
+            <EmptyState
+              icon={Search}
+              title="No webhooks match your search"
+              description={`No webhooks match "${searchFilter}". Try a different URL or event-type fragment.`}
+            />
+          ) : (
+            <EmptyState
+              icon={Webhook}
+              title="No webhooks registered"
+              description="Webhooks deliver event-bus traffic to external HTTP receivers signed with HMAC-SHA256."
+            />
+          )}
         </div>
       ) : (
         <div className="card overflow-hidden" data-testid="webhook-list">

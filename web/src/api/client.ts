@@ -293,7 +293,12 @@ export const system = {
 
 // --- Webhooks ---
 export const webhooks = {
-  list: () => unwrap(apiClient.GET('/webhooks', {})),
+  // The `search` param is a case-insensitive substring filter applied
+  // server-side across each webhook's URL and event_types. Empty/undefined
+  // omits the param so the daemon returns every webhook. Mirrors the
+  // pattern used for VMs (2.2.13), images (5.4.9), and events (4.2.20).
+  list: ({ search = '' }: { search?: string } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined } } })),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>
