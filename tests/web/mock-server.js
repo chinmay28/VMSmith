@@ -877,7 +877,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, filtered, { "X-Total-Count": String(total) });
   }
   if (p === "/api/v1/webhooks" && method === "GET") {
-    const needle = (q.get("search") || "").trim().toLowerCase();
+    const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const hooks = [...webhookList.values()];
     if (!needle) return json(res, 200, hooks);
     // Mirror pkg/types.WebhookMatchesSearch: URL + event_types only. Secret,

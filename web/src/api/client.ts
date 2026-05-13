@@ -298,7 +298,7 @@ export const webhooks = {
   // omits the param so the daemon returns every webhook. Mirrors the
   // pattern used for VMs (2.2.13), images (5.4.9), and events (4.2.20).
   list: ({ search = '' }: { search?: string } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined } as any } })),
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined } } })),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>
