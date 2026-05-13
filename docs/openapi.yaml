@@ -1049,6 +1049,33 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /templates/bulk_delete:
+    post:
+      tags: [Templates]
+      summary: Delete multiple templates in a single request
+      description: |
+        Delete a batch of templates either by explicit ID list or by tag
+        selector. Returns a per-target result so partial failures (one
+        template missing, the rest succeeded) surface in a single response.
+        Exactly one of `ids` or `tag` must be provided. Tag matching is
+        case-insensitive. Mirrors `/images/bulk_delete` (2.3.6).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkDeleteTemplatesRequest'
+      responses:
+        '200':
+          description: Per-template delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkDeleteTemplatesResponse'
+        '400':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /templates/{templateID}:
     patch:
       tags: [Templates]
@@ -1839,6 +1866,42 @@ components:
           items:
             $ref: '#/components/schemas/BulkDeleteImageResult'
     BulkDeleteImageResult:
+      type: object
+      required: [id, success]
+      properties:
+        id:
+          type: string
+        success:
+          type: boolean
+        code:
+          type: string
+        message:
+          type: string
+    BulkDeleteTemplatesRequest:
+      type: object
+      description: |
+        Selector for the templates to delete. Exactly one of `ids` or `tag`
+        must be set; the request is rejected with HTTP 400
+        `invalid_bulk_request` when both or neither are present. Tag matching
+        is case-insensitive.
+      properties:
+        ids:
+          type: array
+          description: Explicit list of template IDs to delete.
+          items:
+            type: string
+        tag:
+          type: string
+          description: Match every template whose tag list contains this tag (case-insensitive).
+    BulkDeleteTemplatesResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkDeleteTemplateResult'
+    BulkDeleteTemplateResult:
       type: object
       required: [id, success]
       properties:

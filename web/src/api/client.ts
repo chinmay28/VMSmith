@@ -253,6 +253,11 @@ export const templates = {
   update: (id: string, patch: { description?: string; tags?: string[] }) =>
     unwrap(apiClient.PATCH('/templates/{templateID}' as any, { params: { path: { templateID: id } }, body: patch } as any)),
   delete: (id: string) => unwrap(apiClient.DELETE('/templates/{templateID}', { params: { path: { templateID: id } } })),
+  // bulkDelete deletes multiple templates in a single round-trip. Pass either
+  // {ids: [...]} for explicit IDs or {tag: "..."} to delete every template
+  // carrying that tag (case-insensitive). Mirrors images.bulkDelete (2.3.6).
+  bulkDelete: (body: { ids?: string[]; tag?: string }) =>
+    unwrap(apiClient.POST('/templates/bulk_delete', { body })),
 };
 
 // --- Host ---

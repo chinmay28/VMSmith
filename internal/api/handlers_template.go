@@ -216,3 +216,98 @@ func (s *Server) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// bulkDeleteTemplatesRequest selects templates to delete in a single batch.
+//
+// Exactly one of IDs or Tag must be set. When Tag is set, every template whose
+// (case-insensitive) tag list contains that tag is targeted — the cheap way
+// to retire a cohort ("legacy-rocky8") without enumerating IDs. Mirrors the
+// image bulk-delete shape (2.3.6) so the two surfaces share semantics.
+type bulkDeleteTemplatesRequest struct {
+	IDs []string `json:"ids,omitempty"`
+	Tag string   `json:"tag,omitempty"`
+}
+
+type bulkDeleteTemplateResult struct {
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkDeleteTemplatesResponse struct {
+	Results []bulkDeleteTemplateResult `json:"results"`
+}
+
+// BulkDeleteTemplates handles POST /api/v1/templates/bulk_delete.
+//
+// Accepts either an explicit list of template IDs ("ids") or a tag selector
+// ("tag"). Returns a per-target result list so partial failures (one template
+// missing, the rest succeeded) surface in a single response — mirroring the
+// image / snapshot / port-forward bulk-delete shapes.
+func (s *Server) BulkDeleteTemplates(w http.ResponseWriter, r *http.Request) {
+	var req bulkDeleteTemplatesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	tag := strings.TrimSpace(req.Tag)
+	cleanedIDs := make([]string, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if t := strings.TrimSpace(id); t != "" {
+			cleanedIDs = append(cleanedIDs, t)
+		}
+	}
+
+	if tag == "" && len(cleanedIDs) == 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"exactly one of ids or tag must be provided"))
+		return
+	}
+	if tag != "" && len(cleanedIDs) > 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"ids and tag are mutually exclusive"))
+		return
+	}
+
+	targets := cleanedIDs
+	if tag != "" {
+		tpls, err := s.storageMgr.ListTemplates()
+		if err != nil {
+			apiErr := sanitizeManagerError(err)
+			writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+			return
+		}
+		for _, tpl := range filterTemplatesByTag(tpls, tag) {
+			targets = append(targets, tpl.ID)
+		}
+	}
+
+	results := make([]bulkDeleteTemplateResult, 0, len(targets))
+	for _, id := range targets {
+		if err := s.storageMgr.DeleteTemplate(id); err != nil {
+			err = sanitizeManagerError(err)
+			result := bulkDeleteTemplateResult{ID: id, Success: false}
+			if apiErr, ok := err.(*types.APIError); ok {
+				result.Code = apiErr.Code
+				result.Message = apiErr.Message
+			} else {
+				result.Message = err.Error()
+			}
+			results = append(results, result)
+			continue
+		}
+		results = append(results, bulkDeleteTemplateResult{ID: id, Success: true})
+		s.publishAppEvent("template.deleted", "", "template "+id+" deleted", map[string]string{
+			"template_id": id,
+			"bulk":        "true",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, bulkDeleteTemplatesResponse{Results: results})
+}

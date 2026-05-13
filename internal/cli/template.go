@@ -273,11 +273,29 @@ func filterTemplatesByTag(templates []*types.VMTemplate, tag string) []*types.VM
 }
 
 var templateDeleteCmd = &cobra.Command{
-	Use:   "delete <template-id>",
-	Short: "Delete a VM template",
-	Args:  cobra.ExactArgs(1),
+	Use:   "delete [template-id]",
+	Short: "Delete a VM template (or many via --tag)",
+	Long: `Delete a VM template.
+
+Single delete:    vmsmith template delete <template-id>
+Bulk by tag:      vmsmith template delete --tag legacy-rocky8
+Exactly one of <template-id> or --tag is required.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
+		tag, _ := cmd.Flags().GetString("tag")
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		var id string
+		if len(args) == 1 {
+			id = strings.TrimSpace(args[0])
+		}
+
+		if id == "" && tag == "" {
+			return fmt.Errorf("exactly one of <template-id> or --tag is required")
+		}
+		if id != "" && tag != "" {
+			return fmt.Errorf("<template-id> and --tag are mutually exclusive")
+		}
+
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
 			logger.Error("cli", "template delete: failed to init storage manager", "error", err.Error())
@@ -285,14 +303,56 @@ var templateDeleteCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		if err := mgr.DeleteTemplate(id); err != nil {
-			logger.Error("cli", "template delete failed", "id", id, "error", err.Error())
-			return err
+		if id != "" {
+			if err := mgr.DeleteTemplate(id); err != nil {
+				logger.Error("cli", "template delete failed", "id", id, "error", err.Error())
+				return err
+			}
+			fmt.Printf("Template %s deleted\n", id)
+			return nil
 		}
 
-		fmt.Printf("Template %s deleted\n", id)
-		return nil
+		return runTemplateTagDelete(mgr, tag)
 	},
+}
+
+func runTemplateTagDelete(mgr templateBulkDeleter, tag string) error {
+	tpls, err := mgr.ListTemplates()
+	if err != nil {
+		logger.Error("cli", "template delete: list failed", "tag", tag, "error", err.Error())
+		return err
+	}
+	matches := filterTemplatesByTag(tpls, tag)
+	if len(matches) == 0 {
+		fmt.Printf("No templates carry tag %q\n", tag)
+		return nil
+	}
+
+	successes := 0
+	failures := 0
+	for _, tpl := range matches {
+		if err := mgr.DeleteTemplate(tpl.ID); err != nil {
+			fmt.Printf("FAIL  %s (%s): %s\n", tpl.ID, tpl.Name, err.Error())
+			failures++
+			continue
+		}
+		fmt.Printf("OK    %s (%s)\n", tpl.ID, tpl.Name)
+		successes++
+	}
+	logger.Info("cli", "template bulk delete complete",
+		"tag", tag,
+		"matched", fmt.Sprintf("%d", len(matches)),
+		"success", fmt.Sprintf("%d", successes),
+		"failed", fmt.Sprintf("%d", failures))
+	if failures > 0 {
+		return fmt.Errorf("%d of %d templates failed to delete", failures, len(matches))
+	}
+	return nil
+}
+
+type templateBulkDeleter interface {
+	ListTemplates() ([]*types.VMTemplate, error)
+	DeleteTemplate(id string) error
 }
 
 func init() {
@@ -318,6 +378,8 @@ func init() {
 	templateEditCmd.Flags().String("description", "", "new template description (omit to keep current)")
 	templateEditCmd.Flags().StringSlice("tag", nil, "replace template tags (repeatable; omit to keep current)")
 	templateEditCmd.Flags().Bool("clear-tags", false, "remove every tag from the template")
+
+	templateDeleteCmd.Flags().String("tag", "", "delete every template carrying this tag (mutually exclusive with template-id; case-insensitive)")
 
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateCreateCmd)
