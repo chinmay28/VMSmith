@@ -2478,6 +2478,96 @@ func TestCLI_TemplateCreate_RejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestCLI_TemplateDelete_NotFound(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("template", "delete", "tmpl-missing"); err == nil {
+		t.Error("expected error for nonexistent template")
+	}
+}
+
+func TestCLI_TemplateDelete_NoArgsErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("template", "delete"); err == nil {
+		t.Error("expected error when neither template-id nor --tag is provided")
+	}
+}
+
+func TestCLI_TemplateDelete_BothIDAndTagErrors(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if _, err := runCLI("template", "delete", "tmpl-x", "--tag", "legacy"); err == nil {
+		t.Error("expected error when both template-id and --tag are provided")
+	}
+}
+
+func TestCLI_TemplateDelete_TagDeletesAllMatching(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	for _, spec := range []struct {
+		id, name string
+		tags     []string
+	}{
+		{"tmpl-prod", "prod", []string{"prod"}},
+		{"tmpl-legacy-a", "legacy-a", []string{"legacy-rocky8"}},
+		{"tmpl-legacy-b", "legacy-b", []string{"legacy-rocky8", "linux"}},
+		{"tmpl-keep", "keep", []string{"rc-2026-05"}},
+	} {
+		s.PutTemplate(&types.VMTemplate{
+			ID: spec.id, Name: spec.name, Image: "rocky9.qcow2",
+			Tags: spec.tags, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		})
+	}
+
+	// Tag matching is case-insensitive.
+	out, err := runCLI("template", "delete", "--tag", "LEGACY-ROCKY8")
+	if err != nil {
+		t.Fatalf("template delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "tmpl-legacy-a") || !strings.Contains(out, "tmpl-legacy-b") {
+		t.Errorf("expected both deleted ids in output, got: %q", out)
+	}
+
+	survivors, _ := s.ListTemplates()
+	want := map[string]bool{"tmpl-prod": true, "tmpl-keep": true}
+	if len(survivors) != 2 {
+		t.Fatalf("survivors = %d, want 2", len(survivors))
+	}
+	for _, tpl := range survivors {
+		if !want[tpl.ID] {
+			t.Errorf("unexpected survivor: %s", tpl.ID)
+		}
+	}
+}
+
+func TestCLI_TemplateDelete_TagNoMatchPrintsMessage(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	s.PutTemplate(&types.VMTemplate{
+		ID: "tmpl-keep", Name: "keep", Image: "rocky9.qcow2",
+		Tags: []string{"prod"}, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+
+	out, err := runCLI("template", "delete", "--tag", "missing")
+	if err != nil {
+		t.Fatalf("template delete --tag: %v", err)
+	}
+	if !strings.Contains(out, "No templates carry tag") {
+		t.Errorf("expected no-match message, got: %q", out)
+	}
+
+	tpls, _ := s.ListTemplates()
+	if len(tpls) != 1 {
+		t.Errorf("survivors = %d, want 1 (tmpl-keep untouched)", len(tpls))
+	}
+}
+
 // =====================================================// Port forward command tests
 // =====================================================
 func TestCLI_PortList_Empty(t *testing.T) {

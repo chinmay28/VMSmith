@@ -745,6 +745,32 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, tpl);
     }
   }
+  if (p === "/api/v1/templates/bulk_delete" && method === "POST") {
+    const body = await parseBody(req);
+    const ids = Array.isArray(body.ids) ? body.ids.filter(s => typeof s === "string" && s.trim() !== "") : [];
+    const tag = typeof body.tag === "string" ? body.tag.trim() : "";
+    if (!ids.length && !tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "exactly one of ids or tag must be provided" });
+    }
+    if (ids.length && tag) {
+      return json(res, 400, { code: "invalid_bulk_request", message: "ids and tag are mutually exclusive" });
+    }
+    let targets = ids;
+    if (tag) {
+      const lc = tag.toLowerCase();
+      targets = [...templates.values()]
+        .filter(tpl => (tpl.tags || []).some(t => String(t).toLowerCase() === lc))
+        .map(tpl => tpl.id);
+    }
+    const results = targets.map(id => {
+      if (templates.has(id)) {
+        templates.delete(id);
+        return { id, success: true };
+      }
+      return { id, success: false, code: "resource_not_found", message: "template not found" };
+    });
+    return json(res, 200, { results });
+  }
   if (p === "/api/v1/quotas/usage" && method === "GET") {
     const list = [...vms.values()];
     const totals = list.reduce((acc, vm) => {

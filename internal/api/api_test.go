@@ -6911,3 +6911,164 @@ func TestListPorts_FilterBySearch_IDAndVMIDNotInHaystack(t *testing.T) {
 		t.Fatalf("expected VM-id substring to be excluded from haystack, got %+v", got)
 	}
 }
+
+// ============================================================
+// Template bulk-delete handler tests (2.3.9)
+// ============================================================
+
+func decodeBulkTemplateResponse(t *testing.T, resp *http.Response) bulkDeleteTemplatesResponse {
+	t.Helper()
+	var out bulkDeleteTemplatesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode bulk template response: %v", err)
+	}
+	return out
+}
+
+func TestBulkDeleteTemplates_ByIDs(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "keep", Image: "rocky9.qcow2", CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "drop-a", Image: "rocky9.qcow2", CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "drop-b", Image: "rocky9.qcow2", CreatedAt: t0.Add(2 * time.Hour)})
+
+	body := jsonBody(t, bulkDeleteTemplatesRequest{IDs: []string{"tmpl-2", "tmpl-3"}})
+	resp, err := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST bulk_delete: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkTemplateResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	for _, r := range out.Results {
+		if !r.Success {
+			t.Errorf("expected success for %q, got code=%q msg=%q", r.ID, r.Code, r.Message)
+		}
+	}
+
+	remaining, _ := s.ListTemplates()
+	if len(remaining) != 1 || remaining[0].ID != "tmpl-1" {
+		t.Errorf("survivors = %v, want only tmpl-1", remaining)
+	}
+}
+
+func TestBulkDeleteTemplates_ByTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "keep", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "old-a", Image: "rocky9.qcow2", Tags: []string{"legacy-rocky8"}, CreatedAt: t0.Add(time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "old-b", Image: "rocky9.qcow2", Tags: []string{"legacy-rocky8", "linux"}, CreatedAt: t0.Add(2 * time.Hour)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-4", Name: "kept-too", Image: "rocky9.qcow2", Tags: []string{"rc-2026-05"}, CreatedAt: t0.Add(3 * time.Hour)})
+
+	// Tag matching is case-insensitive.
+	body := jsonBody(t, bulkDeleteTemplatesRequest{Tag: "LEGACY-ROCKY8"})
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkTemplateResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2 (got %+v)", len(out.Results), out.Results)
+	}
+
+	remaining, _ := s.ListTemplates()
+	survivors := map[string]bool{}
+	for _, tpl := range remaining {
+		survivors[tpl.ID] = true
+	}
+	if !survivors["tmpl-1"] || !survivors["tmpl-4"] || len(survivors) != 2 {
+		t.Errorf("survivors = %v, want tmpl-1 + tmpl-4", survivors)
+	}
+}
+
+func TestBulkDeleteTemplates_PartialFailure(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-real", Name: "real", Image: "rocky9.qcow2", CreatedAt: t0})
+
+	body := jsonBody(t, bulkDeleteTemplatesRequest{IDs: []string{"tmpl-real", "tmpl-missing"}})
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkTemplateResponse(t, resp)
+	if len(out.Results) != 2 {
+		t.Fatalf("results = %d, want 2", len(out.Results))
+	}
+	gotByID := map[string]bulkDeleteTemplateResult{}
+	for _, r := range out.Results {
+		gotByID[r.ID] = r
+	}
+	if !gotByID["tmpl-real"].Success {
+		t.Errorf("expected tmpl-real to succeed, got %+v", gotByID["tmpl-real"])
+	}
+	if gotByID["tmpl-missing"].Success {
+		t.Errorf("expected tmpl-missing to fail")
+	}
+	if gotByID["tmpl-missing"].Code != "resource_not_found" {
+		t.Errorf("tmpl-missing.Code = %q, want resource_not_found", gotByID["tmpl-missing"].Code)
+	}
+}
+
+func TestBulkDeleteTemplates_EmptyRequestRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteTemplatesRequest{})
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteTemplates_BothIDsAndTagRejected(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	body := jsonBody(t, bulkDeleteTemplatesRequest{IDs: []string{"tmpl-1"}, Tag: "prod"})
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_bulk_request")
+}
+
+func TestBulkDeleteTemplates_TagNoMatchEmptyResponse(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-keep", Name: "keep", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0})
+
+	body := jsonBody(t, bulkDeleteTemplatesRequest{Tag: "nope"})
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodeBulkTemplateResponse(t, resp)
+	if len(out.Results) != 0 {
+		t.Errorf("results = %d, want 0", len(out.Results))
+	}
+	remaining, _ := s.ListTemplates()
+	if len(remaining) != 1 {
+		t.Errorf("survivors = %d, want 1 (tmpl-keep untouched)", len(remaining))
+	}
+}
+
+func TestBulkDeleteTemplates_BadJSON(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/templates/bulk_delete", "application/json", bytes.NewBufferString("not-json"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_request_body")
+}
