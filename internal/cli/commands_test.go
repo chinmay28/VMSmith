@@ -3756,3 +3756,97 @@ func TestCLI_TemplateList_FilterBySearch_CombinesWithTag(t *testing.T) {
 		t.Fatalf("did not expect non-intersecting templates, got %q", out)
 	}
 }
+
+// =====================================================
+// webhook list --search tests
+// =====================================================
+//
+// The CLI sends GET /api/v1/webhooks?search=<q>; the daemon does the actual
+// matching.  These tests stand in a fake daemon that captures the query
+// string + returns canned JSON so we can assert the wire shape end-to-end
+// without spinning up the real api server.
+
+// newFakeWebhookListDaemon returns an httptest.Server that captures the most
+// recent GET path + query and serves a canned JSON body.  Tests inspect
+// `state.lastQuery` to assert that the CLI forwarded the `?search=` param.
+type fakeWebhookListDaemon struct {
+	lastPath  string
+	lastQuery string
+	status    int
+	respBody  string
+}
+
+func newFakeWebhookListDaemon(t *testing.T, status int, body string) (*httptest.Server, *fakeWebhookListDaemon) {
+	t.Helper()
+	state := &fakeWebhookListDaemon{status: status, respBody: body}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state.lastPath = r.URL.Path
+		state.lastQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(state.status)
+		w.Write([]byte(state.respBody))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, state
+}
+
+func TestCLI_WebhookList_ForwardsSearchParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK,
+		`[{"id":"wh-1","url":"https://hooks.example.com/audit","active":true,"event_types":["vm.started"],"created_at":"2024-01-01T00:00:00Z"}]`)
+
+	out, err := runCLI("webhook", "list", "--api-url", srv.URL, "--search", "audit")
+	if err != nil {
+		t.Fatalf("webhook list: %v\nout=%s", err, out)
+	}
+	if state.lastPath != "/api/v1/webhooks" {
+		t.Fatalf("path = %q, want /api/v1/webhooks", state.lastPath)
+	}
+	if !strings.Contains(state.lastQuery, "search=audit") {
+		t.Fatalf("query missing search=audit: %q", state.lastQuery)
+	}
+	if !strings.Contains(out, "wh-1") {
+		t.Fatalf("expected webhook id wh-1 in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookList_TrimsAndLowercasesSearch(t *testing.T) {
+	// The CLI trims and lowercases the needle before forwarding so the
+	// daemon's per-page search response is consistent regardless of
+	// shell quoting noise.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--search", "  AUDIT  "); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "search=audit") {
+		t.Fatalf("expected normalized 'search=audit' in query, got %q", state.lastQuery)
+	}
+	if strings.Contains(state.lastQuery, "AUDIT") || strings.Contains(state.lastQuery, "+++") {
+		t.Fatalf("query should not retain whitespace or uppercase: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_EmptySearchOmitsParam(t *testing.T) {
+	// `--search ""` (or omitted) must not add `search=` to the URL — the
+	// query should be unscoped so the daemon returns every webhook.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--search", ""); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "search=") {
+		t.Fatalf("empty search must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_NoMatchPrintsEmptyMessage(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	out, err := runCLI("webhook", "list", "--api-url", srv.URL, "--search", "needle-not-present")
+	if err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(out, "No webhooks registered.") {
+		t.Fatalf("expected empty-list message, got %q", out)
+	}
+}

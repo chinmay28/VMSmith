@@ -654,3 +654,155 @@ func TestUpdateWebhook_ReactivatesStoppedWorker(t *testing.T) {
 		t.Fatalf("manager.Register not called on reactivation: %v", fake.registered)
 	}
 }
+
+// seedSearchableWebhooks pre-populates the fake store with three hooks that
+// cover the major haystack fields (URL substring, event-type substring,
+// mixed-case URL) so the filter tests can assert hits and misses without
+// re-seeding each test.
+func seedSearchableWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	now := time.Now().UTC()
+	hooks := []*types.Webhook{
+		{
+			ID:         "wh-audit",
+			URL:        "https://hooks.example.com/audit",
+			Secret:     "audit-secret-token",
+			EventTypes: []string{"vm.started", "vm.stopped"},
+			Active:     true,
+			CreatedAt:  now,
+			// LastError is operator-noise and intentionally excluded from
+			// the haystack — assert that the predicate does not match it.
+			LastError: "dial tcp 198.51.100.7: connection refused",
+		},
+		{
+			ID:         "wh-metrics",
+			URL:        "https://metrics.example.com/in",
+			Secret:     "k",
+			EventTypes: []string{"vm.created", "image.created"},
+			Active:     true,
+			CreatedAt:  now.Add(time.Second),
+		},
+		{
+			ID:         "wh-CASE",
+			URL:        "https://CamelCase.Example.com/Webhook",
+			Secret:     "k",
+			EventTypes: nil,
+			Active:     true,
+			CreatedAt:  now.Add(2 * time.Second),
+		},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func listWebhooksWithQuery(t *testing.T, baseURL, rawQuery string) []*types.Webhook {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/api/v1/webhooks?" + rawQuery)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	return hooks
+}
+
+func TestListWebhooks_FilterBySearch_MatchesURL(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=audit")
+	if len(hooks) != 1 || hooks[0].ID != "wh-audit" {
+		t.Fatalf("expected only wh-audit, got %v", hooks)
+	}
+	if hooks[0].Secret != "" {
+		t.Fatalf("filter response leaked secret: %q", hooks[0].Secret)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_MatchesEventType(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	// "image.created" is only carried by wh-metrics.
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=image.created")
+	if len(hooks) != 1 || hooks[0].ID != "wh-metrics" {
+		t.Fatalf("expected only wh-metrics, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_IsCaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	// Uppercase needle against a mixed-case URL must hit because the
+	// handler lowercases the needle once before calling the predicate.
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=CAMELCASE")
+	if len(hooks) != 1 || hooks[0].ID != "wh-CASE" {
+		t.Fatalf("expected wh-CASE, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_TrimsWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=%20%20audit%20%20")
+	if len(hooks) != 1 || hooks[0].ID != "wh-audit" {
+		t.Fatalf("expected only wh-audit after trim, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_EmptyQueryReturnsAll(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=")
+	if len(hooks) != 3 {
+		t.Fatalf("empty search must match all webhooks, got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterBySearch_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=needle-not-present-anywhere")
+	if len(hooks) != 0 {
+		t.Fatalf("expected empty result, got %d hooks: %+v", len(hooks), hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_SecretAndLastErrorNotInHaystack(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	// Even though wh-audit's Secret contains "audit-secret-token", the
+	// matcher must never consult the secret. The "audit" needle still
+	// matches via the URL ("…/audit"), but a substring that only exists
+	// in the secret must not.
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=secret-token")
+	if len(hooks) != 0 {
+		t.Fatalf("expected secret substring to not match, got %d hooks", len(hooks))
+	}
+
+	// LastError carries "dial tcp 198.51.100.7…"; the IP is exclusive to
+	// last_error so a positive match would indicate a contract regression.
+	hooks = listWebhooksWithQuery(t, ts.URL, "search=198.51.100.7")
+	if len(hooks) != 0 {
+		t.Fatalf("expected last_error substring to not match, got %d hooks", len(hooks))
+	}
+}

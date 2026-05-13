@@ -877,7 +877,21 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, filtered, { "X-Total-Count": String(total) });
   }
   if (p === "/api/v1/webhooks" && method === "GET") {
-    return json(res, 200, [...webhookList.values()]);
+    const needle = (q.get("search") || "").trim().toLowerCase();
+    const hooks = [...webhookList.values()];
+    if (!needle) return json(res, 200, hooks);
+    // Mirror pkg/types.WebhookMatchesSearch: URL + event_types only. Secret,
+    // ID, and last_error are intentionally excluded from the haystack.
+    const filtered = hooks.filter((wh) => {
+      if (typeof wh.url === "string" && wh.url.toLowerCase().includes(needle)) return true;
+      if (Array.isArray(wh.event_types)) {
+        for (const et of wh.event_types) {
+          if (typeof et === "string" && et.toLowerCase().includes(needle)) return true;
+        }
+      }
+      return false;
+    });
+    return json(res, 200, filtered);
   }
   if (p === "/api/v1/webhooks" && method === "POST") {
     const body = await parseBody(req);

@@ -729,6 +729,66 @@ async function main() {
 
     await page.close();
 
+    // ================== Settings: Webhooks free-text search ==================
+    // Symmetric search surface alongside VMs (2.2.13), images (5.4.9),
+    // events (4.2.20), snapshots (5.4.10), port forwards (5.4.11),
+    // templates (5.4.12), and logs (5.4.13).  Substring filter is applied
+    // server-side over URL + event_types.
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+
+    await runTest("webhook search input filters the list and matches URL or event types", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      const seed = async (url, types) => {
+        await p.locator('[data-testid="add-webhook-btn"]').click();
+        await p.waitForTimeout(150);
+        await p.locator('[data-testid="webhook-url-input"]').fill(url);
+        await p.locator('[data-testid="webhook-secret-input"]').fill("k");
+        if (types) await p.locator('[data-testid="webhook-event-types-input"]').fill(types);
+        await p.locator('[data-testid="webhook-create-submit"]').click();
+        await p.waitForTimeout(500);
+      };
+      await seed("https://hooks.example.com/audit", "vm.started, vm.stopped");
+      await seed("https://metrics.example.com/in", "image.created");
+
+      const allRows = p.locator('[data-testid^="webhook-row-"]');
+      await assert((await allRows.count()) === 2, `expected 2 seeded rows, got ${await allRows.count()}`);
+
+      // Filter by a URL substring — only the audit row should remain.
+      await p.locator('[data-testid="webhook-list-search"]').fill("audit");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 1, `expected 1 row after URL substring filter, got ${await allRows.count()}`);
+      const auditText = (await allRows.first().textContent()) || "";
+      await assert(auditText.includes("hooks.example.com/audit"), `row should be the audit webhook, got: ${auditText}`);
+
+      // The URL search-param round-trips so a bookmark replays the filter.
+      const urlAfter = new URL(p.url());
+      await assert(urlAfter.searchParams.get("search") === "audit",
+        `expected ?search=audit, got ${urlAfter.searchParams.get("search")}`);
+
+      // Clear control restores the unfiltered view.
+      await p.locator('[data-testid="webhook-list-search-clear"]').click();
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 2, `expected 2 rows after clear, got ${await allRows.count()}`);
+
+      // Filter by an event-type substring — only the metrics row should remain.
+      await p.locator('[data-testid="webhook-list-search"]').fill("image.created");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 1, `expected 1 row after event-type filter, got ${await allRows.count()}`);
+      const metricsText = (await allRows.first().textContent()) || "";
+      await assert(metricsText.includes("metrics.example.com"), `row should be the metrics webhook, got: ${metricsText}`);
+
+      // No-match query renders the dedicated empty-state copy.
+      await p.locator('[data-testid="webhook-list-search"]').fill("needle-not-anywhere");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 0, "expected zero rows for no-match query");
+    }, page);
+
+    await page.close();
+
     // ================== Full Lifecycle E2E ==================
     console.log("\nFull Lifecycle E2E:");
 
