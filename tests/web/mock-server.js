@@ -771,10 +771,26 @@ const server = http.createServer(async (req, res) => {
     const level = url.searchParams.get("level") || "debug";
     const limit = parseInt(url.searchParams.get("limit") || "200", 10);
     const source = url.searchParams.get("source") || "";
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     const levelOrder = { debug: 0, info: 1, warn: 2, error: 3 };
     const minLevel = levelOrder[level] ?? 0;
     let filtered = entries.filter(e => (levelOrder[e.level] ?? 0) >= minLevel);
     if (source) filtered = filtered.filter(e => e.source === source);
+    if (search) {
+      // Mirror internal/logger.EntryMatchesSearch: message + source + level +
+      // every field VALUE; field keys are intentionally excluded.
+      filtered = filtered.filter(e => {
+        if (e.msg && e.msg.toLowerCase().includes(search)) return true;
+        if (e.source && e.source.toLowerCase().includes(search)) return true;
+        if (e.level && e.level.toLowerCase().includes(search)) return true;
+        if (e.fields) {
+          for (const v of Object.values(e.fields)) {
+            if (v && String(v).toLowerCase().includes(search)) return true;
+          }
+        }
+        return false;
+      });
+    }
     const total = filtered.length;
     if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
     return json(res, 200, { entries: filtered, total }, { "X-Total-Count": String(total) });

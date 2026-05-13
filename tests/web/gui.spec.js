@@ -1525,6 +1525,59 @@ test.describe("Log Viewer", () => {
 
     await expect(page.getByTestId("btn-log-pause")).toHaveText("Pause");
   });
+
+  // 5.4.13 — Free-text search filter mirrored across API + GUI.
+  test("search input filters the log table and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // Mock-server seeds an entry whose message contains "vmSmith daemon listening" on source=daemon.
+    await page.getByTestId("log-search").fill("listening");
+
+    // After the 250 ms debounce + fetch, the daemon entry should be the only one visible.
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("search=listening");
+    await expect(page.getByTestId("log-source-daemon")).toBeVisible();
+    // The api request entry ("GET /api/v1/vms") should be filtered out.
+    await expect(page.getByTestId("log-source-api")).toBeHidden();
+  });
+
+  test("search input matches against structured field values", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // Mock-server seeds an "api" source entry with fields.status_code=200.
+    // Field values are in the haystack, but field keys are not.
+    await page.getByTestId("log-search").fill("200");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("search=200");
+    await expect(page.getByTestId("log-source-api")).toBeVisible();
+  });
+
+  test("search shows empty-state hint when no entries match", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    await page.getByTestId("log-search").fill("zzzzz-no-such-needle");
+    await expect(page.getByTestId("log-empty-state")).toContainText(
+      'No log entries match "zzzzz-no-such-needle".',
+    );
+  });
+
+  test("search clear button restores the unfiltered view", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    await page.getByTestId("log-search").fill("listening");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("search=listening");
+
+    await page.getByTestId("log-search-clear").click();
+    await expect.poll(() => page.url(), { timeout: 2000 }).not.toContain("search=");
+    await expect(page.getByTestId("log-source-api")).toBeVisible();
+    await expect(page.getByTestId("log-source-daemon")).toBeVisible();
+  });
 });
 
 // ============================================================

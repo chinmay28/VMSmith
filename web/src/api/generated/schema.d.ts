@@ -2102,6 +2102,18 @@ export interface paths {
                     per_page?: number;
                     /** @description Alias retained for compatibility. */
                     limit?: number;
+                    /**
+                     * @description Case-insensitive substring filter applied to each entry's
+                     *     message, source, level, and every value in the structured
+                     *     fields map. Whitespace is trimmed before matching. Field keys
+                     *     and timestamps are intentionally excluded from the haystack —
+                     *     keys are a small repeating vocabulary (`vm_id`, `method`,
+                     *     `error`, ...) and would generate noisy matches, while
+                     *     timestamps are scoped via `since`. The filter composes
+                     *     additively with `level`, `source`, `since`, and pagination,
+                     *     so `X-Total-Count` reflects the post-search population.
+                     */
+                    search?: string;
                 };
                 header?: never;
                 path?: never;

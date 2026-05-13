@@ -268,9 +268,9 @@ export const quotas = {
 
 // --- Logs ---
 export const logs = {
-  list: ({ level = 'debug', page, perPage, limit, since = '', source = '' }: { level?: string; page?: number; perPage?: number; limit?: number; since?: string; source?: string } = {}) =>
+  list: ({ level = 'debug', page, perPage, limit, since = '', source = '', search = '' }: { level?: string; page?: number; perPage?: number; limit?: number; since?: string; source?: string; search?: string } = {}) =>
     unwrap(apiClient.GET('/logs', {
-      params: { query: { level, page, per_page: perPage, limit, since, source } },
+      params: { query: { level, page, per_page: perPage, limit, since, source, search } },
     }), { withMeta: true }),
 };
 
