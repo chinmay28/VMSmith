@@ -734,6 +734,7 @@ async function main() {
     // events (4.2.20), snapshots (5.4.10), port forwards (5.4.11),
     // templates (5.4.12), and logs (5.4.13).  Substring filter is applied
     // server-side over URL + event_types.
+    // 2.3.10 — webhook bulk-delete via multi-select + "Delete selected".
     page = await context.newPage();
     await page.goto(BASE);
     await page.waitForTimeout(400);
@@ -785,6 +786,61 @@ async function main() {
       await p.locator('[data-testid="webhook-list-search"]').fill("needle-not-anywhere");
       await p.waitForTimeout(450);
       await assert((await allRows.count()) === 0, "expected zero rows for no-match query");
+    }, page);
+
+    await runTest("bulk-delete selected webhooks via checkbox + Delete-selected", async (p) => {
+      p.on("dialog", (d) => d.accept());
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      // Seed three webhooks.
+      const urls = ["https://example.com/bulk-a", "https://example.com/bulk-b", "https://example.com/bulk-c"];
+      for (const url of urls) {
+        await p.locator('[data-testid="add-webhook-btn"]').click();
+        await p.waitForTimeout(150);
+        await p.locator('[data-testid="webhook-url-input"]').fill(url);
+        await p.locator('[data-testid="webhook-secret-input"]').fill("s");
+        await p.locator('[data-testid="webhook-create-submit"]').click();
+        await p.waitForTimeout(500);
+      }
+      const rows = p.locator('[data-testid^="webhook-row-"]');
+      let count = await rows.count();
+      await assert(count === 3, `expected 3 webhook rows after seed, got ${count}`);
+
+      // Select two of three by ticking their checkboxes.
+      const firstID = (await rows.nth(0).getAttribute("data-testid")).replace("webhook-row-", "");
+      const secondID = (await rows.nth(1).getAttribute("data-testid")).replace("webhook-row-", "");
+      await p.locator(`[data-testid="webhook-checkbox-${firstID}"]`).check();
+      await p.locator(`[data-testid="webhook-checkbox-${secondID}"]`).check();
+
+      // Bulk-delete.
+      await p.locator('[data-testid="btn-bulk-delete-webhooks"]').click();
+      await p.waitForTimeout(800);
+
+      // Only one survivor remains, and the result banner appears.
+      count = await p.locator('[data-testid^="webhook-row-"]').count();
+      await assert(count === 1, `expected 1 surviving webhook row, got ${count}`);
+      await assertText(p, "webhook-bulk-result", "2 of 2 succeeded");
+    }, page);
+
+    await runTest("select-all then Delete-selected sweeps every webhook", async (p) => {
+      // Continues from the previous test — 1 row left. Add another, then sweep.
+      await p.locator('[data-testid="add-webhook-btn"]').click();
+      await p.waitForTimeout(150);
+      await p.locator('[data-testid="webhook-url-input"]').fill("https://example.com/sweep-extra");
+      await p.locator('[data-testid="webhook-secret-input"]').fill("s");
+      await p.locator('[data-testid="webhook-create-submit"]').click();
+      await p.waitForTimeout(500);
+
+      const before = await p.locator('[data-testid^="webhook-row-"]').count();
+      await assert(before >= 2, `expected >= 2 rows before sweep, got ${before}`);
+
+      await p.locator('[data-testid="webhook-select-all"]').check();
+      await p.locator('[data-testid="btn-bulk-delete-webhooks"]').click();
+      await p.waitForTimeout(800);
+
+      const after = await p.locator('[data-testid^="webhook-row-"]').count();
+      await assert(after === 0, `expected zero rows after select-all sweep, got ${after}`);
     }, page);
 
     await page.close();

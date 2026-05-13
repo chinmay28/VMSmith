@@ -11,6 +11,8 @@ export default function Settings() {
   const [editing, setEditing] = useState(null);
   const [testResults, setTestResults] = useState({});
   const [testingID, setTestingID] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkResult, setBulkResult] = useState(null);
 
   // Free-text search across URL + event_types. `searchInput` is the live
   // input value; `searchFilter` is the debounced value that drives the
@@ -55,13 +57,54 @@ export default function Settings() {
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
+  const bulkMut = useMutation(webhooksApi.bulkDelete);
   const hooks = hookList || [];
+
+  // Drop selections that disappear from the list (after refresh / external delete).
+  useEffect(() => {
+    if (!hooks.length) {
+      if (selected.size) setSelected(new Set());
+      return;
+    }
+    const existing = new Set(hooks.map((wh) => wh.id));
+    let changed = false;
+    const next = new Set();
+    selected.forEach((id) => {
+      if (existing.has(id)) next.add(id);
+      else changed = true;
+    });
+    if (changed) setSelected(next);
+  }, [hooks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (id, url) => {
     if (!window.confirm(`Delete webhook for ${url}?`)) return;
     await deleteMut.execute(id);
     refresh();
   };
+
+  const allSelected = selected.size > 0 && selected.size === hooks.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(hooks.map((wh) => wh.id)));
+  };
+  const toggleOne = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const handleBulkDelete = async () => {
+    if (!selected.size) return;
+    if (!window.confirm(`Delete ${selected.size} webhook${selected.size === 1 ? '' : 's'}?`)) return;
+    const result = await bulkMut.execute({ ids: Array.from(selected) });
+    setBulkResult(result);
+    setSelected(new Set());
+    refresh();
+  };
+  const dismissBulkResult = () => setBulkResult(null);
 
   const handleTest = async (id) => {
     setTestingID(id);
@@ -181,9 +224,46 @@ export default function Settings() {
         </div>
       ) : (
         <div className="card overflow-hidden" data-testid="webhook-list">
+          <div className="flex items-center justify-between px-4 py-1.5 border-b border-steel-800/40 bg-steel-900/40">
+            <label className="flex items-center gap-2 text-xs text-steel-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={toggleAll}
+                data-testid="webhook-select-all"
+              />
+              {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+            </label>
+            <button
+              className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleBulkDelete}
+              disabled={!selected.size || bulkMut.loading}
+              data-testid="btn-bulk-delete-webhooks"
+            >
+              <Trash2 size={12} /> Delete selected
+            </button>
+          </div>
+          {bulkResult && (
+            <div
+              className="px-4 py-2 border-b border-steel-800/40 bg-steel-900/40 text-xs text-steel-400 flex items-center justify-between"
+              data-testid="webhook-bulk-result"
+            >
+              <span>
+                {(bulkResult.results || []).filter(r => r.success).length} of {(bulkResult.results || []).length} succeeded
+                {bulkResult.results?.some(r => !r.success) && (
+                  <span className="text-red-400">
+                    {' '}· {bulkResult.results.filter(r => !r.success).length} failed
+                  </span>
+                )}
+              </span>
+              <button className="btn-ghost text-xs" onClick={dismissBulkResult}>Dismiss</button>
+            </div>
+          )}
           <table className="w-full">
             <thead>
               <tr className="border-b border-steel-800/40">
+                <th className="table-header table-cell w-8"></th>
                 <th className="table-header table-cell">URL</th>
                 <th className="table-header table-cell">Event filters</th>
                 <th className="table-header table-cell">Last delivery</th>
@@ -196,6 +276,14 @@ export default function Settings() {
                 const result = testResults[wh.id];
                 return (
                   <tr key={wh.id} className="hover:bg-steel-800/20" data-testid={`webhook-row-${wh.id}`}>
+                    <td className="table-cell">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(wh.id)}
+                        onChange={() => toggleOne(wh.id)}
+                        data-testid={`webhook-checkbox-${wh.id}`}
+                      />
+                    </td>
                     <td className="table-cell">
                       <div className="flex items-center gap-2.5">
                         <div className="w-7 h-7 rounded bg-steel-800/60 border border-steel-700/30 flex items-center justify-center">

@@ -3542,6 +3542,113 @@ func TestCLI_WebhookEdit_PropagatesDaemonError(t *testing.T) {
 	}
 }
 
+// --- Webhook bulk-delete (2.3.10) ---
+
+func TestCLI_WebhookDelete_NoArgsErrors(t *testing.T) {
+	_, err := runCLI("webhook", "delete", "--api-url", "http://invalid")
+	if err == nil {
+		t.Fatal("expected error when no id and no --event-type")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %v, want 'exactly one of'", err)
+	}
+}
+
+func TestCLI_WebhookDelete_BothIDAndEventTypeErrors(t *testing.T) {
+	_, err := runCLI("webhook", "delete", "wh-1", "--event-type", "vm.deleted", "--api-url", "http://invalid")
+	if err == nil {
+		t.Fatal("expected error when both id and --event-type are passed")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want 'mutually exclusive'", err)
+	}
+}
+
+func TestCLI_WebhookDelete_SinglePositional(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusNoContent, ``)
+
+	out, err := runCLI("webhook", "delete", "wh-positional", "--api-url", srv.URL)
+	if err != nil {
+		t.Fatalf("webhook delete: %v\nout: %s", err, out)
+	}
+	if state.lastMethod != http.MethodDelete {
+		t.Fatalf("expected DELETE, got %s", state.lastMethod)
+	}
+	if !strings.Contains(out, "Webhook wh-positional deleted") {
+		t.Errorf("expected confirmation: %s", out)
+	}
+}
+
+func TestCLI_WebhookDelete_EventTypeBulk(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"results":[{"id":"wh-a","success":true},{"id":"wh-b","success":true}]}`)
+
+	out, err := runCLI("webhook", "delete", "--api-url", srv.URL, "--event-type", "vm.deleted")
+	if err != nil {
+		t.Fatalf("webhook delete: %v\nout: %s", err, out)
+	}
+	if state.lastMethod != http.MethodPost {
+		t.Fatalf("expected POST to /webhooks/bulk_delete, got %s", state.lastMethod)
+	}
+	var sent struct {
+		EventType string `json:"event_type"`
+	}
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v\nbody=%s", err, state.lastBody)
+	}
+	if sent.EventType != "vm.deleted" {
+		t.Errorf("event_type not forwarded: got %q", sent.EventType)
+	}
+	if !strings.Contains(out, "OK    wh-a") || !strings.Contains(out, "OK    wh-b") {
+		t.Errorf("expected per-target OK lines: %s", out)
+	}
+}
+
+func TestCLI_WebhookDelete_EventTypeTrimsWhitespace(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK, `{"results":[]}`)
+
+	if _, err := runCLI("webhook", "delete", "--api-url", srv.URL, "--event-type", "  vm.deleted  "); err != nil {
+		t.Fatalf("webhook delete: %v", err)
+	}
+	var sent struct {
+		EventType string `json:"event_type"`
+	}
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if sent.EventType != "vm.deleted" {
+		t.Errorf("whitespace not trimmed: got %q", sent.EventType)
+	}
+}
+
+func TestCLI_WebhookDelete_EventTypeNoMatchPrintsMessage(t *testing.T) {
+	srv, _ := newFakeWebhookDaemon(t, http.StatusOK, `{"results":[]}`)
+
+	out, err := runCLI("webhook", "delete", "--api-url", srv.URL, "--event-type", "nope.event")
+	if err != nil {
+		t.Fatalf("webhook delete: %v", err)
+	}
+	if !strings.Contains(out, `No webhooks subscribed to event type "nope.event"`) {
+		t.Errorf("expected no-match message, got: %s", out)
+	}
+}
+
+func TestCLI_WebhookDelete_PartialFailureSurfaces(t *testing.T) {
+	srv, _ := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"results":[{"id":"wh-a","success":true},{"id":"wh-b","success":false,"code":"resource_not_found","message":"webhook not found"}]}`)
+
+	out, err := runCLI("webhook", "delete", "--api-url", srv.URL, "--event-type", "vm.deleted")
+	if err == nil {
+		t.Fatal("expected error when at least one target fails")
+	}
+	if !strings.Contains(err.Error(), "1 of 2 webhooks failed") {
+		t.Errorf("error = %v, want '1 of 2 webhooks failed'", err)
+	}
+	if !strings.Contains(out, "OK    wh-a") || !strings.Contains(out, "FAIL  wh-b") {
+		t.Errorf("expected per-target lines: %s", out)
+	}
+}
+
 // --- Template list sort (5.4.7) ---
 
 func TestCLI_TemplateList_SortByName(t *testing.T) {

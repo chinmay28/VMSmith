@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -297,37 +298,121 @@ Field semantics:
 }
 
 var webhookDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a registered webhook",
-	Args:  cobra.ExactArgs(1),
+	Use:   "delete [id]",
+	Short: "Delete a registered webhook (or many via --event-type)",
+	Long: `Delete one or many registered webhooks.
+
+Single delete:     vmsmith webhook delete <id>
+Bulk by event:     vmsmith webhook delete --event-type vm.deleted
+
+Exactly one of <id> or --event-type is required. The --event-type selector
+matches webhooks whose event_types filter contains the exact event type;
+catch-all webhooks (empty event_types) are not swept — delete them by id.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := strings.TrimSpace(args[0])
+		eventType, _ := cmd.Flags().GetString("event-type")
+		eventType = strings.TrimSpace(eventType)
+		var id string
+		if len(args) == 1 {
+			id = strings.TrimSpace(args[0])
+		}
+
+		if id == "" && eventType == "" {
+			return fmt.Errorf("exactly one of <id> or --event-type is required")
+		}
+		if id != "" && eventType != "" {
+			return fmt.Errorf("<id> and --event-type are mutually exclusive")
+		}
+
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
-
 		resolved := resolveAPIURL(apiURL)
-		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodDelete,
-			resolved+"/api/v1/webhooks/"+id, nil)
-		if err != nil {
-			return err
-		}
-		if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+apiKey)
-		}
+		apiKey = strings.TrimSpace(apiKey)
 
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return err
+		if id != "" {
+			return runWebhookSingleDelete(cmd.Context(), resolved, apiKey, id)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNoContent {
-			fmt.Printf("Webhook %s deleted.\n", id)
-			return nil
-		}
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("daemon rejected delete (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return runWebhookBulkDeleteByEventType(cmd.Context(), resolved, apiKey, eventType)
 	},
+}
+
+func runWebhookSingleDelete(ctx context.Context, apiURL, apiKey, id string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, apiURL+"/api/v1/webhooks/"+id, nil)
+	if err != nil {
+		return err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		fmt.Printf("Webhook %s deleted.\n", id)
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("daemon rejected delete (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+func runWebhookBulkDeleteByEventType(ctx context.Context, apiURL, apiKey, eventType string) error {
+	payload, err := json.Marshal(map[string]any{"event_type": eventType})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		apiURL+"/api/v1/webhooks/bulk_delete", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("daemon rejected bulk delete (HTTP %d): %s",
+			resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Results []struct {
+			ID      string `json:"id"`
+			Success bool   `json:"success"`
+			Code    string `json:"code,omitempty"`
+			Message string `json:"message,omitempty"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("parsing daemon response: %w", err)
+	}
+	if len(out.Results) == 0 {
+		fmt.Printf("No webhooks subscribed to event type %q\n", eventType)
+		return nil
+	}
+	successes, failures := 0, 0
+	for _, r := range out.Results {
+		if r.Success {
+			fmt.Printf("OK    %s\n", r.ID)
+			successes++
+			continue
+		}
+		fmt.Printf("FAIL  %s: %s\n", r.ID, strings.TrimSpace(r.Message))
+		failures++
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d of %d webhooks failed to delete", failures, len(out.Results))
+	}
+	_ = successes
+	return nil
 }
 
 func resolveAPIURL(flag string) string {
@@ -355,6 +440,9 @@ func init() {
 	webhookEditCmd.Flags().StringSlice("event-types", nil, "replace event-type filter list (comma-separated)")
 	webhookEditCmd.Flags().Bool("clear-event-types", false, "clear the event filter so the webhook fires on every event")
 	webhookEditCmd.Flags().Bool("active", true, "toggle delivery on/off (only takes effect when explicitly set)")
+
+	webhookDeleteCmd.Flags().String("event-type", "",
+		"delete every webhook whose event_types filter contains this exact event type (mutually exclusive with <id>)")
 
 	for _, c := range []*cobra.Command{webhookAddCmd, webhookListCmd, webhookEditCmd, webhookDeleteCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")

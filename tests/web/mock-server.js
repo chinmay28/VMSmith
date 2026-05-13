@@ -953,6 +953,46 @@ const server = http.createServer(async (req, res) => {
     });
     return json(res, 200, hooks);
   }
+  if (p === "/api/v1/webhooks/bulk_delete" && method === "POST") {
+    const body = await parseBody(req);
+    const eventType = typeof body.event_type === "string" ? body.event_type.trim() : "";
+    const cleanedIds = Array.isArray(body.ids)
+      ? body.ids.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean)
+      : [];
+    if (eventType === "" && cleanedIds.length === 0) {
+      return json(res, 400, {
+        code: "invalid_bulk_request",
+        message: "exactly one of ids or event_type must be provided",
+      });
+    }
+    if (eventType !== "" && cleanedIds.length > 0) {
+      return json(res, 400, {
+        code: "invalid_bulk_request",
+        message: "ids and event_type are mutually exclusive",
+      });
+    }
+    let targets = cleanedIds;
+    if (eventType !== "") {
+      targets = [];
+      for (const wh of webhookList.values()) {
+        // Explicit-membership match. Catch-all webhooks (no event_types) are
+        // NOT swept by the categorical selector — mirror the API contract.
+        if (Array.isArray(wh.event_types) && wh.event_types.some((t) => typeof t === "string" && t.trim() === eventType)) {
+          targets.push(wh.id);
+        }
+      }
+    }
+    const results = [];
+    for (const id of targets) {
+      if (!webhookList.has(id)) {
+        results.push({ id, success: false, code: "resource_not_found", message: "webhook not found" });
+        continue;
+      }
+      webhookList.delete(id);
+      results.push({ id, success: true });
+    }
+    return json(res, 200, { results });
+  }
   if (p === "/api/v1/webhooks" && method === "POST") {
     const body = await parseBody(req);
     const url2 = (body.url || "").trim();

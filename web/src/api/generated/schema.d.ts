@@ -2006,6 +2006,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/bulk_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete multiple webhooks in a single request
+         * @description Delete a batch of webhooks either by explicit ID list or by event-type
+         *     selector. Returns a per-target result so partial failures (one
+         *     webhook missing, the rest succeeded) surface in a single response.
+         *     Exactly one of `ids` or `event_type` must be provided.
+         *
+         *     The `event_type` selector matches webhooks whose `event_types` filter
+         *     list contains the exact event type. Catch-all webhooks (empty
+         *     `event_types`) are NOT swept by the categorical selector — delete
+         *     them by id. Mirrors `/templates/bulk_delete` (2.3.9) and
+         *     `/images/bulk_delete` (2.3.6).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BulkDeleteWebhooksRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-webhook delete results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BulkDeleteWebhooksResponse"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/{webhookID}": {
         parameters: {
             query?: never;
@@ -2471,6 +2526,31 @@ export interface components {
             results: components["schemas"]["BulkDeleteTemplateResult"][];
         };
         BulkDeleteTemplateResult: {
+            id: string;
+            success: boolean;
+            code?: string;
+            message?: string;
+        };
+        /**
+         * @description Selector for the webhooks to delete. Exactly one of `ids` or
+         *     `event_type` must be set; the request is rejected with HTTP 400
+         *     `invalid_bulk_request` when both or neither are present.
+         *
+         *     The `event_type` selector matches webhooks whose `event_types`
+         *     filter list contains this exact value. Catch-all webhooks
+         *     (empty `event_types`) are NOT swept by the categorical selector
+         *     — delete them by id.
+         */
+        BulkDeleteWebhooksRequest: {
+            /** @description Explicit list of webhook IDs to delete. */
+            ids?: string[];
+            /** @description Match every webhook whose event_types filter contains this exact event type. */
+            event_type?: string;
+        };
+        BulkDeleteWebhooksResponse: {
+            results: components["schemas"]["BulkDeleteWebhookResult"][];
+        };
+        BulkDeleteWebhookResult: {
             id: string;
             success: boolean;
             code?: string;
