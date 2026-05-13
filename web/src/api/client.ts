@@ -246,8 +246,8 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage, tag, sort, order }: { page?: number; perPage?: number; tag?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, sort, order } as any } }), { withMeta: true }),
+  list: ({ page, perPage, tag, search, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, sort, order } as any } }), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>

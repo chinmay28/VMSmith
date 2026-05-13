@@ -692,6 +692,14 @@ const server = http.createServer(async (req, res) => {
       const lc = tag.toLowerCase();
       list = list.filter(t => (t.tags || []).some(x => String(x).toLowerCase() === lc));
     }
+    const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    if (search) {
+      list = list.filter(t => {
+        if (t.name && String(t.name).toLowerCase().includes(search)) return true;
+        if (t.description && String(t.description).toLowerCase().includes(search)) return true;
+        return Array.isArray(t.tags) && t.tags.some(x => String(x).toLowerCase().includes(search));
+      });
+    }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
     const allowedSort = ["id", "name", "created_at"];

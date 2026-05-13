@@ -1620,6 +1620,18 @@ export interface paths {
                      *     X-Total-Count reflects the filtered population.
                      */
                     tag?: string;
+                    /**
+                     * @description Case-insensitive substring filter applied to the template's
+                     *     `name`, `description`, and `tags`. The needle is trimmed and
+                     *     lowercased before matching. Filtering happens before sort +
+                     *     pagination so `X-Total-Count` reflects the post-search
+                     *     population. ID, image, default_user, and network attachments
+                     *     are intentionally excluded from the haystack — they describe
+                     *     what the template produces, not the template itself, and
+                     *     including them produces noisy false positives. Mirrors the
+                     *     5.4.9 / 5.4.10 / 5.4.11 `search` filter contract.
+                     */
+                    search?: string;
                 };
                 header?: never;
                 path?: never;

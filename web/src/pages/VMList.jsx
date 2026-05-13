@@ -537,12 +537,27 @@ function CreateVMModal({ open, onClose, onCreated }) {
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
+  const [templateSearchInput, setTemplateSearchInput] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
   const createMut = useMutation(vms.create);
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
-  const { data: templateResponse } = useFetch(() => templatesApi.list({ sort: 'name' }), [], 0);
+  const { data: templateResponse } = useFetch(
+    () => templatesApi.list({ sort: 'name', search: templateSearch }),
+    [templateSearch],
+    0,
+  );
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
   const imageList = safeArray(imageResponse?.data || imageResponse);
   const templates = safeArray(templateResponse?.data || templateResponse);
+
+  // Debounce the template-selector search box. `templateSearchInput` is the
+  // live value the user types; `templateSearch` is the committed query that
+  // drives the API call.
+  useEffect(() => {
+    const trimmed = templateSearchInput.trim();
+    const id = setTimeout(() => setTemplateSearch(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [templateSearchInput]);
 
   const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
@@ -669,8 +684,31 @@ function CreateVMModal({ open, onClose, onCreated }) {
                 </div>
                 <div>
                   <label className="label">Template <span className="text-steel-500 font-normal">(optional)</span></label>
+                  <div className="relative mb-1.5">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+                    <input
+                      type="search"
+                      value={templateSearchInput}
+                      onChange={e => setTemplateSearchInput(e.target.value)}
+                      placeholder="Search templates…"
+                      className="input w-full pl-7 pr-7 py-1 text-xs"
+                      data-testid="template-search-input"
+                      aria-label="Search templates"
+                    />
+                    {templateSearchInput && (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+                        onClick={() => setTemplateSearchInput('')}
+                        data-testid="template-search-clear"
+                        aria-label="Clear template search"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                   <select className="input" value={form.template_id} onChange={e => applyTemplate(e.target.value)} data-testid="input-vm-template">
-                    <option value="">No template</option>
+                    <option value="">{templateSearch && templates.length === 0 ? `No templates match "${templateSearch}"` : 'No template'}</option>
                     {templates.map(template => (
                       <option key={template.id} value={template.id}>{template.name}</option>
                     ))}

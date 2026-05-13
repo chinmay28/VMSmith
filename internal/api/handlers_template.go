@@ -86,6 +86,12 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //   - tag=<value>            case-insensitive filter; only templates carrying
 //     this tag are returned. Filtering happens before sort + pagination so
 //     the X-Total-Count header reflects the filtered population.
+//   - search=<value>         case-insensitive substring filter applied to
+//     `name`, `description`, and `tags`. Trimmed + lowercased once before
+//     delegating to the shared predicate. Composes additively with `tag`,
+//     `sort`, `order`, and pagination — same shape as 5.4.9 / 5.4.10 /
+//     5.4.11. ID, image, default_user, and network attachments are
+//     intentionally excluded from the haystack.
 //   - sort=<id|name|created_at>  default id; case-insensitive
 //   - order=<asc|desc>       default asc
 //   - page / per_page (see parsePagination)
@@ -108,6 +114,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 
 	if tagFilter := strings.TrimSpace(r.URL.Query().Get("tag")); tagFilter != "" {
 		templates = filterTemplatesByTag(templates, tagFilter)
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if searchFilter != "" {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if types.TemplateMatchesSearch(tpl, searchFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
 	}
 
 	types.SortTemplates(templates, sortField, order)
