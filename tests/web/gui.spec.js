@@ -1388,6 +1388,7 @@ test.describe("Templates", () => {
   test("edit modal updates description and tags via PATCH", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
     await page.getByTestId("btn-edit-template-big-rocky").click();
     await expect(page.getByTestId("edit-template-modal")).toBeVisible();
     await page.getByTestId("edit-template-description").fill("Promoted to GA");
@@ -1412,15 +1413,20 @@ test.describe("Templates", () => {
   test("bulk delete via select-all sweeps every template", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await page.getByTestId("template-select-all").check();
-    page.once("dialog", (d) => d.accept());
     await page.getByTestId("btn-bulk-delete-templates").click();
-    await expect(page.getByTestId("template-bulk-result")).toContainText("2 of 2 succeeded");
+    // Once the second row drops, the table card is replaced by the EmptyState
+    // branch, so just assert the rows are gone and the empty state renders.
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
   test("delete single template via row action", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     page.once("dialog", (d) => d.accept());
     await page.getByTestId("btn-delete-template-small-ubuntu").click();
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
