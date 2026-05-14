@@ -565,6 +565,107 @@ func TestLastIDToSeq(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `vmsmith events list --sort --order` (5.4.16)
+// ============================================================
+
+func TestCLI_EventsList_SortByType_CaseInsensitive(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	base := time.Now()
+	s.PutEvent(&types.Event{ID: "1", Type: "vm.started", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "2", Type: "Image.created", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "3", Type: "snapshot.taken", CreatedAt: base})
+
+	out, err := runCLI("events", "list", "--sort", "type", "--order", "asc")
+	if err != nil {
+		t.Fatalf("events list --sort: %v", err)
+	}
+	// case-insensitive: "image.created" < "snapshot.taken" < "vm.started"
+	idxImage := strings.Index(out, "Image.created")
+	idxSnap := strings.Index(out, "snapshot.taken")
+	idxStart := strings.Index(out, "vm.started")
+	if !(idxImage >= 0 && idxSnap >= 0 && idxStart >= 0 && idxImage < idxSnap && idxSnap < idxStart) {
+		t.Errorf("expected type asc order image<snapshot<vm; got positions %d/%d/%d:\n%s",
+			idxImage, idxSnap, idxStart, out)
+	}
+}
+
+func TestCLI_EventsList_SortByOccurredAtAsc(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	s.PutEvent(&types.Event{ID: "1", Type: "alpha", OccurredAt: base.Add(2 * time.Hour)})
+	s.PutEvent(&types.Event{ID: "2", Type: "bravo", OccurredAt: base.Add(1 * time.Hour)})
+	s.PutEvent(&types.Event{ID: "3", Type: "charlie", OccurredAt: base.Add(3 * time.Hour)})
+
+	out, err := runCLI("events", "list", "--sort", "occurred_at", "--order", "asc")
+	if err != nil {
+		t.Fatalf("events list --sort: %v", err)
+	}
+	idxBravo := strings.Index(out, "bravo")
+	idxAlpha := strings.Index(out, "alpha")
+	idxCharlie := strings.Index(out, "charlie")
+	if !(idxBravo >= 0 && idxAlpha >= 0 && idxCharlie >= 0 && idxBravo < idxAlpha && idxAlpha < idxCharlie) {
+		t.Errorf("expected occurred_at asc order bravo<alpha<charlie; got positions %d/%d/%d:\n%s",
+			idxBravo, idxAlpha, idxCharlie, out)
+	}
+}
+
+func TestCLI_EventsList_RejectsInvalidSort(t *testing.T) {
+	_, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	_, err := runCLI("events", "list", "--sort", "attributes")
+	if err == nil {
+		t.Fatal("expected error for invalid --sort")
+	}
+	if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Errorf("wrong error: %v", err)
+	}
+}
+
+func TestCLI_EventsList_RejectsInvalidOrder(t *testing.T) {
+	_, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	_, err := runCLI("events", "list", "--sort", "type", "--order", "sideways")
+	if err == nil {
+		t.Fatal("expected error for invalid --order")
+	}
+	if !strings.Contains(err.Error(), "invalid --order") {
+		t.Errorf("wrong error: %v", err)
+	}
+}
+
+func TestCLI_EventsList_NoSortFlagPreservesLegacyNewestFirst(t *testing.T) {
+	// Without --sort the CLI must still order by timestamp desc (legacy),
+	// independent of the API's id-desc default.
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	// Insert id-asc != time-desc so the wrong path is observable.
+	s.PutEvent(&types.Event{ID: "1", Type: "first_inserted", OccurredAt: base.Add(1 * time.Hour)})
+	s.PutEvent(&types.Event{ID: "2", Type: "second_inserted", OccurredAt: base.Add(3 * time.Hour)})
+	s.PutEvent(&types.Event{ID: "3", Type: "third_inserted", OccurredAt: base.Add(2 * time.Hour)})
+
+	out, err := runCLI("events", "list")
+	if err != nil {
+		t.Fatalf("events list: %v", err)
+	}
+	// expect: second(3h) < third(2h) < first(1h)
+	idxSecond := strings.Index(out, "second_inserted")
+	idxThird := strings.Index(out, "third_inserted")
+	idxFirst := strings.Index(out, "first_inserted")
+	if !(idxSecond < idxThird && idxThird < idxFirst) {
+		t.Errorf("expected newest-by-timestamp; got positions second=%d third=%d first=%d:\n%s",
+			idxSecond, idxThird, idxFirst, out)
+	}
+}
+
 func TestMatchesEventFilter(t *testing.T) {
 	e := &types.Event{Type: "vm.started", Source: "libvirt", Severity: "info", VMID: "vm-A"}
 	cases := []struct {

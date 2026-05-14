@@ -43,8 +43,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         source:   searchParams.get('source')  || '',
         severity: searchParams.get('severity') || '',
         search:   searchParams.get('search')  || '',
+        sort:     searchParams.get('sort')    || '',
+        order:    searchParams.get('order')   || '',
       }
-    : { vmId: vmIdProp, type: '', source: '', severity: '', search: '' };
+    : { vmId: vmIdProp, type: '', source: '', severity: '', search: '', sort: '', order: '' };
 
   const [vmFilter, setVmFilter] = useState(initial.vmId);
   const [typeFilter, setTypeFilter] = useState(initial.type);
@@ -55,6 +57,8 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // per keystroke while letting the input feel responsive.
   const [searchInput, setSearchInput] = useState(initial.search);
   const [searchFilter, setSearchFilter] = useState(initial.search);
+  const [sortField, setSortField] = useState(initial.sort);
+  const [sortOrder, setSortOrder] = useState(initial.order);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
 
@@ -75,8 +79,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     if (sourceFilter)   next.set('source', sourceFilter);
     if (severityFilter) next.set('severity', severityFilter);
     if (searchFilter)   next.set('search', searchFilter);
+    if (sortField)      next.set('sort', sortField);
+    if (sortOrder)      next.set('order', sortOrder);
     setSearchParams(next, { replace: true });
-  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, setSearchParams]);
+  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder, setSearchParams]);
 
   // Debounce the search input: a fetch per keystroke would fan out one
   // request per character. 250 ms is the sweet spot between "feels live"
@@ -104,6 +110,8 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         source: sourceFilter,
         severity: severityFilter,
         search: searchFilter,
+        sort: sortField,
+        order: sortOrder,
         page,
         perPage,
       });
@@ -116,7 +124,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     } finally {
       setLoading(false);
     }
-  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, page, perPage]);
+  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder, page, perPage]);
 
   useEffect(() => {
     setLoading(true);
@@ -128,7 +136,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // Reset to page 1 when filters change.
   useEffect(() => {
     setPage(1);
-  }, [vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter]);
+  }, [vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder]);
 
   // Lazily build a VM ID → name map so the timeline can render names.
   // Only top-level Activity needs this; the embedded tab already knows the VM.
@@ -235,10 +243,36 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="">All types</option>
             {distinctTypes.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter || searchInput) && (
+          <select
+            className="input py-1 text-xs w-36"
+            value={sortField}
+            onChange={e => setSortField(e.target.value)}
+            data-testid="activity-sort-field"
+            title="Sort by"
+          >
+            <option value="">Sort: default</option>
+            <option value="id">Sort: id</option>
+            <option value="occurred_at">Sort: time</option>
+            <option value="type">Sort: type</option>
+            <option value="source">Sort: source</option>
+            <option value="severity">Sort: severity</option>
+          </select>
+          <select
+            className="input py-1 text-xs w-28"
+            value={sortOrder}
+            onChange={e => setSortOrder(e.target.value)}
+            data-testid="activity-sort-order"
+            disabled={!sortField}
+            title="Sort order"
+          >
+            <option value="">Order: default</option>
+            <option value="asc">Order: asc</option>
+            <option value="desc">Order: desc</option>
+          </select>
+          {(vmFilter || typeFilter || sourceFilter || severityFilter || searchInput || sortField || sortOrder) && (
             <button
               className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setSearchInput(''); }}
+              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
               data-testid="btn-activity-clear-filters"
             >
               Clear

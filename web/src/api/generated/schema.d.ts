@@ -2278,8 +2278,15 @@ export interface paths {
         /**
          * List recent events
          * @description Returns the most recent events matching the provided filters, sorted
-         *     newest-first. Each event carries a monotonic numeric ID assigned by the
-         *     EventBus, plus a structured payload (source, severity, attributes).
+         *     newest-first by default. Each event carries a monotonic numeric ID
+         *     assigned by the EventBus, plus a structured payload (source, severity,
+         *     attributes).
+         *
+         *     Sorting is whitelisted via `sort` and `order` (defaults: `id` /
+         *     `desc` — preserves the long-standing "newest first" contract since
+         *     sequence IDs are appended in publish order). All comparators tiebreak
+         *     on `id` so paginated responses are deterministic. Unknown values
+         *     return 400 `invalid_sort` / `invalid_order`.
          *
          *     Pagination is page/per_page; clients can also provide `until=<seq>` to
          *     fetch events older than a known sequence ID (cursor pagination).
@@ -2307,6 +2314,17 @@ export interface paths {
                     since?: string;
                     /** @description Cursor — exclude events with sequence ID >= this uint64. */
                     until?: string;
+                    /**
+                     * @description Sort field. `type`, `source`, and `severity` match
+                     *     case-insensitively. Defaults to `id` so the long-standing
+                     *     newest-first contract is preserved.
+                     */
+                    sort?: "id" | "occurred_at" | "type" | "source" | "severity";
+                    /**
+                     * @description Sort direction. Defaults to `desc` so the long-standing
+                     *     newest-first contract is preserved.
+                     */
+                    order?: "asc" | "desc";
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };
@@ -2324,6 +2342,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Event"][];
+                    };
+                };
+                /** @description Invalid sort or order parameter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APIError"];
                     };
                 };
                 default: components["responses"]["APIError"];

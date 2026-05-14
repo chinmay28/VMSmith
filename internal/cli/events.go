@@ -37,7 +37,12 @@ var eventsListCmd = &cobra.Command{
 
 Reads directly from the local bbolt store (no daemon required); filters
 are applied client-side after a full bucket scan. For real-time streaming
-or daemon-side filtering, query GET /api/v1/events instead.`,
+or daemon-side filtering, query GET /api/v1/events instead.
+
+Sort: --sort and --order accept the same whitelist as the API
+(--sort=id|occurred_at|type|source|severity, --order=asc|desc). When
+--sort is omitted the legacy "newest by timestamp" ordering is used,
+which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
@@ -45,7 +50,14 @@ or daemon-side filtering, query GET /api/v1/events instead.`,
 		severityFilter, _ := cmd.Flags().GetString("severity")
 		searchFilter, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
+		sortFlag, _ := cmd.Flags().GetString("sort")
+		orderFlag, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
+
+		sortField, order, err := validateEventSort(sortFlag, orderFlag)
+		if err != nil {
+			return err
+		}
 
 		sinceTime, err := parseSinceFlag(sinceFlag)
 		if err != nil {
@@ -73,10 +85,15 @@ or daemon-side filtering, query GET /api/v1/events instead.`,
 			since:    sinceTime,
 		})
 
-		// Newest first.
-		sort.Slice(filtered, func(i, j int) bool {
-			return eventTimestamp(filtered[i]).After(eventTimestamp(filtered[j]))
-		})
+		if sortField == "" {
+			// Default — newest by timestamp first. Preserves the long-standing
+			// CLI ordering for callers that don't pass `--sort`.
+			sort.Slice(filtered, func(i, j int) bool {
+				return eventTimestamp(filtered[i]).After(eventTimestamp(filtered[j]))
+			})
+		} else {
+			types.SortEvents(filtered, sortField, order)
+		}
 
 		if limit > 0 && len(filtered) > limit {
 			filtered = filtered[:limit]
@@ -140,6 +157,38 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 		out = append(out, e)
 	}
 	return out
+}
+
+// validateEventSort accepts the user's --sort / --order flags and returns the
+// canonical (lowercase) values, or an error suitable for surfacing to the
+// shell. Empty --sort means "no explicit sort" — the caller falls back to the
+// legacy newest-by-timestamp ordering. An explicit but unknown value is a
+// hard error so callers can't silently fall through.
+func validateEventSort(sortFlag, orderFlag string) (sortField, order string, err error) {
+	sortField = strings.TrimSpace(strings.ToLower(sortFlag))
+	if sortField == "" {
+		// Leave order empty too — caller short-circuits to legacy path.
+		return "", "", nil
+	}
+	switch sortField {
+	case types.EventSortID,
+		types.EventSortOccurredAt,
+		types.EventSortType,
+		types.EventSortSource,
+		types.EventSortSeverity:
+	default:
+		return "", "", fmt.Errorf("invalid --sort value %q (want one of: id, occurred_at, type, source, severity)", sortFlag)
+	}
+	order = strings.TrimSpace(strings.ToLower(orderFlag))
+	if order == "" {
+		order = types.SortOrderDesc
+	}
+	switch order {
+	case types.SortOrderAsc, types.SortOrderDesc:
+	default:
+		return "", "", fmt.Errorf("invalid --order value %q (want asc or desc)", orderFlag)
+	}
+	return sortField, order, nil
 }
 
 // eventTimestamp returns the best-available time for an event, falling back
@@ -474,6 +523,8 @@ func init() {
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
 	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsListCmd.Flags().String("since", "", "show events since (Go duration like 5m, or RFC3339 timestamp)")
+	eventsListCmd.Flags().String("sort", "", "sort field: id, occurred_at, type, source, severity (default: legacy newest-by-timestamp)")
+	eventsListCmd.Flags().String("order", "", "sort order: asc | desc (default: desc when --sort is set)")
 	eventsListCmd.Flags().Int("limit", 100, "maximum number of events to show")
 
 	eventsFollowCmd.Flags().String("vm", "", "only print events for this VM ID")

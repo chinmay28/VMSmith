@@ -1437,8 +1437,15 @@ paths:
       summary: List recent events
       description: |
         Returns the most recent events matching the provided filters, sorted
-        newest-first. Each event carries a monotonic numeric ID assigned by the
-        EventBus, plus a structured payload (source, severity, attributes).
+        newest-first by default. Each event carries a monotonic numeric ID
+        assigned by the EventBus, plus a structured payload (source, severity,
+        attributes).
+
+        Sorting is whitelisted via `sort` and `order` (defaults: `id` /
+        `desc` — preserves the long-standing "newest first" contract since
+        sequence IDs are appended in publish order). All comparators tiebreak
+        on `id` so paginated responses are deterministic. Unknown values
+        return 400 `invalid_sort` / `invalid_order`.
 
         Pagination is page/per_page; clients can also provide `until=<seq>` to
         fetch events older than a known sequence ID (cursor pagination).
@@ -1486,6 +1493,25 @@ paths:
           schema:
             type: string
           description: Cursor — exclude events with sequence ID >= this uint64.
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [id, occurred_at, type, source, severity]
+            default: id
+          description: |
+            Sort field. `type`, `source`, and `severity` match
+            case-insensitively. Defaults to `id` so the long-standing
+            newest-first contract is preserved.
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: |
+            Sort direction. Defaults to `desc` so the long-standing
+            newest-first contract is preserved.
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -1500,6 +1526,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Event'
+        '400':
+          description: Invalid sort or order parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
         default:
           $ref: '#/components/responses/APIError'
 components:
