@@ -96,21 +96,62 @@ var webhookListCmd = &cobra.Command{
 	Short: "List registered webhooks",
 	Long: `List registered webhooks (secrets are always redacted).
 
-Optional filter:
+Optional filters and ordering:
 
-  --search <q>   Case-insensitive substring filter applied to each webhook's
-                 URL and event-type list.  IDs, secrets, and last_error are
-                 intentionally excluded from the haystack.  Trimmed and
-                 lowercased before being forwarded to the daemon.`,
+  --search <q>          Case-insensitive substring filter applied to each
+                        webhook's URL and event-type list.  IDs, secrets, and
+                        last_error are intentionally excluded from the haystack.
+                        Trimmed and lowercased before being forwarded to the
+                        daemon.
+
+  --sort <field>        Whitelisted to one of:
+                          id, url, created_at, last_delivery_at
+                        Default: id.
+
+  --order <asc|desc>    Default: asc.  Sort ascending or descending. Unknown
+                        values are rejected client-side before contacting the
+                        daemon.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		search, _ := cmd.Flags().GetString("search")
+		sortField, _ := cmd.Flags().GetString("sort")
+		order, _ := cmd.Flags().GetString("order")
+
+		sortField = strings.TrimSpace(strings.ToLower(sortField))
+		if sortField != "" {
+			switch sortField {
+			case types.WebhookSortID,
+				types.WebhookSortURL,
+				types.WebhookSortCreatedAt,
+				types.WebhookSortLastDelivery:
+			default:
+				return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at")
+			}
+		}
+		order = strings.TrimSpace(strings.ToLower(order))
+		if order != "" {
+			switch order {
+			case types.SortOrderAsc, types.SortOrderDesc:
+			default:
+				return fmt.Errorf("invalid --order: must be 'asc' or 'desc'")
+			}
+		}
 
 		resolved := resolveAPIURL(apiURL)
 		endpoint := resolved + "/api/v1/webhooks"
+		q := url.Values{}
 		if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
-			endpoint += "?search=" + url.QueryEscape(needle)
+			q.Set("search", needle)
+		}
+		if sortField != "" {
+			q.Set("sort", sortField)
+		}
+		if order != "" {
+			q.Set("order", order)
+		}
+		if encoded := q.Encode(); encoded != "" {
+			endpoint += "?" + encoded
 		}
 		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet,
 			endpoint, nil)
@@ -306,6 +347,8 @@ func init() {
 	webhookAddCmd.Flags().StringSlice("event-types", nil, "comma-separated event-type filters (e.g. vm.started,system.*)")
 
 	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL and event-type names)")
+	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
+	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 
 	webhookEditCmd.Flags().String("url", "", "replace receiver URL")
 	webhookEditCmd.Flags().String("secret", "", "rotate HMAC signing secret (cannot be empty)")

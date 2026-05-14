@@ -1177,6 +1177,27 @@ paths:
             response bodies, IDs are opaque `wh-<unix-nano>` strings, and
             last_error is operator-noise surfaced via `last_status` /
             status badges instead.
+        - in: query
+          name: sort
+          required: false
+          schema:
+            type: string
+            enum: [id, url, created_at, last_delivery_at]
+            default: id
+          description: |
+            Field to sort by. `url` matches case-insensitively.
+            `last_delivery_at` sorts never-delivered webhooks
+            (zero timestamp) at the tail of the ascending list and the
+            head of the descending list. All comparators tiebreak on `id`
+            so repeated requests return a deterministic order.
+        - in: query
+          name: order
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Sort direction. Default `asc`.
       responses:
         '200':
           description: Webhook list
@@ -1186,6 +1207,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Webhook'
+        '400':
+          $ref: '#/components/responses/APIError'
         '503':
           $ref: '#/components/responses/APIError'
         default:

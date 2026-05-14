@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -124,8 +123,21 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     templates (5.4.12), events (4.2.20), and logs (5.4.13). Secret, ID,
 //     and last_error are intentionally excluded from the haystack — see
 //     pkg/types/webhook_search.go.
+//   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
+//     Default `id`. Unknown values return 400 `invalid_sort`.
+//   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
+//
+// All comparators tiebreak on `id` so repeated requests return a deterministic
+// order. `url` matches case-insensitively. `last_delivery_at` sorts
+// never-delivered webhooks (zero timestamp) at the tail of the ascending list
+// and the head of the descending list.
 func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWebhookStore(w) {
+		return
+	}
+	sortField, order, err := parseWebhookSort(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
 	hooks, err := s.webhookStore.ListWebhooks()
@@ -136,9 +148,6 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	if hooks == nil {
 		hooks = []*types.Webhook{}
 	}
-	sort.Slice(hooks, func(i, j int) bool {
-		return hooks[i].CreatedAt.Before(hooks[j].CreatedAt)
-	})
 
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 
@@ -149,6 +158,7 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, redactWebhook(h))
 	}
+	types.SortWebhooks(out, sortField, order)
 	writeJSON(w, http.StatusOK, out)
 }
 

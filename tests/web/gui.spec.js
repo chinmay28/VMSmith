@@ -1528,6 +1528,43 @@ test.describe("Settings — Webhooks", () => {
     ).toBe(0);
     await expect(page.getByText(/No webhooks match your search/i)).toBeVisible();
   });
+
+  // 5.4.15 — sortable webhook list (sort + order dropdowns).
+  test("sort dropdowns reorder the webhook list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+
+    // Seed three webhooks with URLs that have a deterministic alphabetical
+    // order: alpha < bravo < charlie.
+    const seed = async (url) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://Charlie.example.com/h");
+    await seed("https://alpha.example.com/h");
+    await seed("https://Bravo.example.com/h");
+
+    // Sort by URL ascending (case-insensitive) — first row must be alpha.
+    await page.getByTestId("webhook-list-sort-field").selectOption("url");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("alpha.example.com");
+
+    // URL round-trip — ?sort=url is reflected in the address bar.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("sort")).toBe("url");
+
+    // Flip the order — first row becomes charlie.
+    await page.getByTestId("webhook-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("charlie.example.com");
+    await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
+  });
 });
 
 // ============================================================
