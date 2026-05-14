@@ -786,12 +786,16 @@ async function main() {
       await p.locator('[data-testid="webhook-list-search"]').fill("needle-not-anywhere");
       await p.waitForTimeout(450);
       await assert((await allRows.count()) === 0, "expected zero rows for no-match query");
-
-      // Clear the search filter before the next test runs on the same page,
-      // otherwise the seeded rows are hidden by the lingering ?search= param.
-      await p.locator('[data-testid="webhook-list-search-clear"]').click();
-      await p.waitForTimeout(450);
     }, page);
+
+    // The search test left two seeded webhooks in the mock server state
+    // (audit + metrics). The bulk-delete tests below need a clean slate so
+    // their `count === 3` assertions hold — reset by hitting `/` which calls
+    // `resetState()` server-side, then re-navigate to Settings.
+    await page.close();
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
 
     await runTest("bulk-delete selected webhooks via checkbox + Delete-selected", async (p) => {
       p.on("dialog", (d) => d.accept());
