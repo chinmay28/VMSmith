@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import VMList from './pages/VMList';
 import VMDetail from './pages/VMDetail';
 import ImageList from './pages/ImageList';
+import TemplateList from './pages/TemplateList';
 import LogViewer from './pages/LogViewer';
 import Activity from './pages/Activity';
 import Settings from './pages/Settings';
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/vms" element={<VMList />} />
           <Route path="/vms/:id" element={<VMDetail />} />
           <Route path="/images" element={<ImageList />} />
+          <Route path="/templates" element={<TemplateList />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/logs" element={<LogViewer />} />
           <Route path="/settings" element={<Settings />} />

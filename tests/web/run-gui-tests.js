@@ -542,6 +542,61 @@ async function main() {
 
     await page.close();
 
+    // ================== Templates Tests ==================
+    console.log("\nTemplates:");
+
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(500);
+    await page.locator('[data-testid="nav-templates"]').click();
+    await page.waitForTimeout(500);
+
+    await runTest("lists seeded templates", async (p) => {
+      await assertVisible(p, "template-table");
+      await assertVisible(p, "template-row-small-ubuntu");
+      await assertVisible(p, "template-row-big-rocky");
+    }, page);
+
+    await runTest("renders description and tag chips", async (p) => {
+      await assertVisible(p, "template-description-small-ubuntu");
+      await assertVisible(p, "template-tags-small-ubuntu");
+    }, page);
+
+    await runTest("filters templates by tag chip", async (p) => {
+      await p.locator('[data-testid="template-tag-filter-prod"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-big-rocky");
+      await assertNotVisible(p, "template-row-small-ubuntu");
+      await p.locator('[data-testid="template-tag-filter-all"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-small-ubuntu");
+    }, page);
+
+    await runTest("edit modal updates description and tags", async (p) => {
+      await p.locator('[data-testid="btn-edit-template-big-rocky"]').click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "edit-template-modal");
+      await p.locator('[data-testid="edit-template-description"]').fill("Promoted to GA");
+      await p.locator('[data-testid="edit-template-tags"]').fill("rocky,ga");
+      await p.locator('[data-testid="btn-save-template"]').click();
+      await p.waitForTimeout(500);
+      await assertNotVisible(p, "edit-template-modal");
+    }, page);
+
+    await runTest("bulk-delete selected templates", async (p) => {
+      // After the edit test above, both seeded templates are still on screen.
+      await assertVisible(p, "template-row-big-rocky");
+      await assertVisible(p, "template-row-small-ubuntu");
+      await p.locator('[data-testid="template-checkbox-big-rocky"]').check();
+      await p.locator('[data-testid="btn-bulk-delete-templates"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "template-row-big-rocky");
+      await assertVisible(p, "template-row-small-ubuntu");
+      await assertText(p, "template-bulk-result", "1 of 1 succeeded");
+    }, page);
+
+    await page.close();
+
     // ================== Navigation Tests ==================
     console.log("\nNavigation:");
 
@@ -562,6 +617,11 @@ async function main() {
       await p.locator('[data-testid="nav-images"]').click();
       await p.waitForTimeout(500);
       await assertVisible(p, "image-table");
+
+      // Templates
+      await p.locator('[data-testid="nav-templates"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-table");
 
       // Back to dashboard
       await p.locator('[data-testid="nav-dashboard"]').click();
