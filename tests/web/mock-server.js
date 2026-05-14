@@ -733,7 +733,7 @@ const server = http.createServer(async (req, res) => {
     if (m && method === "PATCH") {
       const tpl = templates.get(m[1]);
       if (!tpl) return json(res, 404, { error: "resource_not_found", code: "resource_not_found" });
-      const patch = body || {};
+      const patch = await parseBody(req);
       if (typeof patch.description === "string" && patch.description.trim() !== "") {
         tpl.description = patch.description.trim();
       }
