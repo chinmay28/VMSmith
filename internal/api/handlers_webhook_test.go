@@ -984,3 +984,212 @@ func equalStringSlice(a, b []string) bool {
 	}
 	return true
 }
+
+// --- Bulk-delete (2.3.10) ---
+
+func postJSON(t *testing.T, urlStr string, body any) *http.Response {
+	t.Helper()
+	resp, err := http.Post(urlStr, "application/json", jsonBody(t, body))
+	if err != nil {
+		t.Fatalf("POST %s: %v", urlStr, err)
+	}
+	return resp
+}
+
+func TestBulkDeleteWebhooks_ByIDs(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	fake.PutWebhook(&types.Webhook{ID: "wh-a", URL: "https://a", Secret: "s", Active: true})
+	fake.PutWebhook(&types.Webhook{ID: "wh-b", URL: "https://b", Secret: "s", Active: true})
+	fake.PutWebhook(&types.Webhook{ID: "wh-c", URL: "https://c", Secret: "s", Active: true})
+
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"ids": []string{"wh-a", "wh-c"}})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got bulkDeleteWebhooksResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %v, want 2 entries", got.Results)
+	}
+	for _, r := range got.Results {
+		if !r.Success {
+			t.Fatalf("id %s expected success, got %+v", r.ID, r)
+		}
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if _, ok := fake.hooks["wh-a"]; ok {
+		t.Fatalf("wh-a not removed")
+	}
+	if _, ok := fake.hooks["wh-c"]; ok {
+		t.Fatalf("wh-c not removed")
+	}
+	if _, ok := fake.hooks["wh-b"]; !ok {
+		t.Fatalf("wh-b should still exist (not in selection)")
+	}
+	if len(fake.unregistered) != 2 {
+		t.Fatalf("manager.Unregister called %d times, want 2: %v", len(fake.unregistered), fake.unregistered)
+	}
+}
+
+func TestBulkDeleteWebhooks_ByEventType(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	fake.PutWebhook(&types.Webhook{ID: "wh-1", URL: "https://1", Secret: "s", Active: true,
+		EventTypes: []string{"vm.started", "vm.deleted"}})
+	fake.PutWebhook(&types.Webhook{ID: "wh-2", URL: "https://2", Secret: "s", Active: true,
+		EventTypes: []string{"vm.deleted"}})
+	fake.PutWebhook(&types.Webhook{ID: "wh-3", URL: "https://3", Secret: "s", Active: true,
+		EventTypes: []string{"vm.started"}})
+	// Catch-all: should NOT be swept by the categorical selector. Tested explicitly below.
+	fake.PutWebhook(&types.Webhook{ID: "wh-catchall", URL: "https://all", Secret: "s", Active: true})
+
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"event_type": "vm.deleted"})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got bulkDeleteWebhooksResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %d, want 2 (wh-1 and wh-2 only)", len(got.Results))
+	}
+	gotIDs := map[string]bool{}
+	for _, r := range got.Results {
+		if !r.Success {
+			t.Fatalf("id %s expected success, got %+v", r.ID, r)
+		}
+		gotIDs[r.ID] = true
+	}
+	if !gotIDs["wh-1"] || !gotIDs["wh-2"] {
+		t.Fatalf("expected wh-1 and wh-2 deleted, got %v", gotIDs)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if _, ok := fake.hooks["wh-3"]; !ok {
+		t.Fatalf("wh-3 (vm.started only) should not have been deleted")
+	}
+	if _, ok := fake.hooks["wh-catchall"]; !ok {
+		t.Fatalf("wh-catchall (empty event_types) should not have been swept by event_type selector")
+	}
+}
+
+func TestBulkDeleteWebhooks_PartialFailure(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-real", URL: "https://x", Secret: "s", Active: true})
+
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"ids": []string{"wh-real", "wh-missing"}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkDeleteWebhooksResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 2 {
+		t.Fatalf("results = %v", got.Results)
+	}
+	results := map[string]bulkDeleteWebhookResult{}
+	for _, r := range got.Results {
+		results[r.ID] = r
+	}
+	if !results["wh-real"].Success {
+		t.Fatalf("wh-real should have succeeded: %+v", results["wh-real"])
+	}
+	if results["wh-missing"].Success {
+		t.Fatalf("wh-missing should have failed")
+	}
+	if results["wh-missing"].Code != "resource_not_found" {
+		t.Fatalf("wh-missing.code = %q, want resource_not_found", results["wh-missing"].Code)
+	}
+}
+
+func TestBulkDeleteWebhooks_EmptyRequestRejected(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete", map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestBulkDeleteWebhooks_BothIDsAndEventTypeRejected(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"ids": []string{"wh-1"}, "event_type": "vm.deleted"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestBulkDeleteWebhooks_EventTypeNoMatchEmptyResponse(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-1", URL: "https://x", Secret: "s", Active: true,
+		EventTypes: []string{"vm.started"}})
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"event_type": "vm.deleted"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got bulkDeleteWebhooksResponse
+	decodeJSON(t, resp, &got)
+	if len(got.Results) != 0 {
+		t.Fatalf("results = %v, want empty (no event_type match)", got.Results)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if _, ok := fake.hooks["wh-1"]; !ok {
+		t.Fatalf("wh-1 should not have been deleted")
+	}
+}
+
+func TestBulkDeleteWebhooks_BadJSON(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks/bulk_delete", "application/json",
+		bytes.NewBufferString("not-json"))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestBulkDeleteWebhooks_DisabledWhenStoreUnset(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer s.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	apiServer := NewServerWithConfig(vm.NewMockManager(),
+		storage.NewManager(cfg, s), network.NewPortForwarder(s), s, cfg, nil)
+	ts := httptest.NewServer(apiServer)
+	defer ts.Close()
+
+	resp := postJSON(t, ts.URL+"/api/v1/webhooks/bulk_delete",
+		map[string]any{"ids": []string{"wh-1"}})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}

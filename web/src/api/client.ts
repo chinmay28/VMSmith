@@ -309,6 +309,12 @@ export const webhooks = {
     unwrap(apiClient.PATCH('/webhooks/{webhookID}', { params: { path: { webhookID: id } }, body: spec })),
   delete: (id: string) =>
     unwrap(apiClient.DELETE('/webhooks/{webhookID}', { params: { path: { webhookID: id } } })),
+  // bulkDelete deletes multiple webhooks in a single round-trip. Pass either
+  // {ids: [...]} for explicit IDs or {event_type: "..."} to sweep every
+  // webhook subscribed to that exact event type. Catch-all webhooks
+  // (empty event_types) are not swept by the categorical selector.
+  bulkDelete: (body: { ids?: string[]; event_type?: string }) =>
+    unwrap(apiClient.POST('/webhooks/bulk_delete', { body })),
   test: (id: string) =>
     unwrap(apiClient.POST('/webhooks/{webhookID}/test', { params: { path: { webhookID: id } } })),
 };

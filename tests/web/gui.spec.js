@@ -1565,6 +1565,69 @@ test.describe("Settings — Webhooks", () => {
     }).toContain("charlie.example.com");
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
   });
+
+  // 2.3.10 — webhook bulk-delete.
+  test("bulk delete selected webhooks via checkbox + Delete-selected", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+
+    // Create three webhooks.
+    for (const url of ["https://example.com/bulk-a", "https://example.com/bulk-b", "https://example.com/bulk-c"]) {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("s");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.locator(`text=${url}`)).toBeVisible();
+    }
+    const rows = page.locator('[data-testid^="webhook-row-"]');
+    await expect(rows).toHaveCount(3);
+    const firstRowID = (await rows.nth(0).getAttribute("data-testid")).replace("webhook-row-", "");
+    const secondRowID = (await rows.nth(1).getAttribute("data-testid")).replace("webhook-row-", "");
+
+    // Select two of the three.
+    await page.getByTestId(`webhook-checkbox-${firstRowID}`).check();
+    await page.getByTestId(`webhook-checkbox-${secondRowID}`).check();
+    await page.getByTestId("btn-bulk-delete-webhooks").click();
+
+    // Only the un-selected webhook should remain.
+    await expect(rows).toHaveCount(1);
+    await expect(page.getByTestId("webhook-bulk-result")).toContainText("2 of 2 succeeded");
+  });
+
+  test("select-all then Delete-selected sweeps every webhook", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+
+    for (const url of ["https://example.com/all-a", "https://example.com/all-b"]) {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("s");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.locator(`text=${url}`)).toBeVisible();
+    }
+
+    await page.getByTestId("webhook-select-all").check();
+    await page.getByTestId("btn-bulk-delete-webhooks").click();
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(0);
+    await expect(page.getByText(/No webhooks registered/i)).toBeVisible();
+  });
+
+  test("Delete-selected button stays disabled when no webhook is selected", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/single");
+    await page.getByTestId("webhook-secret-input").fill("s");
+    await page.getByTestId("webhook-create-submit").click();
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+
+    // No checkbox ticked → button is disabled.
+    await expect(page.getByTestId("btn-bulk-delete-webhooks")).toBeDisabled();
+  });
 });
 
 // ============================================================

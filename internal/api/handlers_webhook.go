@@ -345,6 +345,130 @@ func (s *Server) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// bulkDeleteWebhooksRequest selects webhooks to delete in a single batch.
+//
+// Exactly one of IDs or EventType must be set. When EventType is set, every
+// webhook whose `event_types` filter list contains that exact event type is
+// targeted — the cheap way to retire a cohort of subscribers after deprecating
+// an event ("retire every webhook still listening to vm.deleted"). Catch-all
+// webhooks (empty `event_types`) are NOT swept by the categorical selector:
+// they fire on every event, including the one being retired, but the operator
+// intent for the bulk call is explicit-membership cleanup, not blanket
+// removal. Use `ids` to delete catch-alls. Mirrors the image / template
+// bulk-delete shape so the API surface is predictable.
+type bulkDeleteWebhooksRequest struct {
+	IDs       []string `json:"ids,omitempty"`
+	EventType string   `json:"event_type,omitempty"`
+}
+
+type bulkDeleteWebhookResult struct {
+	ID      string `json:"id"`
+	Success bool   `json:"success"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type bulkDeleteWebhooksResponse struct {
+	Results []bulkDeleteWebhookResult `json:"results"`
+}
+
+// BulkDeleteWebhooks handles POST /api/v1/webhooks/bulk_delete.
+//
+// Accepts either an explicit list of webhook IDs ("ids") or an event-type
+// selector ("event_type"). Returns a per-target result list so partial
+// failures (one webhook missing, the rest succeeded) surface in a single
+// response — mirroring the image / template bulk-delete shapes.
+func (s *Server) BulkDeleteWebhooks(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWebhookStore(w) {
+		return
+	}
+	var req bulkDeleteWebhooksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if isRequestTooLarge(err) {
+			writeErrorCode(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request_body", "invalid request body: "+err.Error())
+		return
+	}
+
+	eventType := strings.TrimSpace(req.EventType)
+	cleanedIDs := make([]string, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if t := strings.TrimSpace(id); t != "" {
+			cleanedIDs = append(cleanedIDs, t)
+		}
+	}
+
+	if eventType == "" && len(cleanedIDs) == 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"exactly one of ids or event_type must be provided"))
+		return
+	}
+	if eventType != "" && len(cleanedIDs) > 0 {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request",
+			"ids and event_type are mutually exclusive"))
+		return
+	}
+
+	targets := cleanedIDs
+	if eventType != "" {
+		hooks, err := s.webhookStore.ListWebhooks()
+		if err != nil {
+			writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list webhooks")
+			return
+		}
+		for _, wh := range hooks {
+			if webhookExplicitlySubscribed(wh, eventType) {
+				targets = append(targets, wh.ID)
+			}
+		}
+	}
+
+	results := make([]bulkDeleteWebhookResult, 0, len(targets))
+	for _, id := range targets {
+		if _, err := s.webhookStore.GetWebhook(id); err != nil {
+			results = append(results, bulkDeleteWebhookResult{
+				ID:      id,
+				Success: false,
+				Code:    "resource_not_found",
+				Message: "webhook not found",
+			})
+			continue
+		}
+		if err := s.webhookStore.DeleteWebhook(id); err != nil {
+			results = append(results, bulkDeleteWebhookResult{
+				ID:      id,
+				Success: false,
+				Code:    "internal_error",
+				Message: "failed to delete webhook",
+			})
+			continue
+		}
+		if s.webhookManager != nil {
+			s.webhookManager.Unregister(id)
+		}
+		results = append(results, bulkDeleteWebhookResult{ID: id, Success: true})
+	}
+
+	writeJSON(w, http.StatusOK, bulkDeleteWebhooksResponse{Results: results})
+}
+
+// webhookExplicitlySubscribed reports whether wh's event_types filter list
+// contains the given exact event type. A catch-all webhook (empty event_types)
+// returns false — see bulkDeleteWebhooksRequest comment for the rationale.
+func webhookExplicitlySubscribed(wh *types.Webhook, eventType string) bool {
+	if wh == nil {
+		return false
+	}
+	for _, t := range wh.EventTypes {
+		if strings.TrimSpace(t) == eventType {
+			return true
+		}
+	}
+	return false
+}
+
 // redactWebhook returns a shallow copy with the Secret cleared.  Secrets are
 // only stored server-side; outbound responses must never expose them.
 func redactWebhook(wh *types.Webhook) *types.Webhook {
