@@ -806,3 +806,181 @@ func TestListWebhooks_FilterBySearch_SecretAndLastErrorNotInHaystack(t *testing.
 		t.Fatalf("expected last_error substring to not match, got %d hooks", len(hooks))
 	}
 }
+
+// seedSortableWebhooks seeds a deterministic set of webhooks with distinct
+// URLs, creation timestamps, and last-delivery timestamps so the sort tests
+// can assert exact orderings without depending on insertion order.
+func seedSortableWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*types.Webhook{
+		{
+			ID:             "wh-3",
+			URL:            "https://Charlie.example.com/h",
+			Secret:         "k",
+			Active:         true,
+			CreatedAt:      base.Add(3 * time.Hour),
+			LastDeliveryAt: base.Add(30 * time.Hour),
+		},
+		{
+			ID:             "wh-1",
+			URL:            "https://alpha.example.com/h",
+			Secret:         "k",
+			Active:         true,
+			CreatedAt:      base.Add(1 * time.Hour),
+			LastDeliveryAt: base.Add(10 * time.Hour),
+		},
+		{
+			ID:        "wh-2",
+			URL:       "https://Bravo.example.com/h",
+			Secret:    "k",
+			Active:    true,
+			CreatedAt: base.Add(2 * time.Hour),
+			// LastDeliveryAt zero — never delivered
+		},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func webhookIDsInOrder(hooks []*types.Webhook) []string {
+	out := make([]string, len(hooks))
+	for i, h := range hooks {
+		out[i] = h.ID
+	}
+	return out
+}
+
+func TestListWebhooks_SortDefaultIsIDAsc(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "")
+	want := []string{"wh-1", "wh-2", "wh-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("default sort: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByURL_CaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=url")
+	// case-insensitive: alpha < Bravo < Charlie
+	want := []string{"wh-1", "wh-2", "wh-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=url: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByURLDesc(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=url&order=desc")
+	want := []string{"wh-3", "wh-2", "wh-1"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=url&order=desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByCreatedAtDesc(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=created_at&order=desc")
+	// newest first
+	want := []string{"wh-3", "wh-2", "wh-1"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=created_at desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByLastDelivery_NeverDeliveredSortsLastAsc(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=last_delivery_at")
+	// asc: oldest delivery first, never-delivered (wh-2) at tail
+	want := []string{"wh-1", "wh-3", "wh-2"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=last_delivery_at asc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByLastDelivery_NeverDeliveredSortsFirstDesc(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=last_delivery_at&order=desc")
+	// desc: never-delivered head, then newest-first
+	want := []string{"wh-2", "wh-3", "wh-1"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=last_delivery_at desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortComposesWithSearch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	// "example.com" matches all three; sort=url asc orders alpha < Bravo < Charlie.
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=example.com&sort=url")
+	want := []string{"wh-1", "wh-2", "wh-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("search+sort: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_RejectsInvalidSort(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?sort=secret")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+}
+
+func TestListWebhooks_RejectsInvalidOrder(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?order=sideways")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

@@ -3850,3 +3850,79 @@ func TestCLI_WebhookList_NoMatchPrintsEmptyMessage(t *testing.T) {
 		t.Fatalf("expected empty-list message, got %q", out)
 	}
 }
+
+// =====================================================
+// webhook list --sort / --order tests
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsSortAndOrder(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--sort", "url", "--order", "desc"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=url") {
+		t.Fatalf("query missing sort=url: %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_NormalisesSortAndOrderCase(t *testing.T) {
+	// The CLI trims + lowercases sort/order client-side so callers can pass
+	// shell-friendly forms like ` URL ` without surprising the daemon.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--sort", "  URL  ", "--order", "DESC"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=url") {
+		t.Fatalf("expected normalized sort=url, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected normalized order=desc, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidSort(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--sort", "secret")
+	if err == nil {
+		t.Fatalf("expected error for invalid sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("error = %q, want it to mention 'invalid --sort'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidOrder(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--order", "sideways")
+	if err == nil {
+		t.Fatalf("expected error for invalid order, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("error = %q, want it to mention 'invalid --order'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_EmptySortAndOrderOmitParams(t *testing.T) {
+	// No --sort / --order flags should leave the daemon URL un-decorated so
+	// the daemon's default id/asc applies.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "sort=") {
+		t.Fatalf("empty sort must not be forwarded: %q", state.lastQuery)
+	}
+	if strings.Contains(state.lastQuery, "order=") {
+		t.Fatalf("empty order must not be forwarded: %q", state.lastQuery)
+	}
+}

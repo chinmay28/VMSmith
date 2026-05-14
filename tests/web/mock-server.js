@@ -878,20 +878,80 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/webhooks" && method === "GET") {
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
-    const hooks = [...webhookList.values()];
-    if (!needle) return json(res, 200, hooks);
-    // Mirror pkg/types.WebhookMatchesSearch: URL + event_types only. Secret,
-    // ID, and last_error are intentionally excluded from the haystack.
-    const filtered = hooks.filter((wh) => {
-      if (typeof wh.url === "string" && wh.url.toLowerCase().includes(needle)) return true;
-      if (Array.isArray(wh.event_types)) {
-        for (const et of wh.event_types) {
-          if (typeof et === "string" && et.toLowerCase().includes(needle)) return true;
+    // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
+    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
+    const allowedOrder = new Set(["asc", "desc"]);
+    let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
+    let order = (url.searchParams.get("order") || "").trim().toLowerCase();
+    if (sortField === "") sortField = "id";
+    else if (!allowedSort.has(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at" });
+    }
+    if (order === "") order = "asc";
+    else if (!allowedOrder.has(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
+
+    let hooks = [...webhookList.values()];
+    if (needle) {
+      // Mirror pkg/types.WebhookMatchesSearch: URL + event_types only.
+      // Secret, ID, and last_error are intentionally excluded from the
+      // haystack.
+      hooks = hooks.filter((wh) => {
+        if (typeof wh.url === "string" && wh.url.toLowerCase().includes(needle)) return true;
+        if (Array.isArray(wh.event_types)) {
+          for (const et of wh.event_types) {
+            if (typeof et === "string" && et.toLowerCase().includes(needle)) return true;
+          }
         }
+        return false;
+      });
+    }
+
+    // Mirror pkg/types.SortWebhooks. All comparators tiebreak on `id`.
+    const desc = order === "desc";
+    hooks.sort((a, b) => {
+      const aID = a.id || "";
+      const bID = b.id || "";
+      const cmpID = aID < bID ? -1 : aID > bID ? 1 : 0;
+      let cmp = 0;
+      switch (sortField) {
+        case "url": {
+          const au = (a.url || "").toLowerCase();
+          const bu = (b.url || "").toLowerCase();
+          cmp = au < bu ? -1 : au > bu ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "created_at": {
+          const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+          cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "last_delivery_at": {
+          // never-delivered (empty / RFC3339 zero) sorts last in asc, first in desc
+          const az = !a.last_delivery_at || a.last_delivery_at === "" ||
+            new Date(a.last_delivery_at).getTime() <= 0;
+          const bz = !b.last_delivery_at || b.last_delivery_at === "" ||
+            new Date(b.last_delivery_at).getTime() <= 0;
+          if (az !== bz) {
+            cmp = az ? 1 : -1;
+            break;
+          }
+          const at = a.last_delivery_at ? new Date(a.last_delivery_at).getTime() : 0;
+          const bt = b.last_delivery_at ? new Date(b.last_delivery_at).getTime() : 0;
+          cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        default: // "id"
+          cmp = cmpID;
       }
-      return false;
+      return desc ? -cmp : cmp;
     });
-    return json(res, 200, filtered);
+    return json(res, 200, hooks);
   }
   if (p === "/api/v1/webhooks" && method === "POST") {
     const body = await parseBody(req);

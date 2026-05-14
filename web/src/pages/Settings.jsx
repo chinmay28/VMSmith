@@ -19,6 +19,22 @@ export default function Settings() {
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
 
+  // Sort field + order — whitelisted to the values the daemon accepts.
+  // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
+  // snapshots, templates, port forwards). Empty == "use the daemon default".
+  const VALID_SORT_FIELDS = ['', 'id', 'url', 'created_at', 'last_delivery_at'];
+  const VALID_SORT_ORDERS = ['', 'asc', 'desc'];
+  const initialSort = (() => {
+    const raw = (searchParams.get('sort') || '').toLowerCase();
+    return VALID_SORT_FIELDS.includes(raw) ? raw : '';
+  })();
+  const initialOrder = (() => {
+    const raw = (searchParams.get('order') || '').toLowerCase();
+    return VALID_SORT_ORDERS.includes(raw) ? raw : '';
+  })();
+  const [sortField, setSortField] = useState(initialSort);
+  const [sortOrder, setSortOrder] = useState(initialOrder);
+
   useEffect(() => {
     const trimmed = searchInput.trim();
     const id = setTimeout(() => setSearchFilter(trimmed), 250);
@@ -28,12 +44,14 @@ export default function Settings() {
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    if (sortField) next.set('sort', sortField); else next.delete('sort');
+    if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     setSearchParams(next, { replace: true });
-  }, [searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, sortField, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: hookList, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter }),
-    [searchFilter],
+    () => webhooksApi.list({ search: searchFilter, sort: sortField, order: sortOrder }),
+    [searchFilter, sortField, sortOrder],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -87,8 +105,8 @@ export default function Settings() {
         onUpdated={refresh}
       />
 
-      <div className="mb-4 flex items-center gap-2">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-4 flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 max-w-md min-w-[200px]">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
@@ -111,6 +129,36 @@ export default function Settings() {
             </button>
           )}
         </div>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Sort
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value)}
+            data-testid="webhook-list-sort-field"
+            aria-label="Sort webhooks by"
+            className="input py-1 text-xs"
+          >
+            <option value="">Default (id)</option>
+            <option value="id">id</option>
+            <option value="url">url</option>
+            <option value="created_at">created_at</option>
+            <option value="last_delivery_at">last_delivery_at</option>
+          </select>
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Order
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value)}
+            data-testid="webhook-list-sort-order"
+            aria-label="Sort order"
+            className="input py-1 text-xs"
+          >
+            <option value="">Default (asc)</option>
+            <option value="asc">asc</option>
+            <option value="desc">desc</option>
+          </select>
+        </label>
       </div>
 
       {loading && !hookList ? (

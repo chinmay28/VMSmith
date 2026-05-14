@@ -297,8 +297,12 @@ export const webhooks = {
   // server-side across each webhook's URL and event_types. Empty/undefined
   // omits the param so the daemon returns every webhook. Mirrors the
   // pattern used for VMs (2.2.13), images (5.4.9), and events (4.2.20).
-  list: ({ search = '' }: { search?: string } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined } } })),
+  //
+  // `sort` / `order` whitelist mirrors the daemon: sort one of id|url|
+  // created_at|last_delivery_at (default id); order asc|desc (default asc).
+  // Empty/undefined omits the param so the daemon's defaults apply.
+  list: ({ search = '', sort = '', order = '' }: { search?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, sort: sort || undefined, order: order || undefined } as any } })),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>

@@ -1941,6 +1941,16 @@ export interface paths {
                      *     status badges instead.
                      */
                     search?: string;
+                    /**
+                     * @description Field to sort by. `url` matches case-insensitively.
+                     *     `last_delivery_at` sorts never-delivered webhooks
+                     *     (zero timestamp) at the tail of the ascending list and the
+                     *     head of the descending list. All comparators tiebreak on `id`
+                     *     so repeated requests return a deterministic order.
+                     */
+                    sort?: "id" | "url" | "created_at" | "last_delivery_at";
+                    /** @description Sort direction. Default `asc`. */
+                    order?: "asc" | "desc";
                 };
                 header?: never;
                 path?: never;
@@ -1957,6 +1967,7 @@ export interface paths {
                         "application/json": components["schemas"]["Webhook"][];
                     };
                 };
+                400: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
             };
