@@ -786,6 +786,11 @@ async function main() {
       await p.locator('[data-testid="webhook-list-search"]').fill("needle-not-anywhere");
       await p.waitForTimeout(450);
       await assert((await allRows.count()) === 0, "expected zero rows for no-match query");
+
+      // Clear the search filter before the next test runs on the same page,
+      // otherwise the seeded rows are hidden by the lingering ?search= param.
+      await p.locator('[data-testid="webhook-list-search-clear"]').click();
+      await p.waitForTimeout(450);
     }, page);
 
     await runTest("bulk-delete selected webhooks via checkbox + Delete-selected", async (p) => {
