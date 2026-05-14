@@ -24,9 +24,17 @@ import (
 //     The numeric event ID is intentionally excluded.
 //   - since     — RFC3339 timestamp; only events with occurred_at after this
 //   - until     — seq ID (uint64); exclude events with ID ≥ this value
+//   - sort      — id | occurred_at | type | source | severity (default occurred_at)
+//   - order     — asc | desc (default desc — "newest first")
 //   - page, per_page — pagination
 func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+
+	sortField, order, sortErr := parseEventSort(r)
+	if sortErr != nil {
+		writeAPIError(w, http.StatusBadRequest, sortErr)
+		return
+	}
 
 	vmID := strings.TrimSpace(q.Get("vm_id"))
 	evtType := strings.TrimSpace(q.Get("type"))
@@ -56,6 +64,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 		sinceTime = parsed
 	}
 
+	// Sort default matches the legacy sequence-ID-desc contract — skip
+	// the pre-pagination re-sort for the cheap path. Any explicit
+	// `?sort=` (or non-default `?order=asc`) triggers a re-sort over the
+	// full filtered set, so we ask the store for the unpaginated result
+	// and paginate after sorting.
+	defaultSort := sortField == types.EventSortID && order == types.SortOrderDesc
+
 	pagination := parsePagination(r)
 
 	filter := store.EventFilter{
@@ -65,11 +80,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 		Severity: severity,
 		Search:   search,
 		UntilSeq: untilSeq,
-		Page:     pagination.Page,
-		PerPage:  pagination.PerPage,
 	}
 	if !sinceTime.IsZero() {
 		filter.Since = sinceTime
+	}
+	if defaultSort {
+		filter.Page = pagination.Page
+		filter.PerPage = pagination.PerPage
 	}
 
 	filtered, total, err := s.store.ListEventsFiltered(filter)
@@ -80,6 +97,30 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	if filtered == nil {
 		filtered = []*types.Event{}
 	}
+
+	if !defaultSort {
+		types.SortEvents(filtered, sortField, order)
+		// Apply pagination over the sorted slice so X-Total-Count
+		// (already set from the unpaginated fetch) still reflects the
+		// post-filter / pre-pagination count.
+		if pagination.PerPage > 0 {
+			page := pagination.Page
+			if page < 1 {
+				page = 1
+			}
+			start := (page - 1) * pagination.PerPage
+			if start >= len(filtered) {
+				filtered = []*types.Event{}
+			} else {
+				end := start + pagination.PerPage
+				if end > len(filtered) {
+					end = len(filtered)
+				}
+				filtered = filtered[start:end]
+			}
+		}
+	}
+
 	setTotalCountHeader(w, total)
 	writeJSON(w, http.StatusOK, filtered)
 }

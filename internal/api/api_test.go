@@ -5258,6 +5258,227 @@ func TestListEvents_FilterBySearch_CombinesWithVMID(t *testing.T) {
 	}
 }
 
+// seedSortableEvents writes a small set of events with distinct types,
+// sources, severities, and occurred_at timestamps so the ?sort= tests can
+// assert exact orderings without depending on insertion order.
+//
+// Insertion order intentionally differs from each sort axis below so a
+// regression to "default insert order" surfaces immediately.
+func seedSortableEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	seeds := []*types.Event{
+		// Insert mid-time first so we can assert occurred_at-desc orders newest-first.
+		{
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			Message:    "started",
+			OccurredAt: base.Add(2 * time.Hour),
+		},
+		{
+			Type:       "Image.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityWarn,
+			Message:    "created image",
+			OccurredAt: base.Add(1 * time.Hour),
+		},
+		{
+			Type:       "snapshot.taken",
+			Source:     types.EventSourceSystem,
+			Severity:   types.EventSeverityError,
+			Message:    "snapshot taken",
+			OccurredAt: base.Add(3 * time.Hour),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func eventIDs(events []*types.Event) []string {
+	out := make([]string, len(events))
+	for i, e := range events {
+		out[i] = e.ID
+	}
+	return out
+}
+
+func TestListEvents_SortDefaultIsIDDesc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// IDs are "1","2","3" assigned in append order (vm.started=1, Image.created=2, snapshot.taken=3).
+	// Default sort is `id`-desc, which preserves the long-standing newest-first contract.
+	want := []string{"3", "2", "1"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("default sort: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByOccurredAtAsc(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=occurred_at&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// occurred_at asc: Image.created (1h) < vm.started (2h) < snapshot.taken (3h)
+	want := []string{"2", "1", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=occurred_at asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByType_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=type&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// case-insensitive: "image.created" < "snapshot.taken" < "vm.started"
+	want := []string{"2", "3", "1"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=type asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortBySource(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=source&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// alpha asc: app < libvirt < system
+	want := []string{"2", "1", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=source asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortBySeverity(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=severity&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// alpha asc: error < info < warn
+	want := []string{"3", "1", "2"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=severity asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortComposesWithSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	// "created" matches both Image.created (id=2) and snapshot.taken's message
+	// "snapshot taken" — only the Image.created event's TYPE contains "created"
+	// AND its message says "created image". The snapshot type is
+	// "snapshot.taken" so its haystack contains "created" via the message
+	// "snapshot taken"? No — "taken" not "created". So only id=2 matches the
+	// substring "image" combined with sort=type asc.
+	resp, err := http.Get(ts.URL + "/api/v1/events?search=image&sort=type&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	want := []string{"2"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("search+sort: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortPaginationDeterministic(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp1, err := http.Get(ts.URL + "/api/v1/events?sort=type&order=asc&page=1&per_page=2")
+	if err != nil {
+		t.Fatalf("GET p1: %v", err)
+	}
+	page1 := decodeEvents(t, resp1)
+	resp2, err := http.Get(ts.URL + "/api/v1/events?sort=type&order=asc&page=2&per_page=2")
+	if err != nil {
+		t.Fatalf("GET p2: %v", err)
+	}
+	page2 := decodeEvents(t, resp2)
+
+	// page=1: [Image.created=2, snapshot.taken=3]; page=2: [vm.started=1]
+	if g := eventIDs(page1); !sortedEventIDsEqual(g, []string{"2", "3"}) {
+		t.Fatalf("page=1: got %v", g)
+	}
+	if g := eventIDs(page2); !sortedEventIDsEqual(g, []string{"1"}) {
+		t.Fatalf("page=2: got %v", g)
+	}
+}
+
+func TestListEvents_RejectsInvalidSort(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=attributes")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestListEvents_RejectsInvalidOrder(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?order=sideways")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func sortedEventIDsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // ============================================================
 // Image metadata: description + tags + PATCH + ?tag= filter
 // ============================================================

@@ -848,6 +848,20 @@ const server = http.createServer(async (req, res) => {
       { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", actor: "ops-alice", message: "VM 'web-server-prod' created", attributes: { template: "rocky9-base" }, created_at: new Date(Date.now() - 60_000).toISOString() },
       { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", actor: "system",    message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
     ];
+    // Sort whitelist mirrors internal/api/event_sort.go.
+    const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity"]);
+    const allowedOrder = new Set(["asc", "desc"]);
+    let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
+    let order = (url.searchParams.get("order") || "").trim().toLowerCase();
+    if (sortField === "") sortField = "id";
+    else if (!allowedSort.has(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, occurred_at, type, source, severity" });
+    }
+    if (order === "") order = "desc";
+    else if (!allowedOrder.has(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
+
     const vmFilter = (url.searchParams.get("vm_id") || "").trim();
     const sourceFilter = (url.searchParams.get("source") || "").trim();
     const severityFilter = (url.searchParams.get("severity") || "").trim();
@@ -873,6 +887,51 @@ const server = http.createServer(async (req, res) => {
       (!typeFilter || e.type === typeFilter) &&
       matchesSearch(e)
     );
+
+    // Mirror pkg/types.SortEvents — all comparators tiebreak on `id`.
+    const desc = order === "desc";
+    const ts = (e) => {
+      const v = e.occurred_at || e.created_at;
+      return v ? new Date(v).getTime() : 0;
+    };
+    filtered.sort((a, b) => {
+      const aID = a.id || "";
+      const bID = b.id || "";
+      const cmpID = aID < bID ? -1 : aID > bID ? 1 : 0;
+      let cmp = 0;
+      switch (sortField) {
+        case "occurred_at": {
+          cmp = ts(a) - ts(b);
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "type": {
+          const at = (a.type || "").toLowerCase();
+          const bt = (b.type || "").toLowerCase();
+          cmp = at < bt ? -1 : at > bt ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "source": {
+          const as = (a.source || "").toLowerCase();
+          const bs = (b.source || "").toLowerCase();
+          cmp = as < bs ? -1 : as > bs ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "severity": {
+          const as = (a.severity || "").toLowerCase();
+          const bs = (b.severity || "").toLowerCase();
+          cmp = as < bs ? -1 : as > bs ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        default: // "id"
+          cmp = cmpID;
+      }
+      return desc ? -cmp : cmp;
+    });
+
     const total = filtered.length;
     return json(res, 200, filtered, { "X-Total-Count": String(total) });
   }

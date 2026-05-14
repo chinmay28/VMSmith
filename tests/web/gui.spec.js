@@ -1757,6 +1757,31 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
     await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
   });
+
+  // 5.4.16 — sortable events list.
+  test("sort dropdowns reorder the activity timeline and round-trip through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+
+    // Default ordering puts evt-3 (most recent, newest sequence id) at the top.
+    const rows = page.locator('[data-testid^="activity-row-"]');
+    await expect(rows.first()).toHaveAttribute("data-testid", "activity-row-evt-3");
+
+    // sort=type asc: case-insensitive — "vm_created" < "vm_started" < "vm_stopped".
+    await page.getByTestId("activity-sort-field").selectOption("type");
+    await page.getByTestId("activity-sort-order").selectOption("asc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-2");
+
+    // URL captures the new sort + order.
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("type");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // sort=source desc — "libvirt" > "app" so evt-3 (libvirt) comes first.
+    await page.getByTestId("activity-sort-field").selectOption("source");
+    await page.getByTestId("activity-sort-order").selectOption("desc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-3");
+  });
 });
 
 // ============================================================
