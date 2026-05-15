@@ -80,7 +80,7 @@ vmsmith/
 │   ├── src/api/generated/       # Generated OpenAPI TypeScript schema (`npm run generate:api`)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, LogViewer (VMList's bulk-action bar fans out start/stop/restart/force-stop/reboot/suspend/resume/delete over the existing per-VM endpoints, with eligibility filtered by VM state; ImageList includes upload progress UI for image imports)
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, TemplateList, LogViewer (VMList's bulk-action bar fans out start/stop/restart/force-stop/reboot/suspend/resume/delete over the existing per-VM endpoints, with eligibility filtered by VM state; ImageList includes upload progress UI for image imports; TemplateList is the dedicated admin page for the templates store with search / sort / per-row edit (description + tags via PATCH) / single-delete / select-all + Delete-selected wired to `/templates/bulk_delete`)
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs (mock server)

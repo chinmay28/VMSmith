@@ -1332,6 +1332,108 @@ test.describe("Images", () => {
 });
 
 // ============================================================
+// Templates admin page (roadmap 2.3.9 GUI follow-up)
+// ============================================================
+test.describe("Templates", () => {
+  test("lists seeded templates with descriptions and tag chips", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-table")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-description-small-ubuntu")).toContainText("Small Ubuntu template");
+    await expect(page.getByTestId("template-tags-small-ubuntu")).toBeVisible();
+  });
+
+  test("filters templates by tag chip", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await page.getByTestId("template-tag-filter-prod").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await page.getByTestId("template-tag-filter-all").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+  });
+
+  test("search input filters templates and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-search").fill("rocky");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBe("rocky");
+
+    await page.getByTestId("template-list-search-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("search=");
+  });
+
+  test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-sort-field").selectOption("name");
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("name");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("desc");
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+    await expect(rows).toHaveCount(2);
+    // name desc → "small-ubuntu" precedes "big-rocky" alphabetically (s > b)
+    await expect(rows.nth(0)).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect(rows.nth(1)).toHaveAttribute("data-testid", "template-row-big-rocky");
+  });
+
+  test("edit modal updates description and tags via PATCH", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await page.getByTestId("btn-edit-template-big-rocky").click();
+    await expect(page.getByTestId("edit-template-modal")).toBeVisible();
+    await page.getByTestId("edit-template-description").fill("Promoted to GA");
+    await page.getByTestId("edit-template-tags").fill("rocky,ga");
+    await page.getByTestId("btn-save-template").click();
+    await expect(page.getByTestId("edit-template-modal")).not.toBeVisible();
+    await expect(page.getByTestId("template-description-big-rocky")).toContainText("Promoted to GA");
+  });
+
+  test("bulk delete selected templates", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await page.getByTestId("template-checkbox-big-rocky").check();
+    await page.getByTestId("btn-bulk-delete-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-bulk-result")).toContainText("1 of 1 succeeded");
+  });
+
+  test("bulk delete via select-all sweeps every template", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await page.getByTestId("template-select-all").check();
+    await page.getByTestId("btn-bulk-delete-templates").click();
+    // Once the second row drops, the table card is replaced by the EmptyState
+    // branch, so just assert the rows are gone and the empty state renders.
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  test("delete single template via row action", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    page.once("dialog", (d) => d.accept());
+    await page.getByTestId("btn-delete-template-small-ubuntu").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+});
+
+// ============================================================
 // Navigation
 // ============================================================
 test.describe("Navigation", () => {
@@ -1348,6 +1450,10 @@ test.describe("Navigation", () => {
     // Images
     await page.getByTestId("nav-images").click();
     await expect(page.getByTestId("image-table")).toBeVisible();
+
+    // Templates
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-table")).toBeVisible();
 
     // Logs
     await page.getByTestId("nav-logs").click();
