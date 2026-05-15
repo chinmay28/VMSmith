@@ -2240,6 +2240,21 @@ export interface paths {
                      *     so `X-Total-Count` reflects the post-search population.
                      */
                     search?: string;
+                    /**
+                     * @description Sort entries by `timestamp`, `level`, or `source`. `level`
+                     *     orders by severity rank (debug < info < warn < error), not
+                     *     alphabetically. `source` matches case-insensitively. All
+                     *     comparators tiebreak on timestamp+source so paginated
+                     *     responses are deterministic. Unknown values return 400
+                     *     `invalid_sort`.
+                     */
+                    sort?: "timestamp" | "level" | "source";
+                    /**
+                     * @description Sort order. Default is `asc` — preserves the legacy
+                     *     oldest-first contract the GUI's auto-scroll relies on.
+                     *     Unknown values return 400 `invalid_order`.
+                     */
+                    order?: "asc" | "desc";
                 };
                 header?: never;
                 path?: never;

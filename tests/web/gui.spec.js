@@ -1850,6 +1850,57 @@ test.describe("Log Viewer", () => {
     await expect(page.getByTestId("log-source-api")).toBeVisible();
     await expect(page.getByTestId("log-source-daemon")).toBeVisible();
   });
+
+  // 5.4.17 — Sortable log list mirrored across API + CLI + GUI.
+  test("sort dropdowns reorder entries and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // Default order is timestamp+asc — the daemon entry is seeded with the
+    // earliest timestamp, so it should appear in the first row.
+    const firstRowLevel = page.locator('[data-testid="log-table"] tbody tr').first();
+    await expect(firstRowLevel).toContainText("daemon");
+
+    // Sort by level + desc → the error entry should rise to the top.
+    await page.getByTestId("log-sort-field").selectOption("level");
+    await page.getByTestId("log-sort-order").selectOption("desc");
+
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("sort=level");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("order=desc");
+
+    // After the round-trip the error row is at position 0.
+    const rowAfter = page.locator('[data-testid="log-table"] tbody tr').first();
+    await expect(rowAfter).toContainText("error");
+  });
+
+  test("sort by source orders alphabetically", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    await page.getByTestId("log-sort-field").selectOption("source");
+    await page.getByTestId("log-sort-order").selectOption("asc");
+
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("sort=source");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("order=asc");
+
+    // api < cli < daemon alphabetical, so first row should be source=api.
+    const firstRow = page.locator('[data-testid="log-table"] tbody tr').first();
+    await expect(firstRow).toContainText("api");
+  });
+
+  test("sort URL parameters hydrate the dropdowns on page load", async ({ page }) => {
+    await page.goto(`${BASE_URL}/logs?sort=level&order=desc`);
+    await expect(page.getByTestId("log-table")).toBeVisible();
+    // The dropdown values should reflect the URL — proving the URL is the
+    // source of truth (deep-linkable filtered view).
+    await expect(page.getByTestId("log-sort-field")).toHaveValue("level");
+    await expect(page.getByTestId("log-sort-order")).toHaveValue("desc");
+    // And the error row is first.
+    const firstRow = page.locator('[data-testid="log-table"] tbody tr').first();
+    await expect(firstRow).toContainText("error");
+  });
 });
 
 // ============================================================

@@ -27,8 +27,18 @@ type logsResponse struct {
 //	            level, and every value in the structured fields map.
 //	            Whitespace-trimmed; field *keys* are intentionally
 //	            excluded from the haystack.
+//	sort      – timestamp | level | source (default: timestamp)
+//	order     – asc | desc (default: asc — preserves the legacy
+//	            oldest-first contract).  level orders by severity rank
+//	            (debug < info < warn < error), not alphabetically.
 func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+
+	sortField, order, sortErr := parseLogSort(r)
+	if sortErr != nil {
+		writeAPIError(w, http.StatusBadRequest, sortErr)
+		return
+	}
 
 	level := q.Get("level")
 	if level == "" {
@@ -63,6 +73,8 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = filtered
 	}
+
+	logger.SortEntries(entries, sortField, order)
 
 	total := len(entries)
 	pagination := parsePagination(r)

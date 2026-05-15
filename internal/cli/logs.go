@@ -46,6 +46,11 @@ Filters mirror the API one-to-one:
                        vocabulary (vm_id, method, error, ...) would
                        generate noisy matches against operator-supplied
                        values.
+  --sort <field>       Sort entries by: timestamp | level | source
+                       (default timestamp).  level orders by severity
+                       rank (debug < info < warn < error), not
+                       alphabetically.
+  --order <asc|desc>   Sort order (default asc — oldest first).
   --limit <n>          Max rows to fetch per request (forwarded as the
                        per_page query param; capped at 2000 daemon-side).
   --page <n>           1-indexed page number (default 1).
@@ -67,6 +72,8 @@ var logsListCmd = &cobra.Command{
 		source, _ := cmd.Flags().GetString("source")
 		since, _ := cmd.Flags().GetString("since")
 		search, _ := cmd.Flags().GetString("search")
+		sortField, _ := cmd.Flags().GetString("sort")
+		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		page, _ := cmd.Flags().GetInt("page")
 		showFields, _ := cmd.Flags().GetBool("fields")
@@ -74,6 +81,11 @@ var logsListCmd = &cobra.Command{
 		flagAPIKey, _ := cmd.Flags().GetString("api-key")
 
 		canonicalLevel, err := validateLogLevel(level)
+		if err != nil {
+			return err
+		}
+
+		canonicalSort, canonicalOrder, err := validateLogSortFlags(sortField, order)
 		if err != nil {
 			return err
 		}
@@ -110,6 +122,12 @@ var logsListCmd = &cobra.Command{
 		}
 		if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
 			q.Set("search", needle)
+		}
+		if canonicalSort != "" {
+			q.Set("sort", canonicalSort)
+		}
+		if canonicalOrder != "" {
+			q.Set("order", canonicalOrder)
 		}
 		if limit > 0 {
 			q.Set("per_page", fmt.Sprintf("%d", limit))
@@ -183,6 +201,28 @@ var logsListCmd = &cobra.Command{
 	},
 }
 
+// validateLogSortFlags mirrors the daemon's parseLogSort whitelist so the
+// CLI returns a clear local error rather than round-tripping to surface a
+// 400 from the API.  Empty values mean "leave unset" — the daemon then
+// applies its default (timestamp+asc, preserving the legacy oldest-first
+// contract).  Returns the canonical lowercase form for the URL params.
+func validateLogSortFlags(sortField, order string) (string, string, error) {
+	canonicalSort := strings.ToLower(strings.TrimSpace(sortField))
+	switch canonicalSort {
+	case "", logger.EntrySortTimestamp, logger.EntrySortLevel, logger.EntrySortSource:
+	default:
+		return "", "", fmt.Errorf("invalid --sort %q (want one of: timestamp, level, source)", sortField)
+	}
+
+	canonicalOrder := strings.ToLower(strings.TrimSpace(order))
+	switch canonicalOrder {
+	case "", logger.EntrySortOrderAsc, logger.EntrySortOrderDesc:
+	default:
+		return "", "", fmt.Errorf("invalid --order %q (want one of: asc, desc)", order)
+	}
+	return canonicalSort, canonicalOrder, nil
+}
+
 // validateLogLevel matches the daemon's parseLevel whitelist
 // (debug|info|warn|warning|error) and returns the canonical lowercase form
 // the API expects.  Empty input means "leave unset" — the daemon then
@@ -237,6 +277,8 @@ func init() {
 	logsListCmd.Flags().String("source", "", "filter by source: cli|api|daemon (empty = all)")
 	logsListCmd.Flags().String("since", "", "show entries since (Go duration like 5m, or RFC3339 timestamp)")
 	logsListCmd.Flags().String("search", "", "case-insensitive substring match across message, source, level, and structured field values")
+	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source (empty = daemon default = timestamp)")
+	logsListCmd.Flags().String("order", "", "sort order: asc|desc (empty = daemon default = asc)")
 	logsListCmd.Flags().Int("limit", 0, "max rows per page (0 = daemon default of 200; capped at 2000)")
 	logsListCmd.Flags().Int("page", 0, "1-indexed page number (0 = first page)")
 	logsListCmd.Flags().Bool("fields", false, "include the structured fields map as a trailing column")
