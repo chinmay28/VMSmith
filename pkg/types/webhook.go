@@ -9,12 +9,13 @@ import "time"
 // for the full wire shape (headers, signature scheme, retry schedule, SSRF
 // rules).
 type Webhook struct {
-	ID         string    `json:"id"`
-	URL        string    `json:"url"`
-	Secret     string    `json:"secret,omitempty"`
-	EventTypes []string  `json:"event_types,omitempty"`
-	Active     bool      `json:"active"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	URL         string    `json:"url"`
+	Secret      string    `json:"secret,omitempty"`
+	EventTypes  []string  `json:"event_types,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Active      bool      `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
 
 	// LastDeliveryAt is the time of the most recent attempted delivery
 	// (success or final failure).  Zero if never attempted.
@@ -30,9 +31,10 @@ type Webhook struct {
 
 // WebhookCreateRequest is the JSON body accepted by POST /api/v1/webhooks.
 type WebhookCreateRequest struct {
-	URL        string   `json:"url"`
-	Secret     string   `json:"secret"`
-	EventTypes []string `json:"event_types,omitempty"`
+	URL         string   `json:"url"`
+	Secret      string   `json:"secret"`
+	EventTypes  []string `json:"event_types,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 // WebhookUpdateSpec is the JSON body accepted by PATCH /api/v1/webhooks/{id}.
@@ -49,13 +51,16 @@ type WebhookCreateRequest struct {
 //     filter list so the webhook matches every event again.
 //   - Active: nil = no change.  Toggling false stops the in-memory worker;
 //     toggling true (re-)starts it.
+//   - Description: nil = no change.  Empty string clears the description.
+//     Trimmed before persistence; capped at 1024 characters.
 //
 // At least one of these must be present; an empty body returns 400 noop_update.
 type WebhookUpdateSpec struct {
-	URL        *string   `json:"url,omitempty"`
-	Secret     *string   `json:"secret,omitempty"`
-	EventTypes *[]string `json:"event_types,omitempty"`
-	Active     *bool     `json:"active,omitempty"`
+	URL         *string   `json:"url,omitempty"`
+	Secret      *string   `json:"secret,omitempty"`
+	EventTypes  *[]string `json:"event_types,omitempty"`
+	Active      *bool     `json:"active,omitempty"`
+	Description *string   `json:"description,omitempty"`
 }
 
 // WebhookTestResult is the response from POST /api/v1/webhooks/{id}/test.

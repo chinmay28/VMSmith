@@ -35,22 +35,28 @@ var webhookAddCmd = &cobra.Command{
 		url, _ := cmd.Flags().GetString("url")
 		secret, _ := cmd.Flags().GetString("secret")
 		eventTypes, _ := cmd.Flags().GetStringSlice("event-types")
+		description, _ := cmd.Flags().GetString("description")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
 
 		url = strings.TrimSpace(url)
 		secret = strings.TrimSpace(secret)
+		description = strings.TrimSpace(description)
 		if url == "" {
 			return fmt.Errorf("--url is required")
 		}
 		if secret == "" {
 			return fmt.Errorf("--secret is required")
 		}
+		if len(description) > 1024 {
+			return fmt.Errorf("--description must be 1024 characters or fewer")
+		}
 
 		body, err := json.Marshal(types.WebhookCreateRequest{
-			URL:        url,
-			Secret:     secret,
-			EventTypes: eventTypes,
+			URL:         url,
+			Secret:      secret,
+			EventTypes:  eventTypes,
+			Description: description,
 		})
 		if err != nil {
 			return err
@@ -88,6 +94,9 @@ var webhookAddCmd = &cobra.Command{
 		if len(wh.EventTypes) > 0 {
 			fmt.Printf("  Types:  %s\n", strings.Join(wh.EventTypes, ","))
 		}
+		if wh.Description != "" {
+			fmt.Printf("  Description: %s\n", wh.Description)
+		}
 		return nil
 	},
 }
@@ -100,10 +109,10 @@ var webhookListCmd = &cobra.Command{
 Optional filters and ordering:
 
   --search <q>          Case-insensitive substring filter applied to each
-                        webhook's URL and event-type list.  IDs, secrets, and
-                        last_error are intentionally excluded from the haystack.
-                        Trimmed and lowercased before being forwarded to the
-                        daemon.
+                        webhook's URL, description, and event-type list.
+                        IDs, secrets, and last_error are intentionally
+                        excluded from the haystack.  Trimmed and lowercased
+                        before being forwarded to the daemon.
 
   --sort <field>        Whitelisted to one of:
                           id, url, created_at, last_delivery_at
@@ -182,7 +191,7 @@ Optional filters and ordering:
 			return nil
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tURL\tACTIVE\tTYPES\tLAST_STATUS\tLAST_ERROR")
+		fmt.Fprintln(tw, "ID\tURL\tACTIVE\tTYPES\tDESCRIPTION\tLAST_STATUS\tLAST_ERROR")
 		for _, h := range hooks {
 			lastStatus := "-"
 			if h.LastStatus != 0 {
@@ -192,7 +201,11 @@ Optional filters and ordering:
 			if len(h.EventTypes) > 0 {
 				etypes = strings.Join(h.EventTypes, ",")
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, etypes, lastStatus, h.LastError)
+			description := h.Description
+			if description == "" {
+				description = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, etypes, description, lastStatus, h.LastError)
 		}
 		return tw.Flush()
 	},
@@ -215,7 +228,9 @@ Field semantics:
                          are mutually exclusive.
   --clear-event-types    Clear the event filter so the webhook fires on every event.
   --active true|false    Toggle delivery.  --active=false stops the worker
-                         without deleting the registration.`,
+                         without deleting the registration.
+  --description <text>   Replace the free-form description.  Pass "" to clear.
+                         Capped at 1024 characters.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -249,9 +264,17 @@ Field semantics:
 			v, _ := cmd.Flags().GetBool("active")
 			spec.Active = &v
 		}
+		if f := cmd.Flags().Lookup("description"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetString("description")
+			v = strings.TrimSpace(v)
+			if len(v) > 1024 {
+				return fmt.Errorf("--description must be 1024 characters or fewer")
+			}
+			spec.Description = &v
+		}
 
-		if spec.URL == nil && spec.Secret == nil && spec.EventTypes == nil && spec.Active == nil {
-			return fmt.Errorf("no fields to update: pass --url, --secret, --event-types, --clear-event-types, or --active")
+		if spec.URL == nil && spec.Secret == nil && spec.EventTypes == nil && spec.Active == nil && spec.Description == nil {
+			return fmt.Errorf("no fields to update: pass --url, --secret, --event-types, --clear-event-types, --description, or --active")
 		}
 
 		body, err := json.Marshal(spec)
@@ -292,6 +315,9 @@ Field semantics:
 			fmt.Printf("  Types:  %s\n", strings.Join(wh.EventTypes, ","))
 		} else {
 			fmt.Println("  Types:  (all events)")
+		}
+		if wh.Description != "" {
+			fmt.Printf("  Description: %s\n", wh.Description)
 		}
 		return nil
 	},
@@ -430,8 +456,9 @@ func init() {
 	webhookAddCmd.Flags().String("url", "", "target URL (http or https) — required")
 	webhookAddCmd.Flags().String("secret", "", "HMAC secret — required")
 	webhookAddCmd.Flags().StringSlice("event-types", nil, "comma-separated event-type filters (e.g. vm.started,system.*)")
+	webhookAddCmd.Flags().String("description", "", "free-form description (≤1024 chars)")
 
-	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL and event-type names)")
+	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL, description, and event-type names)")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 
@@ -440,6 +467,7 @@ func init() {
 	webhookEditCmd.Flags().StringSlice("event-types", nil, "replace event-type filter list (comma-separated)")
 	webhookEditCmd.Flags().Bool("clear-event-types", false, "clear the event filter so the webhook fires on every event")
 	webhookEditCmd.Flags().Bool("active", true, "toggle delivery on/off (only takes effect when explicitly set)")
+	webhookEditCmd.Flags().String("description", "", "replace the free-form description (pass \"\" to clear; ≤1024 chars)")
 
 	webhookDeleteCmd.Flags().String("event-type", "",
 		"delete every webhook whose event_types filter contains this exact event type (mutually exclusive with <id>)")

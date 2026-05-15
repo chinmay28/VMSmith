@@ -3529,6 +3529,87 @@ func TestCLI_WebhookEdit_RejectsNoFlags(t *testing.T) {
 	}
 }
 
+func TestCLI_WebhookEdit_SetsDescription(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-d","url":"https://x","active":true,"description":"Slack notifier","created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "edit", "wh-d", "--api-url", srv.URL, "--description", "Slack notifier")
+	if err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.Description == nil || *sent.Description != "Slack notifier" {
+		t.Errorf("Description not sent: %+v", sent)
+	}
+	if !strings.Contains(out, "Description: Slack notifier") {
+		t.Errorf("expected description in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_ClearsDescription(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-d","url":"https://x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	if _, err := runCLI("webhook", "edit", "wh-d", "--api-url", srv.URL, "--description", ""); err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.Description == nil || *sent.Description != "" {
+		t.Errorf("Description should be empty string (clear), got %+v", sent.Description)
+	}
+}
+
+func TestCLI_WebhookEdit_DescriptionTooLong(t *testing.T) {
+	long := strings.Repeat("a", 1025)
+	_, err := runCLI("webhook", "edit", "wh-d", "--api-url", "http://invalid", "--description", long)
+	if err == nil {
+		t.Fatal("expected error for >1024 char description")
+	}
+	if !strings.Contains(err.Error(), "1024 characters") {
+		t.Errorf("error = %v, want '1024 characters'", err)
+	}
+}
+
+func TestCLI_WebhookAdd_WithDescription(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusCreated,
+		`{"id":"wh-new","url":"https://x","active":true,"description":"Slack alerts","created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "add", "--api-url", srv.URL, "--url", "https://x", "--secret", "k", "--description", "  Slack alerts  ")
+	if err != nil {
+		t.Fatalf("webhook add: %v", err)
+	}
+	if state.lastMethod != http.MethodPost {
+		t.Fatalf("expected POST, got %s", state.lastMethod)
+	}
+	var sent types.WebhookCreateRequest
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding sent body: %v", err)
+	}
+	if sent.Description != "Slack alerts" {
+		t.Errorf("Description not trimmed/sent: %q", sent.Description)
+	}
+	if !strings.Contains(out, "Description: Slack alerts") {
+		t.Errorf("expected description in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookAdd_DescriptionTooLong(t *testing.T) {
+	long := strings.Repeat("a", 1025)
+	_, err := runCLI("webhook", "add", "--api-url", "http://invalid", "--url", "https://x", "--secret", "k", "--description", long)
+	if err == nil {
+		t.Fatal("expected error for >1024 char description")
+	}
+	if !strings.Contains(err.Error(), "1024 characters") {
+		t.Errorf("error = %v, want '1024 characters'", err)
+	}
+}
+
 func TestCLI_WebhookEdit_PropagatesDaemonError(t *testing.T) {
 	srv, _ := newFakeWebhookDaemon(t, http.StatusNotFound,
 		`{"code":"resource_not_found","message":"webhook not found"}`)

@@ -109,3 +109,37 @@ func TestWebhookMatchesSearch_EmptyEventTypesHandled(t *testing.T) {
 		t.Fatalf("expected no match against empty event types")
 	}
 }
+
+func TestWebhookMatchesSearch_DescriptionSubstring(t *testing.T) {
+	wh := &Webhook{
+		URL:         "https://example.com/x",
+		Description: "Slack notifier for production VM crashes",
+	}
+	if !WebhookMatchesSearch(wh, "slack") {
+		t.Fatalf("expected description substring 'slack' to hit")
+	}
+	if !WebhookMatchesSearch(wh, "production") {
+		t.Fatalf("expected description substring 'production' to hit")
+	}
+}
+
+func TestWebhookMatchesSearch_DescriptionCaseInsensitive(t *testing.T) {
+	wh := &Webhook{
+		URL:         "https://example.com/x",
+		Description: "PagerDuty Escalation",
+	}
+	if !WebhookMatchesSearch(wh, "pagerduty") {
+		t.Fatalf("expected lowercase needle to match mixed-case description")
+	}
+}
+
+func TestWebhookMatchesSearch_EmptyDescriptionDoesNotMatchEmptyQuery(t *testing.T) {
+	// Empty description is the common case; the haystack scan must not
+	// short-circuit to true just because the description happens to be "".
+	// A non-empty needle against an empty description should miss unless
+	// the URL or event_types carry the needle.
+	wh := &Webhook{URL: "https://example.com/x", Description: ""}
+	if WebhookMatchesSearch(wh, "anything") {
+		t.Fatalf("expected empty description not to match arbitrary needle")
+	}
+}

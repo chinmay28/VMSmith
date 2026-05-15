@@ -4,10 +4,10 @@ import "strings"
 
 // WebhookMatchesSearch reports whether the given webhook matches the
 // (already normalised, lowercase) search query. The match is a
-// case-insensitive substring scan across the webhook's URL and event-type
-// filters — the fields an operator types into a "find this webhook" box.
-// An empty query matches everything; callers should short-circuit before
-// calling.
+// case-insensitive substring scan across the webhook's URL, event-type
+// filters, and free-text description — the fields an operator types into
+// a "find this webhook" box. An empty query matches everything; callers
+// should short-circuit before calling.
 //
 // Intentionally excluded from the haystack:
 //
@@ -32,6 +32,9 @@ func WebhookMatchesSearch(wh *Webhook, query string) bool {
 		return true
 	}
 	if strings.Contains(strings.ToLower(wh.URL), query) {
+		return true
+	}
+	if wh.Description != "" && strings.Contains(strings.ToLower(wh.Description), query) {
 		return true
 	}
 	for _, et := range wh.EventTypes {

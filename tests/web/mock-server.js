@@ -953,11 +953,12 @@ const server = http.createServer(async (req, res) => {
 
     let hooks = [...webhookList.values()];
     if (needle) {
-      // Mirror pkg/types.WebhookMatchesSearch: URL + event_types only.
+      // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types.
       // Secret, ID, and last_error are intentionally excluded from the
       // haystack.
       hooks = hooks.filter((wh) => {
         if (typeof wh.url === "string" && wh.url.toLowerCase().includes(needle)) return true;
+        if (typeof wh.description === "string" && wh.description !== "" && wh.description.toLowerCase().includes(needle)) return true;
         if (Array.isArray(wh.event_types)) {
           for (const et of wh.event_types) {
             if (typeof et === "string" && et.toLowerCase().includes(needle)) return true;
@@ -1062,11 +1063,16 @@ const server = http.createServer(async (req, res) => {
     if (!secret) {
       return json(res, 400, { code: "missing_secret", message: "secret is required" });
     }
+    const description = typeof body.description === "string" ? body.description.trim() : "";
+    if (description.length > 1024) {
+      return json(res, 400, { code: "invalid_webhook", message: "description must be 1024 characters or fewer" });
+    }
     webhookCounter++;
     const wh = {
       id: `wh-${webhookCounter}`,
       url: url2,
       event_types: Array.isArray(body.event_types) ? body.event_types : null,
+      description: description || "",
       active: true,
       created_at: new Date().toISOString(),
     };
@@ -1091,7 +1097,8 @@ const server = http.createServer(async (req, res) => {
     const hasSecret = Object.prototype.hasOwnProperty.call(body, "secret");
     const hasEventTypes = Object.prototype.hasOwnProperty.call(body, "event_types");
     const hasActive = Object.prototype.hasOwnProperty.call(body, "active");
-    if (!hasURL && !hasSecret && !hasEventTypes && !hasActive) {
+    const hasDescription = Object.prototype.hasOwnProperty.call(body, "description");
+    if (!hasURL && !hasSecret && !hasEventTypes && !hasActive && !hasDescription) {
       return json(res, 400, { code: "noop_update", message: "no fields to update" });
     }
     if (hasURL) {
@@ -1119,6 +1126,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (hasActive) {
       wh.active = Boolean(body.active);
+    }
+    if (hasDescription) {
+      const next = typeof body.description === "string" ? body.description.trim() : "";
+      if (next.length > 1024) {
+        return json(res, 400, { code: "invalid_webhook", message: "description must be 1024 characters or fewer" });
+      }
+      wh.description = next;
     }
     webhookList.set(wh.id, wh);
     return json(res, 200, wh);

@@ -184,6 +184,60 @@ func TestCreateWebhook_RejectsInvalidScheme(t *testing.T) {
 	}
 }
 
+func TestCreateWebhook_WithDescription(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	body := jsonBody(t, types.WebhookCreateRequest{
+		URL:         "https://example.com/hook",
+		Secret:      "topsecret",
+		Description: "  Slack notifier for production VM crashes  ",
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 201; body=%s", resp.StatusCode, b)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.Description != "Slack notifier for production VM crashes" {
+		t.Fatalf("description not trimmed/persisted: %q", got.Description)
+	}
+
+	fake.mu.Lock()
+	persisted := fake.hooks[got.ID]
+	fake.mu.Unlock()
+	if persisted.Description != "Slack notifier for production VM crashes" {
+		t.Fatalf("persisted description: %q", persisted.Description)
+	}
+}
+
+func TestCreateWebhook_RejectsLongDescription(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	long := make([]byte, 1025)
+	for i := range long {
+		long[i] = 'a'
+	}
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json",
+		jsonBody(t, types.WebhookCreateRequest{
+			URL:         "https://example.com/hook",
+			Secret:      "k",
+			Description: string(long),
+		}))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+}
+
 func TestCreateWebhook_RejectsMissingSecret(t *testing.T) {
 	ts, _, _, cleanup := webhookTestServer(t)
 	defer cleanup()
@@ -639,6 +693,113 @@ func TestUpdateWebhook_EventTypeReorderIsNoOp(t *testing.T) {
 	}
 }
 
+func TestUpdateWebhook_SetsDescription(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-d1", URL: "https://x", Secret: "k", Active: true})
+
+	resp := patchWebhook(t, ts.URL, "wh-d1", types.WebhookUpdateSpec{
+		Description: ptrStr("  PagerDuty escalation hook  "),
+	})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.Description != "PagerDuty escalation hook" {
+		t.Fatalf("description not trimmed/persisted: %q", got.Description)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-d1"].Description
+	fake.mu.Unlock()
+	if persisted != "PagerDuty escalation hook" {
+		t.Fatalf("persisted description: %q", persisted)
+	}
+}
+
+func TestUpdateWebhook_ClearsDescription(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-d2", URL: "https://x", Secret: "k", Active: true,
+		Description: "previous description",
+	})
+
+	resp := patchWebhook(t, ts.URL, "wh-d2", types.WebhookUpdateSpec{
+		Description: ptrStr(""),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if got.Description != "" {
+		t.Fatalf("expected cleared description, got %q", got.Description)
+	}
+}
+
+func TestUpdateWebhook_OmittedDescriptionIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-d3", URL: "https://x", Secret: "k", Active: true,
+		Description: "keep me",
+	})
+
+	// Patch a different field; the description must survive untouched.
+	resp := patchWebhook(t, ts.URL, "wh-d3", types.WebhookUpdateSpec{
+		Active: ptrBool(false),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-d3"].Description
+	fake.mu.Unlock()
+	if persisted != "keep me" {
+		t.Fatalf("description should be unchanged, got %q", persisted)
+	}
+}
+
+func TestUpdateWebhook_RejectsLongDescription(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-d4", URL: "https://x", Secret: "k", Active: true})
+
+	long := make([]byte, 1025)
+	for i := range long {
+		long[i] = 'a'
+	}
+	desc := string(long)
+	resp := patchWebhook(t, ts.URL, "wh-d4", types.WebhookUpdateSpec{Description: &desc})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_DescriptionNoOpDoesNotBounceWorker(t *testing.T) {
+	// Setting description to its current value must not bounce the worker.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-d5", URL: "https://x", Secret: "k", Active: true,
+		Description: "stable",
+	})
+
+	resp := patchWebhook(t, ts.URL, "wh-d5", types.WebhookUpdateSpec{
+		Description: ptrStr("stable"),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.unregistered) != 0 {
+		t.Fatalf("manager.Unregister called for description no-op: %v", fake.unregistered)
+	}
+}
+
 func TestUpdateWebhook_ReactivatesStoppedWorker(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()
@@ -675,12 +836,13 @@ func seedSearchableWebhooks(t *testing.T, fake *fakeWebhookStore) {
 			LastError: "dial tcp 198.51.100.7: connection refused",
 		},
 		{
-			ID:         "wh-metrics",
-			URL:        "https://metrics.example.com/in",
-			Secret:     "k",
-			EventTypes: []string{"vm.created", "image.created"},
-			Active:     true,
-			CreatedAt:  now.Add(time.Second),
+			ID:          "wh-metrics",
+			URL:         "https://metrics.example.com/in",
+			Secret:      "k",
+			EventTypes:  []string{"vm.created", "image.created"},
+			Description: "Prometheus Alertmanager fan-out",
+			Active:      true,
+			CreatedAt:   now.Add(time.Second),
 		},
 		{
 			ID:         "wh-CASE",
@@ -782,6 +944,23 @@ func TestListWebhooks_FilterBySearch_NoMatchReturnsEmpty(t *testing.T) {
 	hooks := listWebhooksWithQuery(t, ts.URL, "search=needle-not-present-anywhere")
 	if len(hooks) != 0 {
 		t.Fatalf("expected empty result, got %d hooks: %+v", len(hooks), hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_MatchesDescription(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	// "prometheus" only appears in wh-metrics' description.
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=prometheus")
+	if len(hooks) != 1 || hooks[0].ID != "wh-metrics" {
+		t.Fatalf("expected only wh-metrics via description, got %v", hooks)
+	}
+	// And case-insensitively:
+	hooks = listWebhooksWithQuery(t, ts.URL, "search=ALERTMANAGER")
+	if len(hooks) != 1 || hooks[0].ID != "wh-metrics" {
+		t.Fatalf("expected case-insensitive description match, got %v", hooks)
 	}
 }
 

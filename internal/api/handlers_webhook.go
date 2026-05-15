@@ -79,6 +79,7 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	url := strings.TrimSpace(req.URL)
 	secret := strings.TrimSpace(req.Secret)
+	description := strings.TrimSpace(req.Description)
 	if url == "" {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_url", "url is required")
 		return
@@ -91,15 +92,20 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "missing_secret", "secret is required for HMAC signing")
 		return
 	}
+	if err := validateWebhookDescription(description); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	now := time.Now().UTC()
 	wh := &types.Webhook{
-		ID:         fmt.Sprintf("wh-%d", now.UnixNano()),
-		URL:        url,
-		Secret:     secret,
-		EventTypes: normalizeEventTypes(req.EventTypes),
-		Active:     true,
-		CreatedAt:  now,
+		ID:          fmt.Sprintf("wh-%d", now.UnixNano()),
+		URL:         url,
+		Secret:      secret,
+		EventTypes:  normalizeEventTypes(req.EventTypes),
+		Description: description,
+		Active:      true,
+		CreatedAt:   now,
 	}
 
 	if err := s.webhookStore.PutWebhook(wh); err != nil {
@@ -116,13 +122,13 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 // ListWebhooks handles GET /api/v1/webhooks.
 //
 // Optional query params:
-//   - search=<value>  case-insensitive substring filter applied to `url` and
-//     `event_types`. Trimmed + lowercased once before delegating to the
-//     shared predicate. Mirrors the symmetric search surface across VMs
-//     (2.2.13), images (5.4.9), snapshots (5.4.10), port forwards (5.4.11),
-//     templates (5.4.12), events (4.2.20), and logs (5.4.13). Secret, ID,
-//     and last_error are intentionally excluded from the haystack — see
-//     pkg/types/webhook_search.go.
+//   - search=<value>  case-insensitive substring filter applied to `url`,
+//     `description`, and `event_types`. Trimmed + lowercased once before
+//     delegating to the shared predicate. Mirrors the symmetric search
+//     surface across VMs (2.2.13), images (5.4.9), snapshots (5.4.10),
+//     port forwards (5.4.11), templates (5.4.12), events (4.2.20), and
+//     logs (5.4.13). Secret, ID, and last_error are intentionally excluded
+//     from the haystack — see pkg/types/webhook_search.go.
 //   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
 //     Default `id`. Unknown values return 400 `invalid_sort`.
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
@@ -208,6 +214,7 @@ func (s *Server) TestWebhook(w http.ResponseWriter, r *http.Request) {
 //   - url / secret: trimmed; empty rejected
 //   - event_types: nil = no change; [] = clear filter list
 //   - active: nil = no change
+//   - description: nil = no change; "" = clear; trimmed; capped at 1024 chars
 //
 // Any successful change unregisters the in-memory worker and re-registers it
 // with the new config so live deliveries pick up the change without a daemon
@@ -233,7 +240,7 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.URL == nil && req.Secret == nil && req.EventTypes == nil && req.Active == nil {
+	if req.URL == nil && req.Secret == nil && req.EventTypes == nil && req.Active == nil && req.Description == nil {
 		writeErrorCode(w, http.StatusBadRequest, "noop_update", "no fields to update")
 		return
 	}
@@ -280,6 +287,18 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil && *req.Active != updated.Active {
 		updated.Active = *req.Active
 		changed = true
+	}
+
+	if req.Description != nil {
+		nextDesc := strings.TrimSpace(*req.Description)
+		if err := validateWebhookDescription(nextDesc); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+		if nextDesc != updated.Description {
+			updated.Description = nextDesc
+			changed = true
+		}
 	}
 
 	if !changed {
