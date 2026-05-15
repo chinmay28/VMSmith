@@ -52,5 +52,6 @@ func init() {
 	rootCmd.AddCommand(eventsCmd)
 	rootCmd.AddCommand(webhookCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(hostCmd)
 	rootCmd.AddCommand(versionCmd)
 }
