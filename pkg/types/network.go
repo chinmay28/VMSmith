@@ -63,16 +63,19 @@ type PortForward struct {
 	GuestIP     string   `json:"guest_ip"`
 	Protocol    Protocol `json:"protocol"`
 	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // PortForwardUpdateSpec carries the editable metadata for an existing
-// port-forward rule. Description is a pointer so callers can distinguish
-// between "leave untouched" (nil) and "clear" (empty string). The wire-level
-// fields that affect the underlying iptables rule (HostPort, GuestPort,
-// GuestIP, Protocol) are intentionally not editable — changing any of those
-// is a delete-and-re-add operation.
+// port-forward rule. Description and Tags are pointers so callers can
+// distinguish between "leave untouched" (nil) and explicit values. For Tags,
+// a nil pointer leaves the tag set unchanged; an empty slice clears it. The
+// wire-level fields that affect the underlying iptables rule (HostPort,
+// GuestPort, GuestIP, Protocol) are intentionally not editable — changing
+// any of those is a delete-and-re-add operation.
 type PortForwardUpdateSpec struct {
 	Description *string
+	Tags        *[]string
 }
 
 func ValidatePortForward(hostPort, guestPort int, proto Protocol) error {

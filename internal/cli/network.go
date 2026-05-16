@@ -11,6 +11,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
+	"github.com/vmsmith/vmsmith/internal/validate"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -32,6 +33,7 @@ var portAddCmd = &cobra.Command{
 		proto, _ := cmd.Flags().GetString("proto")
 		descriptionRaw, _ := cmd.Flags().GetString("description")
 		description := strings.TrimSpace(descriptionRaw)
+		tagsRaw, _ := cmd.Flags().GetStringSlice("tag")
 
 		logger.Info("cli", "port add", "vm_id", vmID,
 			"host_port", fmt.Sprintf("%d", hostPort),
@@ -43,6 +45,10 @@ var portAddCmd = &cobra.Command{
 		}
 		if len(description) > cliMaxPortForwardDescriptionLength {
 			return fmt.Errorf("description must be at most %d characters", cliMaxPortForwardDescriptionLength)
+		}
+		tags, err := validate.NormalizeTags(tagsRaw)
+		if err != nil {
+			return err
 		}
 
 		vmMgr, vmCleanup, err := newVMManager()
@@ -69,7 +75,7 @@ var portAddCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		rule, err := pf.Add(vmID, hostPort, guestPort, vm.IP, types.Protocol(proto), network.AddOptions{Description: description})
+		rule, err := pf.Add(vmID, hostPort, guestPort, vm.IP, types.Protocol(proto), network.AddOptions{Description: description, Tags: tags})
 		if err != nil {
 			logger.Error("cli", "port add failed", "vm_id", vmID,
 				"host_port", fmt.Sprintf("%d", hostPort),
@@ -88,6 +94,9 @@ var portAddCmd = &cobra.Command{
 		if rule.Description != "" {
 			fmt.Printf("Description: %s\n", rule.Description)
 		}
+		if len(rule.Tags) > 0 {
+			fmt.Printf("Tags: %s\n", strings.Join(rule.Tags, ", "))
+		}
 		return nil
 	},
 }
@@ -102,9 +111,11 @@ var portListCmd = &cobra.Command{
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		searchRaw, _ := cmd.Flags().GetString("search")
+		tagRaw, _ := cmd.Flags().GetString("tag")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
 		searchFilter := strings.ToLower(strings.TrimSpace(searchRaw))
+		tagFilter := strings.ToLower(strings.TrimSpace(tagRaw))
 		if sortField == "" {
 			sortField = types.PortForwardSortID
 		}
@@ -126,7 +137,7 @@ var portListCmd = &cobra.Command{
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
 
-		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter)
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter)
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -139,6 +150,18 @@ var portListCmd = &cobra.Command{
 		if err != nil {
 			logger.Error("cli", "port list failed", "vm_id", vmID, "error", err.Error())
 			return err
+		}
+		if tagFilter != "" {
+			filtered := ports[:0]
+			for _, p := range ports {
+				for _, tg := range p.Tags {
+					if tg == tagFilter {
+						filtered = append(filtered, p)
+						break
+					}
+				}
+			}
+			ports = filtered
 		}
 		if searchFilter != "" {
 			filtered := ports[:0]
@@ -153,10 +176,10 @@ var portListCmd = &cobra.Command{
 		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tHOST PORT\tGUEST\tPROTOCOL\tDESCRIPTION")
+		fmt.Fprintln(w, "ID\tHOST PORT\tGUEST\tPROTOCOL\tDESCRIPTION\tTAGS")
 		for _, p := range ports {
-			fmt.Fprintf(w, "%s\t%d\t%s:%d\t%s\t%s\n",
-				p.ID, p.HostPort, p.GuestIP, p.GuestPort, p.Protocol, p.Description)
+			fmt.Fprintf(w, "%s\t%d\t%s:%d\t%s\t%s\t%s\n",
+				p.ID, p.HostPort, p.GuestIP, p.GuestPort, p.Protocol, p.Description, strings.Join(p.Tags, ","))
 		}
 		w.Flush()
 		return nil
@@ -168,27 +191,67 @@ var portEditCmd = &cobra.Command{
 	Short: "Edit metadata on an existing port forwarding rule",
 	Long: `Edit free-form metadata on an existing port forwarding rule.
 
-Today only the description is editable. Omit --description to make this a
-no-op (and the command will fail with a clear error). Pass an empty string
-("") to clear the description. The 5-tuple driving the iptables rule
-(host_port/guest_port/guest_ip/protocol) is intentionally immutable — to
-change any of those, delete the rule and re-add it.`,
+Currently editable fields: --description (free-form label, max 256 chars;
+pass "" to clear), --tag (repeatable, replaces the entire tag set), and
+--clear-tags (drops every tag from the rule; mutually exclusive with --tag).
+
+At least one of --description / --tag / --clear-tags must be supplied.
+The 5-tuple driving the iptables rule (host_port/guest_port/guest_ip/
+protocol) is intentionally immutable — to change any of those, delete the
+rule and re-add it.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		portID := args[0]
 
 		descFlag := cmd.Flags().Lookup("description")
-		if descFlag == nil || !descFlag.Changed {
-			return fmt.Errorf("--description is required (pass \"\" to clear)")
+		tagFlag := cmd.Flags().Lookup("tag")
+		clearTagsFlag := cmd.Flags().Lookup("clear-tags")
+
+		descChanged := descFlag != nil && descFlag.Changed
+		tagChanged := tagFlag != nil && tagFlag.Changed
+		clearTagsChanged := clearTagsFlag != nil && clearTagsFlag.Changed
+
+		if tagChanged && clearTagsChanged {
+			return fmt.Errorf("--tag and --clear-tags are mutually exclusive")
+		}
+		if !descChanged && !tagChanged && !clearTagsChanged {
+			return fmt.Errorf("at least one of --description, --tag, or --clear-tags is required")
 		}
 
-		descRaw, _ := cmd.Flags().GetString("description")
-		desc := strings.TrimSpace(descRaw)
-		if len(desc) > cliMaxPortForwardDescriptionLength {
-			return fmt.Errorf("description must be at most %d characters", cliMaxPortForwardDescriptionLength)
+		opts := network.UpdateOptions{}
+
+		var descPtr *string
+		if descChanged {
+			descRaw, _ := cmd.Flags().GetString("description")
+			desc := strings.TrimSpace(descRaw)
+			if len(desc) > cliMaxPortForwardDescriptionLength {
+				return fmt.Errorf("description must be at most %d characters", cliMaxPortForwardDescriptionLength)
+			}
+			descPtr = &desc
+			opts.Description = descPtr
 		}
 
-		logger.Info("cli", "port edit", "id", portID, "description_len", fmt.Sprintf("%d", len(desc)))
+		var tagsPtr *[]string
+		if tagChanged {
+			tagsRaw, _ := cmd.Flags().GetStringSlice("tag")
+			normalized, err := validate.NormalizeTags(tagsRaw)
+			if err != nil {
+				return err
+			}
+			if normalized == nil {
+				normalized = []string{}
+			}
+			tagsPtr = &normalized
+			opts.Tags = tagsPtr
+		} else if clearTagsChanged {
+			empty := []string{}
+			tagsPtr = &empty
+			opts.Tags = tagsPtr
+		}
+
+		logger.Info("cli", "port edit", "id", portID,
+			"description_changed", fmt.Sprintf("%v", descChanged),
+			"tags_changed", fmt.Sprintf("%v", tagChanged || clearTagsChanged))
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -197,7 +260,7 @@ change any of those, delete the rule and re-add it.`,
 		}
 		defer cleanup()
 
-		updated, err := pf.Update(portID, network.UpdateOptions{Description: &desc})
+		updated, err := pf.Update(portID, opts)
 		if err != nil {
 			logger.Error("cli", "port edit failed", "id", portID, "error", err.Error())
 			return err
@@ -206,10 +269,19 @@ change any of those, delete the rule and re-add it.`,
 		logger.Info("cli", "port edited", "id", updated.ID)
 		fmt.Printf("Port forward %s updated (host:%d -> %s:%d/%s)\n",
 			updated.ID, updated.HostPort, updated.GuestIP, updated.GuestPort, updated.Protocol)
-		if updated.Description != "" {
-			fmt.Printf("Description: %s\n", updated.Description)
-		} else {
-			fmt.Println("Description cleared")
+		if descChanged {
+			if updated.Description != "" {
+				fmt.Printf("Description: %s\n", updated.Description)
+			} else {
+				fmt.Println("Description cleared")
+			}
+		}
+		if tagChanged || clearTagsChanged {
+			if len(updated.Tags) > 0 {
+				fmt.Printf("Tags: %s\n", strings.Join(updated.Tags, ", "))
+			} else {
+				fmt.Println("Tags cleared")
+			}
 		}
 		return nil
 	},
@@ -317,17 +389,21 @@ func init() {
 	portAddCmd.Flags().Int("guest", 0, "guest port (required)")
 	portAddCmd.Flags().String("proto", "tcp", "protocol (tcp or udp)")
 	portAddCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars)")
+	portAddCmd.Flags().StringSlice("tag", nil, "tag (repeatable; lowercased, deduplicated, alphabetised; 1-32 chars, alphanumeric/._:-)")
 	portAddCmd.MarkFlagRequired("host")
 	portAddCmd.MarkFlagRequired("guest")
 
 	portListCmd.Flags().String("sort", types.PortForwardSortID, "sort field: id, host_port, guest_port, protocol, description")
 	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
-	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, and guest_ip")
+	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, guest_ip, and tags")
+	portListCmd.Flags().String("tag", "", "filter by a single tag (case-insensitive exact match)")
 
 	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
 	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")
 
 	portEditCmd.Flags().String("description", "", "free-form label for the rule (max 256 chars). Pass \"\" to clear.")
+	portEditCmd.Flags().StringSlice("tag", nil, "replace the tag set with these tags (repeatable)")
+	portEditCmd.Flags().Bool("clear-tags", false, "drop every tag from the rule (mutually exclusive with --tag)")
 
 	portCmd.AddCommand(portAddCmd)
 	portCmd.AddCommand(portListCmd)

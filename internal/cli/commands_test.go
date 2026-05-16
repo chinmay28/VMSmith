@@ -2617,7 +2617,7 @@ func TestCLI_PortList_WithForwards(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"ID", "HOST PORT", "GUEST", "PROTOCOL", "DESCRIPTION"}
+	wantHeaders := []string{"ID", "HOST PORT", "GUEST", "PROTOCOL", "DESCRIPTION", "TAGS"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
@@ -3067,10 +3067,10 @@ func TestCLI_PortEdit_RequiresFlag(t *testing.T) {
 
 	_, err := runCLI("port", "edit", "pf-x")
 	if err == nil {
-		t.Fatal("expected error when --description is omitted")
+		t.Fatal("expected error when no editable field is supplied")
 	}
-	if !strings.Contains(err.Error(), "--description is required") {
-		t.Errorf("expected '--description is required' error, got %v", err)
+	if !strings.Contains(err.Error(), "--description") || !strings.Contains(err.Error(), "--tag") {
+		t.Errorf("expected error mentioning --description and --tag, got %v", err)
 	}
 }
 
@@ -3103,6 +3103,132 @@ func TestCLI_PortEdit_NotFound(t *testing.T) {
 	}
 	if apiErr.Code != "resource_not_found" {
 		t.Errorf("Code = %q, want resource_not_found", apiErr.Code)
+	}
+}
+
+func TestCLI_PortAdd_WithTags(t *testing.T) {
+	mock, vmCleanup := withMockVM(t)
+	defer vmCleanup()
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-tag", Name: "tag", IP: "192.168.100.10"})
+
+	out, err := runCLI("port", "add", "vm-tag", "--host", "8080", "--guest", "80",
+		"--tag", "PRODUCTION", "--tag", "web", "--tag", "production")
+	if err != nil {
+		t.Fatalf("port add: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "Tags: production, web") {
+		t.Errorf("expected normalised tags line in output, got %q", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-tag")
+	if len(stored) != 1 || strings.Join(stored[0].Tags, ",") != "production,web" {
+		t.Errorf("persisted Tags = %v", stored[0].Tags)
+	}
+}
+
+func TestCLI_PortAdd_RejectsInvalidTag(t *testing.T) {
+	mock, vmCleanup := withMockVM(t)
+	defer vmCleanup()
+	_, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-tag", Name: "tag", IP: "192.168.100.10"})
+
+	_, err := runCLI("port", "add", "vm-tag", "--host", "8080", "--guest", "80",
+		"--tag", "has spaces")
+	if err == nil {
+		t.Fatal("expected validation error for invalid tag")
+	}
+}
+
+func TestCLI_PortEdit_SetsTags(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-tag", VMID: "vm-e", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	out, err := runCLI("port", "edit", "pf-tag", "--tag", "audit", "--tag", "production")
+	if err != nil {
+		t.Fatalf("port edit: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "Tags: audit, production") {
+		t.Errorf("expected normalised tags line in output, got %q", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-e")
+	if len(stored) != 1 || strings.Join(stored[0].Tags, ",") != "audit,production" {
+		t.Errorf("persisted Tags = %v", stored[0].Tags)
+	}
+}
+
+func TestCLI_PortEdit_ClearsTags(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-tag", VMID: "vm-e", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"stale"}})
+
+	out, err := runCLI("port", "edit", "pf-tag", "--clear-tags")
+	if err != nil {
+		t.Fatalf("port edit --clear-tags: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, "Tags cleared") {
+		t.Errorf("expected 'Tags cleared' line, got %q", out)
+	}
+
+	stored, _ := s.ListPortForwards("vm-e")
+	if len(stored) != 1 || len(stored[0].Tags) != 0 {
+		t.Errorf("expected tags cleared, got %v", stored[0].Tags)
+	}
+}
+
+func TestCLI_PortEdit_RejectsConflictingTagFlags(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-tag", VMID: "vm-e", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	_, err := runCLI("port", "edit", "pf-tag", "--tag", "a", "--clear-tags")
+	if err == nil {
+		t.Fatal("expected error when --tag and --clear-tags are combined")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually-exclusive error, got %v", err)
+	}
+}
+
+func TestCLI_PortList_FilterByTag(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-a", VMID: "vm-flt", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production"}})
+	s.PutPortForward(&types.PortForward{ID: "pf-b", VMID: "vm-flt", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"audit"}})
+
+	out, err := runCLI("port", "list", "vm-flt", "--tag", "PRODUCTION")
+	if err != nil {
+		t.Fatalf("port list --tag: %v", err)
+	}
+	if !strings.Contains(out, "pf-a") || strings.Contains(out, "pf-b") {
+		t.Errorf("expected only pf-a (production), got %q", out)
+	}
+}
+
+func TestCLI_PortList_ShowsTagsColumn(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-a", VMID: "vm-col", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production", "web"}})
+
+	out, err := runCLI("port", "list", "vm-col")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	headers := rows[0]
+	if headers[len(headers)-1] != "TAGS" {
+		t.Errorf("last header = %q, want TAGS", headers[len(headers)-1])
+	}
+	body := rows[1]
+	if body[len(body)-1] != "production,web" {
+		t.Errorf("last row column = %q, want production,web", body[len(body)-1])
 	}
 }
 

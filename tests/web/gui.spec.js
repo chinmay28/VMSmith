@@ -930,6 +930,58 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("port-description-pf-seed-ssh")).toHaveCount(0);
   });
 
+  test("add port forward with tags renders chips inline", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-port").click();
+    await page.getByTestId("input-host-port").fill("3333");
+    await page.getByTestId("input-guest-port").fill("33");
+    await page.getByTestId("input-port-tags").fill("PRODUCTION, web");
+    await page.getByTestId("btn-submit-port").click();
+
+    // Tag chips render under the new port-forward row.
+    const tagsRow = page.locator('[data-testid^="port-tags-"]').last();
+    await expect(tagsRow).toContainText("production");
+    await expect(tagsRow).toContainText("web");
+  });
+
+  test("edit port forward tags and clear via empty input", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // First, set tags via the edit modal.
+    await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
+    await page.getByTestId("input-edit-port-tags").fill("audit, jumpbox");
+    await page.getByTestId("btn-submit-edit-port").click();
+
+    const tagsRow = page.getByTestId("port-tags-pf-seed-ssh");
+    await expect(tagsRow).toContainText("audit");
+    await expect(tagsRow).toContainText("jumpbox");
+
+    // Now clear via the edit modal.
+    await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
+    await page.getByTestId("input-edit-port-tags").fill("");
+    await page.getByTestId("btn-submit-edit-port").click();
+
+    // Tags chip row should disappear entirely.
+    await expect(page.getByTestId("port-tags-pf-seed-ssh")).toHaveCount(0);
+  });
+
+  test("port search input matches port-forward tags", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Set tags on the SSH rule, then verify the search box hits via tag.
+    await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
+    await page.getByTestId("input-edit-port-tags").fill("jumpgateway");
+    await page.getByTestId("btn-submit-edit-port").click();
+
+    await page.getByTestId("port-list-search").fill("jumpgateway");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+  });
+
   test("port modal rejects descriptions over 256 chars", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

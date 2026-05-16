@@ -8,9 +8,9 @@ import (
 // PortForwardMatchesSearch reports whether the given port-forward has a
 // substring match against the (already lower-cased, trimmed) query. The
 // haystack covers the operator-useful fields: description, protocol, the
-// host port, the guest port, and the guest IP. The rule ID (`{vmID}/{host}`)
-// and vm_id are intentionally excluded — they're the URL scope, redundant
-// with the host port match, or noisy numeric needles.
+// host port, the guest port, the guest IP, and the tag list. The rule ID
+// (`{vmID}/{host}`) and vm_id are intentionally excluded — they're the URL
+// scope, redundant with the host port match, or noisy numeric needles.
 //
 // An empty query matches every non-nil port forward; a nil rule never
 // matches.
@@ -18,7 +18,8 @@ import (
 // Mirrors the contract of VMMatchesSearch (2.2.13), ImageMatchesSearch
 // (5.4.9), SnapshotMatchesSearch (5.4.10), and EventMatchesSearch
 // (4.2.20): callers must lower-case + trim the needle before invoking
-// (the API/CLI handlers do).
+// (the API/CLI handlers do). Tags are already normalised lowercase on
+// persistence so the substring check is straight `Contains`.
 func PortForwardMatchesSearch(pf *PortForward, query string) bool {
 	if pf == nil {
 		return false
@@ -40,6 +41,11 @@ func PortForwardMatchesSearch(pf *PortForward, query string) bool {
 	}
 	if pf.GuestIP != "" && strings.Contains(strings.ToLower(pf.GuestIP), query) {
 		return true
+	}
+	for _, tag := range pf.Tags {
+		if strings.Contains(tag, query) {
+			return true
+		}
 	}
 	return false
 }

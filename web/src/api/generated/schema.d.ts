@@ -711,13 +711,15 @@ export interface paths {
         };
         /**
          * Stream VM resource metrics (SSE)
-         * @description Server-Sent Events stream of `MetricSample` frames.  Each new sample
+         * @description Server-Sent Events stream of `MetricSample` frames. Each new sample
          *     produced by the metrics collector is delivered as one `vm.stats`
          *     event whose `data` field is a JSON-encoded `MetricSample` and whose
-         *     `id` is the sample's unix-nanosecond timestamp.  Clients should
-         *     seed history with `GET /vms/{vmID}/stats` before subscribing —
-         *     the stream provides no replay.  A `: keepalive` comment frame is
-         *     sent every 30 seconds.  The stream closes when the client
+         *     `id` is the sample's unix-nanosecond timestamp. Clients should
+         *     seed history with `GET /vms/{vmID}/stats` before subscribing.
+         *     Replay is not supported on this stream, so requests that send
+         *     `Last-Event-ID` or `?since=` are rejected with HTTP 400
+         *     `metrics_replay_not_supported`. A `: keepalive` comment frame is
+         *     sent every 30 seconds. The stream closes when the client
          *     disconnects, the VM is deleted, or the daemon shuts down.
          */
         get: {
@@ -740,6 +742,7 @@ export interface paths {
                         "text/event-stream": string;
                     };
                 };
+                400: components["responses"]["APIError"];
                 404: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
@@ -1031,9 +1034,13 @@ export interface paths {
          *
          *     `search` is an optional case-insensitive substring filter applied
          *     before sort across `description`, `protocol`, `host_port`,
-         *     `guest_port`, and `guest_ip`. The rule ID (`{vmID}/{host}`) and
-         *     `vm_id` are intentionally excluded from the haystack — they're the
-         *     URL scope or redundant with the host port match.
+         *     `guest_port`, `guest_ip`, and `tags`. The rule ID (`{vmID}/{host}`)
+         *     and `vm_id` are intentionally excluded from the haystack — they're
+         *     the URL scope or redundant with the host port match.
+         *
+         *     `tag` is an optional case-insensitive exact-match filter on the
+         *     rule's tag list. Composes additively with `search` (the tag filter
+         *     is applied first).
          */
         get: {
             parameters: {
@@ -1044,10 +1051,15 @@ export interface paths {
                     order?: "asc" | "desc";
                     /**
                      * @description Case-insensitive substring filter applied before sort across
-                     *     description, protocol, host_port, guest_port, and guest_ip.
-                     *     Leading/trailing whitespace is trimmed.
+                     *     description, protocol, host_port, guest_port, guest_ip, and
+                     *     tags. Leading/trailing whitespace is trimmed.
                      */
                     search?: string;
+                    /**
+                     * @description Case-insensitive exact-match filter on the rule's tag list.
+                     *     Applied before search + sort; composes additively with search.
+                     */
+                    tag?: string;
                 };
                 header?: never;
                 path: {
@@ -2479,15 +2491,23 @@ export interface components {
             results: components["schemas"]["BulkVMActionResult"][];
         };
         /**
-         * @description Editable metadata for an existing port forwarding rule. Today only
-         *     `description` is editable; the underlying iptables 5-tuple is
-         *     immutable. The `description` field is a JSON-pointer style optional
-         *     — omit it to leave the description unchanged, pass an empty string to
-         *     clear it.
+         * @description Editable metadata for an existing port forwarding rule. Currently
+         *     `description` and `tags` are editable; the underlying iptables
+         *     5-tuple (host_port/guest_port/guest_ip/protocol) is immutable. Both
+         *     fields use JSON-pointer style optionals — omit a key to leave its
+         *     value unchanged. Pass `description: ""` to clear the description;
+         *     pass `tags: []` to clear the tag set.
          */
         UpdatePortRequest: {
             /** @description Free-form label (max 256 chars). Pass `""` to clear. */
             description?: string;
+            /**
+             * @description Replace the rule's tag set with this list. Tags are normalised
+             *     (lowercased, deduplicated, alphabetised; 1-32 chars; pattern
+             *     `[a-z0-9][a-z0-9._:-]*`). Pass `[]` to clear; omit the key to
+             *     leave the existing tag set unchanged.
+             */
+            tags?: string[];
         };
         /**
          * @description Selector for the port forwards to delete. Exactly one of `ids` or
@@ -2646,6 +2666,12 @@ export interface components {
             protocol?: components["schemas"]["Protocol"];
             /** @description Optional free-form label for the rule (e.g. "web", "metrics scrape"). */
             description?: string;
+            /**
+             * @description Optional free-form tags. Normalised on save (lowercased,
+             *     deduplicated, alphabetised; 1-32 chars per tag; pattern
+             *     `[a-z0-9][a-z0-9._:-]*`).
+             */
+            tags?: string[];
         };
         PortForward: {
             id: string;
@@ -2656,6 +2682,8 @@ export interface components {
             protocol: components["schemas"]["Protocol"];
             /** @description Optional free-form label for the rule. */
             description?: string;
+            /** @description Normalised tag list (lowercased, deduplicated, alphabetised). */
+            tags?: string[];
         };
         ConsoleTicket: {
             /** @description Single-use opaque token; pass to the websocket endpoint. */

@@ -126,6 +126,21 @@ func validatePortForwardDescription(description string) error {
 	return nil
 }
 
+// normalizePortForwardTags re-wraps validate.NormalizeTags's error so the
+// port-forward error surface stays consistent (invalid_port_forward) — same
+// pattern as validatePortForwardDescription. Mirrors validateWebhookTags
+// (2.2.15).
+func normalizePortForwardTags(tags []string) ([]string, error) {
+	normalized, err := validatepkg.NormalizeTags(tags)
+	if err != nil {
+		if apiErr, ok := err.(*types.APIError); ok {
+			return nil, types.NewAPIError("invalid_port_forward", apiErr.Message)
+		}
+		return nil, err
+	}
+	return normalized, nil
+}
+
 func validateCreateSnapshotRequest(name, description string) error {
 	if strings.TrimSpace(name) == "" {
 		return types.NewAPIError("invalid_name", "snapshot name is required")

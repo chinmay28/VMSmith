@@ -988,6 +988,18 @@ function PortList({ vmId, portList, refreshPorts, portSearch }) {
                     {pf.description}
                   </div>
                 )}
+                {Array.isArray(pf.tags) && pf.tags.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1" data-testid={`port-tags-${pf.id}`}>
+                    {pf.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="badge bg-steel-800/60 text-steel-300 border-steel-700/40"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -1031,16 +1043,39 @@ function PortList({ vmId, portList, refreshPorts, portSearch }) {
 // --- Edit Port Forward Modal ---
 function EditPortModal({ vmId, portForward, onClose, onSaved }) {
   const [description, setDescription] = useState('');
-  const updateMut = useMutation((args) => ports.update(vmId, args.id, { description: args.description }));
+  const [tagsInput, setTagsInput] = useState('');
+  const updateMut = useMutation((args) => {
+    const patch = { description: args.description };
+    if (args.tagsChanged) {
+      patch.tags = args.tags;
+    }
+    return ports.update(vmId, args.id, patch);
+  });
 
   React.useEffect(() => {
-    if (portForward) setDescription(portForward.description || '');
+    if (portForward) {
+      setDescription(portForward.description || '');
+      setTagsInput((portForward.tags || []).join(', '));
+    }
   }, [portForward]);
 
   if (!portForward) return null;
 
   const handleSubmit = async () => {
-    await updateMut.execute({ id: portForward.id, description });
+    const parsedTags = tagsInput
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    const currentTags = portForward.tags || [];
+    const sortedParsed = [...parsedTags].sort();
+    const sortedCurrent = [...currentTags].sort();
+    const tagsChanged = JSON.stringify(sortedParsed) !== JSON.stringify(sortedCurrent);
+    await updateMut.execute({
+      id: portForward.id,
+      description,
+      tags: parsedTags,
+      tagsChanged,
+    });
     onSaved();
   };
 
@@ -1063,6 +1098,17 @@ function EditPortModal({ vmId, portForward, onClose, onSaved }) {
             autoFocus
           />
           <p className="mt-1 text-xs text-steel-500">{description.length}/256 characters</p>
+        </div>
+        <div>
+          <label className="label">Tags <span className="text-steel-500 font-normal">(comma-separated; empty to clear)</span></label>
+          <input
+            className="input"
+            type="text"
+            placeholder="production, web"
+            value={tagsInput}
+            onChange={e => setTagsInput(e.target.value)}
+            data-testid="input-edit-port-tags"
+          />
         </div>
         {updateMut.error && <p className="text-sm text-red-400">{updateMut.error}</p>}
         <div className="flex justify-end gap-2">
@@ -1132,9 +1178,21 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
   const [guestPort, setGuestPort] = useState('');
   const [protocol, setProtocol] = useState('tcp');
   const [description, setDescription] = useState('');
-  const addMut = useMutation(() =>
-    ports.add(vmId, parseInt(hostPort), parseInt(guestPort), protocol, description.trim() || undefined),
-  );
+  const [tagsInput, setTagsInput] = useState('');
+  const addMut = useMutation(() => {
+    const tags = tagsInput
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    return ports.add(
+      vmId,
+      parseInt(hostPort),
+      parseInt(guestPort),
+      protocol,
+      description.trim() || undefined,
+      tags.length > 0 ? tags : undefined,
+    );
+  });
 
   const handleSubmit = async () => {
     await addMut.execute();
@@ -1143,6 +1201,7 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
     setHostPort('');
     setGuestPort('');
     setDescription('');
+    setTagsInput('');
   };
 
   return (
@@ -1175,6 +1234,17 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
             value={description}
             onChange={e => setDescription(e.target.value)}
             data-testid="input-port-description"
+          />
+        </div>
+        <div>
+          <label className="label">Tags <span className="text-steel-500">(comma-separated, optional)</span></label>
+          <input
+            className="input"
+            type="text"
+            placeholder="production, web"
+            value={tagsInput}
+            onChange={e => setTagsInput(e.target.value)}
+            data-testid="input-port-tags"
           />
         </div>
         {addMut.error && <p className="text-sm text-red-400">{addMut.error}</p>}
