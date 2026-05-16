@@ -548,6 +548,11 @@ daemon:
     key_file: ""
     auto_cert: ""           # optional public FQDN for automatic Let's Encrypt certificates
     auto_cert_cache_dir: "~/.vmsmith/autocert"
+  console:
+    max_concurrent_sessions: 8  # cap active browser console sessions
+    max_session_seconds: 3600   # hard cap before a console session is closed
+    idle_timeout_seconds: 600   # close idle console sessions after this many seconds
+    password_key: ""            # optional base64 secret for encrypting per-VM VNC passwords
   max_request_body_bytes: 52428800
   max_upload_body_bytes: 53687091200
   max_concurrent_creates: 2   # return HTTP 429 when the create queue is full

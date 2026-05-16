@@ -21,16 +21,17 @@ type Config struct {
 }
 
 type DaemonConfig struct {
-	Listen               string     `yaml:"listen"`
-	PIDFile              string     `yaml:"pid_file"`
-	LogFile              string     `yaml:"log_file"`
-	TLS                  TLSConfig  `yaml:"tls"`
-	Auth                 AuthConfig `yaml:"auth"`
-	MaxRequestBodyBytes  int64      `yaml:"max_request_body_bytes"`
-	MaxUploadBodyBytes   int64      `yaml:"max_upload_body_bytes"`
-	MaxConcurrentCreates int        `yaml:"max_concurrent_creates"`
-	RateLimitPerSecond   float64    `yaml:"rate_limit_per_second"`
-	RateLimitBurst       int        `yaml:"rate_limit_burst"`
+	Listen               string        `yaml:"listen"`
+	PIDFile              string        `yaml:"pid_file"`
+	LogFile              string        `yaml:"log_file"`
+	TLS                  TLSConfig     `yaml:"tls"`
+	Auth                 AuthConfig    `yaml:"auth"`
+	Console              ConsoleConfig `yaml:"console"`
+	MaxRequestBodyBytes  int64         `yaml:"max_request_body_bytes"`
+	MaxUploadBodyBytes   int64         `yaml:"max_upload_body_bytes"`
+	MaxConcurrentCreates int           `yaml:"max_concurrent_creates"`
+	RateLimitPerSecond   float64       `yaml:"rate_limit_per_second"`
+	RateLimitBurst       int           `yaml:"rate_limit_burst"`
 }
 
 type AuthConfig struct {
@@ -43,6 +44,13 @@ type TLSConfig struct {
 	KeyFile          string `yaml:"key_file"`
 	AutoCert         string `yaml:"auto_cert"`
 	AutoCertCacheDir string `yaml:"auto_cert_cache_dir"`
+}
+
+type ConsoleConfig struct {
+	MaxConcurrentSessions int    `yaml:"max_concurrent_sessions"`
+	MaxSessionSeconds     int    `yaml:"max_session_seconds"`
+	IdleTimeoutSeconds    int    `yaml:"idle_timeout_seconds"`
+	PasswordKey           string `yaml:"password_key"`
 }
 
 func (d DaemonConfig) TLSConfigured() bool {
@@ -82,7 +90,7 @@ type DefaultsConfig struct {
 }
 
 type QuotasConfig struct {
-	MaxVMs         int `yaml:"max_vms"`
+	MaxVMs            int `yaml:"max_vms"`
 	MaxTotalCPUs      int `yaml:"max_total_cpus"`
 	MaxTotalRAMMB     int `yaml:"max_total_ram_mb"`
 	MaxTotalDiskGB    int `yaml:"max_total_disk_gb"`
@@ -138,11 +146,16 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Daemon: DaemonConfig{
-			Listen:               "0.0.0.0:8080",
-			PIDFile:              "/var/run/vmsmith.pid",
-			LogFile:              filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
+			Listen:  "0.0.0.0:8080",
+			PIDFile: "/var/run/vmsmith.pid",
+			LogFile: filepath.Join(homeDir, ".vmsmith", "vmsmith.log"),
 			TLS: TLSConfig{
 				AutoCertCacheDir: filepath.Join(homeDir, ".vmsmith", "autocert"),
+			},
+			Console: ConsoleConfig{
+				MaxConcurrentSessions: 8,
+				MaxSessionSeconds:     3600,
+				IdleTimeoutSeconds:    600,
 			},
 			MaxRequestBodyBytes:  50 << 20,
 			MaxUploadBodyBytes:   50 << 30,
