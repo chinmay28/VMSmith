@@ -590,6 +590,43 @@ func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
 	}
 }
 
+func TestStreamVMStats_IgnoresWhitespaceOnlyReplayHints(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-whitespace", "stream-whitespace", types.VMStateRunning)
+	m.setState(v.ID, "running")
+	cpu := 22.0
+	m.seed(v.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream?since=%20%20%20", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Last-Event-ID", "   ")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	frame, err := readSSEFrame(bufio.NewReader(resp.Body))
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if frame.event != "vm.stats" {
+		t.Fatalf("event = %q, want vm.stats", frame.event)
+	}
+}
+
 func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
 	m := newTestMetricsMock()
 	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
@@ -726,6 +763,44 @@ func TestPrometheusMetrics_Disabled(t *testing.T) {
 	// With nil metrics manager, the endpoint returns 503.
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestPrometheusMetrics_NotMountedOnMainRouterWhenScrapeListenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	if err := os.MkdirAll(imagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir images: %v", err)
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer s.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+	cfg.Metrics.Enabled = true
+	cfg.Metrics.ScrapeListen = "127.0.0.1:9100"
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	apiServer := NewServerWithMetrics(mockMgr, storageMgr, portFwd, s, cfg, nil, newTestMetricsMock())
+	ts := httptest.NewServer(apiServer)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
 
