@@ -789,6 +789,65 @@ async function main() {
 
     await page.close();
 
+    // ================== Settings: Webhook description (2.2.14) ================
+    // Fresh page session — navigating to "/" triggers resetState() on the
+    // mock server so we start with zero webhooks.
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+
+    await runTest("create webhook with description, edit, and clear", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      await p.locator('[data-testid="add-webhook-btn"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="webhook-url-input"]').fill("https://example.com/desc");
+      await p.locator('[data-testid="webhook-secret-input"]').fill("k");
+      await p.locator('[data-testid="webhook-description-input"]').fill("Slack notifier");
+      await p.locator('[data-testid="webhook-create-submit"]').click();
+      await p.waitForTimeout(600);
+
+      const row = p.locator('[data-testid^="webhook-row-"]').first();
+      await row.waitFor({ state: "visible", timeout: 5000 });
+      const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+      const descLocator = p.locator(`[data-testid="webhook-description-${rowID}"]`);
+      await descLocator.waitFor({ state: "visible", timeout: 3000 });
+      await assert(
+        (await descLocator.textContent()) === "Slack notifier",
+        "row should render description",
+      );
+
+      // Edit description.
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      const descInput = p.locator('[data-testid="edit-webhook-description-input"]');
+      await assert(
+        (await descInput.inputValue()) === "Slack notifier",
+        "edit modal should pre-fill description",
+      );
+      await descInput.fill("PagerDuty escalation");
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+      await assert(
+        (await descLocator.textContent()) === "PagerDuty escalation",
+        "row should reflect updated description",
+      );
+
+      // Clear it.
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="edit-webhook-description-input"]').fill("");
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+      await assert(
+        (await descLocator.count()) === 0,
+        "description row should disappear after clearing",
+      );
+    }, page);
+
+    await page.close();
+
     // ================== Settings: Webhooks free-text search ==================
     // Symmetric search surface alongside VMs (2.2.13), images (5.4.9),
     // events (4.2.20), snapshots (5.4.10), port forwards (5.4.11),

@@ -1171,8 +1171,8 @@ paths:
           required: false
           description: |
             Case-insensitive substring filter applied across each webhook's
-            URL and event-type filters. Whitespace is trimmed before
-            matching. Secret, ID, and last_error are intentionally
+            URL, description, and event-type filters. Whitespace is trimmed
+            before matching. Secret, ID, and last_error are intentionally
             excluded from the haystack — secrets must never appear in
             response bodies, IDs are opaque `wh-<unix-nano>` strings, and
             last_error is operator-noise surfaced via `last_status` /
@@ -2413,6 +2413,13 @@ components:
           items:
             type: string
           description: Optional event-type filter list (exact match or "prefix.*" glob). Empty = all events.
+        description:
+          type: string
+          maxLength: 1024
+          description: >
+            Free-form operator label ("Slack notifier for VM crashes",
+            "PagerDuty escalations"). Surfaced in the GUI and CLI listings;
+            included in the case-insensitive `search` haystack.
         active:
           type: boolean
         created_at:
@@ -2440,6 +2447,12 @@ components:
           type: array
           items:
             type: string
+        description:
+          type: string
+          maxLength: 1024
+          description: >
+            Free-form operator label. Trimmed before persistence; capped at
+            1024 characters. Optional.
     WebhookUpdateSpec:
       type: object
       description: >
@@ -2465,6 +2478,12 @@ components:
         active:
           type: boolean
           description: Toggle delivery on or off without deleting the registration.
+        description:
+          type: string
+          maxLength: 1024
+          description: >
+            Replace the free-form description. Omit the key to leave it
+            unchanged; pass the empty string to clear it.
     WebhookTestResult:
       type: object
       required: [success, duration_ms, attempted_at]

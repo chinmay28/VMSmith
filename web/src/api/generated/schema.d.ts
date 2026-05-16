@@ -1933,8 +1933,8 @@ export interface paths {
                 query?: {
                     /**
                      * @description Case-insensitive substring filter applied across each webhook's
-                     *     URL and event-type filters. Whitespace is trimmed before
-                     *     matching. Secret, ID, and last_error are intentionally
+                     *     URL, description, and event-type filters. Whitespace is trimmed
+                     *     before matching. Secret, ID, and last_error are intentionally
                      *     excluded from the haystack — secrets must never appear in
                      *     response bodies, IDs are opaque `wh-<unix-nano>` strings, and
                      *     last_error is operator-noise surfaced via `last_status` /
@@ -2777,6 +2777,8 @@ export interface components {
             url: string;
             /** @description Optional event-type filter list (exact match or "prefix.*" glob). Empty = all events. */
             event_types?: string[];
+            /** @description Free-form operator label ("Slack notifier for VM crashes", "PagerDuty escalations"). Surfaced in the GUI and CLI listings; included in the case-insensitive `search` haystack. */
+            description?: string;
             active: boolean;
             /** Format: date-time */
             created_at: string;
@@ -2792,6 +2794,8 @@ export interface components {
             /** @description HMAC-SHA256 signing secret. Never returned in responses. */
             secret: string;
             event_types?: string[];
+            /** @description Free-form operator label. Trimmed before persistence; capped at 1024 characters. Optional. */
+            description?: string;
         };
         /** @description Partial-update payload for `PATCH /webhooks/{id}`.  All fields are optional; omit a key to leave the corresponding field unchanged. `event_types: []` clears the filter so the webhook matches every event; `event_types` omitted leaves the current list intact. */
         WebhookUpdateSpec: {
@@ -2806,6 +2810,8 @@ export interface components {
             event_types?: string[];
             /** @description Toggle delivery on or off without deleting the registration. */
             active?: boolean;
+            /** @description Replace the free-form description. Omit the key to leave it unchanged; pass the empty string to clear it. */
+            description?: string;
         };
         WebhookTestResult: {
             /** @description True iff the receiver returned a 2xx HTTP status. */

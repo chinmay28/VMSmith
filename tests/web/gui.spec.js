@@ -1548,6 +1548,81 @@ test.describe("Settings — Webhooks", () => {
     await expect(row).toContainText("vm.deleted");
   });
 
+  // 2.2.14 — free-text description on webhooks (create + edit + search).
+  test("create webhook with a description renders it in the row", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/hook");
+    await page.getByTestId("webhook-secret-input").fill("topsecret");
+    await page.getByTestId("webhook-description-input").fill("Slack notifier for crashes");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+    await expect(page.getByTestId(`webhook-description-${rowID}`)).toHaveText(
+      "Slack notifier for crashes",
+    );
+  });
+
+  test("edit webhook description and clear it via empty input", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/desc");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    await page.getByTestId("webhook-description-input").fill("Initial label");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+    // Edit: rename the description.
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await expect(page.getByTestId("edit-webhook-form")).toBeVisible();
+    await expect(page.getByTestId("edit-webhook-description-input")).toHaveValue("Initial label");
+    await page.getByTestId("edit-webhook-description-input").fill("Renamed: PagerDuty escalation");
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    await expect(page.getByTestId(`webhook-description-${rowID}`)).toHaveText(
+      "Renamed: PagerDuty escalation",
+    );
+
+    // Edit again: clear the description.
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await page.getByTestId("edit-webhook-description-input").fill("");
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    await expect(page.getByTestId(`webhook-description-${rowID}`)).toHaveCount(0);
+  });
+
+  test("search input matches webhook description", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    const seed = async (url, description) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (description) await page.getByTestId("webhook-description-input").fill(description);
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://a.example.com/x", "Slack alerts");
+    await seed("https://b.example.com/x", "PagerDuty escalation");
+    await seed("https://c.example.com/x", "");
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // "pagerduty" only appears in the description of webhook #2.
+    await page.getByTestId("webhook-list-search").fill("pagerduty");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("b.example.com");
+  });
+
   test("edit webhook can clear event-type filter to subscribe-all", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-settings").click();

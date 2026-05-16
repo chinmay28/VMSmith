@@ -291,6 +291,14 @@ export default function Settings() {
                         </div>
                         <div>
                           <div className="text-sm text-steel-200 font-mono break-all">{wh.url}</div>
+                          {wh.description && (
+                            <div
+                              className="text-[11px] text-steel-400 break-all"
+                              data-testid={`webhook-description-${wh.id}`}
+                            >
+                              {wh.description}
+                            </div>
+                          )}
                           <div className="text-[11px] text-steel-600 font-mono">{wh.id}</div>
                         </div>
                       </div>
@@ -404,6 +412,7 @@ function AddWebhookModal({ open, onClose, onCreated }) {
   const [url, setUrl] = useState('');
   const [secret, setSecret] = useState('');
   const [eventTypes, setEventTypes] = useState('');
+  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -411,6 +420,7 @@ function AddWebhookModal({ open, onClose, onCreated }) {
     setUrl('');
     setSecret('');
     setEventTypes('');
+    setDescription('');
     setErr(null);
     setSubmitting(false);
   };
@@ -424,7 +434,13 @@ function AddWebhookModal({ open, onClose, onCreated }) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      await webhooksApi.create({ url: url.trim(), secret: secret.trim(), event_types: types.length ? types : undefined });
+      const trimmedDescription = description.trim();
+      await webhooksApi.create({
+        url: url.trim(),
+        secret: secret.trim(),
+        event_types: types.length ? types : undefined,
+        description: trimmedDescription || undefined,
+      });
       onCreated?.();
       reset();
       onClose();
@@ -476,6 +492,20 @@ function AddWebhookModal({ open, onClose, onCreated }) {
             Comma-separated. Empty = subscribe to every event.
           </p>
         </div>
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Description (optional)</label>
+          <input
+            className="input w-full"
+            placeholder='e.g. "Slack notifier for VM crashes"'
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={1024}
+            data-testid="webhook-description-input"
+          />
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Free-form label that appears in the list and is searchable.
+          </p>
+        </div>
 
         {err && <ErrorBanner message={err} />}
 
@@ -511,6 +541,7 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
   const [eventTypes, setEventTypes] = useState('');
   const [subscribeAll, setSubscribeAll] = useState(false);
   const [active, setActive] = useState(true);
+  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -523,6 +554,7 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
     setEventTypes(initialTypes);
     setSubscribeAll(!webhook.event_types?.length);
     setActive(Boolean(webhook.active));
+    setDescription(webhook.description || '');
     setErr(null);
     setSubmitting(false);
   }, [webhook]);
@@ -560,6 +592,13 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
     }
     if (active !== Boolean(webhook.active)) {
       spec.active = active;
+    }
+    // Description: PATCH semantics are nil = no change, "" = clear.  Only
+    // send when the trimmed value differs from the current stored value so
+    // unchanged forms don't bounce the worker.
+    const trimmedDescription = description.trim();
+    if (trimmedDescription !== (webhook.description || '')) {
+      spec.description = trimmedDescription;
     }
 
     if (Object.keys(spec).length === 0) {
@@ -638,6 +677,20 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
           </label>
           <p className="text-[11px] font-mono text-steel-600 mt-1">
             Disable to pause the worker without deleting the registration.
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Description</label>
+          <input
+            className="input w-full"
+            placeholder='e.g. "Slack notifier for VM crashes"'
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={1024}
+            data-testid="edit-webhook-description-input"
+          />
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Clear the field to remove the description; ≤1024 characters.
           </p>
         </div>
 

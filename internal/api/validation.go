@@ -193,6 +193,19 @@ func validateImageDescription(description string) error {
 	return nil
 }
 
+// validateWebhookDescription enforces a 1024-char cap on free-form webhook
+// descriptions ("Slack notifier for production crashes", "PagerDuty
+// escalations"). Empty strings are allowed; the PATCH path treats an
+// explicit empty string as "clear", while the POST path treats it as "no
+// description provided" since both shapes round-trip to the same stored
+// value.
+func validateWebhookDescription(description string) error {
+	if len(description) > 1024 {
+		return types.NewAPIError("invalid_webhook", "description must be 1024 characters or fewer")
+	}
+	return nil
+}
+
 func validateUploadedImage(filename string, data []byte) error {
 	trimmedName := strings.TrimSpace(filename)
 	if trimmedName == "" {
