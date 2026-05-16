@@ -4787,6 +4787,204 @@ func TestGetLogs_FilterBySearch_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestGetLogs_SortDefaultIsTimestampAsc(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Three distinct messages emitted in order; the legacy default is
+	// oldest-first which the LogViewer's auto-scroll relies on.
+	logger.Info("daemon", "sort-default needle one")
+	time.Sleep(2 * time.Millisecond)
+	logger.Info("daemon", "sort-default needle two")
+	time.Sleep(2 * time.Millisecond)
+	logger.Info("daemon", "sort-default needle three")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-default&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	want := []string{"sort-default needle one", "sort-default needle two", "sort-default needle three"}
+	for i, e := range result.Entries {
+		if e.Message != want[i] {
+			t.Fatalf("position %d: want %q, got %q", i, want[i], e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortByTimestampDesc(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-desc needle one")
+	time.Sleep(2 * time.Millisecond)
+	logger.Info("daemon", "sort-desc needle two")
+	time.Sleep(2 * time.Millisecond)
+	logger.Info("daemon", "sort-desc needle three")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-desc&sort=timestamp&order=desc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	want := []string{"sort-desc needle three", "sort-desc needle two", "sort-desc needle one"}
+	for i, e := range result.Entries {
+		if e.Message != want[i] {
+			t.Fatalf("position %d: want %q, got %q", i, want[i], e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortByLevel_DescPutsErrorsFirst(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// The default global logger min-level is info, so debug entries are
+	// dropped before they reach the ring; cover info/warn/error here.
+	// `_TestSortByLevel_AscOrderedBySeverity_Direct` exercises the full
+	// debug→error severity ladder via the in-package SortEntries helper.
+	logger.Info("daemon", "sort-level needle info")
+	logger.Warn("daemon", "sort-level needle warn")
+	logger.Error("daemon", "sort-level needle error")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-level&sort=level&order=desc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	// Sort desc by severity rank: error → warn → info.
+	wantLevels := []string{"error", "warn", "info"}
+	for i, e := range result.Entries {
+		if e.Level != wantLevels[i] {
+			t.Fatalf("position %d: want level %q, got %q (msg=%q)",
+				i, wantLevels[i], e.Level, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortByLevel_AscOrderedBySeverity(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Error("daemon", "sort-level-asc needle error")
+	logger.Warn("daemon", "sort-level-asc needle warn")
+	logger.Info("daemon", "sort-level-asc needle info")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-level-asc&sort=level&order=asc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	wantLevels := []string{"info", "warn", "error"}
+	for i, e := range result.Entries {
+		if e.Level != wantLevels[i] {
+			t.Fatalf("position %d: want level %q, got %q (msg=%q)",
+				i, wantLevels[i], e.Level, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortBySource(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-source needle d")
+	logger.Info("api", "sort-source needle a")
+	logger.Info("cli", "sort-source needle c")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-source&sort=source&order=asc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	wantSources := []string{"api", "cli", "daemon"}
+	for i, e := range result.Entries {
+		if e.Source != wantSources[i] {
+			t.Fatalf("position %d: want source %q, got %q (msg=%q)",
+				i, wantSources[i], e.Source, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortComposesWithSearch(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-compose needle one")
+	logger.Warn("daemon", "sort-compose needle two")
+	logger.Error("daemon", "sort-compose needle three")
+	// Noise that the search filter must drop before the sort runs.
+	logger.Error("daemon", "irrelevant noise")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-compose&sort=level&order=desc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (search must drop the noise entry)", len(result.Entries))
+	}
+	// error → warn → info with the noise entry excluded.
+	wantLevels := []string{"error", "warn", "info"}
+	for i, e := range result.Entries {
+		if e.Level != wantLevels[i] {
+			t.Fatalf("position %d: want level %q, got %q (msg=%q)",
+				i, wantLevels[i], e.Level, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_RejectsInvalidSort(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?sort=bogus")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["code"] != "invalid_sort" {
+		t.Errorf("code = %v, want invalid_sort", body["code"])
+	}
+}
+
+func TestGetLogs_RejectsInvalidOrder(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?order=sideways")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["code"] != "invalid_order" {
+		t.Errorf("code = %v, want invalid_order", body["code"])
+	}
+}
+
 // Helpers for timeout in tests
 func init() {
 	_ = time.Second // ensure time is used

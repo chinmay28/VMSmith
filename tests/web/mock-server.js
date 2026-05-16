@@ -787,13 +787,31 @@ const server = http.createServer(async (req, res) => {
     });
   }
   if (p === "/api/v1/logs" && method === "GET") {
+    // Use a fixed base timestamp so the sort tests get deterministic
+    // chronological ordering across entries even when the host clock
+    // ticks faster than the loop construction.
+    const baseTs = Date.now();
+    const ts = (offsetMs) => new Date(baseTs + offsetMs).toISOString();
     const entries = [
-      { ts: new Date().toISOString(), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },
-      { ts: new Date().toISOString(), level: "info", source: "api", msg: "GET /api/v1/vms", fields: { status_code: "200", duration_ms: "1" } },
-      { ts: new Date().toISOString(), level: "info", source: "cli", msg: "vm list", fields: {} },
-      { ts: new Date().toISOString(), level: "warn", source: "daemon", msg: "port forward restore skipped", fields: { error: "iptables not available" } },
-      { ts: new Date().toISOString(), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5" } },
+      { ts: ts(0), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },
+      { ts: ts(1), level: "info", source: "api", msg: "GET /api/v1/vms", fields: { status_code: "200", duration_ms: "1" } },
+      { ts: ts(2), level: "info", source: "cli", msg: "vm list", fields: {} },
+      { ts: ts(3), level: "warn", source: "daemon", msg: "port forward restore skipped", fields: { error: "iptables not available" } },
+      { ts: ts(4), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5" } },
     ];
+    // Sort whitelist mirrors internal/api/log_sort.go.
+    const allowedSort = new Set(["timestamp", "level", "source"]);
+    const allowedOrder = new Set(["asc", "desc"]);
+    let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
+    let order = (url.searchParams.get("order") || "").trim().toLowerCase();
+    if (sortField === "") sortField = "timestamp";
+    else if (!allowedSort.has(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: timestamp, level, source" });
+    }
+    if (order === "") order = "asc";
+    else if (!allowedOrder.has(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
     const level = url.searchParams.get("level") || "debug";
     const limit = parseInt(url.searchParams.get("limit") || "200", 10);
     const source = url.searchParams.get("source") || "";
@@ -817,6 +835,30 @@ const server = http.createServer(async (req, res) => {
         return false;
       });
     }
+    // Mirror internal/logger.SortEntries: level uses severity rank
+    // (debug<info<warn<error), source is case-insensitive, timestamp
+    // tiebreaks ascending so identical-key entries stay deterministic.
+    const desc = order === "desc";
+    filtered.sort((a, b) => {
+      let less;
+      if (sortField === "level") {
+        const ra = levelOrder[a.level] ?? -1, rb = levelOrder[b.level] ?? -1;
+        if (ra !== rb) less = ra < rb;
+        else if (a.ts !== b.ts) less = a.ts < b.ts;
+        else less = (a.source || "").toLowerCase() < (b.source || "").toLowerCase();
+      } else if (sortField === "source") {
+        const sa = (a.source || "").toLowerCase(), sb = (b.source || "").toLowerCase();
+        if (sa !== sb) less = sa < sb;
+        else if (a.ts !== b.ts) less = a.ts < b.ts;
+        else less = (a.level || "") < (b.level || "");
+      } else {
+        // timestamp
+        if (a.ts !== b.ts) less = a.ts < b.ts;
+        else less = (a.source || "").toLowerCase() < (b.source || "").toLowerCase();
+      }
+      const sign = less ? -1 : 1;
+      return desc ? -sign : sign;
+    });
     const total = filtered.length;
     if (filtered.length > limit) filtered = filtered.slice(filtered.length - limit);
     return json(res, 200, { entries: filtered, total }, { "X-Total-Count": String(total) });

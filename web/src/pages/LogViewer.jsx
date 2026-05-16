@@ -35,6 +35,14 @@ export default function LogViewer() {
   const [sourceFilter, setSourceFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
+  const sortFromUrl = searchParams.get('sort') || '';
+  const orderFromUrl = searchParams.get('order') || '';
+  const [sortField, setSortField] = useState(
+    ['timestamp', 'level', 'source'].includes(sortFromUrl) ? sortFromUrl : ''
+  );
+  const [sortOrder, setSortOrder] = useState(
+    ['asc', 'desc'].includes(orderFromUrl) ? orderFromUrl : ''
+  );
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -55,6 +63,8 @@ export default function LogViewer() {
         perPage,
         source: sourceFilter,
         search: searchFilter,
+        sort: sortField,
+        order: sortOrder,
       });
       const nextEntries = response?.data?.entries || [];
       setEntries(nextEntries);
@@ -65,7 +75,7 @@ export default function LogViewer() {
     } finally {
       setLoading(false);
     }
-  }, [levelFilter, page, perPage, sourceFilter, searchFilter, paused]);
+  }, [levelFilter, page, perPage, sourceFilter, searchFilter, sortField, sortOrder, paused]);
 
   // Initial load + polling every 3 seconds.
   useEffect(() => {
@@ -77,7 +87,7 @@ export default function LogViewer() {
 
   useEffect(() => {
     setPage(1);
-  }, [levelFilter, sourceFilter, searchFilter]);
+  }, [levelFilter, sourceFilter, searchFilter, sortField, sortOrder]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -96,6 +106,17 @@ export default function LogViewer() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     setSearchParams(next, { replace: true });
   }, [searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mirror sort field + order in the URL so the alternate view is
+  // shareable / bookmarkable / survives a refresh.  Empty value means
+  // "daemon default" (timestamp+asc); we omit the param in that case so
+  // the URL stays clean.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (sortField) next.set('sort', sortField); else next.delete('sort');
+    if (sortOrder) next.set('order', sortOrder); else next.delete('order');
+    setSearchParams(next, { replace: true });
+  }, [sortField, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom when new entries arrive — only when the user
   // is already pinned to the bottom. Use direct scrollTop (not smooth
@@ -163,6 +184,33 @@ export default function LogViewer() {
               <option value="info">Info+</option>
               <option value="warn">Warn+</option>
               <option value="error">Error</option>
+            </select>
+
+            {/* Sort field */}
+            <select
+              className="input py-1 text-xs w-28"
+              value={sortField}
+              onChange={e => setSortField(e.target.value)}
+              data-testid="log-sort-field"
+              aria-label="Sort logs by"
+            >
+              <option value="">Time (default)</option>
+              <option value="timestamp">Time</option>
+              <option value="level">Level</option>
+              <option value="source">Source</option>
+            </select>
+
+            {/* Sort order */}
+            <select
+              className="input py-1 text-xs w-24"
+              value={sortOrder}
+              onChange={e => setSortOrder(e.target.value)}
+              data-testid="log-sort-order"
+              aria-label="Sort order"
+            >
+              <option value="">Asc (default)</option>
+              <option value="asc">Asc</option>
+              <option value="desc">Desc</option>
             </select>
 
             {/* Pause / resume */}

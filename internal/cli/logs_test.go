@@ -228,3 +228,65 @@ func TestCLI_LogsList_AuthorizationHeader(t *testing.T) {
 		t.Fatalf("Authorization = %q, want Bearer secret-token", state.authHdr)
 	}
 }
+
+func TestCLI_LogsList_ForwardsSortAndOrder(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL,
+		"--sort", "level", "--order", "desc"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	for _, want := range []string{"sort=level", "order=desc"} {
+		if !strings.Contains(state.lastQuery, want) {
+			t.Fatalf("query missing %q: %q", want, state.lastQuery)
+		}
+	}
+}
+
+func TestCLI_LogsList_NormalisesSortAndOrderCase(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL,
+		"--sort", "  SOURCE  ", "--order", " DESC "); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=source") {
+		t.Fatalf("expected lowercase trimmed sort=source, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected lowercase trimmed order=desc, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_RejectsInvalidSort(t *testing.T) {
+	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--sort", "bogus")
+	if err == nil {
+		t.Fatal("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("error = %q, want 'invalid --sort'", err.Error())
+	}
+}
+
+func TestCLI_LogsList_RejectsInvalidOrder(t *testing.T) {
+	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--order", "sideways")
+	if err == nil {
+		t.Fatal("expected error for invalid --order, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("error = %q, want 'invalid --order'", err.Error())
+	}
+}
+
+func TestCLI_LogsList_EmptySortAndOrderOmitParams(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL,
+		"--sort", "", "--order", ""); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	for _, banned := range []string{"sort=", "order="} {
+		if strings.Contains(state.lastQuery, banned) {
+			t.Fatalf("empty sort/order must not be forwarded; query=%q contained %q", state.lastQuery, banned)
+		}
+	}
+}

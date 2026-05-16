@@ -1419,6 +1419,31 @@ paths:
             timestamps are scoped via `since`. The filter composes
             additively with `level`, `source`, `since`, and pagination,
             so `X-Total-Count` reflects the post-search population.
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [timestamp, level, source]
+            default: timestamp
+          description: |
+            Sort entries by `timestamp`, `level`, or `source`. `level`
+            orders by severity rank (debug < info < warn < error), not
+            alphabetically. `source` matches case-insensitively. All
+            comparators tiebreak on timestamp+source so paginated
+            responses are deterministic. Unknown values return 400
+            `invalid_sort`.
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: |
+            Sort order. Default is `asc` — preserves the legacy
+            oldest-first contract the GUI's auto-scroll relies on.
+            Unknown values return 400 `invalid_order`.
       responses:
         '200':
           description: Log entries
