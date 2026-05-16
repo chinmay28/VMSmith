@@ -108,15 +108,16 @@ const streamSampleInterval = 1 * time.Second
 // StreamVMStats handles GET /api/v1/vms/{vmID}/stats/stream (SSE).
 //
 // Each new MetricSample is delivered as a single SSE frame whose data field
-// is the JSON-encoded sample.  The event id is a unix-nanosecond timestamp
-// so clients can resume after a reconnect with Last-Event-ID, though replay
-// is not supported by the in-memory metrics ring (the REST `/stats` endpoint
-// provides initial backfill).  A 30s heartbeat comment defeats proxy idle
-// timeouts.
+// is the JSON-encoded sample. The event id is a unix-nanosecond timestamp for
+// monotonic ordering only. Replay is not supported by the in-memory metrics
+// ring, so clients must seed history via the REST `/stats` endpoint instead of
+// reconnecting with Last-Event-ID or `?since=`. A 30s heartbeat comment
+// defeats proxy idle timeouts.
 //
 // Returns:
 //   - 503 metrics_disabled when the metrics manager is not wired
 //   - 404 resource_not_found when the VM is unknown
+//   - 400 metrics_replay_not_supported when Last-Event-ID or `?since=` is set
 //   - 200 with `text/event-stream` otherwise
 //
 // The stream ends when the client disconnects, the request context is
@@ -133,6 +134,12 @@ func (s *Server) StreamVMStats(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.vmManager.Get(r.Context(), vmID); err != nil {
 		writeAPIError(w, http.StatusNotFound, types.NewAPIError("resource_not_found",
 			fmt.Sprintf("vm %q not found", vmID)))
+		return
+	}
+
+	if strings.TrimSpace(r.Header.Get("Last-Event-ID")) != "" || strings.TrimSpace(r.URL.Query().Get("since")) != "" {
+		writeErrorCode(w, http.StatusBadRequest, "metrics_replay_not_supported",
+			"metrics SSE replay is not supported; fetch GET /api/v1/vms/{id}/stats for history, then reconnect without Last-Event-ID or since")
 		return
 	}
 
