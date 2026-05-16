@@ -848,6 +848,61 @@ async function main() {
 
     await page.close();
 
+    // ================== Settings: Webhook tags (2.2.15) ===================
+    // Mirror the Playwright suite — same flow exercised against a JSDOM
+    // page so we can run without a browser binary. Same surface as
+    // description (2.2.14) but for the tag list.
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+
+    await runTest("create webhook with tags, edit, and clear", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      await p.locator('[data-testid="add-webhook-btn"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="webhook-url-input"]').fill("https://example.com/tags");
+      await p.locator('[data-testid="webhook-secret-input"]').fill("k");
+      // Mixed-case + duplicate — exercising server-side normalisation.
+      await p.locator('[data-testid="webhook-tags-input"]').fill("Production, audit, production");
+      await p.locator('[data-testid="webhook-create-submit"]').click();
+      await p.waitForTimeout(600);
+
+      const row = p.locator('[data-testid^="webhook-row-"]').first();
+      await row.waitFor({ state: "visible", timeout: 5000 });
+      const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+      const tagBox = p.locator(`[data-testid="webhook-tags-${rowID}"]`);
+      await tagBox.waitFor({ state: "visible", timeout: 3000 });
+      const tagText = (await tagBox.textContent()) || "";
+      await assert(/audit/.test(tagText), "row should render audit tag chip");
+      await assert(/production/.test(tagText), "row should render production tag chip");
+
+      // Edit: replace the tag list.
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      const tagInput = p.locator('[data-testid="edit-webhook-tags-input"]');
+      await tagInput.fill("staging");
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+      const tagText2 = (await tagBox.textContent()) || "";
+      await assert(/staging/.test(tagText2), "row should reflect updated tag list");
+      await assert(!/audit/.test(tagText2), "audit chip should be removed after edit");
+
+      // Clear all tags.
+      await p.locator(`[data-testid="webhook-edit-${rowID}"]`).click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="edit-webhook-tags-input"]').fill("");
+      await p.locator('[data-testid="edit-webhook-submit"]').click();
+      await p.waitForTimeout(700);
+      await assert(
+        (await tagBox.count()) === 0,
+        "tag chips should disappear after clearing",
+      );
+    }, page);
+
+    await page.close();
+
     // ================== Settings: Webhooks free-text search ==================
     // Symmetric search surface alongside VMs (2.2.13), images (5.4.9),
     // events (4.2.20), snapshots (5.4.10), port forwards (5.4.11),

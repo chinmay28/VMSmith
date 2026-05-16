@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -800,6 +801,172 @@ func TestUpdateWebhook_DescriptionNoOpDoesNotBounceWorker(t *testing.T) {
 	}
 }
 
+func TestCreateWebhook_WithTags(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	body := jsonBody(t, types.WebhookCreateRequest{
+		URL:    "https://example.com/hook",
+		Secret: "topsecret",
+		// Intentionally mixed-case, duplicated, and whitespace-padded — the
+		// API must normalise + dedupe + sort + lowercase.
+		Tags: []string{" Production ", "audit", "production"},
+	})
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 201; body=%s", resp.StatusCode, b)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if !reflect.DeepEqual(got.Tags, []string{"audit", "production"}) {
+		t.Fatalf("tags not normalised: %#v", got.Tags)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks[got.ID].Tags
+	fake.mu.Unlock()
+	if !reflect.DeepEqual(persisted, []string{"audit", "production"}) {
+		t.Fatalf("persisted tags: %#v", persisted)
+	}
+}
+
+func TestCreateWebhook_RejectsInvalidTagCharacters(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json",
+		jsonBody(t, types.WebhookCreateRequest{
+			URL: "https://example.com/x", Secret: "k",
+			Tags: []string{"has spaces"},
+		}))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+}
+
+func TestCreateWebhook_RejectsEmptyTag(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json",
+		jsonBody(t, types.WebhookCreateRequest{
+			URL: "https://example.com/x", Secret: "k",
+			Tags: []string{"valid", "   "},
+		}))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdateWebhook_SetsTags(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-t1", URL: "https://x", Secret: "k", Active: true})
+
+	tags := []string{"Audit", "  Production  "}
+	resp := patchWebhook(t, ts.URL, "wh-t1", types.WebhookUpdateSpec{Tags: &tags})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if !reflect.DeepEqual(got.Tags, []string{"audit", "production"}) {
+		t.Fatalf("tags not normalised/persisted: %#v", got.Tags)
+	}
+}
+
+func TestUpdateWebhook_ClearsTags(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-t2", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"audit", "production"},
+	})
+
+	empty := []string{}
+	resp := patchWebhook(t, ts.URL, "wh-t2", types.WebhookUpdateSpec{Tags: &empty})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got types.Webhook
+	decodeJSON(t, resp, &got)
+	if len(got.Tags) != 0 {
+		t.Fatalf("expected cleared tags, got %#v", got.Tags)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-t2"].Tags
+	fake.mu.Unlock()
+	if len(persisted) != 0 {
+		t.Fatalf("persisted tags should be empty/nil, got %#v", persisted)
+	}
+}
+
+func TestUpdateWebhook_OmittedTagsIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-t3", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"keep", "me"},
+	})
+	// Patch a different field; the tags must survive untouched.
+	resp := patchWebhook(t, ts.URL, "wh-t3", types.WebhookUpdateSpec{
+		Active: ptrBool(false),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	persisted := fake.hooks["wh-t3"].Tags
+	fake.mu.Unlock()
+	if !reflect.DeepEqual(persisted, []string{"keep", "me"}) {
+		t.Fatalf("tags should be unchanged, got %#v", persisted)
+	}
+}
+
+func TestUpdateWebhook_TagsNoOpDoesNotBounceWorker(t *testing.T) {
+	// Setting tags to a permutation of their current value must not bounce
+	// the worker — tags are normalised on persistence so the PATCH path
+	// detects equivalence after normalisation.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-t4", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"audit", "production"},
+	})
+
+	permutation := []string{"PRODUCTION", "audit"}
+	resp := patchWebhook(t, ts.URL, "wh-t4", types.WebhookUpdateSpec{Tags: &permutation})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.unregistered) != 0 {
+		t.Fatalf("manager.Unregister called for tags no-op: %v", fake.unregistered)
+	}
+}
+
+func TestUpdateWebhook_RejectsInvalidTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{ID: "wh-t5", URL: "https://x", Secret: "k", Active: true})
+
+	bad := []string{"has spaces"}
+	resp := patchWebhook(t, ts.URL, "wh-t5", types.WebhookUpdateSpec{Tags: &bad})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestUpdateWebhook_ReactivatesStoppedWorker(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()
@@ -961,6 +1128,118 @@ func TestListWebhooks_FilterBySearch_MatchesDescription(t *testing.T) {
 	hooks = listWebhooksWithQuery(t, ts.URL, "search=ALERTMANAGER")
 	if len(hooks) != 1 || hooks[0].ID != "wh-metrics" {
 		t.Fatalf("expected case-insensitive description match, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+	// Add a tag to wh-metrics so the predicate has something to hit.
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-tagged", URL: "https://example.com/t", Secret: "k", Active: true,
+		Tags: []string{"production"},
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "search=production")
+	if len(hooks) != 1 || hooks[0].ID != "wh-tagged" {
+		t.Fatalf("expected only wh-tagged via tag search, got %v", hooks)
+	}
+	// Case-insensitive needle hits a lowercase-normalised tag.
+	hooks = listWebhooksWithQuery(t, ts.URL, "search=PROD")
+	if len(hooks) != 1 || hooks[0].ID != "wh-tagged" {
+		t.Fatalf("expected case-insensitive partial tag match, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-tag1", URL: "https://a", Secret: "k", Active: true,
+		Tags: []string{"production", "audit"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-tag2", URL: "https://b", Secret: "k", Active: true,
+		Tags: []string{"production"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-tag3", URL: "https://c", Secret: "k", Active: true,
+		Tags: []string{"staging"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-tag4", URL: "https://d", Secret: "k", Active: true,
+		// No tags at all — must not appear in tag-filtered results.
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=production")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 production webhooks, got %d: %+v", len(hooks), hooks)
+	}
+	for _, h := range hooks {
+		if h.ID != "wh-tag1" && h.ID != "wh-tag2" {
+			t.Fatalf("unexpected webhook in production set: %s", h.ID)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByTag_CaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-ci", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"production"},
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=PRODUCTION")
+	if len(hooks) != 1 || hooks[0].ID != "wh-ci" {
+		t.Fatalf("expected case-insensitive tag match, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByTag_TrimsWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-trim", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"audit"},
+	})
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=%20%20audit%20%20")
+	if len(hooks) != 1 || hooks[0].ID != "wh-trim" {
+		t.Fatalf("expected whitespace-trimmed tag filter to match, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByTag_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-x", URL: "https://x", Secret: "k", Active: true,
+		Tags: []string{"audit"},
+	})
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=nonexistent")
+	if len(hooks) != 0 {
+		t.Fatalf("expected empty result, got %d hooks", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByTag_ComposesWithSearch(t *testing.T) {
+	// `?tag=` and `?search=` compose additively (AND) — only a webhook that
+	// passes both filters appears in the response.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-a", URL: "https://hooks.example.com/audit", Secret: "k", Active: true,
+		Tags: []string{"audit", "production"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-b", URL: "https://hooks.example.com/audit", Secret: "k", Active: true,
+		Tags: []string{"staging"},
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=production&search=audit")
+	if len(hooks) != 1 || hooks[0].ID != "wh-a" {
+		t.Fatalf("expected only wh-a (audit URL + production tag), got %v", hooks)
 	}
 }
 

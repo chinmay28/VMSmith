@@ -1623,6 +1623,85 @@ test.describe("Settings — Webhooks", () => {
     await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("b.example.com");
   });
 
+  test("create webhook with tags renders chips in the row", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/tags");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    // Mixed-case + whitespace + duplicate — must be normalised + deduped
+    // before they reach the row chips.
+    await page.getByTestId("webhook-tags-input").fill(" Production , audit, production ");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+    const chipBox = page.getByTestId(`webhook-tags-${rowID}`);
+    await expect(chipBox).toBeVisible();
+    // Normalisation: lowercased, deduplicated, alphabetised.
+    await expect(chipBox).toHaveText(/audit/);
+    await expect(chipBox).toHaveText(/production/);
+  });
+
+  test("edit webhook tags and clear them via empty input", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("add-webhook-btn").click();
+    await page.getByTestId("webhook-url-input").fill("https://example.com/tag-edit");
+    await page.getByTestId("webhook-secret-input").fill("k");
+    await page.getByTestId("webhook-tags-input").fill("staging");
+    await page.getByTestId("webhook-create-submit").click();
+
+    const row = page.locator('[data-testid^="webhook-row-"]').first();
+    await expect(row).toBeVisible();
+    const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
+
+    // Edit: replace the tags.
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await expect(page.getByTestId("edit-webhook-form")).toBeVisible();
+    await expect(page.getByTestId("edit-webhook-tags-input")).toHaveValue("staging");
+    await page.getByTestId("edit-webhook-tags-input").fill("production, audit");
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    const chipBox = page.getByTestId(`webhook-tags-${rowID}`);
+    await expect(chipBox).toHaveText(/audit/);
+    await expect(chipBox).toHaveText(/production/);
+    await expect(chipBox).not.toHaveText(/staging/);
+
+    // Edit again: clear the tags.
+    await page.getByTestId(`webhook-edit-${rowID}`).click();
+    await page.getByTestId("edit-webhook-tags-input").fill("");
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+    await expect(page.getByTestId(`webhook-tags-${rowID}`)).toHaveCount(0);
+  });
+
+  test("search input matches webhook tags", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    const seed = async (url, tagsCsv) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (tagsCsv) await page.getByTestId("webhook-tags-input").fill(tagsCsv);
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://a.example.com/x", "production");
+    await seed("https://b.example.com/x", "staging");
+    await seed("https://c.example.com/x", "");
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // "staging" only appears as a tag on webhook #2.
+    await page.getByTestId("webhook-list-search").fill("staging");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("b.example.com");
+  });
+
   test("edit webhook can clear event-type filter to subscribe-all", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-settings").click();

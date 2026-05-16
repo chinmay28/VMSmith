@@ -1165,18 +1165,28 @@ paths:
       summary: List registered webhooks (secrets redacted)
       parameters:
         - in: query
+          name: tag
+          schema:
+            type: string
+          required: false
+          description: |
+            Case-insensitive exact-match filter on the webhook tag list
+            (a webhook matches when any of its tags equals the value).
+            Whitespace-trimmed. Applied before the search filter so the
+            response reflects the intersection of tag + search.
+        - in: query
           name: search
           schema:
             type: string
           required: false
           description: |
             Case-insensitive substring filter applied across each webhook's
-            URL, description, and event-type filters. Whitespace is trimmed
-            before matching. Secret, ID, and last_error are intentionally
-            excluded from the haystack — secrets must never appear in
-            response bodies, IDs are opaque `wh-<unix-nano>` strings, and
-            last_error is operator-noise surfaced via `last_status` /
-            status badges instead.
+            URL, description, event-type filters, and tags. Whitespace is
+            trimmed before matching. Secret, ID, and last_error are
+            intentionally excluded from the haystack — secrets must never
+            appear in response bodies, IDs are opaque `wh-<unix-nano>`
+            strings, and last_error is operator-noise surfaced via
+            `last_status` / status badges instead.
         - in: query
           name: sort
           required: false
@@ -2420,6 +2430,16 @@ components:
             Free-form operator label ("Slack notifier for VM crashes",
             "PagerDuty escalations"). Surfaced in the GUI and CLI listings;
             included in the case-insensitive `search` haystack.
+        tags:
+          type: array
+          items:
+            type: string
+          description: >
+            Free-form lowercase tag list for organising webhooks by team or
+            purpose ("production", "audit", "slack"). Normalised on
+            persistence (trimmed, lowercased, deduplicated, alphabetised);
+            included in the case-insensitive `search` haystack and supports
+            exact-match filtering via the `?tag=` query parameter.
         active:
           type: boolean
         created_at:
@@ -2453,6 +2473,15 @@ components:
           description: >
             Free-form operator label. Trimmed before persistence; capped at
             1024 characters. Optional.
+        tags:
+          type: array
+          items:
+            type: string
+          description: >
+            Free-form tag list. Normalised on persistence (trimmed,
+            lowercased, deduplicated, alphabetised). Each tag must be 1-32
+            characters of lowercase letters, numbers, dots, colons,
+            underscores, or hyphens. Optional.
     WebhookUpdateSpec:
       type: object
       description: >
@@ -2484,6 +2513,15 @@ components:
           description: >
             Replace the free-form description. Omit the key to leave it
             unchanged; pass the empty string to clear it.
+        tags:
+          type: array
+          items:
+            type: string
+          description: >
+            Replace the tag list. Omit the key to leave the current list
+            unchanged; pass `[]` to clear all tags. Tags are normalised
+            (trimmed, lowercased, deduplicated, alphabetised) before
+            persistence.
     WebhookTestResult:
       type: object
       required: [success, duration_ms, attempted_at]

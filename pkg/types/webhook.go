@@ -14,6 +14,7 @@ type Webhook struct {
 	Secret      string    `json:"secret,omitempty"`
 	EventTypes  []string  `json:"event_types,omitempty"`
 	Description string    `json:"description,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
 
@@ -35,6 +36,7 @@ type WebhookCreateRequest struct {
 	Secret      string   `json:"secret"`
 	EventTypes  []string `json:"event_types,omitempty"`
 	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // WebhookUpdateSpec is the JSON body accepted by PATCH /api/v1/webhooks/{id}.
@@ -53,6 +55,9 @@ type WebhookCreateRequest struct {
 //     toggling true (re-)starts it.
 //   - Description: nil = no change.  Empty string clears the description.
 //     Trimmed before persistence; capped at 1024 characters.
+//   - Tags: nil = no change.  Explicit empty slice ([]) clears the tag list.
+//     Tags are normalised (lowercase, trimmed, deduplicated, alphabetised)
+//     before persistence.
 //
 // At least one of these must be present; an empty body returns 400 noop_update.
 type WebhookUpdateSpec struct {
@@ -61,6 +66,7 @@ type WebhookUpdateSpec struct {
 	EventTypes  *[]string `json:"event_types,omitempty"`
 	Active      *bool     `json:"active,omitempty"`
 	Description *string   `json:"description,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
 }
 
 // WebhookTestResult is the response from POST /api/v1/webhooks/{id}/test.

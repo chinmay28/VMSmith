@@ -4114,3 +4114,123 @@ func TestCLI_WebhookList_EmptySortAndOrderOmitParams(t *testing.T) {
 		t.Fatalf("empty order must not be forwarded: %q", state.lastQuery)
 	}
 }
+
+// =====================================================
+// webhook tags (2.2.15) CLI tests
+// =====================================================
+
+func TestCLI_WebhookAdd_WithTags(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusCreated,
+		`{"id":"wh-tagged","url":"https://x","active":true,"tags":["audit","production"],"created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "add", "--api-url", srv.URL, "--url", "https://x",
+		"--secret", "k", "--tag", "production", "--tag", "audit")
+	if err != nil {
+		t.Fatalf("webhook add: %v", err)
+	}
+	var sent types.WebhookCreateRequest
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	// Cobra preserves command-line order; validation/normalisation happens
+	// server-side. The CLI just forwards the raw list.
+	if len(sent.Tags) != 2 {
+		t.Errorf("expected 2 tags forwarded, got %v", sent.Tags)
+	}
+	if !strings.Contains(out, "Tags:") {
+		t.Errorf("expected Tags: line in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_SetsTags(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-t","url":"https://x","active":true,"tags":["audit","production"],"created_at":"2024-01-01T00:00:00Z"}`)
+
+	out, err := runCLI("webhook", "edit", "wh-t", "--api-url", srv.URL,
+		"--tag", "production", "--tag", "audit")
+	if err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if sent.Tags == nil {
+		t.Fatalf("Tags pointer should be set, got nil")
+	}
+	if len(*sent.Tags) != 2 {
+		t.Errorf("expected 2 tags forwarded, got %v", *sent.Tags)
+	}
+	if !strings.Contains(out, "Tags:") {
+		t.Errorf("expected Tags: line in output: %s", out)
+	}
+}
+
+func TestCLI_WebhookEdit_ClearsTags(t *testing.T) {
+	srv, state := newFakeWebhookDaemon(t, http.StatusOK,
+		`{"id":"wh-t","url":"https://x","active":true,"created_at":"2024-01-01T00:00:00Z"}`)
+
+	if _, err := runCLI("webhook", "edit", "wh-t", "--api-url", srv.URL, "--clear-tags"); err != nil {
+		t.Fatalf("webhook edit: %v", err)
+	}
+	var sent types.WebhookUpdateSpec
+	if err := json.Unmarshal(state.lastBody, &sent); err != nil {
+		t.Fatalf("decoding body: %v", err)
+	}
+	if sent.Tags == nil || len(*sent.Tags) != 0 {
+		t.Errorf("expected Tags to be empty slice for clear, got %+v", sent.Tags)
+	}
+}
+
+func TestCLI_WebhookEdit_RejectsConflictingTagFlags(t *testing.T) {
+	// --tag and --clear-tags are mutually exclusive; the CLI rejects before
+	// reaching the daemon.
+	_, err := runCLI("webhook", "edit", "wh-t", "--api-url", "http://invalid",
+		"--tag", "production", "--clear-tags")
+	if err == nil {
+		t.Fatal("expected error for conflicting --tag + --clear-tags")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want 'mutually exclusive'", err)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsTagFilter(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--tag", "  Production  "); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "tag=production") {
+		t.Fatalf("expected normalized 'tag=production' in query, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_EmptyTagOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--tag", ""); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "tag=") {
+		t.Fatalf("empty tag must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ShowsTagsColumn(t *testing.T) {
+	// The webhook list table now includes a TAGS column. Make sure a webhook
+	// with tags renders them in the row.
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK,
+		`[{"id":"wh-1","url":"https://x","active":true,"tags":["audit","production"],"created_at":"2024-01-01T00:00:00Z"}]`)
+
+	out, err := runCLI("webhook", "list", "--api-url", srv.URL)
+	if err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(out, "TAGS") {
+		t.Errorf("expected TAGS header in output: %s", out)
+	}
+	if !strings.Contains(out, "audit,production") {
+		t.Errorf("expected joined tags in row: %s", out)
+	}
+}

@@ -1932,13 +1932,20 @@ export interface paths {
             parameters: {
                 query?: {
                     /**
+                     * @description Case-insensitive exact-match filter on the webhook tag list
+                     *     (a webhook matches when any of its tags equals the value).
+                     *     Whitespace-trimmed. Applied before the search filter so the
+                     *     response reflects the intersection of tag + search.
+                     */
+                    tag?: string;
+                    /**
                      * @description Case-insensitive substring filter applied across each webhook's
-                     *     URL, description, and event-type filters. Whitespace is trimmed
-                     *     before matching. Secret, ID, and last_error are intentionally
-                     *     excluded from the haystack — secrets must never appear in
-                     *     response bodies, IDs are opaque `wh-<unix-nano>` strings, and
-                     *     last_error is operator-noise surfaced via `last_status` /
-                     *     status badges instead.
+                     *     URL, description, event-type filters, and tags. Whitespace is
+                     *     trimmed before matching. Secret, ID, and last_error are
+                     *     intentionally excluded from the haystack — secrets must never
+                     *     appear in response bodies, IDs are opaque `wh-<unix-nano>`
+                     *     strings, and last_error is operator-noise surfaced via
+                     *     `last_status` / status badges instead.
                      */
                     search?: string;
                     /**
@@ -2779,6 +2786,8 @@ export interface components {
             event_types?: string[];
             /** @description Free-form operator label ("Slack notifier for VM crashes", "PagerDuty escalations"). Surfaced in the GUI and CLI listings; included in the case-insensitive `search` haystack. */
             description?: string;
+            /** @description Free-form lowercase tag list for organising webhooks by team or purpose ("production", "audit", "slack"). Normalised on persistence (trimmed, lowercased, deduplicated, alphabetised); included in the case-insensitive `search` haystack and supports exact-match filtering via the `?tag=` query parameter. */
+            tags?: string[];
             active: boolean;
             /** Format: date-time */
             created_at: string;
@@ -2796,6 +2805,8 @@ export interface components {
             event_types?: string[];
             /** @description Free-form operator label. Trimmed before persistence; capped at 1024 characters. Optional. */
             description?: string;
+            /** @description Free-form tag list. Normalised on persistence (trimmed, lowercased, deduplicated, alphabetised). Each tag must be 1-32 characters of lowercase letters, numbers, dots, colons, underscores, or hyphens. Optional. */
+            tags?: string[];
         };
         /** @description Partial-update payload for `PATCH /webhooks/{id}`.  All fields are optional; omit a key to leave the corresponding field unchanged. `event_types: []` clears the filter so the webhook matches every event; `event_types` omitted leaves the current list intact. */
         WebhookUpdateSpec: {
@@ -2812,6 +2823,8 @@ export interface components {
             active?: boolean;
             /** @description Replace the free-form description. Omit the key to leave it unchanged; pass the empty string to clear it. */
             description?: string;
+            /** @description Replace the tag list. Omit the key to leave the current list unchanged; pass `[]` to clear all tags. Tags are normalised (trimmed, lowercased, deduplicated, alphabetised) before persistence. */
+            tags?: string[];
         };
         WebhookTestResult: {
             /** @description True iff the receiver returned a 2xx HTTP status. */

@@ -206,6 +206,30 @@ func validateWebhookDescription(description string) error {
 	return nil
 }
 
+// validateWebhookTags normalises (lowercase, trim, dedupe, alphabetise) the
+// caller-supplied tag list using the shared validator. Returns the
+// normalised slice on success, or an APIError with code `invalid_webhook` on
+// any rule violation (empty value, length > 32 chars, illegal characters).
+//
+// Nil / empty input round-trips as nil so the persisted record omits the
+// `tags` field entirely; this matters because every other persisted webhook
+// pre-dating 2.2.15 has `Tags == nil` and the search/filter predicates treat
+// an absent tag list as "no tags" rather than "the empty string".
+func validateWebhookTags(tags []string) ([]string, error) {
+	normalised, err := normalizeTags(tags)
+	if err != nil {
+		// Re-wrap with the webhook-scoped error code so the API surface stays
+		// consistent with validateWebhookDescription. The validator returns a
+		// generic `invalid_spec` for cross-resource use; webhook callers see
+		// `invalid_webhook`.
+		if apiErr, ok := err.(*types.APIError); ok {
+			return nil, types.NewAPIError("invalid_webhook", apiErr.Message)
+		}
+		return nil, err
+	}
+	return normalised, nil
+}
+
 func validateUploadedImage(filename string, data []byte) error {
 	trimmedName := strings.TrimSpace(filename)
 	if trimmedName == "" {
@@ -234,7 +258,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_sort", "invalid_order", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_sort", "invalid_order", "invalid_webhook", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503
