@@ -4234,3 +4234,161 @@ func TestCLI_WebhookList_ShowsTagsColumn(t *testing.T) {
 		t.Errorf("expected joined tags in row: %s", out)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// vmsmith webhook test <id> — CLI parallel of POST /webhooks/{id}/test.
+//
+// Each test seeds an httptest.Server that returns a canned WebhookTestResult
+// (or a non-200 error envelope) and asserts that runCLI:
+//   - sends POST to the correct path
+//   - forwards Authorization / api-url
+//   - prints a human verdict by default and the raw JSON under --json
+//   - exits non-zero when the receiver returned !success (so the command
+//     composes with shell pipelines)
+// ---------------------------------------------------------------------------
+
+// fakeWebhookTestDaemon captures the most recent POST to
+// /api/v1/webhooks/{id}/test and returns canned bodies.
+type fakeWebhookTestDaemon struct {
+	lastMethod string
+	lastPath   string
+	lastAuth   string
+	status     int
+	respBody   string
+}
+
+func newFakeWebhookTestDaemon(t *testing.T, status int, body string) (*httptest.Server, *fakeWebhookTestDaemon) {
+	t.Helper()
+	state := &fakeWebhookTestDaemon{status: status, respBody: body}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state.lastMethod = r.Method
+		state.lastPath = r.URL.Path
+		state.lastAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(state.status)
+		_, _ = io.WriteString(w, state.respBody)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, state
+}
+
+func TestCLI_WebhookTest_Success(t *testing.T) {
+	srv, state := newFakeWebhookTestDaemon(t, http.StatusOK, `{
+		"success": true,
+		"status_code": 204,
+		"duration_ms": 42,
+		"attempted_at": "2026-05-16T00:00:00Z",
+		"event_id": "wh-test-1"
+	}`)
+
+	out, err := runCLI("webhook", "test", "wh-ok", "--api-url", srv.URL)
+	if err != nil {
+		t.Fatalf("webhook test: %v\nout: %s", err, out)
+	}
+	if state.lastMethod != http.MethodPost {
+		t.Fatalf("expected POST, got %s", state.lastMethod)
+	}
+	if state.lastPath != "/api/v1/webhooks/wh-ok/test" {
+		t.Fatalf("path = %q, want /api/v1/webhooks/wh-ok/test", state.lastPath)
+	}
+	for _, want := range []string{"OK", "wh-ok", "204", "42 ms", "wh-test-1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestCLI_WebhookTest_FailureExitsNonZero(t *testing.T) {
+	// Daemon returns HTTP 200 with success=false — receiver responded with
+	// 500 or signature rejection. The command must surface the failure and
+	// exit non-zero so it composes with shell || pipelines.
+	srv, _ := newFakeWebhookTestDaemon(t, http.StatusOK, `{
+		"success": false,
+		"status_code": 500,
+		"duration_ms": 31,
+		"attempted_at": "2026-05-16T00:00:00Z",
+		"error": "receiver returned 500"
+	}`)
+
+	out, err := runCLI("webhook", "test", "wh-bad", "--api-url", srv.URL)
+	if err == nil {
+		t.Fatalf("expected non-nil err when delivery failed; out=%s", out)
+	}
+	if !strings.Contains(err.Error(), "test delivery failed") {
+		t.Errorf("err = %q, want 'test delivery failed' substring", err.Error())
+	}
+	for _, want := range []string{"FAIL", "wh-bad", "500", "receiver returned 500"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestCLI_WebhookTest_JSONFlagEmitsRaw(t *testing.T) {
+	canned := `{"success":true,"status_code":200,"duration_ms":12,"attempted_at":"2026-05-16T00:00:00Z","event_id":"e-1"}`
+	srv, _ := newFakeWebhookTestDaemon(t, http.StatusOK, canned)
+
+	out, err := runCLI("webhook", "test", "wh-ok", "--api-url", srv.URL, "--json")
+	if err != nil {
+		t.Fatalf("webhook test: %v\nout: %s", err, out)
+	}
+	if !strings.Contains(out, canned) {
+		t.Errorf("--json output should include raw body verbatim. got=%s want substring=%s", out, canned)
+	}
+	// Human table headers must not appear when --json is set.
+	if strings.Contains(out, "Duration:") || strings.Contains(out, "Status:") {
+		t.Errorf("--json output should suppress the human table: %s", out)
+	}
+}
+
+func TestCLI_WebhookTest_ForwardsAuthHeader(t *testing.T) {
+	srv, state := newFakeWebhookTestDaemon(t, http.StatusOK,
+		`{"success":true,"status_code":204,"duration_ms":5,"attempted_at":"2026-05-16T00:00:00Z"}`)
+
+	if _, err := runCLI("webhook", "test", "wh-1", "--api-url", srv.URL, "--api-key", "secret-token"); err != nil {
+		t.Fatalf("webhook test: %v", err)
+	}
+	if state.lastAuth != "Bearer secret-token" {
+		t.Errorf("Authorization header = %q, want %q", state.lastAuth, "Bearer secret-token")
+	}
+}
+
+func TestCLI_WebhookTest_NotFoundPropagatesDaemonError(t *testing.T) {
+	// 404 from daemon (unknown webhook id) must surface as a daemon error
+	// rather than a silent success.
+	srv, _ := newFakeWebhookTestDaemon(t, http.StatusNotFound,
+		`{"error":{"code":"resource_not_found","message":"webhook not found"}}`)
+
+	out, err := runCLI("webhook", "test", "wh-missing", "--api-url", srv.URL)
+	if err == nil {
+		t.Fatalf("expected error for 404; out=%s", out)
+	}
+	if !strings.Contains(err.Error(), "HTTP 404") {
+		t.Errorf("err = %q, want HTTP 404 in message", err.Error())
+	}
+}
+
+func TestCLI_WebhookTest_ServiceUnavailablePropagates(t *testing.T) {
+	// 503 webhook_test_unavailable — daemon was built without the runtime
+	// tester wired. The CLI should surface the daemon's message instead
+	// of pretending success.
+	srv, _ := newFakeWebhookTestDaemon(t, http.StatusServiceUnavailable,
+		`{"error":{"code":"webhook_test_unavailable","message":"webhook test deliveries are not enabled"}}`)
+
+	_, err := runCLI("webhook", "test", "wh-any", "--api-url", srv.URL)
+	if err == nil {
+		t.Fatalf("expected error for 503")
+	}
+	if !strings.Contains(err.Error(), "HTTP 503") {
+		t.Errorf("err = %q, want HTTP 503 in message", err.Error())
+	}
+}
+
+func TestCLI_WebhookTest_RequiresID(t *testing.T) {
+	// cobra.ExactArgs(1) means missing positional id is rejected before any
+	// HTTP call is made.
+	_, err := runCLI("webhook", "test", "--api-url", "http://127.0.0.1:1")
+	if err == nil {
+		t.Fatalf("expected error when id is missing")
+	}
+}

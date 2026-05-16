@@ -362,6 +362,122 @@ Field semantics:
 	},
 }
 
+// webhookTestCmd hits POST /api/v1/webhooks/{id}/test so the daemon
+// synthesises a `system.webhook_test` event and delivers it once (no
+// retries) to the registered receiver.  Mirrors the per-row Test button
+// on the Settings page so operators can verify connectivity, HMAC
+// signing, and receiver health from a shell or cron job — without
+// needing to open the GUI.
+//
+// Exit codes:
+//   - 0  delivery succeeded (HTTP 2xx from receiver)
+//   - 1  delivery failed (HTTP non-2xx, network error, signature
+//     rejection, 503 webhook_test_unavailable, or 404 unknown id)
+//
+// The non-zero exit on delivery failure lets the command be used in a
+// CI / monitoring loop ("is this Slack webhook still reachable?")
+// without parsing stdout.
+var webhookTestCmd = &cobra.Command{
+	Use:   "test <id>",
+	Short: "Send a synthetic test event to a registered webhook",
+	Long: `Send a synthetic 'system.webhook_test' event to the receiver registered
+under <id>.  The daemon delivers the event exactly once (no retries),
+records the outcome in the webhook's persisted last_delivery_at /
+last_status / last_error fields, and returns the result.
+
+This is the CLI parallel of the per-row 'Test' button on the Settings
+page — useful from a shell or scheduled monitor to confirm that an
+external receiver (Slack, PagerDuty, …) is still reachable, that its
+HMAC verification still accepts the configured secret, and that it
+returns a 2xx within the daemon's delivery timeout.
+
+The command exits non-zero when delivery fails so it composes with
+shell pipelines:
+
+    vmsmith webhook test wh-1234 || alert-oncall "Slack webhook down"
+
+Use --json to emit the raw WebhookTestResult instead of the table
+view (useful for scripting).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := strings.TrimSpace(args[0])
+		if id == "" {
+			return fmt.Errorf("webhook id is required")
+		}
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		asJSON, _ := cmd.Flags().GetBool("json")
+
+		resolved := resolveAPIURL(apiURL)
+		req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost,
+			resolved+"/api/v1/webhooks/"+url.PathEscape(id)+"/test", nil)
+		if err != nil {
+			return err
+		}
+		if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		client := &http.Client{Timeout: 60 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("connecting to daemon: %w", err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("daemon rejected test (HTTP %d): %s",
+				resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		if asJSON {
+			fmt.Println(strings.TrimSpace(string(body)))
+		}
+
+		var result types.WebhookTestResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("decoding webhook test response: %w", err)
+		}
+
+		if !asJSON {
+			printWebhookTestResult(id, result)
+		}
+
+		if !result.Success {
+			return fmt.Errorf("test delivery failed")
+		}
+		return nil
+	},
+}
+
+// printWebhookTestResult renders WebhookTestResult as a small human
+// table.  Mirrors the GUI's DeliveryStatus chip shape (status code on
+// success, short error on failure) so operators see the same verdict
+// in both surfaces.
+func printWebhookTestResult(id string, r types.WebhookTestResult) {
+	if r.Success {
+		fmt.Printf("OK    %s\n", id)
+	} else {
+		fmt.Printf("FAIL  %s\n", id)
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if r.StatusCode != 0 {
+		fmt.Fprintf(tw, "  Status:\t%d\n", r.StatusCode)
+	}
+	fmt.Fprintf(tw, "  Duration:\t%d ms\n", r.DurationMs)
+	if !r.AttemptedAt.IsZero() {
+		fmt.Fprintf(tw, "  Attempted:\t%s\n", r.AttemptedAt.Format(time.RFC3339))
+	}
+	if r.EventID != "" {
+		fmt.Fprintf(tw, "  Event:\t%s\n", r.EventID)
+	}
+	if r.Error != "" {
+		fmt.Fprintf(tw, "  Error:\t%s\n", r.Error)
+	}
+	_ = tw.Flush()
+}
+
 var webhookDeleteCmd = &cobra.Command{
 	Use:   "delete [id]",
 	Short: "Delete a registered webhook (or many via --event-type)",
@@ -515,12 +631,15 @@ func init() {
 	webhookDeleteCmd.Flags().String("event-type", "",
 		"delete every webhook whose event_types filter contains this exact event type (mutually exclusive with <id>)")
 
-	for _, c := range []*cobra.Command{webhookAddCmd, webhookListCmd, webhookEditCmd, webhookDeleteCmd} {
+	webhookTestCmd.Flags().Bool("json", false, "emit the raw WebhookTestResult JSON instead of the table view")
+
+	for _, c := range []*cobra.Command{webhookAddCmd, webhookListCmd, webhookEditCmd, webhookDeleteCmd, webhookTestCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 	}
 	webhookCmd.AddCommand(webhookAddCmd)
 	webhookCmd.AddCommand(webhookListCmd)
 	webhookCmd.AddCommand(webhookEditCmd)
+	webhookCmd.AddCommand(webhookTestCmd)
 	webhookCmd.AddCommand(webhookDeleteCmd)
 }
