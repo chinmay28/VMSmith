@@ -35,6 +35,8 @@ export default function LogViewer() {
   const [sourceFilter, setSourceFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
+  const [vmIDInput, setVMIDInput] = useState(searchParams.get('vm_id') || '');
+  const [vmIDFilter, setVMIDFilter] = useState(searchParams.get('vm_id') || '');
   const sortFromUrl = searchParams.get('sort') || '';
   const orderFromUrl = searchParams.get('order') || '';
   const [sortField, setSortField] = useState(
@@ -62,6 +64,7 @@ export default function LogViewer() {
         page,
         perPage,
         source: sourceFilter,
+        vmId: vmIDFilter,
         search: searchFilter,
         sort: sortField,
         order: sortOrder,
@@ -75,7 +78,7 @@ export default function LogViewer() {
     } finally {
       setLoading(false);
     }
-  }, [levelFilter, page, perPage, sourceFilter, searchFilter, sortField, sortOrder, paused]);
+  }, [levelFilter, page, perPage, sourceFilter, vmIDFilter, searchFilter, sortField, sortOrder, paused]);
 
   // Initial load + polling every 3 seconds.
   useEffect(() => {
@@ -87,7 +90,7 @@ export default function LogViewer() {
 
   useEffect(() => {
     setPage(1);
-  }, [levelFilter, sourceFilter, searchFilter, sortField, sortOrder]);
+  }, [levelFilter, sourceFilter, vmIDFilter, searchFilter, sortField, sortOrder]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -99,6 +102,17 @@ export default function LogViewer() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  // Same debounce for the vm_id filter — the VM ID input is a precise
+  // exact-match field so leading/trailing whitespace is stripped before
+  // the daemon sees it.
+  useEffect(() => {
+    const trimmed = vmIDInput.trim();
+    const id = setTimeout(() => {
+      setVMIDFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [vmIDInput]);
+
   // Mirror committed search query in the URL so the filtered view is
   // shareable / bookmarkable / survives a refresh.
   useEffect(() => {
@@ -106,6 +120,12 @@ export default function LogViewer() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     setSearchParams(next, { replace: true });
   }, [searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (vmIDFilter) next.set('vm_id', vmIDFilter); else next.delete('vm_id');
+    setSearchParams(next, { replace: true });
+  }, [vmIDFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mirror sort field + order in the URL so the alternate view is
   // shareable / bookmarkable / survives a refresh.  Empty value means
@@ -256,6 +276,28 @@ export default function LogViewer() {
             </button>
           )}
         </div>
+        <div className="relative w-64">
+          <input
+            type="search"
+            value={vmIDInput}
+            onChange={(e) => setVMIDInput(e.target.value)}
+            placeholder="Filter by VM ID (exact match)"
+            className="input w-full pl-2.5 pr-8 py-1.5 text-sm font-mono"
+            data-testid="log-vm-id-filter"
+            aria-label="Filter logs by VM ID"
+          />
+          {vmIDInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setVMIDInput('')}
+              data-testid="log-vm-id-filter-clear"
+              aria-label="Clear VM ID filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Log table */}
@@ -270,9 +312,11 @@ export default function LogViewer() {
           <div className="flex justify-center py-20"><Spinner size={18} /></div>
         ) : filtered.length === 0 ? (
           <p className="text-center text-steel-500 py-20" data-testid="log-empty-state">
-            {searchFilter
-              ? `No log entries match "${searchFilter}".`
-              : 'No log entries yet.'}
+            {vmIDFilter
+              ? `No log entries for VM "${vmIDFilter}".`
+              : searchFilter
+                ? `No log entries match "${searchFilter}".`
+                : 'No log entries yet.'}
           </p>
         ) : (
           <table className="w-full border-collapse">

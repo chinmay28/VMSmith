@@ -104,3 +104,69 @@ func TestEntryMatchesSearch_EmptyFieldsHandledGracefully(t *testing.T) {
 		t.Fatal("expected unrelated needle to miss when no fields/source/level present")
 	}
 }
+
+func TestEntryMatchesVMID_EmptyTargetMatchesAll(t *testing.T) {
+	if !EntryMatchesVMID(Entry{}, "") {
+		t.Fatal("expected empty target to match zero entry")
+	}
+	if !EntryMatchesVMID(Entry{Fields: map[string]string{"vm_id": "vm-1"}}, "") {
+		t.Fatal("expected empty target to match populated entry")
+	}
+}
+
+func TestEntryMatchesVMID_ExactMatch(t *testing.T) {
+	e := Entry{Fields: map[string]string{"vm_id": "vm-1741234567890"}}
+	if !EntryMatchesVMID(e, "vm-1741234567890") {
+		t.Fatal("expected exact vm_id to match")
+	}
+	if EntryMatchesVMID(e, "vm-1741234567891") {
+		t.Fatal("expected different vm_id to miss")
+	}
+}
+
+func TestEntryMatchesVMID_PrefixDoesNotMatch(t *testing.T) {
+	// The exact-match contract prevents `vm-123` from accidentally swallowing
+	// `vm-12345`. This is a deliberate guard against substring confusion when
+	// VM IDs share leading digits.
+	e := Entry{Fields: map[string]string{"vm_id": "vm-12345"}}
+	if EntryMatchesVMID(e, "vm-123") {
+		t.Fatal("expected vm_id prefix to NOT match (exact-match contract)")
+	}
+}
+
+func TestEntryMatchesVMID_CaseSensitive(t *testing.T) {
+	// VM IDs are opaque `vm-<unix-nano>` strings — case-sensitive by
+	// construction. An operator typo should miss rather than silently match.
+	e := Entry{Fields: map[string]string{"vm_id": "vm-ABC123"}}
+	if EntryMatchesVMID(e, "vm-abc123") {
+		t.Fatal("expected case-sensitive miss")
+	}
+	if !EntryMatchesVMID(e, "vm-ABC123") {
+		t.Fatal("expected exact-case to match")
+	}
+}
+
+func TestEntryMatchesVMID_NilFieldsMissesNonEmptyTarget(t *testing.T) {
+	if EntryMatchesVMID(Entry{Message: "no fields"}, "vm-1") {
+		t.Fatal("expected nil fields with non-empty target to miss")
+	}
+}
+
+func TestEntryMatchesVMID_MissingVMIDFieldMisses(t *testing.T) {
+	e := Entry{Fields: map[string]string{"method": "POST"}}
+	if EntryMatchesVMID(e, "vm-1") {
+		t.Fatal("expected entry without vm_id field to miss")
+	}
+}
+
+func TestEntryMatchesVMID_OtherFieldsIgnored(t *testing.T) {
+	// Only the `vm_id` field counts — a vm-shaped value in some other key
+	// must not match. This is what separates this filter from `search`.
+	e := Entry{Fields: map[string]string{"resource_id": "vm-1", "vm_id": "vm-2"}}
+	if EntryMatchesVMID(e, "vm-1") {
+		t.Fatal("expected resource_id to be ignored")
+	}
+	if !EntryMatchesVMID(e, "vm-2") {
+		t.Fatal("expected vm_id to be the authoritative field")
+	}
+}

@@ -4787,6 +4787,159 @@ func TestGetLogs_FilterBySearch_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestGetLogs_FilterByVMID_ExactMatch(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "vm-filter scoped target", "vm_id", "vm-aaa")
+	logger.Info("daemon", "vm-filter scoped target", "vm_id", "vm-bbb")
+	logger.Info("daemon", "vm-filter unrelated noise")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=vm-aaa")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one matching entry")
+	}
+	for _, e := range result.Entries {
+		if e.Fields["vm_id"] != "vm-aaa" {
+			t.Errorf("entry vm_id = %q, want vm-aaa", e.Fields["vm_id"])
+		}
+	}
+}
+
+func TestGetLogs_FilterByVMID_WhitespaceTrimmed(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "vm-trim target", "vm_id", "vm-trim-1")
+
+	// Leading + trailing whitespace must be trimmed before exact-match comparison.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=%20vm-trim-1%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected whitespace-trimmed filter to match")
+	}
+	for _, e := range result.Entries {
+		if e.Fields["vm_id"] != "vm-trim-1" {
+			t.Errorf("entry vm_id = %q, want vm-trim-1", e.Fields["vm_id"])
+		}
+	}
+}
+
+func TestGetLogs_FilterByVMID_PrefixDoesNotMatch(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Exact-match contract — `vm-1` filter must NOT swallow `vm-12345`.
+	logger.Info("daemon", "longer vm id", "vm_id", "vm-12345")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=vm-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	for _, e := range result.Entries {
+		if e.Fields["vm_id"] == "vm-12345" {
+			t.Errorf("prefix filter vm-1 must not match vm-12345")
+		}
+	}
+}
+
+func TestGetLogs_FilterByVMID_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "tagged entry", "vm_id", "vm-real-id")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=vm-does-not-exist")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 0 {
+		t.Errorf("expected zero matches, got %d", len(result.Entries))
+	}
+}
+
+func TestGetLogs_FilterByVMID_ComposesWithSourceAndSearch(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "compose probe alpha", "vm_id", "vm-compose")
+	logger.Info("api", "compose probe alpha", "vm_id", "vm-compose")
+	logger.Info("daemon", "compose probe beta", "vm_id", "vm-compose")
+	logger.Info("daemon", "compose probe alpha", "vm_id", "vm-other")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&source=daemon&vm_id=vm-compose&search=alpha")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least one entry matching all three filters")
+	}
+	for _, e := range result.Entries {
+		if e.Source != "daemon" {
+			t.Errorf("entry source = %q, want daemon", e.Source)
+		}
+		if e.Fields["vm_id"] != "vm-compose" {
+			t.Errorf("entry vm_id = %q, want vm-compose", e.Fields["vm_id"])
+		}
+		if !strings.Contains(strings.ToLower(e.Message), "alpha") {
+			t.Errorf("entry message %q does not contain 'alpha'", e.Message)
+		}
+	}
+}
+
+func TestGetLogs_FilterByVMID_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "scoped one", "vm_id", "vm-scope-total")
+	logger.Info("daemon", "scoped two", "vm_id", "vm-scope-total")
+	logger.Info("daemon", "scoped three", "vm_id", "vm-other")
+	logger.Info("daemon", "untagged noise")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=vm-scope-total&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	total := resp.Header.Get("X-Total-Count")
+	if total != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (only the two scoped entries)", total)
+	}
+}
+
+func TestGetLogs_FilterByVMID_EmptyParamIsNoOp(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "noop-probe one", "vm_id", "vm-1")
+	logger.Info("daemon", "noop-probe two")
+
+	// Explicit empty vm_id should not filter anything out.
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&vm_id=&search=noop-probe")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) < 2 {
+		t.Errorf("expected both probe entries (got %d) — empty vm_id must not filter", len(result.Entries))
+	}
+}
+
 func TestGetLogs_SortDefaultIsTimestampAsc(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

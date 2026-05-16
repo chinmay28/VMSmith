@@ -23,6 +23,10 @@ type logsResponse struct {
 //	limit     – alias for per_page
 //	since     – RFC3339 timestamp; only return entries after this time
 //	source    – filter by source: cli | api | daemon (empty = all)
+//	vm_id     – exact-match filter against the entry's structured
+//	            `vm_id` field. Whitespace-trimmed; empty = no filter.
+//	            Composes additively with the other filters so
+//	            `X-Total-Count` reflects the post-filter population.
 //	search    – case-insensitive substring match over message, source,
 //	            level, and every value in the structured fields map.
 //	            Whitespace-trimmed; field *keys* are intentionally
@@ -58,6 +62,16 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		filtered := entries[:0]
 		for _, e := range entries {
 			if e.Source == src {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
+
+	if vmID := strings.TrimSpace(q.Get("vm_id")); vmID != "" {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if logger.EntryMatchesVMID(e, vmID) {
 				filtered = append(filtered, e)
 			}
 		}
