@@ -544,9 +544,9 @@ func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
 	v := seedTestVM(t, mockMgr, "vm-stream-replay", "stream-replay", types.VMStateRunning)
 
 	cases := []struct {
-		name        string
-		buildURL    func() string
-		addHeaders  func(*http.Request)
+		name       string
+		buildURL   func() string
+		addHeaders func(*http.Request)
 	}{
 		{
 			name:     "last-event-id header",
