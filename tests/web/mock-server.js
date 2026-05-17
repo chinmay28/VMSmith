@@ -598,7 +598,21 @@ const server = http.createServer(async (req, res) => {
       return order === "desc" ? -l : l;
     };
     list.sort(cmp);
-    return json(res, 200, list);
+    const total = list.length;
+    // Pagination — `per_page` (with `limit` as a synonym) and `page` mirror
+    // the API's parsePagination contract. Pagination is applied after filter
+    // + sort so X-Total-Count reflects the post-filter / pre-pagination
+    // population.
+    const perPageRaw = url.searchParams.get("per_page") || url.searchParams.get("limit") || "";
+    const pageRaw = url.searchParams.get("page") || "";
+    const perPage = Number.parseInt(perPageRaw.trim(), 10);
+    let page = Number.parseInt(pageRaw.trim(), 10);
+    if (Number.isFinite(perPage) && perPage > 0) {
+      if (!Number.isFinite(page) || page < 1) page = 1;
+      const start = (page - 1) * perPage;
+      list = start >= list.length ? [] : list.slice(start, start + perPage);
+    }
+    return json(res, 200, list, { "X-Total-Count": String(total) });
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports\/bulk_delete$/)) && method === "POST") {
     const vmId = m[1];

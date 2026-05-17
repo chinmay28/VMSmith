@@ -8,7 +8,7 @@ import { vms, snapshots, ports, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
-import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator } from '../components/Shared';
+import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
 import Activity from './Activity';
@@ -56,11 +56,26 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_search') || '';
   });
-  const { data: portList, refresh: refreshPorts } = useFetch(
-    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch }),
-    [id, portSort, portOrder, portSearch],
+  const [portPage, setPortPage] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const raw = Number.parseInt(sp.get('port_page') || '', 10);
+    return Number.isFinite(raw) && raw > 0 ? raw : 1;
+  });
+  const [portPerPage, setPortPerPage] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const raw = Number.parseInt(sp.get('port_per_page') || '', 10);
+    return Number.isFinite(raw) && raw > 0 ? raw : 25;
+  });
+  const { data: portResponse, refresh: refreshPorts } = useFetch(
+    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, page: portPage, perPage: portPerPage }),
+    [id, portSort, portOrder, portSearch, portPage, portPerPage],
     10000,
   );
+  const portList = portResponse?.data || [];
+  const portTotal = portResponse?.meta?.totalCount ?? portList.length;
+  // Whenever filter / sort / search changes, snap back to page 1 so the user
+  // never lands beyond the post-filter page count.
+  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portPerPage]);
 
   // Debounce the port-forward search box. `portSearchInput` is what the user
   // types; `portSearch` is the committed query that drives the API call.
@@ -75,11 +90,13 @@ export default function VMDetail() {
     if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
     if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
     if (portSearch) sp.set('port_search', portSearch); else sp.delete('port_search');
+    if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
+    if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, snapSearch]);
+  }, [portSort, portOrder, portSearch, portPage, portPerPage, snapSearch]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -388,6 +405,19 @@ export default function VMDetail() {
             </div>
           </div>
           <PortList vmId={id} portList={portList} refreshPorts={refreshPorts} portSearch={portSearch} />
+          {portTotal > 0 && (
+            <div className="px-4 pb-3" data-testid="port-pagination">
+              <PaginationControls
+                page={portPage}
+                perPage={portPerPage}
+                total={portTotal}
+                perPageOptions={[10, 25, 50, 100]}
+                itemLabel="rules"
+                onPageChange={setPortPage}
+                onPerPageChange={(n) => { setPortPerPage(n); setPortPage(1); }}
+              />
+            </div>
+          )}
         </div>
       </div>
 

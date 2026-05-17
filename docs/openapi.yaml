@@ -640,6 +640,12 @@ paths:
         `tag` is an optional case-insensitive exact-match filter on the
         rule's tag list. Composes additively with `search` (the tag filter
         is applied first).
+
+        `page` and `per_page` paginate the result. Pagination is applied
+        after filter + sort so the `X-Total-Count` response header reflects
+        the post-filter / pre-pagination population. `limit` is accepted as
+        a synonym for `per_page`. Omitting both returns the full filtered
+        set, preserving the legacy contract.
       parameters:
         - $ref: '#/components/parameters/VMID'
         - in: query
@@ -675,9 +681,19 @@ paths:
           description: |
             Case-insensitive exact-match filter on the rule's tag list.
             Applied before search + sort; composes additively with search.
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
       responses:
         '200':
           description: Port forward list
+          headers:
+            X-Total-Count:
+              schema:
+                type: integer
+              description: |
+                Total number of port forwards matching the filter +
+                search predicates (pre-pagination). Use this to drive
+                page indicators on the client.
           content:
             application/json:
               schema:
