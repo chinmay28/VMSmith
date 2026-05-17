@@ -1651,3 +1651,116 @@ func TestBulkDeleteWebhooks_DisabledWhenStoreUnset(t *testing.T) {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
 }
+
+// --- Pagination on GET /api/v1/webhooks (roadmap 5.4.19) ---
+
+// listWebhooksRaw returns both the decoded body and the raw response so tests
+// can assert on the X-Total-Count header alongside the payload.
+func listWebhooksRaw(t *testing.T, baseURL, rawQuery string) ([]*types.Webhook, *http.Response) {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/api/v1/webhooks?" + rawQuery)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	return hooks, resp
+}
+
+func TestListWebhooks_Pagination_PerPagePage(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks, resp := listWebhooksRaw(t, ts.URL, "sort=id&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("page 1 X-Total-Count = %q, want 3", got)
+	}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, []string{"wh-1", "wh-2"}) {
+		t.Fatalf("page 1 = %v, want [wh-1 wh-2]", got)
+	}
+
+	hooks2, resp2 := listWebhooksRaw(t, ts.URL, "sort=id&per_page=2&page=2")
+	if got := resp2.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("page 2 X-Total-Count = %q, want 3", got)
+	}
+	if got := webhookIDsInOrder(hooks2); !equalStringSlice(got, []string{"wh-3"}) {
+		t.Fatalf("page 2 = %v, want [wh-3]", got)
+	}
+}
+
+func TestListWebhooks_Pagination_PageBeyondEndReturnsEmpty(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks, resp := listWebhooksRaw(t, ts.URL, "per_page=2&page=99")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", got)
+	}
+	if len(hooks) != 0 {
+		t.Errorf("hooks = %v, want empty slice for out-of-range page", hooks)
+	}
+}
+
+func TestListWebhooks_Pagination_NoParamsReturnsAll(t *testing.T) {
+	// Without pagination params, ListWebhooks returns the full filtered set —
+	// preserves the existing zero-perPage contract from parsePagination.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks, resp := listWebhooksRaw(t, ts.URL, "")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", got)
+	}
+	if len(hooks) != 3 {
+		t.Errorf("len = %d, want 3 (full set)", len(hooks))
+	}
+}
+
+func TestListWebhooks_Pagination_TotalCountReflectsFilter(t *testing.T) {
+	// X-Total-Count must reflect the post-filter / pre-pagination count so
+	// the GUI can paginate over the filtered population. Mirrors the
+	// contract documented for VMs / images / templates / events.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSearchableWebhooks(t, fake)
+
+	_, resp := listWebhooksRaw(t, ts.URL, "search=audit&per_page=10&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (only wh-audit matches)", got)
+	}
+}
+
+func TestListWebhooks_Pagination_LimitAlias(t *testing.T) {
+	// parsePagination accepts `limit` as a synonym for `per_page`.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks, _ := listWebhooksRaw(t, ts.URL, "sort=id&limit=1")
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, []string{"wh-1"}) {
+		t.Fatalf("limit=1 = %v, want [wh-1]", got)
+	}
+}
+
+func TestListWebhooks_Pagination_CapsAtMaxPerPage(t *testing.T) {
+	// per_page > maxPerPage (2000) is clamped, but for tests we just verify
+	// a huge per_page returns the full set without erroring.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	hooks, resp := listWebhooksRaw(t, ts.URL, "per_page=10000")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", got)
+	}
+	if len(hooks) != 3 {
+		t.Errorf("len = %d, want 3", len(hooks))
+	}
+}

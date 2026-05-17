@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock, Search, X } from 'lucide-react';
 import { webhooks as webhooksApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal } from '../components/Shared';
+import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+
+const DEFAULT_WEBHOOK_PER_PAGE = 25;
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -37,28 +39,48 @@ export default function Settings() {
   const [sortField, setSortField] = useState(initialSort);
   const [sortOrder, setSortOrder] = useState(initialOrder);
 
+  const initialPage = (() => {
+    const parsed = parseInt(searchParams.get('page') || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  })();
+  const initialPerPage = (() => {
+    const parsed = parseInt(searchParams.get('per_page') || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WEBHOOK_PER_PAGE;
+  })();
+  const [page, setPage] = useState(initialPage);
+  const [perPage, setPerPage] = useState(initialPerPage);
+
   useEffect(() => {
     const trimmed = searchInput.trim();
     const id = setTimeout(() => setSearchFilter(trimmed), 250);
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  // Whenever the filter / sort changes, reset to page 1 so the user doesn't
+  // land on an empty page beyond the post-filter population.
+  useEffect(() => {
+    setPage(1);
+  }, [searchFilter, sortField, sortOrder]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
+    if (page > 1) next.set('page', String(page)); else next.delete('page');
+    if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, sortField, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { data: hookList, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, sort: sortField, order: sortOrder }),
-    [searchFilter, sortField, sortOrder],
+  const { data: hookResponse, loading, error, refresh } = useFetch(
+    () => webhooksApi.list({ search: searchFilter, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
   const bulkMut = useMutation(webhooksApi.bulkDelete);
-  const hooks = hookList || [];
+  const hooks = hookResponse?.data || [];
+  const totalHooks = hookResponse?.meta?.totalCount ?? hooks.length;
 
   // Drop selections that disappear from the list (after refresh / external delete).
   useEffect(() => {
@@ -204,7 +226,7 @@ export default function Settings() {
         </label>
       </div>
 
-      {loading && !hookList ? (
+      {loading && !hookResponse ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : hooks.length === 0 ? (
         <div className="card">
@@ -380,6 +402,17 @@ export default function Settings() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {hooks.length > 0 && (
+        <PaginationControls
+          page={page}
+          perPage={perPage}
+          total={totalHooks}
+          itemLabel="webhooks"
+          onPageChange={setPage}
+          onPerPageChange={(value) => { setPerPage(value); setPage(1); }}
+        />
       )}
     </div>
   );

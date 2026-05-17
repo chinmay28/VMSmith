@@ -143,6 +143,10 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
 //     Default `id`. Unknown values return 400 `invalid_sort`.
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
+//   - page / per_page (see parsePagination) — applied after filter + sort so
+//     the X-Total-Count header reflects the post-filter / pre-pagination
+//     population. Mirrors the pagination surface that VMs, images, templates,
+//     snapshots, events, and logs already ship.
 //
 // All comparators tiebreak on `id` so repeated requests return a deterministic
 // order. `url` matches case-insensitively. `last_delivery_at` sorts
@@ -180,6 +184,15 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, redactWebhook(h))
 	}
 	types.SortWebhooks(out, sortField, order)
+
+	total := len(out)
+	pagination := parsePagination(r)
+	out = paginateSlice(out, pagination.Page, pagination.PerPage)
+	if out == nil {
+		out = []*types.Webhook{}
+	}
+	setTotalCountHeader(w, total)
+
 	writeJSON(w, http.StatusOK, out)
 }
 

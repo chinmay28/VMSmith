@@ -4661,3 +4661,68 @@ func TestCLI_SnapshotList_ShowsTagsColumn(t *testing.T) {
 		t.Errorf("tagged row should show 'prod,backup' joined column, got %q", out)
 	}
 }
+
+// --- webhook list pagination flag forwarding (roadmap 5.4.19) ---
+
+func TestCLI_WebhookList_ForwardsLimit(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--limit", "25"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "per_page=25") {
+		t.Fatalf("expected per_page=25 in query, got %q", state.lastQuery)
+	}
+	// --page defaults to 1, which should not be forwarded explicitly so the
+	// daemon's default-page-1 contract handles it. Use a leading "&" or "?"
+	// boundary check so per_page=N doesn't trigger a false positive.
+	if strings.Contains(state.lastQuery, "&page=") || strings.HasPrefix(state.lastQuery, "page=") {
+		t.Fatalf("page=1 default must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsLimitAndPage(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--limit", "10", "--page", "3"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "per_page=10") {
+		t.Fatalf("expected per_page=10 in query, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "page=3") {
+		t.Fatalf("expected page=3 in query, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_PageWithoutLimitOmitsBothParams(t *testing.T) {
+	// --page on its own is a no-op without --limit because the daemon
+	// returns the full set when per_page is unset. Forwarding page=2
+	// alone would be misleading.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--page", "5"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "per_page=") {
+		t.Fatalf("per_page must not be forwarded without --limit: %q", state.lastQuery)
+	}
+	if strings.Contains(state.lastQuery, "&page=") || strings.HasPrefix(state.lastQuery, "page=") {
+		t.Fatalf("page must not be forwarded without --limit: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_LimitComposesWithFilters(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--search", "audit", "--tag", "production", "--sort", "url", "--order", "desc",
+		"--limit", "5"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	for _, want := range []string{"search=audit", "tag=production", "sort=url", "order=desc", "per_page=5"} {
+		if !strings.Contains(state.lastQuery, want) {
+			t.Errorf("query missing %q: %q", want, state.lastQuery)
+		}
+	}
+}
