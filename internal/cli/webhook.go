@@ -431,6 +431,11 @@ view (useful for scripting).`,
 				resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
+		// Emit the raw body first when --json is set so scripted consumers
+		// always see the daemon's exact response, even when the subsequent
+		// decode trips a struct mismatch.  On decode failure the parse
+		// error still surfaces on stderr — stdout matches the daemon
+		// contract, stderr explains the failure.
 		if asJSON {
 			fmt.Println(strings.TrimSpace(string(body)))
 		}
