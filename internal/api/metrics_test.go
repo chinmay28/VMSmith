@@ -544,9 +544,12 @@ func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
 	v := seedTestVM(t, mockMgr, "vm-stream-replay", "stream-replay", types.VMStateRunning)
 
 	cases := []struct {
-		name       string
-		buildURL   func() string
-		addHeaders func(*http.Request)
+		name             string
+		buildURL         func() string
+		addHeaders       func(*http.Request)
+		wantStatus       int
+		wantCode         string
+		wantBodyContains []string
 	}{
 		{
 			name:     "last-event-id header",
@@ -554,17 +557,48 @@ func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
 			addHeaders: func(req *http.Request) {
 				req.Header.Set("Last-Event-ID", "123")
 			},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "metrics_replay_not_supported",
+			wantBodyContains: []string{
+				"GET /api/v1/vms/{id}/stats",
+				"Last-Event-ID",
+				"since",
+			},
 		},
 		{
 			name:       "since query",
 			buildURL:   func() string { return ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream?since=123" },
 			addHeaders: func(*http.Request) {},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "metrics_replay_not_supported",
+			wantBodyContains: []string{
+				"GET /api/v1/vms/{id}/stats",
+				"Last-Event-ID",
+				"since",
+			},
+		},
+		{
+			name:       "whitespace since query is ignored",
+			buildURL:   func() string { return ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream?since=%20%20%20" },
+			addHeaders: func(*http.Request) {},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:     "whitespace last-event-id header is ignored",
+			buildURL: func() string { return ts.URL + "/api/v1/vms/" + v.ID + "/stats/stream" },
+			addHeaders: func(req *http.Request) {
+				req.Header.Set("Last-Event-ID", "   ")
+			},
+			wantStatus: http.StatusOK,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, tc.buildURL(), nil)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, tc.buildURL(), nil)
 			if err != nil {
 				t.Fatalf("new request: %v", err)
 			}
@@ -576,15 +610,24 @@ func TestStreamVMStats_RejectsReplayParams(t *testing.T) {
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
 			}
+			if tc.wantCode == "" {
+				return
+			}
+
 			var errResp errorResponse
 			if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			if errResp.Code != "metrics_replay_not_supported" {
-				t.Errorf("code = %q, want metrics_replay_not_supported", errResp.Code)
+			if errResp.Code != tc.wantCode {
+				t.Errorf("code = %q, want %q", errResp.Code, tc.wantCode)
+			}
+			for _, want := range tc.wantBodyContains {
+				if !containsStr(errResp.Message, want) {
+					t.Errorf("message = %q, want to contain %q", errResp.Message, want)
+				}
 			}
 		})
 	}
@@ -1127,6 +1170,44 @@ func TestGetTopVMs_EmptyWhenNoVMs(t *testing.T) {
 	}
 	if len(body.Items) != 0 {
 		t.Errorf("len(items) = %d, want 0", len(body.Items))
+	}
+}
+
+func TestPrometheusMetrics_NotMountedOnMainRouterWhenScrapeListenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+		t.Fatalf("mkdir images: %v", err)
+	}
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer s.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+	cfg.Metrics.Enabled = true
+	cfg.Metrics.ScrapeListen = "127.0.0.1:9101"
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	apiServer := NewServerWithMetrics(mockMgr, storageMgr, portFwd, s, cfg, nil, newTestMetricsMock())
+	ts := httptest.NewServer(apiServer)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 when scrape listener is separate", resp.StatusCode)
 	}
 }
 
