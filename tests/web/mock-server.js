@@ -521,7 +521,7 @@ const server = http.createServer(async (req, res) => {
     const list = snapshots.get(m[1]) || [];
     const snap = list.find(s => s.name === m[2]);
     if (!snap) return json(res, 404, { error: { code: "resource_not_found", message: "snapshot not found" } });
-    const patch = body || {};
+    const patch = await parseBody(req);
     if (typeof patch.description === "string") {
       const trimmed = patch.description.trim();
       if (trimmed.length > 1024) {
