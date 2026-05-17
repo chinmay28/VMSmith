@@ -398,6 +398,7 @@ func (m *MockManager) CreateSnapshot(ctx context.Context, vmID string, spec type
 		VMID:        vmID,
 		Name:        spec.Name,
 		Description: spec.Description,
+		Tags:        append([]string(nil), spec.Tags...),
 		CreatedAt:   time.Now(),
 	}
 
@@ -423,7 +424,11 @@ func (m *MockManager) UpdateSnapshot(ctx context.Context, vmID string, snapshotN
 			if patch.Description != nil {
 				s.Description = strings.TrimSpace(*patch.Description)
 			}
+			if patch.Tags != nil {
+				s.Tags = append([]string(nil), (*patch.Tags)...)
+			}
 			snapCopy := *s
+			snapCopy.Tags = append([]string(nil), s.Tags...)
 			return &snapCopy, nil
 		}
 	}

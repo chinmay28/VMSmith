@@ -431,11 +431,18 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
     let list = [...(snapshots.get(m[1]) || [])];
+    // Tag filter is applied before search so the post-filter total reflects
+    // the intersection (matches the API contract).
+    const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
+    if (tagFilter) {
+      list = list.filter(s => (s.tags || []).some(t => String(t).toLowerCase() === tagFilter));
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(s => {
         if ((s.name || "").toLowerCase().includes(search)) return true;
         if (s.description && s.description.toLowerCase().includes(search)) return true;
+        if ((s.tags || []).some(t => String(t).toLowerCase().includes(search))) return true;
         return false;
       });
     }
@@ -462,6 +469,15 @@ const server = http.createServer(async (req, res) => {
     if (typeof body.description === "string" && body.description.length > 1024) {
       return json(res, 400, { error: { code: "invalid_description", message: "description must be at most 1024 characters" } });
     }
+    // Normalise tags client-mirror style: trim + lowercase + dedupe +
+    // alphabetise.  The mock-server is permissive about the tag alphabet
+    // (the daemon's Go validator is the source of truth for that); the
+    // Playwright + JSDOM tests only need to verify the wire shape, the
+    // tag-chip rendering, and the search/filter wiring.
+    let normalisedTags = null;
+    if (Array.isArray(body.tags)) {
+      normalisedTags = [...new Set(body.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean))].sort();
+    }
     const snap = {
       id: `${vmId}/${body.name}`,
       vm_id: vmId,
@@ -469,6 +485,7 @@ const server = http.createServer(async (req, res) => {
       created_at: new Date().toISOString(),
     };
     if (body.description) snap.description = body.description;
+    if (normalisedTags && normalisedTags.length > 0) snap.tags = normalisedTags;
     const list = snapshots.get(vmId) || [];
     list.push(snap); snapshots.set(vmId, list);
     return json(res, 201, snap);
@@ -497,8 +514,9 @@ const server = http.createServer(async (req, res) => {
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)\/restore$/)) && method === "POST") {
     return json(res, 200, { status: "restored" });
   }
-  // PATCH /api/v1/vms/{vmID}/snapshots/{snapName}: edit description.
-  // Empty body or missing description = no change. Empty string clears.
+  // PATCH /api/v1/vms/{vmID}/snapshots/{snapName}: edit description and/or
+  // tags. Pointer semantics: undefined/missing = no change. Empty string
+  // clears description; empty array clears tags.
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots\/([^/]+)$/)) && method === "PATCH") {
     const list = snapshots.get(m[1]) || [];
     const snap = list.find(s => s.name === m[2]);
@@ -510,6 +528,14 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: { code: "invalid_description", message: "description too long" } });
       }
       snap.description = trimmed;
+    }
+    if (Array.isArray(patch.tags)) {
+      const normalised = [...new Set(patch.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean))].sort();
+      if (normalised.length === 0) {
+        delete snap.tags;
+      } else {
+        snap.tags = normalised;
+      }
     }
     return json(res, 200, snap);
   }

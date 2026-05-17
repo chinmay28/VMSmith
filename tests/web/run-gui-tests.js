@@ -345,6 +345,35 @@ async function main() {
       await assertText(p, "snap-bulk-result", "2 of 2 succeeded");
     }, page);
 
+    await runTest("create snapshot with tags renders chips and edit clears them", async (p) => {
+      // Roadmap 2.2.17 — tags on snapshots.
+      await p.locator('[data-testid="btn-new-snapshot"]').click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="input-snap-name"]').fill("jsdom-tagged-snap");
+      // Mixed-case + duplicate to exercise mock-server normalisation.
+      await p.locator('[data-testid="input-snap-tags"]').fill("Production, audit, production");
+      await p.locator('[data-testid="btn-submit-snapshot"]').click();
+      await p.waitForTimeout(800);
+      await assertVisible(p, "snap-jsdom-tagged-snap");
+
+      const chipBox = p.locator('[data-testid="snap-tags-jsdom-tagged-snap"]');
+      await chipBox.waitFor({ state: "visible", timeout: 3000 });
+      const chipText = (await chipBox.textContent()) || "";
+      await assert(/audit/.test(chipText), "tag chip row should include audit");
+      await assert(/production/.test(chipText), "tag chip row should include production");
+
+      // Edit and clear via empty input.
+      await p.locator('[data-testid="btn-edit-snap-jsdom-tagged-snap"]').click();
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="input-edit-snap-tags"]').fill("");
+      await p.locator('[data-testid="btn-submit-edit-snap"]').click();
+      await p.waitForTimeout(800);
+      await assert(
+        (await chipBox.count()) === 0,
+        "tag chips should disappear after clearing the input",
+      );
+    }, page);
+
     await runTest("sort snapshots by name desc", async (p) => {
       // Re-seed all three snapshots via creates so the prior bulk-delete
       // test doesn't leave the list in an emptied state.

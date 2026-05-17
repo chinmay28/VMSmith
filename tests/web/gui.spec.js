@@ -783,6 +783,83 @@ test.describe("VM Detail", () => {
     await expect(page.getByText(/No snapshots match "needle-not-present"/)).toBeVisible();
   });
 
+  // --- Snapshot tags (roadmap 2.2.17) ---
+
+  test("create snapshot with tags renders chips inline", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-snapshot").click();
+    await page.getByTestId("input-snap-name").fill("tagged-snap");
+    // Mixed case + duplicate to exercise the mock-server normalisation.
+    await page.getByTestId("input-snap-tags").fill("Audit, production, audit");
+    await page.getByTestId("btn-submit-snapshot").click();
+
+    const chipBox = page.getByTestId("snap-tags-tagged-snap");
+    await expect(chipBox).toBeVisible();
+    await expect(chipBox).toHaveText(/audit/);
+    await expect(chipBox).toHaveText(/production/);
+  });
+
+  test("edit snapshot tags via the edit modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seed a fresh tagged snapshot via the Create flow so we can edit it.
+    await page.getByTestId("btn-new-snapshot").click();
+    await page.getByTestId("input-snap-name").fill("editable-snap");
+    await page.getByTestId("input-snap-tags").fill("staging");
+    await page.getByTestId("btn-submit-snapshot").click();
+    await expect(page.getByTestId("snap-tags-editable-snap")).toContainText(/staging/);
+
+    await page.getByTestId("btn-edit-snap-editable-snap").click();
+    await expect(page.getByTestId("input-edit-snap-tags")).toHaveValue("staging");
+    await page.getByTestId("input-edit-snap-tags").fill("production, audit");
+    await page.getByTestId("btn-submit-edit-snap").click();
+
+    const chipBox = page.getByTestId("snap-tags-editable-snap");
+    await expect(chipBox).toHaveText(/audit/);
+    await expect(chipBox).toHaveText(/production/);
+    await expect(chipBox).not.toHaveText(/staging/);
+  });
+
+  test("clear snapshot tags via empty input", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seed and clear.
+    await page.getByTestId("btn-new-snapshot").click();
+    await page.getByTestId("input-snap-name").fill("clearable-snap");
+    await page.getByTestId("input-snap-tags").fill("doomed");
+    await page.getByTestId("btn-submit-snapshot").click();
+    await expect(page.getByTestId("snap-tags-clearable-snap")).toContainText(/doomed/);
+
+    await page.getByTestId("btn-edit-snap-clearable-snap").click();
+    await page.getByTestId("input-edit-snap-tags").fill("");
+    await page.getByTestId("btn-submit-edit-snap").click();
+
+    // Tag chips removed entirely once cleared.
+    await expect(page.getByTestId("snap-tags-clearable-snap")).toHaveCount(0);
+  });
+
+  test("snapshot search input matches against tag values", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-new-snapshot").click();
+    await page.getByTestId("input-snap-name").fill("tagged-search-snap");
+    await page.getByTestId("input-snap-tags").fill("rocketscience");
+    await page.getByTestId("btn-submit-snapshot").click();
+    await expect(page.getByTestId("snap-tagged-search-snap")).toBeVisible();
+
+    // The seed snapshots ("before-deploy", "auto-...") never carry the
+    // rocketscience tag, so the search box should narrow the list to
+    // just the newly created one.
+    await page.getByTestId("snap-list-search").fill("rocketscience");
+    await expect(page.getByTestId("snap-tagged-search-snap")).toBeVisible();
+    await expect(page.getByTestId("snap-before-deploy")).toHaveCount(0);
+  });
+
   test("add port forward with description and see it inline", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

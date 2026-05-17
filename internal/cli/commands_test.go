@@ -1353,7 +1353,7 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	}
 
 	headers := rows[0]
-	wantHeaders := []string{"NAME", "CREATED", "DESCRIPTION"}
+	wantHeaders := []string{"NAME", "CREATED", "TAGS", "DESCRIPTION"}
 	if strings.Join(headers, "|") != strings.Join(wantHeaders, "|") {
 		t.Fatalf("headers = %v, want %v", headers, wantHeaders)
 	}
@@ -1364,9 +1364,10 @@ func TestCLI_SnapshotList_WithSnapshots(t *testing.T) {
 	if got := rows[2][0]; got != "snap-b" {
 		t.Fatalf("second snapshot name = %q, want snap-b", got)
 	}
-	if got := rows[1][2]; got != "before" && got != "before upgrade" {
-		// tableRows splits on whitespace, so a multi-word description may
-		// land split across columns in rows[1]. Tolerate either form.
+	// rows[1][2] is now the TAGS column; the description sits at index 3
+	// (and may be split across further columns by tableRows for multi-
+	// word values).
+	if got := rows[1][3]; got != "before" && got != "before upgrade" {
 		t.Fatalf("first snapshot description column = %q, want 'before' (multi-word descriptions get split by tableRows)", got)
 	}
 	for i, row := range rows[1:] {
@@ -4516,5 +4517,147 @@ func TestCLI_WebhookTest_RequiresID(t *testing.T) {
 	_, err := runCLI("webhook", "test", "--api-url", "http://127.0.0.1:1")
 	if err == nil {
 		t.Fatalf("expected error when id is missing")
+	}
+}
+
+// --- Snapshot tag tests (roadmap 2.2.17) ---
+
+func TestCLI_SnapshotCreate_WithTags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t1", Name: "host"})
+
+	if _, err := runCLI("snapshot", "create", "vm-t1", "--name", "snap-a",
+		"--tag", "production", "--tag", "audit"); err != nil {
+		t.Fatalf("snapshot create: %v", err)
+	}
+
+	snaps, err := mock.ListSnapshots(nil, "vm-t1")
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if len(snaps) != 1 || len(snaps[0].Tags) != 2 {
+		t.Fatalf("expected 1 snapshot with 2 tags, got %+v", snaps)
+	}
+	if snaps[0].Tags[0] != "production" || snaps[0].Tags[1] != "audit" {
+		t.Errorf("tags = %v, want [production audit] (mock preserves caller order; the API normalises server-side)", snaps[0].Tags)
+	}
+}
+
+func TestCLI_SnapshotCreate_PrintsTags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t1p", Name: "host"})
+	out, err := runCLI("snapshot", "create", "vm-t1p", "--name", "snap-a", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("snapshot create: %v", err)
+	}
+	if !strings.Contains(out, "Tags: prod") {
+		t.Errorf("output should include 'Tags: prod', got %q", out)
+	}
+}
+
+func TestCLI_SnapshotEdit_SetsTags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t2", Name: "host"})
+	mock.CreateSnapshot(nil, "vm-t2", types.SnapshotSpec{Name: "snap-a"})
+
+	if _, err := runCLI("snapshot", "edit", "vm-t2", "snap-a", "--tag", "backup"); err != nil {
+		t.Fatalf("snapshot edit: %v", err)
+	}
+
+	snaps, _ := mock.ListSnapshots(nil, "vm-t2")
+	if len(snaps) != 1 || len(snaps[0].Tags) != 1 || snaps[0].Tags[0] != "backup" {
+		t.Errorf("expected one tag 'backup', got %+v", snaps)
+	}
+}
+
+func TestCLI_SnapshotEdit_ClearTagsFlag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t3", Name: "host"})
+	mock.CreateSnapshot(nil, "vm-t3", types.SnapshotSpec{Name: "snap-a", Tags: []string{"to-remove"}})
+
+	if _, err := runCLI("snapshot", "edit", "vm-t3", "snap-a", "--clear-tags"); err != nil {
+		t.Fatalf("snapshot edit --clear-tags: %v", err)
+	}
+
+	snaps, _ := mock.ListSnapshots(nil, "vm-t3")
+	if len(snaps) != 1 || len(snaps[0].Tags) != 0 {
+		t.Errorf("expected tags cleared, got %+v", snaps)
+	}
+}
+
+func TestCLI_SnapshotEdit_RejectsConflictingTagFlags(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t4", Name: "host"})
+	mock.CreateSnapshot(nil, "vm-t4", types.SnapshotSpec{Name: "snap-a"})
+
+	_, err := runCLI("snapshot", "edit", "vm-t4", "snap-a", "--tag", "x", "--clear-tags")
+	if err == nil {
+		t.Fatalf("expected error when --tag and --clear-tags are both set")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %q, want 'mutually exclusive'", err.Error())
+	}
+}
+
+func TestCLI_SnapshotList_FilterByTag(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t5", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-t5", Name: "snap-a", Tags: []string{"audit"}})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-t5", Name: "snap-b", Tags: []string{"production"}})
+
+	out, err := runCLI("snapshot", "list", "vm-t5", "--tag", "audit")
+	if err != nil {
+		t.Fatalf("snapshot list --tag: %v", err)
+	}
+	if !strings.Contains(out, "snap-a") {
+		t.Errorf("output should include snap-a: %q", out)
+	}
+	if strings.Contains(out, "snap-b") {
+		t.Errorf("output should not include snap-b (tag mismatch): %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_FilterByTag_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t6", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-t6", Name: "snap-a", Tags: []string{"audit"}})
+
+	out, err := runCLI("snapshot", "list", "vm-t6", "--tag", "AUDIT")
+	if err != nil {
+		t.Fatalf("snapshot list --tag AUDIT: %v", err)
+	}
+	if !strings.Contains(out, "snap-a") {
+		t.Errorf("output should include snap-a (case-insensitive): %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_ShowsTagsColumn(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-t7", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-t7", Name: "snap-a", Tags: []string{"prod", "backup"}})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-t7", Name: "snap-b"})
+
+	out, err := runCLI("snapshot", "list", "vm-t7")
+	if err != nil {
+		t.Fatalf("snapshot list: %v", err)
+	}
+	if !strings.Contains(out, "prod,backup") {
+		t.Errorf("tagged row should show 'prod,backup' joined column, got %q", out)
 	}
 }

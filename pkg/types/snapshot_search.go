@@ -4,9 +4,9 @@ import "strings"
 
 // SnapshotMatchesSearch reports whether the given snapshot has a substring
 // match against the (already lower-cased, trimmed) query. The haystack
-// covers the snapshot's name and description — the two fields an operator
-// would type into a "find this snapshot" box. An empty query matches every
-// non-nil snapshot; a nil snapshot never matches.
+// covers the snapshot's name, description, and tags — the three fields an
+// operator would type into a "find this snapshot" box. An empty query
+// matches every non-nil snapshot; a nil snapshot never matches.
 //
 // Matching against ID and VMID is intentionally excluded:
 //   - ID is the libvirt path `<vmID>/<name>` and is therefore redundant with
@@ -29,6 +29,14 @@ func SnapshotMatchesSearch(snap *Snapshot, query string) bool {
 	}
 	if snap.Description != "" && strings.Contains(strings.ToLower(snap.Description), query) {
 		return true
+	}
+	for _, tag := range snap.Tags {
+		if tag == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(tag), query) {
+			return true
+		}
 	}
 	return false
 }

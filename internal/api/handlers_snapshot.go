@@ -10,18 +10,21 @@ import (
 )
 
 type createSnapshotRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // updateSnapshotRequest carries the editable metadata for an existing
 // snapshot. Description is a pointer so the caller can distinguish between
-// "omit" (leave untouched) and "set to empty string" (clear). Today only
-// description is editable; libvirt has no in-place rename for snapshots, so
-// adding a Name field would require a copy + delete of the underlying disk
-// state and is intentionally out of scope.
+// "omit" (leave untouched) and "set to empty string" (clear).  Tags
+// follows the same pointer semantics: nil = leave untouched, an explicit
+// empty slice clears every tag.  Libvirt has no in-place rename for
+// snapshots so adding a Name field would require a copy + delete of the
+// underlying disk state and is intentionally out of scope.
 type updateSnapshotRequest struct {
-	Description *string `json:"description,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
 }
 
 // bulkDeleteSnapshotsRequest selects snapshots to delete in a single batch.
@@ -63,8 +66,13 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	normalisedTags, err := normalizeSnapshotTags(req.Tags)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
-	spec := types.SnapshotSpec{Name: req.Name, Description: req.Description}
+	spec := types.SnapshotSpec{Name: req.Name, Description: req.Description, Tags: normalisedTags}
 	snap, err := s.vmManager.CreateSnapshot(r.Context(), vmID, spec)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -104,6 +112,24 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
+	}
+
+	// Tag filter is applied before search so the post-filter
+	// X-Total-Count reflects the same population the search/sort/
+	// pagination operate on.  Mirrors the additive-filter contract
+	// documented for VMs/images/templates/webhooks.
+	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	if tagFilter != "" {
+		filtered := snaps[:0]
+		for _, snap := range snaps {
+			for _, tag := range snap.Tags {
+				if strings.EqualFold(tag, tagFilter) {
+					filtered = append(filtered, snap)
+					break
+				}
+			}
+		}
+		snaps = filtered
 	}
 
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
@@ -152,8 +178,17 @@ func (s *Server) UpdateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	var normalisedTagsPtr *[]string
+	if req.Tags != nil {
+		normalisedTags, err := normalizeSnapshotTags(*req.Tags)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+		normalisedTagsPtr = &normalisedTags
+	}
 
-	patch := types.SnapshotUpdateSpec{Description: req.Description}
+	patch := types.SnapshotUpdateSpec{Description: req.Description, Tags: normalisedTagsPtr}
 	snap, err := s.vmManager.UpdateSnapshot(r.Context(), vmID, snapName, patch)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)

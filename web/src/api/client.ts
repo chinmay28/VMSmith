@@ -91,31 +91,41 @@ export const vms = {
 export const snapshots = {
   list: (
     vmId: string,
-    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc'; search?: string } = {},
+    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc'; search?: string; tag?: string } = {},
   ) =>
     unwrap(
       apiClient.GET('/vms/{vmID}/snapshots', {
         params: {
           path: { vmID: vmId },
-          query: { sort: opts.sort, order: opts.order, search: opts.search || undefined } as any,
+          query: {
+            sort: opts.sort,
+            order: opts.order,
+            search: opts.search || undefined,
+            tag: opts.tag || undefined,
+          } as any,
         },
       }),
     ),
-  create: (vmId: string, name: string, description?: string) =>
-    unwrap(
+  create: (vmId: string, name: string, description?: string, tags?: string[]) => {
+    const body: { name: string; description?: string; tags?: string[] } = { name };
+    if (description) body.description = description;
+    if (tags && tags.length > 0) body.tags = tags;
+    return unwrap(
       apiClient.POST('/vms/{vmID}/snapshots', {
         params: { path: { vmID: vmId } },
-        body: description ? { name, description } : { name },
+        body: body as any,
       }),
-    ),
+    );
+  },
   restore: (vmId: string, snapName: string) =>
     unwrap(apiClient.POST('/vms/{vmID}/snapshots/{snapName}/restore', { params: { path: { vmID: vmId, snapName } } })),
-  // update edits snapshot metadata (currently only the description). Pass an
-  // empty string to clear; omit the field entirely to leave it unchanged.
-  update: (vmId: string, snapName: string, body: { description?: string | null }) =>
+  // update edits snapshot metadata.  description and tags follow pointer
+  // semantics: omit a field to leave it unchanged; pass an empty string
+  // ("" for description, [] for tags) to clear.
+  update: (vmId: string, snapName: string, body: { description?: string | null; tags?: string[] | null }) =>
     unwrap(apiClient.PATCH('/vms/{vmID}/snapshots/{snapName}', {
       params: { path: { vmID: vmId, snapName } },
-      body,
+      body: body as any,
     })),
   delete: (vmId: string, snapName: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/snapshots/{snapName}', { params: { path: { vmID: vmId, snapName } } })),

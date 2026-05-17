@@ -951,11 +951,23 @@ func (m *LibvirtManager) CreateSnapshot(ctx context.Context, vmID string, spec t
 		return nil, fmt.Errorf("creating snapshot: %w", err)
 	}
 
+	// Persist tags out-of-band (libvirt's domainsnapshot schema does not
+	// permit <metadata>, so tags cannot live alongside description in
+	// the XML).  Failure here does not roll the libvirt snapshot back —
+	// description + disk state are already on disk, and the worst case
+	// is the operator re-applies the tag list via PATCH.
+	if len(spec.Tags) > 0 {
+		if err := m.store.PutSnapshotTags(vmID, spec.Name, spec.Tags); err != nil {
+			return nil, fmt.Errorf("persisting snapshot tags: %w", err)
+		}
+	}
+
 	snap := &types.Snapshot{
 		ID:          fmt.Sprintf("%s/%s", vmID, spec.Name),
 		VMID:        vmID,
 		Name:        spec.Name,
 		Description: spec.Description,
+		Tags:        append([]string(nil), spec.Tags...),
 		CreatedAt:   time.Now(),
 	}
 
@@ -1022,11 +1034,25 @@ func (m *LibvirtManager) UpdateSnapshot(ctx context.Context, vmID string, snapsh
 		}
 	}
 
+	// Tag mutation lives in bbolt; pointer-nil means "leave as-is", a
+	// non-nil pointer (including the explicit empty slice) replaces the
+	// stored set.  An empty slice removes the record entirely so List
+	// no longer emits a tags array for this snapshot.
+	currentTags, _ := m.store.GetSnapshotTags(vmID, snapshotName)
+	tags := currentTags
+	if patch.Tags != nil {
+		tags = append([]string(nil), (*patch.Tags)...)
+		if err := m.store.PutSnapshotTags(vmID, snapshotName, tags); err != nil {
+			return nil, fmt.Errorf("persisting snapshot tags: %w", err)
+		}
+	}
+
 	return &types.Snapshot{
 		ID:          fmt.Sprintf("%s/%s", vmID, snapshotName),
 		VMID:        vmID,
 		Name:        snapshotName,
 		Description: desc,
+		Tags:        tags,
 		CreatedAt:   currentCreated,
 	}, nil
 }
@@ -1148,6 +1174,13 @@ func (m *LibvirtManager) ListSnapshots(ctx context.Context, vmID string) ([]*typ
 		return nil, fmt.Errorf("listing snapshots: %w", err)
 	}
 
+	// Pull every tag record under this VM in one cursor walk so the
+	// listing path stays O(N) in libvirt round-trips instead of N+1.
+	// An error here drops to an empty map — tags are nice-to-have
+	// metadata, not core snapshot identity, so a corrupt bucket
+	// must not break the list endpoint.
+	tagsByName, _ := m.store.ListSnapshotTagsByVM(vmID)
+
 	var result []*types.Snapshot
 	for _, s := range snaps {
 		name, _ := s.GetName()
@@ -1163,6 +1196,9 @@ func (m *LibvirtManager) ListSnapshots(ctx context.Context, vmID string) ([]*typ
 					entry.CreatedAt = created
 				}
 			}
+		}
+		if tags, ok := tagsByName[name]; ok && len(tags) > 0 {
+			entry.Tags = tags
 		}
 		result = append(result, entry)
 		s.Free()
@@ -1207,7 +1243,14 @@ func (m *LibvirtManager) DeleteSnapshot(ctx context.Context, vmID string, snapsh
 	}
 	defer snap.Free()
 
-	return snap.Delete(0)
+	if err := snap.Delete(0); err != nil {
+		return err
+	}
+	// Drop the tag record once libvirt confirms the snapshot is gone.
+	// A delete error here is not fatal — the libvirt snapshot is already
+	// removed and the orphan record will be pruned on the next list cycle.
+	_ = m.store.DeleteSnapshotTags(vmID, snapshotName)
+	return nil
 }
 
 // GetConsoleEndpoint inspects the live libvirt domain XML to discover

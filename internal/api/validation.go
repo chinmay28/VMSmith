@@ -158,6 +158,23 @@ func validateUpdateSnapshotRequest(description *string) error {
 	return nil
 }
 
+// normalizeSnapshotTags re-wraps validate.NormalizeTags's error code as
+// `invalid_snapshot` so the snapshot error surface stays consistent with
+// validateCreateSnapshotRequest / validateUpdateSnapshotRequest.  Mirrors
+// the wrapper pattern used by validatePortForwardTags (2.2.16) and
+// validateWebhookTags (2.2.15) — single source of truth for the tag
+// alphabet, but each resource's error code is its own.
+func normalizeSnapshotTags(tags []string) ([]string, error) {
+	out, err := validatepkg.NormalizeTags(tags)
+	if err == nil {
+		return out, nil
+	}
+	if apiErr, ok := err.(*types.APIError); ok {
+		return nil, types.NewAPIError("invalid_snapshot", apiErr.Message)
+	}
+	return nil, types.NewAPIError("invalid_snapshot", err.Error())
+}
+
 func validateCloneVMRequest(req cloneVMRequest) error {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -273,7 +290,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_sort", "invalid_order", "invalid_webhook", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503
