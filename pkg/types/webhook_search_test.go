@@ -143,3 +143,42 @@ func TestWebhookMatchesSearch_EmptyDescriptionDoesNotMatchEmptyQuery(t *testing.
 		t.Fatalf("expected empty description not to match arbitrary needle")
 	}
 }
+
+func TestWebhookMatchesSearch_TagSubstring(t *testing.T) {
+	wh := &Webhook{
+		URL:  "https://hooks.example.com/x",
+		Tags: []string{"production", "audit"},
+	}
+	if !WebhookMatchesSearch(wh, "production") {
+		t.Fatalf("expected tag 'production' to match")
+	}
+	if !WebhookMatchesSearch(wh, "audit") {
+		t.Fatalf("expected tag 'audit' to match")
+	}
+}
+
+func TestWebhookMatchesSearch_TagPartialSubstring(t *testing.T) {
+	// Substring (not whole-token) match — mirrors how every other
+	// resource's tag search behaves.
+	wh := &Webhook{URL: "https://example.com/x", Tags: []string{"production"}}
+	if !WebhookMatchesSearch(wh, "prod") {
+		t.Fatalf("expected partial tag substring 'prod' to match")
+	}
+}
+
+func TestWebhookMatchesSearch_TagCaseInsensitive(t *testing.T) {
+	// Tags are normalised lowercase on persistence, but lock the
+	// haystack-side case-fold in here too so an unnormalised slice
+	// (e.g. a test fixture seeded with mixed-case) still matches.
+	wh := &Webhook{URL: "https://example.com/x", Tags: []string{"Production"}}
+	if !WebhookMatchesSearch(wh, "production") {
+		t.Fatalf("expected lowercase needle to match mixed-case tag")
+	}
+}
+
+func TestWebhookMatchesSearch_EmptyTagsHandled(t *testing.T) {
+	wh := &Webhook{URL: "https://example.com/x", Tags: nil}
+	if WebhookMatchesSearch(wh, "production") {
+		t.Fatalf("expected no match against nil tags slice")
+	}
+}

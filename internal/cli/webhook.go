@@ -36,6 +36,7 @@ var webhookAddCmd = &cobra.Command{
 		secret, _ := cmd.Flags().GetString("secret")
 		eventTypes, _ := cmd.Flags().GetStringSlice("event-types")
 		description, _ := cmd.Flags().GetString("description")
+		tags, _ := cmd.Flags().GetStringSlice("tag")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
 
@@ -57,6 +58,7 @@ var webhookAddCmd = &cobra.Command{
 			Secret:      secret,
 			EventTypes:  eventTypes,
 			Description: description,
+			Tags:        tags,
 		})
 		if err != nil {
 			return err
@@ -97,6 +99,9 @@ var webhookAddCmd = &cobra.Command{
 		if wh.Description != "" {
 			fmt.Printf("  Description: %s\n", wh.Description)
 		}
+		if len(wh.Tags) > 0 {
+			fmt.Printf("  Tags:   %s\n", strings.Join(wh.Tags, ","))
+		}
 		return nil
 	},
 }
@@ -108,9 +113,14 @@ var webhookListCmd = &cobra.Command{
 
 Optional filters and ordering:
 
+  --tag <tag>           Case-insensitive exact-match filter on the webhook
+                        tag list (a webhook matches when any of its tags
+                        equals the value).  Whitespace-trimmed.  Composes
+                        additively with --search.
+
   --search <q>          Case-insensitive substring filter applied to each
-                        webhook's URL, description, and event-type list.
-                        IDs, secrets, and last_error are intentionally
+                        webhook's URL, description, event-type list, and
+                        tags.  IDs, secrets, and last_error are intentionally
                         excluded from the haystack.  Trimmed and lowercased
                         before being forwarded to the daemon.
 
@@ -125,6 +135,7 @@ Optional filters and ordering:
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		search, _ := cmd.Flags().GetString("search")
+		tag, _ := cmd.Flags().GetString("tag")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 
@@ -153,6 +164,9 @@ Optional filters and ordering:
 		q := url.Values{}
 		if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
 			q.Set("search", needle)
+		}
+		if t := strings.ToLower(strings.TrimSpace(tag)); t != "" {
+			q.Set("tag", t)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -191,7 +205,7 @@ Optional filters and ordering:
 			return nil
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tURL\tACTIVE\tTYPES\tDESCRIPTION\tLAST_STATUS\tLAST_ERROR")
+		fmt.Fprintln(tw, "ID\tURL\tACTIVE\tTYPES\tTAGS\tDESCRIPTION\tLAST_STATUS\tLAST_ERROR")
 		for _, h := range hooks {
 			lastStatus := "-"
 			if h.LastStatus != 0 {
@@ -201,11 +215,15 @@ Optional filters and ordering:
 			if len(h.EventTypes) > 0 {
 				etypes = strings.Join(h.EventTypes, ",")
 			}
+			tagList := "-"
+			if len(h.Tags) > 0 {
+				tagList = strings.Join(h.Tags, ",")
+			}
 			description := h.Description
 			if description == "" {
 				description = "-"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, etypes, description, lastStatus, h.LastError)
+			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\t%s\t%s\n", h.ID, h.URL, h.Active, etypes, tagList, description, lastStatus, h.LastError)
 		}
 		return tw.Flush()
 	},
@@ -230,7 +248,12 @@ Field semantics:
   --active true|false    Toggle delivery.  --active=false stops the worker
                          without deleting the registration.
   --description <text>   Replace the free-form description.  Pass "" to clear.
-                         Capped at 1024 characters.`,
+                         Capped at 1024 characters.
+  --tag <tag>            Replace the tag list.  Repeat to set multiple.
+                         Tags are normalised (lowercase, deduplicated,
+                         alphabetised) before persistence.  Mutually
+                         exclusive with --clear-tags.
+  --clear-tags           Clear the tag list.  Mutually exclusive with --tag.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -272,9 +295,22 @@ Field semantics:
 			}
 			spec.Description = &v
 		}
+		tagsChanged := false
+		if f := cmd.Flags().Lookup("tag"); f != nil && f.Changed {
+			v, _ := cmd.Flags().GetStringSlice("tag")
+			spec.Tags = &v
+			tagsChanged = true
+		}
+		if clear, _ := cmd.Flags().GetBool("clear-tags"); clear {
+			if tagsChanged {
+				return fmt.Errorf("--tag and --clear-tags are mutually exclusive")
+			}
+			empty := []string{}
+			spec.Tags = &empty
+		}
 
-		if spec.URL == nil && spec.Secret == nil && spec.EventTypes == nil && spec.Active == nil && spec.Description == nil {
-			return fmt.Errorf("no fields to update: pass --url, --secret, --event-types, --clear-event-types, --description, or --active")
+		if spec.URL == nil && spec.Secret == nil && spec.EventTypes == nil && spec.Active == nil && spec.Description == nil && spec.Tags == nil {
+			return fmt.Errorf("no fields to update: pass --url, --secret, --event-types, --clear-event-types, --description, --tag, --clear-tags, or --active")
 		}
 
 		body, err := json.Marshal(spec)
@@ -318,6 +354,9 @@ Field semantics:
 		}
 		if wh.Description != "" {
 			fmt.Printf("  Description: %s\n", wh.Description)
+		}
+		if len(wh.Tags) > 0 {
+			fmt.Printf("  Tags:   %s\n", strings.Join(wh.Tags, ","))
 		}
 		return nil
 	},
@@ -457,8 +496,10 @@ func init() {
 	webhookAddCmd.Flags().String("secret", "", "HMAC secret — required")
 	webhookAddCmd.Flags().StringSlice("event-types", nil, "comma-separated event-type filters (e.g. vm.started,system.*)")
 	webhookAddCmd.Flags().String("description", "", "free-form description (≤1024 chars)")
+	webhookAddCmd.Flags().StringSlice("tag", nil, "free-form tag (repeatable; normalised lowercase)")
 
-	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL, description, and event-type names)")
+	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL, description, event-type names, and tags)")
+	webhookListCmd.Flags().String("tag", "", "filter by exact tag match (case-insensitive)")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 
@@ -468,6 +509,8 @@ func init() {
 	webhookEditCmd.Flags().Bool("clear-event-types", false, "clear the event filter so the webhook fires on every event")
 	webhookEditCmd.Flags().Bool("active", true, "toggle delivery on/off (only takes effect when explicitly set)")
 	webhookEditCmd.Flags().String("description", "", "replace the free-form description (pass \"\" to clear; ≤1024 chars)")
+	webhookEditCmd.Flags().StringSlice("tag", nil, "replace the tag list (repeatable; normalised lowercase)")
+	webhookEditCmd.Flags().Bool("clear-tags", false, "clear the tag list (mutually exclusive with --tag)")
 
 	webhookDeleteCmd.Flags().String("event-type", "",
 		"delete every webhook whose event_types filter contains this exact event type (mutually exclusive with <id>)")

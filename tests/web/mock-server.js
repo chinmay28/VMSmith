@@ -5,6 +5,38 @@ const path = require("path");
 const DIST_DIR = path.resolve(__dirname, "../../internal/web/dist");
 const DIST_INDEX = path.join(DIST_DIR, "index.html");
 
+const WEBHOOK_TAG_RE = /^[a-z0-9][a-z0-9._:-]*$/;
+// normalizeWebhookTags mirrors internal/validate.NormalizeTags: trim,
+// lowercase, dedupe, alphabetise; reject empty values and characters outside
+// the lowercase tag alphabet. Returns {tags, err} so callers can short-circuit
+// on validation failure.
+function normalizeWebhookTags(input) {
+  if (!Array.isArray(input)) return { tags: null, err: null };
+  if (input.length === 0) return { tags: [], err: null };
+  const seen = new Set();
+  const out = [];
+  for (const raw of input) {
+    if (typeof raw !== "string") {
+      return { tags: null, err: { code: "invalid_webhook", message: "tags must be strings" } };
+    }
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed === "") {
+      return { tags: null, err: { code: "invalid_webhook", message: "tags cannot contain empty values" } };
+    }
+    if (trimmed.length > 32) {
+      return { tags: null, err: { code: "invalid_webhook", message: "tags must be 1-32 characters" } };
+    }
+    if (!WEBHOOK_TAG_RE.test(trimmed)) {
+      return { tags: null, err: { code: "invalid_webhook", message: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens" } };
+    }
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  out.sort();
+  return { tags: out.length ? out : [], err: null };
+}
+
 let vmCounter = 0;
 let webhookCounter = 0;
 const vms = new Map();
@@ -979,6 +1011,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/webhooks" && method === "GET") {
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
     const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
@@ -994,16 +1027,25 @@ const server = http.createServer(async (req, res) => {
     }
 
     let hooks = [...webhookList.values()];
+    if (tagFilter) {
+      hooks = hooks.filter((wh) => Array.isArray(wh.tags)
+        && wh.tags.some((t) => typeof t === "string" && t.toLowerCase() === tagFilter));
+    }
     if (needle) {
-      // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types.
-      // Secret, ID, and last_error are intentionally excluded from the
-      // haystack.
+      // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types
+      // + tags. Secret, ID, and last_error are intentionally excluded from
+      // the haystack.
       hooks = hooks.filter((wh) => {
         if (typeof wh.url === "string" && wh.url.toLowerCase().includes(needle)) return true;
         if (typeof wh.description === "string" && wh.description !== "" && wh.description.toLowerCase().includes(needle)) return true;
         if (Array.isArray(wh.event_types)) {
           for (const et of wh.event_types) {
             if (typeof et === "string" && et.toLowerCase().includes(needle)) return true;
+          }
+        }
+        if (Array.isArray(wh.tags)) {
+          for (const t of wh.tags) {
+            if (typeof t === "string" && t.toLowerCase().includes(needle)) return true;
           }
         }
         return false;
@@ -1109,12 +1151,15 @@ const server = http.createServer(async (req, res) => {
     if (description.length > 1024) {
       return json(res, 400, { code: "invalid_webhook", message: "description must be 1024 characters or fewer" });
     }
+    const { tags, err: tagsErr } = normalizeWebhookTags(body.tags);
+    if (tagsErr) return json(res, 400, tagsErr);
     webhookCounter++;
     const wh = {
       id: `wh-${webhookCounter}`,
       url: url2,
       event_types: Array.isArray(body.event_types) ? body.event_types : null,
       description: description || "",
+      tags: tags && tags.length ? tags : null,
       active: true,
       created_at: new Date().toISOString(),
     };
@@ -1140,7 +1185,8 @@ const server = http.createServer(async (req, res) => {
     const hasEventTypes = Object.prototype.hasOwnProperty.call(body, "event_types");
     const hasActive = Object.prototype.hasOwnProperty.call(body, "active");
     const hasDescription = Object.prototype.hasOwnProperty.call(body, "description");
-    if (!hasURL && !hasSecret && !hasEventTypes && !hasActive && !hasDescription) {
+    const hasTags = Object.prototype.hasOwnProperty.call(body, "tags");
+    if (!hasURL && !hasSecret && !hasEventTypes && !hasActive && !hasDescription && !hasTags) {
       return json(res, 400, { code: "noop_update", message: "no fields to update" });
     }
     if (hasURL) {
@@ -1175,6 +1221,11 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { code: "invalid_webhook", message: "description must be 1024 characters or fewer" });
       }
       wh.description = next;
+    }
+    if (hasTags) {
+      const { tags, err: tagsErr } = normalizeWebhookTags(body.tags);
+      if (tagsErr) return json(res, 400, tagsErr);
+      wh.tags = tags && tags.length ? tags : null;
     }
     webhookList.set(wh.id, wh);
     return json(res, 200, wh);

@@ -299,6 +299,21 @@ export default function Settings() {
                               {wh.description}
                             </div>
                           )}
+                          {wh.tags?.length > 0 && (
+                            <div
+                              className="flex flex-wrap gap-1 mt-1"
+                              data-testid={`webhook-tags-${wh.id}`}
+                            >
+                              {wh.tags.map((t) => (
+                                <span
+                                  key={t}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-steel-800/60 text-steel-300 border border-steel-700/30"
+                                >
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <div className="text-[11px] text-steel-600 font-mono">{wh.id}</div>
                         </div>
                       </div>
@@ -413,6 +428,7 @@ function AddWebhookModal({ open, onClose, onCreated }) {
   const [secret, setSecret] = useState('');
   const [eventTypes, setEventTypes] = useState('');
   const [description, setDescription] = useState('');
+  const [tagsInput, setTagsInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -421,6 +437,7 @@ function AddWebhookModal({ open, onClose, onCreated }) {
     setSecret('');
     setEventTypes('');
     setDescription('');
+    setTagsInput('');
     setErr(null);
     setSubmitting(false);
   };
@@ -434,12 +451,17 @@ function AddWebhookModal({ open, onClose, onCreated }) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const tags = tagsInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const trimmedDescription = description.trim();
       await webhooksApi.create({
         url: url.trim(),
         secret: secret.trim(),
         event_types: types.length ? types : undefined,
         description: trimmedDescription || undefined,
+        tags: tags.length ? tags : undefined,
       });
       onCreated?.();
       reset();
@@ -506,6 +528,19 @@ function AddWebhookModal({ open, onClose, onCreated }) {
             Free-form label that appears in the list and is searchable.
           </p>
         </div>
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Tags (optional)</label>
+          <input
+            className="input w-full"
+            placeholder="production, audit, slack"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            data-testid="webhook-tags-input"
+          />
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Comma-separated. Tags are normalised lowercase and searchable.
+          </p>
+        </div>
 
         {err && <ErrorBanner message={err} />}
 
@@ -542,6 +577,7 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
   const [subscribeAll, setSubscribeAll] = useState(false);
   const [active, setActive] = useState(true);
   const [description, setDescription] = useState('');
+  const [tagsInput, setTagsInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -555,6 +591,7 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
     setSubscribeAll(!webhook.event_types?.length);
     setActive(Boolean(webhook.active));
     setDescription(webhook.description || '');
+    setTagsInput(webhook.tags?.length ? webhook.tags.join(', ') : '');
     setErr(null);
     setSubmitting(false);
   }, [webhook]);
@@ -599,6 +636,23 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
     const trimmedDescription = description.trim();
     if (trimmedDescription !== (webhook.description || '')) {
       spec.description = trimmedDescription;
+    }
+    // Tags: PATCH semantics are nil = no change, [] = clear. Normalise the
+    // input client-side (split + trim + drop empties) and only send when the
+    // resulting set differs from the current set.  Compare order-independently
+    // (lowercase + sort both sides before walking) so re-submitting a typed
+    // "production, audit" over a stored ["audit", "production"] is recognised
+    // as a no-op locally and skips the round-trip the server would also flag.
+    const nextTags = tagsInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const normalisedNext = nextTags.map((t) => t.toLowerCase()).sort();
+    const normalisedCurrent = (webhook.tags || []).map((t) => t.toLowerCase()).sort();
+    const sameTags = normalisedNext.length === normalisedCurrent.length
+      && normalisedNext.every((t, i) => t === normalisedCurrent[i]);
+    if (!sameTags) {
+      spec.tags = nextTags;
     }
 
     if (Object.keys(spec).length === 0) {
@@ -691,6 +745,19 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
           />
           <p className="text-[11px] font-mono text-steel-600 mt-1">
             Clear the field to remove the description; ≤1024 characters.
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-mono text-steel-400 mb-1">Tags</label>
+          <input
+            className="input w-full"
+            placeholder="production, audit, slack"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            data-testid="edit-webhook-tags-input"
+          />
+          <p className="text-[11px] font-mono text-steel-600 mt-1">
+            Comma-separated. Clear the field to remove all tags.
           </p>
         </div>
 

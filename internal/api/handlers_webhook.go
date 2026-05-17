@@ -96,6 +96,11 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	tags, err := validateWebhookTags(req.Tags)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	now := time.Now().UTC()
 	wh := &types.Webhook{
@@ -104,6 +109,7 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		Secret:      secret,
 		EventTypes:  normalizeEventTypes(req.EventTypes),
 		Description: description,
+		Tags:        tags,
 		Active:      true,
 		CreatedAt:   now,
 	}
@@ -122,9 +128,14 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 // ListWebhooks handles GET /api/v1/webhooks.
 //
 // Optional query params:
+//   - tag=<value>    case-insensitive exact-match filter on the webhook tag
+//     list (a webhook matches when any of its tags equals the value).
+//     Whitespace-trimmed. Applied before the search filter so `X-Total-Count`
+//     reflects the post-filter population. Mirrors the `?tag=` surface that
+//     VMs (2.2.4), images (2.2.7), and templates (2.2.10) already ship.
 //   - search=<value>  case-insensitive substring filter applied to `url`,
-//     `description`, and `event_types`. Trimmed + lowercased once before
-//     delegating to the shared predicate. Mirrors the symmetric search
+//     `description`, `event_types`, and `tags`. Trimmed + lowercased once
+//     before delegating to the shared predicate. Mirrors the symmetric search
 //     surface across VMs (2.2.13), images (5.4.9), snapshots (5.4.10),
 //     port forwards (5.4.11), templates (5.4.12), events (4.2.20), and
 //     logs (5.4.13). Secret, ID, and last_error are intentionally excluded
@@ -155,10 +166,14 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		hooks = []*types.Webhook{}
 	}
 
+	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 
 	out := make([]*types.Webhook, 0, len(hooks))
 	for _, h := range hooks {
+		if tagFilter != "" && !webhookHasTag(h, tagFilter) {
+			continue
+		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {
 			continue
 		}
@@ -166,6 +181,22 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	}
 	types.SortWebhooks(out, sortField, order)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// webhookHasTag reports whether any of the webhook's tags case-insensitively
+// equals the (already lowercased) needle. Tags persisted via the API are
+// always lowercase, but legacy fixtures or future code paths might supply
+// mixed-case input, so we lowercase the haystack defensively.
+func webhookHasTag(wh *types.Webhook, lowercased string) bool {
+	if wh == nil {
+		return false
+	}
+	for _, t := range wh.Tags {
+		if strings.ToLower(t) == lowercased {
+			return true
+		}
+	}
+	return false
 }
 
 // GetWebhook handles GET /api/v1/webhooks/{id}.
@@ -215,6 +246,8 @@ func (s *Server) TestWebhook(w http.ResponseWriter, r *http.Request) {
 //   - event_types: nil = no change; [] = clear filter list
 //   - active: nil = no change
 //   - description: nil = no change; "" = clear; trimmed; capped at 1024 chars
+//   - tags: nil = no change; [] = clear; normalised (lowercase, trimmed,
+//     deduplicated, alphabetised) before persistence
 //
 // Any successful change unregisters the in-memory worker and re-registers it
 // with the new config so live deliveries pick up the change without a daemon
@@ -240,7 +273,7 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.URL == nil && req.Secret == nil && req.EventTypes == nil && req.Active == nil && req.Description == nil {
+	if req.URL == nil && req.Secret == nil && req.EventTypes == nil && req.Active == nil && req.Description == nil && req.Tags == nil {
 		writeErrorCode(w, http.StatusBadRequest, "noop_update", "no fields to update")
 		return
 	}
@@ -301,6 +334,18 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.Tags != nil {
+		nextTags, err := validateWebhookTags(*req.Tags)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+		if !tagSetsEqual(nextTags, updated.Tags) {
+			updated.Tags = nextTags
+			changed = true
+		}
+	}
+
 	if !changed {
 		writeJSON(w, http.StatusOK, redactWebhook(&updated))
 		return
@@ -320,6 +365,23 @@ func (s *Server) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, redactWebhook(&updated))
+}
+
+// tagSetsEqual is the no-op detector for the Tags patch path. Tags are
+// always normalised (sorted, lowercased, deduplicated) by
+// validateWebhookTags before they reach here, so a straight elementwise
+// compare is sufficient — the slices are either identical or differ in a
+// way that should bounce the worker.
+func tagSetsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // eventTypeSetsEqual is the no-op detector for the EventTypes patch path.
