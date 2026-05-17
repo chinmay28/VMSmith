@@ -104,20 +104,80 @@ which matches the long-standing CLI behaviour.`,
 			return nil
 		}
 
+		showActor, _ := cmd.Flags().GetBool("actor")
+		showAttrs, _ := cmd.Flags().GetBool("attrs")
+
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "TIME\tSEVERITY\tSOURCE\tTYPE\tVM\tMESSAGE")
+		writeEventsHeader(w, showActor, showAttrs)
 		for _, e := range filtered {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				formatEventTime(eventTimestamp(e)),
-				orDash(e.Severity),
-				orDash(e.Source),
-				orDash(e.Type),
-				orDash(e.VMID),
-				truncMessage(e.Message, 80),
-			)
+			writeEventRow(w, e, showActor, showAttrs)
 		}
 		return w.Flush()
 	},
+}
+
+// writeEventsHeader prints the events-list table header to w. The base header
+// (TIME / SEVERITY / SOURCE / TYPE / VM / MESSAGE) is preserved for scripted
+// callers that don't pass --actor or --attrs; the optional columns are appended
+// only when the operator opts in so existing pipelines stay stable.
+func writeEventsHeader(w *tabwriter.Writer, showActor, showAttrs bool) {
+	cols := []string{"TIME", "SEVERITY", "SOURCE", "TYPE"}
+	if showActor {
+		cols = append(cols, "ACTOR")
+	}
+	cols = append(cols, "VM", "MESSAGE")
+	if showAttrs {
+		cols = append(cols, "ATTRIBUTES")
+	}
+	fmt.Fprintln(w, strings.Join(cols, "\t"))
+}
+
+// writeEventRow prints a single event row matching the header layout written
+// by writeEventsHeader. The attributes column folds in `resource_id=<id>` when
+// non-empty so operators have a single column to read all structured detail
+// from.
+func writeEventRow(w *tabwriter.Writer, e *types.Event, showActor, showAttrs bool) {
+	cols := []string{
+		formatEventTime(eventTimestamp(e)),
+		orDash(e.Severity),
+		orDash(e.Source),
+		orDash(e.Type),
+	}
+	if showActor {
+		cols = append(cols, orDash(e.Actor))
+	}
+	cols = append(cols, orDash(e.VMID), truncMessage(e.Message, 80))
+	if showAttrs {
+		cols = append(cols, formatEventAttributes(e))
+	}
+	fmt.Fprintln(w, strings.Join(cols, "\t"))
+}
+
+// formatEventAttributes renders the event's structured detail as a single
+// column suitable for a fixed-width table. Keys are sorted so the output is
+// deterministic across runs (important for scripted callers grepping the
+// column). `resource_id` is folded in when set so the --attrs column carries
+// every structured field in one place. A dash is rendered when there is
+// nothing to show so empty cells don't collapse against the previous column.
+func formatEventAttributes(e *types.Event) string {
+	parts := make([]string, 0, len(e.Attributes)+1)
+	if strings.TrimSpace(e.ResourceID) != "" {
+		parts = append(parts, "resource_id="+e.ResourceID)
+	}
+	if len(e.Attributes) > 0 {
+		keys := make([]string, 0, len(e.Attributes))
+		for k := range e.Attributes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			parts = append(parts, k+"="+e.Attributes[k])
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
 }
 
 type eventFilter struct {
@@ -305,28 +365,39 @@ Examples:
 			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
+		showActor, _ := cmd.Flags().GetBool("actor")
+		showAttrs, _ := cmd.Flags().GetBool("attrs")
+
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
 		// Header — identical to `events list` so output remains scriptable.
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "TIME\tSEVERITY\tSOURCE\tTYPE\tVM\tMESSAGE")
+		writeEventsHeader(w, showActor, showAttrs)
 		w.Flush()
 
-		return followEventsStream(ctx, apiURL, apiKey, filter, os.Stdout)
+		return followEventsStream(ctx, apiURL, apiKey, filter, eventRowOptions{showActor: showActor, showAttrs: showAttrs}, os.Stdout)
 	},
+}
+
+// eventRowOptions toggles the optional ACTOR / ATTRIBUTES columns rendered by
+// both `events list` and `events follow`. Default-zero means the legacy 6-col
+// table, so existing scripted callers see no change.
+type eventRowOptions struct {
+	showActor bool
+	showAttrs bool
 }
 
 // followEventsStream connects to /api/v1/events/stream and prints matching
 // events to out as they arrive. Reconnects on transient errors using the most
 // recent observed event ID so no events are missed.
-func followEventsStream(ctx context.Context, apiURL, apiKey string, filter eventFilter, out io.Writer) error {
+func followEventsStream(ctx context.Context, apiURL, apiKey string, filter eventFilter, opts eventRowOptions, out io.Writer) error {
 	var lastID string
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
 
 	for {
-		err := streamEventsOnce(ctx, apiURL, apiKey, &lastID, filter, out)
+		err := streamEventsOnce(ctx, apiURL, apiKey, &lastID, filter, opts, out)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -369,7 +440,7 @@ func isFatalStreamErr(err error) bool {
 // streamEventsOnce opens a single SSE connection and prints events until the
 // connection drops or context is cancelled. lastID is updated as events arrive
 // so a subsequent call can resume after the last seen ID.
-func streamEventsOnce(ctx context.Context, apiURL, apiKey string, lastID *string, filter eventFilter, out io.Writer) error {
+func streamEventsOnce(ctx context.Context, apiURL, apiKey string, lastID *string, filter eventFilter, opts eventRowOptions, out io.Writer) error {
 	streamURL := strings.TrimRight(apiURL, "/") + "/api/v1/events/stream"
 	if *lastID != "" {
 		// Pass the last seen seq via ?since= as a uint64 fallback for clients
@@ -410,13 +481,13 @@ func streamEventsOnce(ctx context.Context, apiURL, apiKey string, lastID *string
 		return fmt.Errorf("daemon returned HTTP %d", resp.StatusCode)
 	}
 
-	return parseSSEStream(ctx, resp.Body, lastID, filter, out)
+	return parseSSEStream(ctx, resp.Body, lastID, filter, opts, out)
 }
 
 // parseSSEStream reads SSE frames from r and prints matching events to out.
 // Updates *lastID as events arrive. Returns nil when the server closes the
 // stream cleanly, a non-nil error on read failure.
-func parseSSEStream(ctx context.Context, r io.Reader, lastID *string, filter eventFilter, out io.Writer) error {
+func parseSSEStream(ctx context.Context, r io.Reader, lastID *string, filter eventFilter, opts eventRowOptions, out io.Writer) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	scanner := bufio.NewScanner(r)
 	// SSE frames can carry large JSON event payloads; raise the max token size
@@ -445,7 +516,7 @@ func parseSSEStream(ctx context.Context, r io.Reader, lastID *string, filter eve
 						}
 					}
 					if matchesEventFilter(&evt, filter) {
-						printEventRow(tw, &evt)
+						printEventRow(tw, &evt, opts)
 						tw.Flush()
 					}
 				}
@@ -489,15 +560,8 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	return true
 }
 
-func printEventRow(tw *tabwriter.Writer, e *types.Event) {
-	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-		formatEventTime(eventTimestamp(e)),
-		orDash(e.Severity),
-		orDash(e.Source),
-		orDash(e.Type),
-		orDash(e.VMID),
-		truncMessage(e.Message, 80),
-	)
+func printEventRow(tw *tabwriter.Writer, e *types.Event, opts eventRowOptions) {
+	writeEventRow(tw, e, opts.showActor, opts.showAttrs)
 }
 
 // lastIDToSeq returns the numeric portion of an event ID for ?since= reuse.
@@ -526,6 +590,8 @@ func init() {
 	eventsListCmd.Flags().String("sort", "", "sort field: id, occurred_at, type, source, severity (default: legacy newest-by-timestamp)")
 	eventsListCmd.Flags().String("order", "", "sort order: asc | desc (default: desc when --sort is set)")
 	eventsListCmd.Flags().Int("limit", 100, "maximum number of events to show")
+	eventsListCmd.Flags().Bool("actor", false, "include the ACTOR column (who initiated the event)")
+	eventsListCmd.Flags().Bool("attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
 
 	eventsFollowCmd.Flags().String("vm", "", "only print events for this VM ID")
 	eventsFollowCmd.Flags().String("type", "", "only print events of this type (exact match)")
@@ -533,6 +599,8 @@ func init() {
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
 	eventsFollowCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsFollowCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
+	eventsFollowCmd.Flags().Bool("actor", false, "include the ACTOR column (who initiated the event)")
+	eventsFollowCmd.Flags().Bool("attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
 
 	eventsCmd.AddCommand(eventsListCmd)
 	eventsCmd.AddCommand(eventsFollowCmd)

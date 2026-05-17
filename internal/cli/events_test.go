@@ -353,7 +353,7 @@ func TestFollow_PrintsEventsAsTheyArrive(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, &buf); err != nil {
+	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("followEventsStream: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestFollow_FiltersByVMID(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{vmID: "vm-A"}, &buf); err != nil {
+	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{vmID: "vm-A"}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 
@@ -400,7 +400,7 @@ func TestFollow_FiltersByTypeSourceSeverity(t *testing.T) {
 
 	var buf bytes.Buffer
 	if err := followEventsStream(ctx, srv.URL(), "",
-		eventFilter{source: "libvirt", severity: "error"}, &buf); err != nil {
+		eventFilter{source: "libvirt", severity: "error"}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestFollow_AuthHeaderForwarded(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := followEventsStream(ctx, srv.URL(), "secret-key", eventFilter{}, &buf); err != nil {
+	if err := followEventsStream(ctx, srv.URL(), "secret-key", eventFilter{}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 
@@ -441,7 +441,7 @@ func TestFollow_AuthFailureIsFatal(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, &buf)
+	err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, eventRowOptions{}, &buf)
 	if err == nil {
 		t.Fatal("expected fatal auth error")
 	}
@@ -458,7 +458,7 @@ func TestFollow_GoneIsFatal(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, &buf)
+	err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, eventRowOptions{}, &buf)
 	if err == nil {
 		t.Fatal("expected 410 fatal error")
 	}
@@ -479,7 +479,7 @@ func TestFollow_ReconnectsOnDisconnect(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, &buf); err != nil {
+	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 
@@ -530,7 +530,7 @@ func TestFollow_HeartbeatIgnored(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := followEventsStream(ctx, srv.URL, "", eventFilter{}, &buf); err != nil {
+	if err := followEventsStream(ctx, srv.URL, "", eventFilter{}, eventRowOptions{}, &buf); err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 	if !strings.Contains(buf.String(), "vm.started") {
@@ -688,5 +688,267 @@ func TestMatchesEventFilter(t *testing.T) {
 				t.Errorf("got %v, want %v", got, c.match)
 			}
 		})
+	}
+}
+
+// --- --actor / --attrs column tests ---
+
+// seedRichEvent stores an event with every structured detail field set so the
+// rendering tests can assert each field appears (or not) in the table output.
+func seedRichEvent(t *testing.T, s *store.Store) {
+	t.Helper()
+	if err := s.PutEvent(&types.Event{
+		ID:         "evt-rich",
+		Type:       "vm.created",
+		Source:     "app",
+		Severity:   "info",
+		VMID:       "vm-100",
+		ResourceID: "tpl-rocky9",
+		Actor:      "alice@example.com",
+		Message:    "VM created from template",
+		Attributes: map[string]string{
+			"template": "rocky9-base",
+			"cpus":     "4",
+			"ram_mb":   "8192",
+		},
+		OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutEvent: %v", err)
+	}
+}
+
+func TestCLI_EventsList_DefaultHidesActorAndAttrsColumns(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedRichEvent(t, s)
+
+	out, err := runCLI("events", "list")
+	if err != nil {
+		t.Fatalf("events list: %v", err)
+	}
+	// Header must be the legacy 6-column shape — existing scripted callers
+	// that grep for column names cannot regress.
+	if !strings.Contains(out, "TIME") || !strings.Contains(out, "MESSAGE") {
+		t.Fatalf("missing base header columns:\n%s", out)
+	}
+	if strings.Contains(out, "ACTOR") {
+		t.Errorf("ACTOR header should be hidden without --actor:\n%s", out)
+	}
+	if strings.Contains(out, "ATTRIBUTES") {
+		t.Errorf("ATTRIBUTES header should be hidden without --attrs:\n%s", out)
+	}
+	// Without --actor, the alice@ value must not appear either.
+	if strings.Contains(out, "alice@example.com") {
+		t.Errorf("actor leaked into default output:\n%s", out)
+	}
+	// Without --attrs, neither the attribute keys nor the resource_id should leak.
+	if strings.Contains(out, "template=rocky9-base") || strings.Contains(out, "resource_id=tpl-rocky9") {
+		t.Errorf("attributes leaked into default output:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_ActorFlagAddsActorColumn(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedRichEvent(t, s)
+
+	out, err := runCLI("events", "list", "--actor")
+	if err != nil {
+		t.Fatalf("events list --actor: %v", err)
+	}
+	if !strings.Contains(out, "ACTOR") {
+		t.Errorf("--actor should print ACTOR header:\n%s", out)
+	}
+	if !strings.Contains(out, "alice@example.com") {
+		t.Errorf("--actor should print actor value:\n%s", out)
+	}
+	// --actor alone should NOT add the attributes column.
+	if strings.Contains(out, "ATTRIBUTES") || strings.Contains(out, "template=rocky9-base") {
+		t.Errorf("--actor alone should not surface attributes:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_AttrsFlagAddsAttributesColumn(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedRichEvent(t, s)
+
+	out, err := runCLI("events", "list", "--attrs")
+	if err != nil {
+		t.Fatalf("events list --attrs: %v", err)
+	}
+	if !strings.Contains(out, "ATTRIBUTES") {
+		t.Errorf("--attrs should print ATTRIBUTES header:\n%s", out)
+	}
+	// Keys must appear sorted alphabetically (cpus < ram_mb < template).
+	wantOrder := []string{"cpus=4", "ram_mb=8192", "template=rocky9-base"}
+	last := -1
+	for _, want := range wantOrder {
+		idx := strings.Index(out, want)
+		if idx == -1 {
+			t.Fatalf("--attrs missing key %q in output:\n%s", want, out)
+		}
+		if idx < last {
+			t.Errorf("--attrs keys not alphabetical: %q at %d came after a later key:\n%s", want, idx, out)
+		}
+		last = idx
+	}
+	// resource_id should be folded into the attributes column when set.
+	if !strings.Contains(out, "resource_id=tpl-rocky9") {
+		t.Errorf("--attrs should fold in resource_id:\n%s", out)
+	}
+	// --attrs alone should NOT add the actor column.
+	if strings.Contains(out, "ACTOR") || strings.Contains(out, "alice@example.com") {
+		t.Errorf("--attrs alone should not surface actor:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_ActorAndAttrsBothEnabled(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedRichEvent(t, s)
+
+	out, err := runCLI("events", "list", "--actor", "--attrs")
+	if err != nil {
+		t.Fatalf("events list --actor --attrs: %v", err)
+	}
+	if !strings.Contains(out, "ACTOR") || !strings.Contains(out, "ATTRIBUTES") {
+		t.Errorf("both columns should be present:\n%s", out)
+	}
+	// ACTOR header must come before VM/MESSAGE; ATTRIBUTES must come last.
+	idxActor := strings.Index(out, "ACTOR")
+	idxVM := strings.Index(out, "VM")
+	idxMessage := strings.Index(out, "MESSAGE")
+	idxAttrs := strings.Index(out, "ATTRIBUTES")
+	if !(idxActor < idxVM && idxVM < idxMessage && idxMessage < idxAttrs) {
+		t.Errorf("column order wrong (want ACTOR < VM < MESSAGE < ATTRIBUTES); got actor=%d vm=%d message=%d attrs=%d:\n%s",
+			idxActor, idxVM, idxMessage, idxAttrs, out)
+	}
+}
+
+func TestCLI_EventsList_AttrsDashOnEmptyAttributes(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	if err := s.PutEvent(&types.Event{
+		ID:         "evt-bare",
+		Type:       "vm.stopped",
+		Source:     "libvirt",
+		Severity:   "info",
+		VMID:       "vm-200",
+		Message:    "VM stopped cleanly",
+		OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("PutEvent: %v", err)
+	}
+
+	out, err := runCLI("events", "list", "--attrs")
+	if err != nil {
+		t.Fatalf("events list --attrs: %v", err)
+	}
+	// The events table writes one row per event; verify there's a tabwriter
+	// row for vm.stopped (so the empty-attrs case doesn't silently drop it).
+	if !strings.Contains(out, "vm.stopped") {
+		t.Fatalf("missing event row:\n%s", out)
+	}
+	// And — importantly — no spurious resource_id= or key=value tokens.
+	if strings.Contains(out, "resource_id=") || strings.Contains(out, "=") && strings.Count(out, "=") > 0 {
+		// Be lenient: the only `=` could come from the path of an unset
+		// attribute. Confirm by checking that none of the seeded keys appear.
+		for _, banned := range []string{"template=", "cpus=", "ram_mb=", "resource_id="} {
+			if strings.Contains(out, banned) {
+				t.Errorf("empty-attrs row leaked a key %q:\n%s", banned, out)
+			}
+		}
+	}
+}
+
+func TestFormatEventAttributes(t *testing.T) {
+	cases := []struct {
+		name string
+		evt  *types.Event
+		want string
+	}{
+		{
+			name: "empty",
+			evt:  &types.Event{},
+			want: "-",
+		},
+		{
+			name: "resource_id only",
+			evt:  &types.Event{ResourceID: "img-1"},
+			want: "resource_id=img-1",
+		},
+		{
+			name: "attrs sorted alphabetically",
+			evt: &types.Event{Attributes: map[string]string{
+				"zebra": "stripe",
+				"alpha": "first",
+				"mid":   "x",
+			}},
+			want: "alpha=first mid=x zebra=stripe",
+		},
+		{
+			name: "resource_id prepended before attrs",
+			evt: &types.Event{
+				ResourceID: "tpl-9",
+				Attributes: map[string]string{"a": "1", "b": "2"},
+			},
+			want: "resource_id=tpl-9 a=1 b=2",
+		},
+		{
+			name: "whitespace-only resource_id ignored",
+			evt: &types.Event{
+				ResourceID: "   ",
+				Attributes: map[string]string{"k": "v"},
+			},
+			want: "k=v",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatEventAttributes(c.evt); got != c.want {
+				t.Errorf("formatEventAttributes() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestCLI_EventsFollow_AttrsFlagAddsAttributesColumn exercises the SSE path so
+// the `events follow` rendering doesn't silently fall behind `events list` when
+// new columns are added in the future.
+func TestCLI_EventsFollow_AttrsAndActorFlagsAddColumns(t *testing.T) {
+	now := time.Now()
+	srv := newSSETestServer(t, []*types.Event{
+		{
+			ID:         "1",
+			Type:       "vm.created",
+			Source:     "app",
+			Severity:   "info",
+			VMID:       "vm-9",
+			ResourceID: "tpl-rocky9",
+			Actor:      "ops-alice",
+			Message:    "VM created",
+			Attributes: map[string]string{"template": "rocky9-base", "cpus": "4"},
+			OccurredAt: now,
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := followEventsStream(ctx, srv.URL(), "", eventFilter{},
+		eventRowOptions{showActor: true, showAttrs: true}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ops-alice") {
+		t.Errorf("--actor missing from follow output:\n%s", out)
+	}
+	if !strings.Contains(out, "cpus=4") || !strings.Contains(out, "template=rocky9-base") {
+		t.Errorf("--attrs missing from follow output:\n%s", out)
+	}
+	if !strings.Contains(out, "resource_id=tpl-rocky9") {
+		t.Errorf("--attrs should fold in resource_id in follow output:\n%s", out)
 	}
 }
