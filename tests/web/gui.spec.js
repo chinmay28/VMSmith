@@ -2332,14 +2332,17 @@ test.describe("Activity", () => {
 
   test("events with no structured details do not render a disclosure toggle", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);
-    // evt-3 (vm_started) has actor="system" but no attributes/resource_id —
-    // actor alone is enough to render details, so the toggle should appear.
-    // Conversely, find an event with NO actor and NO attributes (none seeded
-    // by default; assert by checking the click is a no-op for non-detailed
-    // rows is hard, so instead verify the chevron exists only when details
-    // are present.
+    // evt-0 is seeded with no actor / attributes / resource_id, so the
+    // hasDetails gate at web/src/pages/Activity.jsx should suppress the
+    // chevron entirely for that row. Asserting toHaveCount(0) on the
+    // toggle exercises the negative branch end-to-end.
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+    await expect(page.getByTestId("activity-row-toggle-evt-0")).toHaveCount(0);
+    // Sanity-check the positive path on the same render: evt-3 has
+    // actor="system" but no attributes / resource_id, and actor alone is
+    // enough to render the toggle.
     const row3Toggle = page.getByTestId("activity-row-toggle-evt-3");
-    await expect(row3Toggle).toBeVisible(); // actor=system, so toggle present
+    await expect(row3Toggle).toBeVisible();
     await row3Toggle.click();
     await expect(page.getByTestId("activity-detail-actor-evt-3")).toContainText("system");
   });
