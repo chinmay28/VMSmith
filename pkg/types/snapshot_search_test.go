@@ -77,3 +77,33 @@ func TestSnapshotMatchesSearch_IDAndVMIDNotInHaystack(t *testing.T) {
 		t.Fatalf("VM-id substring must not match — IDs are excluded from haystack")
 	}
 }
+
+func TestSnapshotMatchesSearch_TagSubstring(t *testing.T) {
+	snap := &Snapshot{Name: "snap-001", Tags: []string{"production", "audit"}}
+	if !SnapshotMatchesSearch(snap, "audit") {
+		t.Fatalf("expected exact tag to match")
+	}
+	if !SnapshotMatchesSearch(snap, "prod") {
+		t.Fatalf("expected tag substring to match")
+	}
+	if SnapshotMatchesSearch(snap, "staging") {
+		t.Fatalf("unrelated tag-shaped query should not match")
+	}
+}
+
+func TestSnapshotMatchesSearch_TagCaseInsensitive(t *testing.T) {
+	// Tags are normalised to lowercase on the server, so the haystack is
+	// already lowercased. Caller lowercases the needle. Confirm the
+	// case-insensitive end-to-end shape works.
+	snap := &Snapshot{Name: "snap-001", Tags: []string{"production"}}
+	if !SnapshotMatchesSearch(snap, "prod") {
+		t.Fatalf("expected lowercase needle to hit lowercase tag")
+	}
+}
+
+func TestSnapshotMatchesSearch_EmptyTagsHandled(t *testing.T) {
+	snap := &Snapshot{Name: "snap-001", Tags: []string{"", "audit"}}
+	if !SnapshotMatchesSearch(snap, "audit") {
+		t.Fatalf("expected non-empty tag to still match through an empty sibling")
+	}
+}

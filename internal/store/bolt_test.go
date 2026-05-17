@@ -696,3 +696,164 @@ func TestPutGetListDeleteWebhook(t *testing.T) {
 		t.Fatalf("ListWebhooks after delete = %d, want 0", len(hooks))
 	}
 }
+
+// --- Snapshot tag metadata tests ---
+
+func TestSnapshotTags_PutGetRoundTrip(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{"audit", "production"}); err != nil {
+		t.Fatalf("PutSnapshotTags: %v", err)
+	}
+	tags, err := s.GetSnapshotTags("vm-1", "snap-a")
+	if err != nil {
+		t.Fatalf("GetSnapshotTags: %v", err)
+	}
+	if len(tags) != 2 || tags[0] != "audit" || tags[1] != "production" {
+		t.Fatalf("round-trip mismatch: got %v", tags)
+	}
+}
+
+func TestSnapshotTags_GetMissingReturnsNil(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	tags, err := s.GetSnapshotTags("vm-1", "missing")
+	if err != nil {
+		t.Fatalf("GetSnapshotTags on missing: %v", err)
+	}
+	if tags != nil {
+		t.Fatalf("expected nil tags on missing record, got %v", tags)
+	}
+}
+
+func TestSnapshotTags_PutEmptyClearsRecord(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{"audit"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Empty slice clears the record entirely.
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{}); err != nil {
+		t.Fatalf("PutSnapshotTags empty: %v", err)
+	}
+	tags, err := s.GetSnapshotTags("vm-1", "snap-a")
+	if err != nil {
+		t.Fatalf("GetSnapshotTags after clear: %v", err)
+	}
+	if tags != nil {
+		t.Fatalf("expected nil after clear, got %v", tags)
+	}
+}
+
+func TestSnapshotTags_DeleteRemovesRecord(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{"audit"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.DeleteSnapshotTags("vm-1", "snap-a"); err != nil {
+		t.Fatalf("DeleteSnapshotTags: %v", err)
+	}
+	tags, err := s.GetSnapshotTags("vm-1", "snap-a")
+	if err != nil {
+		t.Fatalf("GetSnapshotTags after delete: %v", err)
+	}
+	if tags != nil {
+		t.Fatalf("expected nil after delete, got %v", tags)
+	}
+}
+
+func TestSnapshotTags_DeleteMissingIsNoOp(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.DeleteSnapshotTags("vm-1", "never-existed"); err != nil {
+		t.Fatalf("DeleteSnapshotTags on missing should be idempotent: %v", err)
+	}
+}
+
+func TestSnapshotTags_ListByVMReturnsMatchingOnly(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{"audit"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutSnapshotTags("vm-1", "snap-b", []string{"production", "backup"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutSnapshotTags("vm-2", "snap-c", []string{"staging"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := s.ListSnapshotTagsByVM("vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshotTagsByVM: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected two entries for vm-1, got %v", out)
+	}
+	if got := out["snap-a"]; len(got) != 1 || got[0] != "audit" {
+		t.Fatalf("snap-a tags wrong: %v", got)
+	}
+	if got := out["snap-b"]; len(got) != 2 || got[0] != "production" || got[1] != "backup" {
+		t.Fatalf("snap-b tags wrong: %v", got)
+	}
+	// vm-2's snap-c must not leak into vm-1's response.
+	if _, leaked := out["snap-c"]; leaked {
+		t.Fatalf("ListSnapshotTagsByVM leaked vm-2 record into vm-1 response")
+	}
+}
+
+func TestSnapshotTags_RejectsEmptyKeys(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("", "snap-a", []string{"x"}); err == nil {
+		t.Fatalf("expected error for empty vmID")
+	}
+	if err := s.PutSnapshotTags("vm-1", "", []string{"x"}); err == nil {
+		t.Fatalf("expected error for empty snapshot name")
+	}
+}
+
+func TestSnapshotTags_ListByVMOnEmptyStoreReturnsEmpty(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	out, err := s.ListSnapshotTagsByVM("vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshotTagsByVM on empty bucket: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("expected empty map, got %v", out)
+	}
+}
+
+// Two VMs with similar IDs (`vm-1` and `vm-10`) must not bleed into each
+// other when their tag rows share a bucket and key prefix.  The cursor walk
+// in ListSnapshotTagsByVM seeks on `vmID + "/"` so the trailing slash
+// disambiguates the prefix.
+func TestSnapshotTags_ListByVMPrefixIsolation(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if err := s.PutSnapshotTags("vm-1", "snap-a", []string{"audit"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutSnapshotTags("vm-10", "snap-b", []string{"staging"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := s.ListSnapshotTagsByVM("vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshotTagsByVM: %v", err)
+	}
+	if _, leaked := out["snap-b"]; leaked {
+		t.Fatalf("ListSnapshotTagsByVM(vm-1) leaked vm-10's snap-b into the response: %v", out)
+	}
+}

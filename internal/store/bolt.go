@@ -192,6 +192,102 @@ func (s *Store) DeletePortForward(id string) error {
 	return s.delete(BucketPortForwards, id)
 }
 
+// --- Snapshot tag metadata ---
+//
+// Tags persist out-of-band from libvirt because libvirt's domainsnapshot
+// XML schema does not permit <metadata>, so we cannot round-trip tags
+// through SnapshotCreateXML(REDEFINE) the way description does today.
+// Keys are `{vmID}/{name}`; values are JSON snapshotTagRecord blobs.
+//
+// The libvirt-stored description remains the source of truth for that
+// one field — only Tags lives in bbolt.
+
+type snapshotTagRecord struct {
+	Tags []string `json:"tags"`
+}
+
+func snapshotTagKey(vmID, name string) string {
+	return vmID + "/" + name
+}
+
+// PutSnapshotTags stores the tag list for a snapshot.  Pass an empty slice
+// to clear the tag list (the record is removed entirely, so future Get
+// returns nil + nil).
+func (s *Store) PutSnapshotTags(vmID, name string, tags []string) error {
+	if vmID == "" || name == "" {
+		return fmt.Errorf("vmID and snapshot name are required")
+	}
+	if len(tags) == 0 {
+		return s.DeleteSnapshotTags(vmID, name)
+	}
+	return s.put(BucketSnapshots, snapshotTagKey(vmID, name), snapshotTagRecord{Tags: tags})
+}
+
+// GetSnapshotTags returns the persisted tag list for a snapshot, or nil if
+// none have been recorded. "Not found" is not an error — it just means the
+// snapshot has no tags yet.
+func (s *Store) GetSnapshotTags(vmID, name string) ([]string, error) {
+	if vmID == "" || name == "" {
+		return nil, nil
+	}
+	var record snapshotTagRecord
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketSnapshots))
+		if b == nil {
+			return nil
+		}
+		v := b.Get([]byte(snapshotTagKey(vmID, name)))
+		if v == nil {
+			return nil
+		}
+		return json.Unmarshal(v, &record)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return record.Tags, nil
+}
+
+// ListSnapshotTagsByVM returns a map of snapshot-name -> tag list for every
+// snapshot known to bbolt under the given VM.  Used by ListSnapshots to fan
+// the tag join out in a single pass instead of N+1 reads.
+func (s *Store) ListSnapshotTagsByVM(vmID string) (map[string][]string, error) {
+	if vmID == "" {
+		return nil, nil
+	}
+	prefix := []byte(vmID + "/")
+	out := make(map[string][]string)
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketSnapshots))
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var record snapshotTagRecord
+			if err := json.Unmarshal(v, &record); err != nil {
+				return err
+			}
+			name := string(k[len(prefix):])
+			out[name] = record.Tags
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteSnapshotTags removes the tag record for a snapshot.  A nil error is
+// returned even if no record existed (delete is idempotent).
+func (s *Store) DeleteSnapshotTags(vmID, name string) error {
+	if vmID == "" || name == "" {
+		return nil
+	}
+	return s.delete(BucketSnapshots, snapshotTagKey(vmID, name))
+}
+
 // --- Webhooks ---
 
 // PutWebhook stores a webhook record.

@@ -789,6 +789,13 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
                 {snap.description ? (
                   <p className="text-xs text-steel-500 mt-1 ml-5 line-clamp-2" data-testid={`snap-desc-${snap.name}`}>{snap.description}</p>
                 ) : null}
+                {snap.tags && snap.tags.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 mt-1 ml-5" data-testid={`snap-tags-${snap.name}`}>
+                    {snap.tags.map((tag) => (
+                      <span key={tag} className="badge bg-blue-500/10 text-blue-300 border-blue-500/20">#{tag}</span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -839,16 +846,43 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
 // --- Edit Snapshot Modal ---
 function EditSnapshotModal({ vmId, snapshot, onClose, onSaved }) {
   const [description, setDescription] = useState('');
-  const updateMut = useMutation((args) => snapshots.update(vmId, args.name, { description: args.description }));
+  const [tagsInput, setTagsInput] = useState('');
+  const updateMut = useMutation((args) =>
+    snapshots.update(vmId, args.name, args.spec),
+  );
 
   React.useEffect(() => {
-    if (snapshot) setDescription(snapshot.description || '');
+    if (snapshot) {
+      setDescription(snapshot.description || '');
+      setTagsInput((snapshot.tags || []).join(', '));
+    }
   }, [snapshot]);
 
   if (!snapshot) return null;
 
   const handleSubmit = async () => {
-    await updateMut.execute({ name: snapshot.name, description });
+    const spec = {};
+    const trimmedDesc = description;
+    if (trimmedDesc !== (snapshot.description || '')) {
+      spec.description = trimmedDesc;
+    }
+    // Tag pointer semantics: nil = no change, [] = clear. Compare the
+    // typed list against the stored list order-independently (lowercase
+    // + sort both sides) so re-submitting a permutation is treated as a
+    // no-op and skips the round-trip.
+    const nextTags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);
+    const normalisedNext = nextTags.map((t) => t.toLowerCase()).sort();
+    const normalisedCurrent = (snapshot.tags || []).map((t) => t.toLowerCase()).sort();
+    const sameTags = normalisedNext.length === normalisedCurrent.length
+      && normalisedNext.every((t, i) => t === normalisedCurrent[i]);
+    if (!sameTags) {
+      spec.tags = nextTags;
+    }
+    if (Object.keys(spec).length === 0) {
+      onSaved();
+      return;
+    }
+    await updateMut.execute({ name: snapshot.name, spec });
     onSaved();
   };
 
@@ -868,6 +902,16 @@ function EditSnapshotModal({ vmId, snapshot, onClose, onSaved }) {
             autoFocus
           />
           <p className="mt-1 text-xs text-steel-500">{description.length}/1024 characters</p>
+        </div>
+        <div>
+          <label className="label">Tags <span className="text-steel-500 font-normal">(comma-separated; clear to remove)</span></label>
+          <input
+            className="input font-mono"
+            placeholder="audit, production"
+            value={tagsInput}
+            onChange={e => setTagsInput(e.target.value)}
+            data-testid="input-edit-snap-tags"
+          />
         </div>
         {updateMut.error && <p className="text-sm text-red-400">{updateMut.error}</p>}
         <div className="flex justify-end gap-2">
@@ -1131,14 +1175,17 @@ function EditPortModal({ vmId, portForward, onClose, onSaved }) {
 function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const createMut = useMutation((args) => snapshots.create(vmId, args.name, args.description));
+  const [tagsInput, setTagsInput] = useState('');
+  const createMut = useMutation((args) => snapshots.create(vmId, args.name, args.description, args.tags));
 
   const handleSubmit = async () => {
-    await createMut.execute({ name, description: description.trim() });
+    const tags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);
+    await createMut.execute({ name, description: description.trim(), tags });
     onCreated();
     onClose();
     setName('');
     setDescription('');
+    setTagsInput('');
   };
 
   return (
@@ -1158,6 +1205,16 @@ function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
             value={description}
             onChange={e => setDescription(e.target.value)}
             data-testid="input-snap-description"
+          />
+        </div>
+        <div>
+          <label className="label">Tags <span className="text-steel-500 font-normal">(comma-separated, optional)</span></label>
+          <input
+            className="input font-mono"
+            placeholder="audit, production, before-patch"
+            value={tagsInput}
+            onChange={e => setTagsInput(e.target.value)}
+            data-testid="input-snap-tags"
           />
         </div>
         {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}

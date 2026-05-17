@@ -783,14 +783,22 @@ export interface paths {
                     order?: components["parameters"]["SortOrder"];
                     /**
                      * @description Case-insensitive substring filter applied to the snapshot's
-                     *     `name` and `description`. The needle is trimmed and lowercased
-                     *     before matching. Filtering happens before sort + pagination so
-                     *     `X-Total-Count` reflects the post-search population. The
-                     *     snapshot ID (`<vmID>/<name>`) and `vm_id` are intentionally
-                     *     excluded from the haystack to avoid noisy false positives on
-                     *     short numeric queries.
+                     *     `name`, `description`, and `tags`. The needle is trimmed and
+                     *     lowercased before matching. Filtering happens before sort +
+                     *     pagination so `X-Total-Count` reflects the post-search
+                     *     population. The snapshot ID (`<vmID>/<name>`) and `vm_id` are
+                     *     intentionally excluded from the haystack to avoid noisy false
+                     *     positives on short numeric queries.
                      */
                     search?: string;
+                    /**
+                     * @description Case-insensitive exact-match tag filter. A snapshot matches
+                     *     when any of its tags equals this value. Applied **before**
+                     *     `search` so the post-filter `X-Total-Count` reflects the
+                     *     intersection. Mirrors the same shape on every other tagged
+                     *     resource (VMs, images, templates, port forwards, webhooks).
+                     */
+                    tag?: string;
                 };
                 header?: never;
                 path: {
@@ -2656,6 +2664,15 @@ export interface components {
             name: string;
             /** @description Optional free-text description (max 1024 chars). */
             description?: string;
+            /**
+             * @description Operator-supplied labels.  Lowercased, deduplicated, and
+             *     alphabetised server-side using the shared tag alphabet
+             *     (1-32 chars, `[a-z0-9][a-z0-9._:-]*`).  Persisted out of band
+             *     from the libvirt snapshot XML (the domainsnapshot schema does
+             *     not permit `<metadata>`); the wire shape is identical to the
+             *     tags array on every other tagged resource.
+             */
+            tags?: string[];
             /** Format: date-time */
             created_at: string;
         };
@@ -2663,18 +2680,28 @@ export interface components {
             name: string;
             /** @description Optional free-text description for this snapshot. */
             description?: string;
+            /**
+             * @description Optional tag list.  Lowercased + deduped + alphabetised server-side
+             *     using the shared `[a-z0-9][a-z0-9._:-]*` tag alphabet.
+             */
+            tags?: string[];
         };
         /**
-         * @description Editable metadata for an existing snapshot. Currently only the
-         *     description is editable; the snapshot's underlying disk and memory
-         *     state, parent pointer, and creation timestamp are immutable.
+         * @description Editable metadata for an existing snapshot. The snapshot's
+         *     underlying disk and memory state, parent pointer, and creation
+         *     timestamp are immutable.
          *
-         *     A nil/missing description means "leave as-is"; an explicit empty string
-         *     clears the description.
+         *     Field semantics:
+         *       * `description` nil/missing = leave as-is; explicit empty
+         *         string clears the description.
+         *       * `tags` nil/missing = leave as-is; explicit empty array
+         *         (`[]`) clears every tag.
          */
         UpdateSnapshotRequest: {
             /** @description New description for the snapshot. Empty string clears. */
             description?: string | null;
+            /** @description New tag list. Empty array clears every tag. */
+            tags?: string[] | null;
         };
         AddPortRequest: {
             host_port: number;

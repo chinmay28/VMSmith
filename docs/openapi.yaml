@@ -472,12 +472,23 @@ paths:
           required: false
           description: |
             Case-insensitive substring filter applied to the snapshot's
-            `name` and `description`. The needle is trimmed and lowercased
-            before matching. Filtering happens before sort + pagination so
-            `X-Total-Count` reflects the post-search population. The
-            snapshot ID (`<vmID>/<name>`) and `vm_id` are intentionally
-            excluded from the haystack to avoid noisy false positives on
-            short numeric queries.
+            `name`, `description`, and `tags`. The needle is trimmed and
+            lowercased before matching. Filtering happens before sort +
+            pagination so `X-Total-Count` reflects the post-search
+            population. The snapshot ID (`<vmID>/<name>`) and `vm_id` are
+            intentionally excluded from the haystack to avoid noisy false
+            positives on short numeric queries.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          description: |
+            Case-insensitive exact-match tag filter. A snapshot matches
+            when any of its tags equals this value. Applied **before**
+            `search` so the post-filter `X-Total-Count` reflects the
+            intersection. Mirrors the same shape on every other tagged
+            resource (VMs, images, templates, port forwards, webhooks).
           schema:
             type: string
       responses:
@@ -2173,6 +2184,17 @@ components:
         description:
           type: string
           description: Optional free-text description (max 1024 chars).
+        tags:
+          type: array
+          items:
+            type: string
+          description: |
+            Operator-supplied labels.  Lowercased, deduplicated, and
+            alphabetised server-side using the shared tag alphabet
+            (1-32 chars, `[a-z0-9][a-z0-9._:-]*`).  Persisted out of band
+            from the libvirt snapshot XML (the domainsnapshot schema does
+            not permit `<metadata>`); the wire shape is identical to the
+            tags array on every other tagged resource.
         created_at:
           type: string
           format: date-time
@@ -2186,21 +2208,37 @@ components:
           type: string
           maxLength: 1024
           description: Optional free-text description for this snapshot.
+        tags:
+          type: array
+          items:
+            type: string
+          description: |
+            Optional tag list.  Lowercased + deduped + alphabetised server-side
+            using the shared `[a-z0-9][a-z0-9._:-]*` tag alphabet.
     UpdateSnapshotRequest:
       type: object
       description: |
-        Editable metadata for an existing snapshot. Currently only the
-        description is editable; the snapshot's underlying disk and memory
-        state, parent pointer, and creation timestamp are immutable.
+        Editable metadata for an existing snapshot. The snapshot's
+        underlying disk and memory state, parent pointer, and creation
+        timestamp are immutable.
 
-        A nil/missing description means "leave as-is"; an explicit empty string
-        clears the description.
+        Field semantics:
+          * `description` nil/missing = leave as-is; explicit empty
+            string clears the description.
+          * `tags` nil/missing = leave as-is; explicit empty array
+            (`[]`) clears every tag.
       properties:
         description:
           type: string
           nullable: true
           maxLength: 1024
           description: New description for the snapshot. Empty string clears.
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: New tag list. Empty array clears every tag.
     AddPortRequest:
       type: object
       required: [host_port, guest_port]

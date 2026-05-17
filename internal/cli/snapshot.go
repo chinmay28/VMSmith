@@ -31,6 +31,7 @@ var snapCreateCmd = &cobra.Command{
 		vmID := args[0]
 		name, _ := cmd.Flags().GetString("name")
 		description, _ := cmd.Flags().GetString("description")
+		tags, _ := cmd.Flags().GetStringSlice("tag")
 		if len(description) > snapshotDescriptionMaxLen {
 			return fmt.Errorf("description must be at most %d characters", snapshotDescriptionMaxLen)
 		}
@@ -43,7 +44,7 @@ var snapCreateCmd = &cobra.Command{
 		}
 		defer cleanup()
 
-		snap, err := mgr.CreateSnapshot(context.Background(), vmID, types.SnapshotSpec{Name: name, Description: description})
+		snap, err := mgr.CreateSnapshot(context.Background(), vmID, types.SnapshotSpec{Name: name, Description: description, Tags: tags})
 		if err != nil {
 			logger.Error("cli", "snapshot create failed", "vm_id", vmID, "name", name, "error", err.Error())
 			return err
@@ -52,6 +53,9 @@ var snapCreateCmd = &cobra.Command{
 		fmt.Printf("Snapshot created: %s\n", snap.Name)
 		if snap.Description != "" {
 			fmt.Printf("Description: %s\n", snap.Description)
+		}
+		if len(snap.Tags) > 0 {
+			fmt.Printf("Tags: %s\n", strings.Join(snap.Tags, ","))
 		}
 		return nil
 	},
@@ -94,7 +98,9 @@ var snapListCmd = &cobra.Command{
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		tagFilter, _ := cmd.Flags().GetString("tag")
 		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
+		tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
 		if sortField == "" {
@@ -128,6 +134,19 @@ var snapListCmd = &cobra.Command{
 			logger.Error("cli", "snapshot list failed", "vm_id", vmID, "error", err.Error())
 			return err
 		}
+		// Tag filter is applied before search (matches the API contract).
+		if tagFilter != "" {
+			filtered := snaps[:0]
+			for _, snap := range snaps {
+				for _, tag := range snap.Tags {
+					if strings.EqualFold(tag, tagFilter) {
+						filtered = append(filtered, snap)
+						break
+					}
+				}
+			}
+			snaps = filtered
+		}
 		if searchFilter != "" {
 			filtered := snaps[:0]
 			for _, snap := range snaps {
@@ -141,13 +160,17 @@ var snapListCmd = &cobra.Command{
 		logger.Info("cli", "snapshot list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(snaps)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tCREATED\tDESCRIPTION")
+		fmt.Fprintln(w, "NAME\tCREATED\tTAGS\tDESCRIPTION")
 		for _, s := range snaps {
 			created := ""
 			if !s.CreatedAt.IsZero() {
 				created = s.CreatedAt.Format("2006-01-02 15:04:05")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, created, s.Description)
+			tagCol := "-"
+			if len(s.Tags) > 0 {
+				tagCol = strings.Join(s.Tags, ",")
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, created, tagCol, s.Description)
 		}
 		w.Flush()
 		return nil
@@ -157,12 +180,20 @@ var snapListCmd = &cobra.Command{
 var snapEditCmd = &cobra.Command{
 	Use:   "edit <vm-id> <snap-name>",
 	Short: "Edit metadata on an existing snapshot",
-	Long: `Edit the description of an existing snapshot. The underlying disk and
-memory state are not touched — only the snapshot's <description> element is
-rewritten via libvirt's snapshot REDEFINE primitive.
+	Long: `Edit the description or tags of an existing snapshot. The underlying
+disk and memory state are not touched — only the snapshot's <description>
+element (rewritten via libvirt's snapshot REDEFINE primitive) and out-of-band
+tag list are mutated.
 
 Pass --description "" to clear the description. Omit --description entirely
-for a no-op (useful for confirming the snapshot is reachable).`,
+for no-op on that field.
+
+Tags follow the same pointer semantics: repeat --tag to set the new list,
+--clear-tags to drop every tag.  --tag and --clear-tags are mutually
+exclusive.  Omitting both leaves the tag list untouched.
+
+Omitting every flag is a deliberate no-op (useful for confirming the
+snapshot is reachable).`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID := args[0]
@@ -177,6 +208,20 @@ for a no-op (useful for confirming the snapshot is reachable).`,
 			descPtr = &d
 		}
 
+		var tagPtr *[]string
+		tagFlag := cmd.Flags().Lookup("tag")
+		clearTags, _ := cmd.Flags().GetBool("clear-tags")
+		if tagFlag != nil && tagFlag.Changed && clearTags {
+			return fmt.Errorf("--tag and --clear-tags are mutually exclusive")
+		}
+		if tagFlag != nil && tagFlag.Changed {
+			t, _ := cmd.Flags().GetStringSlice("tag")
+			tagPtr = &t
+		} else if clearTags {
+			empty := []string{}
+			tagPtr = &empty
+		}
+
 		logger.Info("cli", "snapshot edit", "vm_id", vmID, "name", snapName)
 
 		mgr, cleanup, err := newVMManager()
@@ -186,7 +231,7 @@ for a no-op (useful for confirming the snapshot is reachable).`,
 		}
 		defer cleanup()
 
-		snap, err := mgr.UpdateSnapshot(context.Background(), vmID, snapName, types.SnapshotUpdateSpec{Description: descPtr})
+		snap, err := mgr.UpdateSnapshot(context.Background(), vmID, snapName, types.SnapshotUpdateSpec{Description: descPtr, Tags: tagPtr})
 		if err != nil {
 			logger.Error("cli", "snapshot edit failed", "vm_id", vmID, "name", snapName, "error", err.Error())
 			return err
@@ -195,6 +240,9 @@ for a no-op (useful for confirming the snapshot is reachable).`,
 		fmt.Printf("Snapshot %s updated\n", snap.Name)
 		if snap.Description != "" {
 			fmt.Printf("Description: %s\n", snap.Description)
+		}
+		if len(snap.Tags) > 0 {
+			fmt.Printf("Tags: %s\n", strings.Join(snap.Tags, ","))
 		}
 		return nil
 	},
@@ -293,15 +341,19 @@ func init() {
 	snapCreateCmd.Flags().String("name", "", "snapshot name (required)")
 	snapCreateCmd.MarkFlagRequired("name")
 	snapCreateCmd.Flags().String("description", "", "free-text description for the snapshot (optional, max 1024 chars)")
+	snapCreateCmd.Flags().StringSlice("tag", nil, "tag (repeat for multiple; lowercased + deduped + alphabetised server-side)")
 
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")
 
 	snapListCmd.Flags().String("sort", types.SnapshotSortID, "sort field: id, name, or created_at")
 	snapListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
-	snapListCmd.Flags().String("search", "", "case-insensitive substring filter on snapshot name and description")
+	snapListCmd.Flags().String("search", "", "case-insensitive substring filter on snapshot name, description, and tags")
+	snapListCmd.Flags().String("tag", "", "case-insensitive exact-match tag filter (applied before --search)")
 
 	snapEditCmd.Flags().String("description", "", "new description for the snapshot (pass empty string to clear; max 1024 chars)")
+	snapEditCmd.Flags().StringSlice("tag", nil, "replace the snapshot's tag list (repeat the flag)")
+	snapEditCmd.Flags().Bool("clear-tags", false, "remove every tag from the snapshot (mutually exclusive with --tag)")
 
 	snapDeleteCmd.Flags().String("name", "", "single snapshot name to delete (mutually exclusive with --prefix)")
 	snapDeleteCmd.Flags().String("prefix", "", "delete every snapshot whose name starts with this prefix (mutually exclusive with --name)")

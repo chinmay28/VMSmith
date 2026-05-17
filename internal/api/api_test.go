@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -7867,4 +7868,237 @@ func TestBulkDeleteTemplates_BadJSON(t *testing.T) {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_request_body")
+}
+
+// --- Snapshot tag tests (roadmap 2.2.17) ---
+//
+// Tags are persisted out-of-band from libvirt (the libvirt domainsnapshot
+// XML schema does not permit <metadata>, so we cannot put tags alongside
+// description in the XML).  The MockManager stores tags in-memory; the
+// LibvirtManager writes them to bbolt.  Either way, the wire contract is
+// the same and the tests below talk only to the HTTP surface.
+
+func TestCreateSnapshot_WithTags(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-t", Name: "host"})
+
+	body := jsonBody(t, map[string]any{
+		"name": "snap-tagged",
+		"tags": []string{"Production", "audit", "production"}, // mixed case + duplicate
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-snap-t/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+
+	// Tags should be lowercased + deduplicated + alphabetised by the
+	// shared validator.
+	if got, want := snap.Tags, []string{"audit", "production"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("snap.Tags = %v, want %v", got, want)
+	}
+
+	// And round-trip via list.
+	listResp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-t/snapshots")
+	var listed []*types.Snapshot
+	decodeJSON(t, listResp, &listed)
+	if len(listed) != 1 || !reflect.DeepEqual(listed[0].Tags, []string{"audit", "production"}) {
+		t.Errorf("list did not preserve tags: %+v", listed)
+	}
+}
+
+func TestCreateSnapshot_RejectsInvalidTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-x", Name: "host"})
+
+	body := jsonBody(t, map[string]any{
+		"name": "snap",
+		"tags": []string{"BAD TAG WITH SPACES"},
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-snap-x/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_snapshot")
+}
+
+func TestCreateSnapshot_EmptyTagsArrayPersistsNoneAndListOmitsField(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-e", Name: "host"})
+
+	body := jsonBody(t, map[string]any{"name": "snap-empty", "tags": []string{}})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-snap-e/snapshots", "application/json", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if len(snap.Tags) != 0 {
+		t.Errorf("empty tags array should produce nil/empty Tags, got %v", snap.Tags)
+	}
+}
+
+func TestUpdateSnapshot_SetsTags(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-up", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-snap-up", types.SnapshotSpec{Name: "snap-up"}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	tags := []string{"backup", "audit"}
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-snap-up/snapshots/snap-up",
+		updateSnapshotRequest{Tags: &tags})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if !reflect.DeepEqual(snap.Tags, []string{"audit", "backup"}) {
+		t.Errorf("Tags = %v, want [audit backup]", snap.Tags)
+	}
+}
+
+func TestUpdateSnapshot_ClearsTags(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-clr", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-snap-clr", types.SnapshotSpec{Name: "snap-c", Tags: []string{"audit"}}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	cleared := []string{}
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-snap-clr/snapshots/snap-c",
+		updateSnapshotRequest{Tags: &cleared})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if len(snap.Tags) != 0 {
+		t.Errorf("Tags should be cleared, got %v", snap.Tags)
+	}
+}
+
+func TestUpdateSnapshot_OmittedTagsIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-noop", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-snap-noop", types.SnapshotSpec{Name: "snap-n", Tags: []string{"keep-me"}}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	desc := "just touching description"
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-snap-noop/snapshots/snap-n",
+		updateSnapshotRequest{Description: &desc})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var snap types.Snapshot
+	decodeJSON(t, resp, &snap)
+	if !reflect.DeepEqual(snap.Tags, []string{"keep-me"}) {
+		t.Errorf("Tags should be preserved when patch omits them, got %v", snap.Tags)
+	}
+}
+
+func TestUpdateSnapshot_RejectsInvalidTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-bad", Name: "host"})
+	if _, err := mockMgr.CreateSnapshot(nil, "vm-snap-bad", types.SnapshotSpec{Name: "snap-b"}); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	bad := []string{"BAD TAG"}
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-snap-bad/snapshots/snap-b",
+		updateSnapshotRequest{Tags: &bad})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_snapshot")
+}
+
+func TestListSnapshots_FilterByTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-fl", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-fl", Name: "snap-a", Tags: []string{"audit"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-fl", Name: "snap-b", Tags: []string{"production"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-fl", Name: "snap-c", Tags: nil})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-fl/snapshots?tag=audit")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "snap-a" {
+		t.Errorf("?tag=audit = %+v, want [snap-a]", listed)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (post-tag-filter count)", got)
+	}
+}
+
+func TestListSnapshots_FilterByTag_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-ci", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-ci", Name: "snap-a", Tags: []string{"audit"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-ci/snapshots?tag=AUDIT")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 {
+		t.Errorf("expected case-insensitive match, got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterByTag_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-nm", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-nm", Name: "snap-a", Tags: []string{"audit"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-nm/snapshots?tag=missing")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 0 {
+		t.Errorf("expected empty list, got %+v", listed)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Errorf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestListSnapshots_FilterByTag_ComposesWithSearch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-cw", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-cw", Name: "before-upgrade", Tags: []string{"audit"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-cw", Name: "after-upgrade", Tags: []string{"audit"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-cw", Name: "before-other", Tags: []string{"production"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-cw/snapshots?tag=audit&search=before")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "before-upgrade" {
+		t.Errorf("?tag=audit&search=before = %+v, want [before-upgrade]", listed)
+	}
+}
+
+func TestListSnapshots_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-mt", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-mt", Name: "snap-a", Tags: []string{"production"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-mt", Name: "snap-b"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-mt/snapshots?search=prod")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "snap-a" {
+		t.Errorf("?search=prod must match against tags, got %+v", listed)
+	}
 }
