@@ -401,6 +401,26 @@ async function main() {
       await assertText(p, "port-description-pf-seed-ssh", "rewritten via JSDOM");
     }, page);
 
+    await runTest("edit port forward tags renders chips and clears", async (p) => {
+      // Set tags via the edit modal, verify the chips, then clear them.
+      await p.locator('[data-testid="btn-edit-port-pf-seed-ssh"]').click();
+      await p.waitForTimeout(200);
+      await assertVisible(p, "input-edit-port-tags");
+      await p.locator('[data-testid="input-edit-port-tags"]').fill("audit, jumpbox");
+      await p.locator('[data-testid="btn-submit-edit-port"]').click();
+      await p.waitForTimeout(800);
+      await assertText(p, "port-tags-pf-seed-ssh", "audit");
+      await assertText(p, "port-tags-pf-seed-ssh", "jumpbox");
+
+      // Now clear them.
+      await p.locator('[data-testid="btn-edit-port-pf-seed-ssh"]').click();
+      await p.waitForTimeout(200);
+      await p.locator('[data-testid="input-edit-port-tags"]').fill("");
+      await p.locator('[data-testid="btn-submit-edit-port"]').click();
+      await p.waitForTimeout(800);
+      await assertNotVisible(p, "port-tags-pf-seed-ssh");
+    }, page);
+
     await runTest("auto-start summary card and edit toggle", async (p) => {
       await assertVisible(p, "vm-detail-auto-start");
       // Open the edit modal and flip the checkbox on.

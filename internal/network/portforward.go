@@ -35,9 +35,13 @@ func (pf *PortForwarder) SetApplyRuleFunc(fn func(action string, hostPort, guest
 }
 
 // AddOptions carries optional metadata for Add. Description is a free-form
-// string capped at the API boundary (256 chars).
+// string capped at the API boundary (256 chars). Tags are expected to be
+// already normalised (lowercased, deduped, sorted, capped 1-32 chars) by the
+// API layer via validate.NormalizeTags; the port forwarder persists them
+// verbatim.
 type AddOptions struct {
 	Description string
+	Tags        []string
 }
 
 // Add creates a new port forwarding rule: host_port -> guest_ip:guest_port.
@@ -72,6 +76,7 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 		GuestIP:     guestIP,
 		Protocol:    proto,
 		Description: opts.Description,
+		Tags:        opts.Tags,
 	}
 
 	if err := pf.store.PutPortForward(rule); err != nil {
@@ -84,10 +89,14 @@ func (pf *PortForwarder) Add(vmID string, hostPort, guestPort int, guestIP strin
 }
 
 // UpdateOptions carries the editable metadata for an existing port-forward
-// rule. Description is a pointer so callers can distinguish between "leave
-// untouched" (nil) and "clear" (empty string).
+// rule. Description and Tags are pointers so callers can distinguish between
+// "leave untouched" (nil) and explicit values. For Tags, a non-nil empty
+// slice clears the tag set entirely; a non-nil non-empty slice replaces it.
+// Tag values are expected to be already normalised by the API layer (via
+// validate.NormalizeTags); the port forwarder persists them verbatim.
 type UpdateOptions struct {
 	Description *string
+	Tags        *[]string
 }
 
 // Update mutates the metadata of an existing port-forward rule. Today only
@@ -109,6 +118,13 @@ func (pf *PortForwarder) Update(id string, opts UpdateOptions) (*types.PortForwa
 		}
 		if opts.Description != nil {
 			fwd.Description = strings.TrimSpace(*opts.Description)
+		}
+		if opts.Tags != nil {
+			if len(*opts.Tags) == 0 {
+				fwd.Tags = nil
+			} else {
+				fwd.Tags = *opts.Tags
+			}
 		}
 		if err := pf.store.PutPortForward(fwd); err != nil {
 			return nil, fmt.Errorf("persisting port forward: %w", err)

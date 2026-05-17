@@ -196,12 +196,13 @@ export const images = {
 export const ports = {
   list: (
     vmId: string,
-    opts: { sort?: string; order?: string; search?: string } = {},
+    opts: { sort?: string; order?: string; search?: string; tag?: string } = {},
   ) => {
     const query: Record<string, string> = {};
     if (opts.sort)   query.sort   = opts.sort;
     if (opts.order)  query.order  = opts.order;
     if (opts.search) query.search = opts.search;
+    if (opts.tag)    query.tag    = opts.tag;
     return unwrap(apiClient.GET('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId }, query: query as any },
     } as any));
@@ -212,8 +213,9 @@ export const ports = {
     guestPort: number,
     protocol: 'tcp' | 'udp' = 'tcp',
     description?: string,
+    tags?: string[],
   ) => {
-    const body: components['schemas']['AddPortRequest'] = {
+    const body: components['schemas']['AddPortRequest'] & { tags?: string[] } = {
       host_port: hostPort,
       guest_port: guestPort,
       protocol,
@@ -221,14 +223,17 @@ export const ports = {
     if (description) {
       body.description = description;
     }
+    if (tags && tags.length > 0) {
+      body.tags = tags;
+    }
     return unwrap(apiClient.POST('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId } },
       body,
-    }));
+    } as any));
   },
   remove: (vmId: string, portId: string) =>
     unwrap(apiClient.DELETE('/vms/{vmID}/ports/{portID}', { params: { path: { vmID: vmId, portID: portId } } })),
-  update: (vmId: string, portId: string, patch: { description?: string }) =>
+  update: (vmId: string, portId: string, patch: { description?: string; tags?: string[] }) =>
     unwrap(apiClient.PATCH('/vms/{vmID}/ports/{portID}' as any, {
       params: { path: { vmID: vmId, portID: portId } },
       body: patch,

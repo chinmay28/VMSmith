@@ -6704,6 +6704,230 @@ func TestUpdatePort_BadJSON(t *testing.T) {
 	}
 }
 
+func TestAddPort_WithTags(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-tags", Name: "tagged", IP: "192.168.100.10"})
+
+	body := jsonBody(t, addPortRequest{
+		HostPort:  2222,
+		GuestPort: 22,
+		Protocol:  "tcp",
+		Tags:      []string{"PRODUCTION", "audit", "production"}, // dupe + uppercase
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-tags/ports", "application/json", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if got, want := strings.Join(out.Tags, ","), "audit,production"; got != want {
+		t.Errorf("Tags = %q, want %q (normalised: lowercased, deduped, sorted)", got, want)
+	}
+}
+
+func TestAddPort_RejectsInvalidTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bad", Name: "bad", IP: "192.168.100.10"})
+
+	body := jsonBody(t, addPortRequest{
+		HostPort:  2222,
+		GuestPort: 22,
+		Protocol:  "tcp",
+		Tags:      []string{"has spaces"},
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-bad/ports", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_port_forward" {
+		t.Errorf("Code = %q, want invalid_port_forward", apiErr.Code)
+	}
+}
+
+func TestAddPort_RejectsEmptyTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bad", Name: "bad", IP: "192.168.100.10"})
+
+	body := jsonBody(t, addPortRequest{
+		HostPort:  2222,
+		GuestPort: 22,
+		Protocol:  "tcp",
+		Tags:      []string{"  "},
+	})
+	resp, _ := http.Post(ts.URL+"/api/v1/vms/vm-bad/ports", "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestUpdatePort_SetsTags(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-tg", VMID: "vm-tg", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-tg/ports/pf-tg",
+		jsonBody(t, map[string]any{"tags": []string{"web", "audit"}}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if got, want := strings.Join(out.Tags, ","), "audit,web"; got != want {
+		t.Errorf("Tags = %q, want %q", got, want)
+	}
+
+	stored, _ := s.ListPortForwards("vm-tg")
+	if len(stored) != 1 || strings.Join(stored[0].Tags, ",") != "audit,web" {
+		t.Errorf("persisted Tags = %v", stored[0].Tags)
+	}
+}
+
+func TestUpdatePort_ClearsTags(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-clr", VMID: "vm-clr", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"old"}})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-clr/ports/pf-clr",
+		jsonBody(t, map[string]any{"tags": []string{}}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if len(out.Tags) != 0 {
+		t.Errorf("expected tags cleared, got %v", out.Tags)
+	}
+}
+
+func TestUpdatePort_OmittedTagsIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-no", VMID: "vm-no", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.11", Protocol: types.ProtocolTCP, Tags: []string{"keep", "me"}})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-no/ports/pf-no",
+		jsonBody(t, map[string]any{"description": "label-only"}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := decodePortForwardResponse(t, resp)
+	if strings.Join(out.Tags, ",") != "keep,me" {
+		t.Errorf("Tags = %v, want unchanged", out.Tags)
+	}
+	if out.Description != "label-only" {
+		t.Errorf("Description = %q, want updated", out.Description)
+	}
+}
+
+func TestUpdatePort_RejectsInvalidTag(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-bad", VMID: "vm-bad", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.12", Protocol: types.ProtocolTCP})
+
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bad/ports/pf-bad",
+		jsonBody(t, map[string]any{"tags": []string{"has spaces"}}))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_port_forward" {
+		t.Errorf("Code = %q, want invalid_port_forward", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByTag(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-a", VMID: "vm-flt", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production", "web"}})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-b", VMID: "vm-flt", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"audit"}})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-c", VMID: "vm-flt", HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-flt/ports?tag=production")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []types.PortForward
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].ID != "pf-a" {
+		t.Errorf("filter result = %+v, want [pf-a]", got)
+	}
+}
+
+func TestListPorts_FilterByTag_CaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-a", VMID: "vm-flt2", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-flt2/ports?tag=PRODUCTION")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []types.PortForward
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 {
+		t.Errorf("filter result count = %d, want 1 (case-insensitive)", len(got))
+	}
+}
+
+func TestListPorts_FilterByTag_ComposesWithSearch(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-a", VMID: "vm-cmb", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production"}, Description: "web frontend"})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-b", VMID: "vm-cmb", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production"}, Description: "metrics"})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-c", VMID: "vm-cmb", HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"audit"}, Description: "web ssh"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-cmb/ports?tag=production&search=web")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []types.PortForward
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].ID != "pf-a" {
+		t.Errorf("intersection result = %+v, want [pf-a]", got)
+	}
+}
+
+func TestListPorts_FilterBySearch_MatchesTag(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-a", VMID: "vm-srch", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"production"}})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-b", VMID: "vm-srch", HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"audit"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-srch/ports?search=audit")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []types.PortForward
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 || got[0].ID != "pf-b" {
+		t.Errorf("search-by-tag result = %+v, want [pf-b]", got)
+	}
+}
+
 func TestBulkDeletePorts_ByIDs(t *testing.T) {
 	ts, _, s, _, cleanup := testServerWithPortFwd(t)
 	defer cleanup()

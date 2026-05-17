@@ -528,6 +528,10 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
     let list = (portForwards.get(m[1]) || []).slice();
+    const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
+    if (tagFilter) {
+      list = list.filter(pf => Array.isArray(pf.tags) && pf.tags.some(t => t === tagFilter));
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(pf => {
@@ -536,6 +540,7 @@ const server = http.createServer(async (req, res) => {
         if (String(pf.host_port || "").includes(search)) return true;
         if (String(pf.guest_port || "").includes(search)) return true;
         if (pf.guest_ip && pf.guest_ip.toLowerCase().includes(search)) return true;
+        if (Array.isArray(pf.tags) && pf.tags.some(t => t.includes(search))) return true;
         return false;
       });
     }
@@ -598,6 +603,27 @@ const server = http.createServer(async (req, res) => {
     if (typeof body.description === "string" && body.description.length > 256) {
       return json(res, 400, { code: "invalid_port_forward", message: "description must be at most 256 characters" });
     }
+    let normalizedTags;
+    if (Array.isArray(body.tags)) {
+      const seen = new Set();
+      normalizedTags = [];
+      for (const t of body.tags) {
+        const lower = String(t || "").trim().toLowerCase();
+        if (!lower) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags cannot contain empty values" });
+        }
+        if (lower.length > 32) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags must be 1-32 characters" });
+        }
+        if (!/^[a-z0-9][a-z0-9._:-]*$/.test(lower)) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens" });
+        }
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        normalizedTags.push(lower);
+      }
+      normalizedTags.sort();
+    }
     const vm = vms.get(m[1]);
     const pf = {
       id: `pf-${Date.now()}`,
@@ -609,6 +635,9 @@ const server = http.createServer(async (req, res) => {
     };
     if (body.description) {
       pf.description = body.description;
+    }
+    if (normalizedTags && normalizedTags.length > 0) {
+      pf.tags = normalizedTags;
     }
     const list = portForwards.get(m[1]) || []; list.push(pf); portForwards.set(m[1], list);
     return json(res, 201, pf);
@@ -627,6 +656,31 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { code: "invalid_port_forward", message: "description must be at most 256 characters" });
       }
       pf.description = body.description.trim();
+    }
+    if (Array.isArray(body.tags)) {
+      const seen = new Set();
+      const normalizedTags = [];
+      for (const t of body.tags) {
+        const lower = String(t || "").trim().toLowerCase();
+        if (!lower) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags cannot contain empty values" });
+        }
+        if (lower.length > 32) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags must be 1-32 characters" });
+        }
+        if (!/^[a-z0-9][a-z0-9._:-]*$/.test(lower)) {
+          return json(res, 400, { code: "invalid_port_forward", message: "tags must contain only lowercase letters, numbers, dots, colons, underscores, or hyphens" });
+        }
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        normalizedTags.push(lower);
+      }
+      normalizedTags.sort();
+      if (normalizedTags.length === 0) {
+        delete pf.tags;
+      } else {
+        pf.tags = normalizedTags;
+      }
     }
     return json(res, 200, pf);
   }

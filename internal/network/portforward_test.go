@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -428,6 +429,97 @@ func TestPortForwarder_Update_NilDescriptionIsNoOp(t *testing.T) {
 	}
 	if updated.Description != "leave-me-alone" {
 		t.Errorf("Description = %q, want unchanged", updated.Description)
+	}
+}
+
+func TestPortForwarder_Add_PersistsTags(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+
+	rule, err := pf.Add("vm-tagged", 8080, 80, "192.168.100.10", types.ProtocolTCP, AddOptions{
+		Tags: []string{"production", "web"},
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got, want := strings.Join(rule.Tags, ","), "production,web"; got != want {
+		t.Errorf("rule.Tags = %q, want %q", got, want)
+	}
+
+	stored, err := pf.store.ListPortForwards("vm-tagged")
+	if err != nil {
+		t.Fatalf("ListPortForwards: %v", err)
+	}
+	if len(stored) != 1 || strings.Join(stored[0].Tags, ",") != "production,web" {
+		t.Errorf("persisted Tags = %v", stored[0].Tags)
+	}
+}
+
+func TestPortForwarder_Update_SetsTags(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-tag", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+	}
+	if err := pf.store.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	tags := []string{"audit", "production"}
+	updated, err := pf.Update("pf-tag", UpdateOptions{Tags: &tags})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if strings.Join(updated.Tags, ",") != "audit,production" {
+		t.Errorf("Tags = %v", updated.Tags)
+	}
+
+	stored, _ := pf.store.ListPortForwards("vm-a")
+	if strings.Join(stored[0].Tags, ",") != "audit,production" {
+		t.Errorf("persisted Tags = %v", stored[0].Tags)
+	}
+}
+
+func TestPortForwarder_Update_ClearsTagsWithEmptySlice(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-tag", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+		Tags: []string{"old", "set"},
+	}
+	if err := pf.store.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	empty := []string{}
+	updated, err := pf.Update("pf-tag", UpdateOptions{Tags: &empty})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updated.Tags) != 0 {
+		t.Errorf("expected tags cleared; got %v", updated.Tags)
+	}
+}
+
+func TestPortForwarder_Update_NilTagsIsNoOp(t *testing.T) {
+	pf, _ := newTestPortForwarder(t)
+
+	fwd := &types.PortForward{
+		ID: "pf-tag", VMID: "vm-a", HostPort: 8080, GuestPort: 80,
+		GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP,
+		Tags: []string{"keep", "me"},
+	}
+	if err := pf.store.PutPortForward(fwd); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	updated, err := pf.Update("pf-tag", UpdateOptions{Tags: nil})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if strings.Join(updated.Tags, ",") != "keep,me" {
+		t.Errorf("Tags = %v, want unchanged", updated.Tags)
 	}
 }
 

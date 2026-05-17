@@ -110,6 +110,45 @@ func TestPortForwardMatchesSearch_NoMatch(t *testing.T) {
 	}
 }
 
+func TestPortForwardMatchesSearch_TagSubstring(t *testing.T) {
+	pf := &PortForward{
+		HostPort:  8080,
+		GuestPort: 80,
+		Protocol:  ProtocolTCP,
+		Tags:      []string{"production", "web"},
+	}
+	if !PortForwardMatchesSearch(pf, "prod") {
+		t.Fatalf("expected partial tag substring to match")
+	}
+	if !PortForwardMatchesSearch(pf, "web") {
+		t.Fatalf("expected exact tag to match")
+	}
+}
+
+func TestPortForwardMatchesSearch_TagCaseInsensitive(t *testing.T) {
+	pf := &PortForward{
+		HostPort:  8080,
+		GuestPort: 80,
+		Protocol:  ProtocolTCP,
+		Tags:      []string{"production"}, // already normalised lowercase
+	}
+	// Tags are stored lowercased; caller is responsible for lowercasing the
+	// needle (matches the existing contract).
+	if !PortForwardMatchesSearch(pf, "production") {
+		t.Fatalf("lowercase needle should match lowercase tag")
+	}
+	if PortForwardMatchesSearch(pf, "PRODUCTION") {
+		t.Fatalf("uppercase needle should miss; caller is responsible for lowercasing")
+	}
+}
+
+func TestPortForwardMatchesSearch_EmptyTagsHandled(t *testing.T) {
+	pf := &PortForward{HostPort: 8080, GuestPort: 80, Protocol: ProtocolTCP}
+	if PortForwardMatchesSearch(pf, "anytag") {
+		t.Fatalf("rule with no tags should not match a tag-only needle")
+	}
+}
+
 func TestPortForwardMatchesSearch_IDAndVMIDNotInHaystack(t *testing.T) {
 	// ID is `{vmID}/{hostPort}` and VMID is the URL scope. A needle that
 	// only appears in those fields (e.g., a substring of the VM id's

@@ -16,16 +16,19 @@ type addPortRequest struct {
 	GuestPort   int            `json:"guest_port"`
 	Protocol    types.Protocol `json:"protocol,omitempty"`
 	Description string         `json:"description,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
 }
 
 // updatePortRequest carries the editable metadata for an existing port-forward
-// rule. Description is a pointer so callers can distinguish between "omit"
-// (leave untouched) and "set to empty string" (clear). The 5-tuple
-// (host_port/guest_port/guest_ip/protocol) that drives the underlying iptables
-// rule is intentionally immutable here — changing any of those is a
-// delete-and-re-add operation.
+// rule. Description and Tags are pointers so callers can distinguish between
+// "omit" (leave untouched) and explicit values. For Tags, a JSON `null` (or
+// an omitted key) leaves the tag set unchanged; an explicit empty array
+// clears it. The 5-tuple (host_port/guest_port/guest_ip/protocol) that drives
+// the underlying iptables rule is intentionally immutable here — changing any
+// of those is a delete-and-re-add operation.
 type updatePortRequest struct {
-	Description *string `json:"description,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
 }
 
 // bulkDeletePortsRequest selects port forwards to delete in a single batch.
@@ -74,6 +77,11 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	tags, err := normalizePortForwardTags(req.Tags)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	// Get VM to find its IP
 	vm, err := s.vmManager.Get(r.Context(), vmID)
@@ -87,7 +95,7 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol, network.AddOptions{Description: description})
+	pf, err := s.portFwd.Add(vmID, req.HostPort, req.GuestPort, vm.IP, req.Protocol, network.AddOptions{Description: description, Tags: tags})
 	if err != nil {
 		if apiErr, ok := err.(*types.APIError); ok && apiErr.Code == "port_forward_conflict" {
 			writeAPIError(w, http.StatusConflict, apiErr)
@@ -110,9 +118,11 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 // ListPorts handles GET /api/v1/vms/{vmID}/ports
 //
 // Optional query params:
+//   - tag=<tag>                  case-insensitive exact-match filter over the
+//     rule's tag list. Applied before search + sort.
 //   - search=<needle>            case-insensitive substring filter across
-//     description, protocol, host_port, guest_port, and guest_ip. Applied
-//     before sort.
+//     description, protocol, host_port, guest_port, guest_ip, and tags.
+//     Applied before sort.
 //   - sort=<id|host_port|guest_port|protocol|description>   default id
 //   - order=<asc|desc>           default asc
 //
@@ -134,6 +144,20 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
 		return
+	}
+
+	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	if tagFilter != "" {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			for _, tag := range pf.Tags {
+				if tag == tagFilter {
+					filtered = append(filtered, pf)
+					break
+				}
+			}
+		}
+		ports = filtered
 	}
 
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
@@ -184,6 +208,24 @@ func (s *Server) UpdatePort(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var tagsPtr *[]string
+	if req.Tags != nil {
+		normalized, err := normalizePortForwardTags(*req.Tags)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err)
+			return
+		}
+		// Preserve "clear" semantics: an explicit empty array clears tags;
+		// keep normalized as nil in that case so the persistence layer
+		// drops the slice.
+		if normalized == nil {
+			empty := []string{}
+			tagsPtr = &empty
+		} else {
+			tagsPtr = &normalized
+		}
+	}
+
 	// Foreign-VM safety: verify the rule belongs to the URL VM before mutating
 	// it. We list the URL VM's forwards and require the target id to be in the
 	// set; any other case (rule missing, rule on a different VM) surfaces as
@@ -207,7 +249,7 @@ func (s *Server) UpdatePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.portFwd.Update(portID, network.UpdateOptions{Description: req.Description})
+	updated, err := s.portFwd.Update(portID, network.UpdateOptions{Description: req.Description, Tags: tagsPtr})
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
@@ -217,6 +259,9 @@ func (s *Server) UpdatePort(w http.ResponseWriter, r *http.Request) {
 	attrs := map[string]string{"port_id": portID}
 	if req.Description != nil {
 		attrs["description"] = strings.TrimSpace(*req.Description)
+	}
+	if tagsPtr != nil {
+		attrs["tags"] = strings.Join(*tagsPtr, ",")
 	}
 	s.publishAppEvent("port_forward.updated", vmID,
 		"port forward "+portID+" updated", attrs)
