@@ -1182,7 +1182,23 @@ const server = http.createServer(async (req, res) => {
       }
       return desc ? -cmp : cmp;
     });
-    return json(res, 200, hooks);
+
+    // Pagination. parsePagination accepts `page` + `per_page` (or `limit` as
+    // a synonym for `per_page`). X-Total-Count reflects the post-filter /
+    // pre-pagination population so the GUI can render a stable page indicator.
+    const total = hooks.length;
+    const pageRaw = parseInt(url.searchParams.get("page") || "1", 10);
+    const perPageRaw = parseInt(
+      url.searchParams.get("per_page") || url.searchParams.get("limit") || "0",
+      10,
+    );
+    const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const perPage = isNaN(perPageRaw) || perPageRaw <= 0 ? 0 : perPageRaw;
+    if (perPage > 0) {
+      const start = (page - 1) * perPage;
+      hooks = hooks.slice(start, start + perPage);
+    }
+    return json(res, 200, hooks, { "X-Total-Count": String(total) });
   }
   if (p === "/api/v1/webhooks/bulk_delete" && method === "POST") {
     const body = await parseBody(req);

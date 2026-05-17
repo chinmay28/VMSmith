@@ -1075,6 +1075,27 @@ async function main() {
       await assert(after === 0, `expected zero rows after select-all sweep, got ${after}`);
     }, page);
 
+    // Roadmap 5.4.19 — pagination on the webhook list. Seed a couple of
+    // webhooks, then verify the PaginationControls render the post-filter
+    // total reading from the X-Total-Count header so the GUI can paginate
+    // beyond the first page without losing the total.
+    await runTest("settings webhook list shows pagination controls with X-Total-Count total", async (p) => {
+      for (let i = 0; i < 3; i++) {
+        await p.locator('[data-testid="add-webhook-btn"]').click();
+        await p.waitForTimeout(150);
+        await p.locator('[data-testid="webhook-url-input"]').fill(`https://example.com/page-${i}`);
+        await p.locator('[data-testid="webhook-secret-input"]').fill("s");
+        await p.locator('[data-testid="webhook-create-submit"]').click();
+        await p.waitForTimeout(300);
+      }
+
+      // The PaginationControls render "Showing 1-3 of 3 webhooks" when total
+      // is read from the X-Total-Count header. If the meta wiring broke we'd
+      // see "of 0" or no controls at all.
+      const indicator = p.locator('text=/Showing\\s+1-3\\s+of\\s+3\\s+webhooks/');
+      await indicator.waitFor({ state: "visible", timeout: 3000 });
+    }, page);
+
     await page.close();
 
     // ================== Full Lifecycle E2E ==================

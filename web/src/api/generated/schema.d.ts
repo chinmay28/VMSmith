@@ -1978,6 +1978,19 @@ export interface paths {
                     sort?: "id" | "url" | "created_at" | "last_delivery_at";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
+                    /**
+                     * @description 1-based page number when paginating the filtered + sorted
+                     *     response. Has no effect when `per_page` (or `limit`) is unset.
+                     */
+                    page?: number;
+                    /**
+                     * @description Maximum number of webhooks to return per page. `limit` is
+                     *     accepted as a synonym. When omitted the full filtered set is
+                     *     returned. Pagination is applied after filter + sort so the
+                     *     `X-Total-Count` response header reflects the post-filter /
+                     *     pre-pagination population.
+                     */
+                    per_page?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1988,6 +2001,12 @@ export interface paths {
                 /** @description Webhook list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of webhooks matching the active filters before
+                         *     pagination is applied. Use this to drive page indicators
+                         *     like "Showing 1-25 of 137".
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {

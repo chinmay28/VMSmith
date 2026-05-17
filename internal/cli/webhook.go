@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -130,7 +131,14 @@ Optional filters and ordering:
 
   --order <asc|desc>    Default: asc.  Sort ascending or descending. Unknown
                         values are rejected client-side before contacting the
-                        daemon.`,
+                        daemon.
+
+  --limit <n>           Maximum number of webhooks to return on this page
+                        (forwarded as per_page).  0 (default) means no limit.
+
+  --page <n>            1-based page number when --limit is set.  Page 1 is
+                        the default.  When --limit is unset the daemon returns
+                        the full filtered set in a single page.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
@@ -138,6 +146,8 @@ Optional filters and ordering:
 		tag, _ := cmd.Flags().GetString("tag")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
+		limit, _ := cmd.Flags().GetInt("limit")
+		page, _ := cmd.Flags().GetInt("page")
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField != "" {
@@ -173,6 +183,12 @@ Optional filters and ordering:
 		}
 		if order != "" {
 			q.Set("order", order)
+		}
+		if limit > 0 {
+			q.Set("per_page", strconv.Itoa(limit))
+			if page > 1 {
+				q.Set("page", strconv.Itoa(page))
+			}
 		}
 		if encoded := q.Encode(); encoded != "" {
 			endpoint += "?" + encoded
@@ -623,6 +639,8 @@ func init() {
 	webhookListCmd.Flags().String("tag", "", "filter by exact tag match (case-insensitive)")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
+	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")
+	webhookListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 
 	webhookEditCmd.Flags().String("url", "", "replace receiver URL")
 	webhookEditCmd.Flags().String("secret", "", "rotate HMAC signing secret (cannot be empty)")

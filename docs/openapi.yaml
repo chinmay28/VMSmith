@@ -1235,9 +1235,40 @@ paths:
             enum: [asc, desc]
             default: asc
           description: Sort direction. Default `asc`.
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: |
+            1-based page number when paginating the filtered + sorted
+            response. Has no effect when `per_page` (or `limit`) is unset.
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+          description: |
+            Maximum number of webhooks to return per page. `limit` is
+            accepted as a synonym. When omitted the full filtered set is
+            returned. Pagination is applied after filter + sort so the
+            `X-Total-Count` response header reflects the post-filter /
+            pre-pagination population.
       responses:
         '200':
           description: Webhook list
+          headers:
+            X-Total-Count:
+              description: |
+                Total number of webhooks matching the active filters before
+                pagination is applied. Use this to drive page indicators
+                like "Showing 1-25 of 137".
+              schema:
+                type: integer
           content:
             application/json:
               schema:
