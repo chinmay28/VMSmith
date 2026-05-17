@@ -639,15 +639,18 @@ function EditWebhookModal({ webhook, open, onClose, onUpdated }) {
     }
     // Tags: PATCH semantics are nil = no change, [] = clear. Normalise the
     // input client-side (split + trim + drop empties) and only send when the
-    // resulting list differs from the current list (case-insensitive
-    // comparison, since the server lowercases on persistence).
+    // resulting set differs from the current set.  Compare order-independently
+    // (lowercase + sort both sides before walking) so re-submitting a typed
+    // "production, audit" over a stored ["audit", "production"] is recognised
+    // as a no-op locally and skips the round-trip the server would also flag.
     const nextTags = tagsInput
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const currentTags = (webhook.tags || []).slice();
-    const sameTags = nextTags.length === currentTags.length
-      && nextTags.every((t, i) => t.toLowerCase() === (currentTags[i] || '').toLowerCase());
+    const normalisedNext = nextTags.map((t) => t.toLowerCase()).sort();
+    const normalisedCurrent = (webhook.tags || []).map((t) => t.toLowerCase()).sort();
+    const sameTags = normalisedNext.length === normalisedCurrent.length
+      && normalisedNext.every((t, i) => t === normalisedCurrent[i]);
     if (!sameTags) {
       spec.tags = nextTags;
     }
