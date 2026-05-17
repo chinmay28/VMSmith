@@ -1400,6 +1400,18 @@ paths:
           schema:
             type: string
           description: Filter by structured log source.
+        - name: vm_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Exact-match filter against each entry's structured `vm_id`
+            field (case-sensitive — VM IDs are opaque `vm-<unix-nano>`
+            strings). Whitespace is trimmed before matching. Empty value
+            disables the filter. Composes additively with `level`,
+            `source`, `since`, `search`, and pagination so
+            `X-Total-Count` reflects the post-filter population.
         - name: page
           in: query
           schema:

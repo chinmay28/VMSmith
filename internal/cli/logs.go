@@ -36,6 +36,9 @@ Filters mirror the API one-to-one:
                        (case-insensitive; default debug = all entries)
   --source <s>         Restrict to a single source: cli | api | daemon
                        (case-insensitive; empty = every source)
+  --vm-id <id>         Restrict to entries whose structured vm_id
+                       field matches exactly (case-sensitive; empty =
+                       every entry).
   --since <when>       Show entries strictly after this point in time.
                        Accepts a Go duration (e.g. 5m, 2h) or an RFC3339
                        timestamp.
@@ -70,6 +73,7 @@ var logsListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		level, _ := cmd.Flags().GetString("level")
 		source, _ := cmd.Flags().GetString("source")
+		vmID, _ := cmd.Flags().GetString("vm-id")
 		since, _ := cmd.Flags().GetString("since")
 		search, _ := cmd.Flags().GetString("search")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -116,6 +120,9 @@ var logsListCmd = &cobra.Command{
 		}
 		if canonicalSource != "" {
 			q.Set("source", canonicalSource)
+		}
+		if trimmedVMID := strings.TrimSpace(vmID); trimmedVMID != "" {
+			q.Set("vm_id", trimmedVMID)
 		}
 		if sinceParam != "" {
 			q.Set("since", sinceParam)
@@ -275,6 +282,7 @@ func formatLogFields(fields map[string]string) string {
 func init() {
 	logsListCmd.Flags().String("level", "", "minimum level: debug|info|warn|error (default debug = all)")
 	logsListCmd.Flags().String("source", "", "filter by source: cli|api|daemon (empty = all)")
+	logsListCmd.Flags().String("vm-id", "", "filter by exact match on the entry's structured vm_id field (empty = all)")
 	logsListCmd.Flags().String("since", "", "show entries since (Go duration like 5m, or RFC3339 timestamp)")
 	logsListCmd.Flags().String("search", "", "case-insensitive substring match across message, source, level, and structured field values")
 	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source (empty = daemon default = timestamp)")

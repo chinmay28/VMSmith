@@ -826,10 +826,10 @@ const server = http.createServer(async (req, res) => {
     const ts = (offsetMs) => new Date(baseTs + offsetMs).toISOString();
     const entries = [
       { ts: ts(0), level: "info", source: "daemon", msg: "vmSmith daemon listening", fields: { addr: "0.0.0.0:8080" } },
-      { ts: ts(1), level: "info", source: "api", msg: "GET /api/v1/vms", fields: { status_code: "200", duration_ms: "1" } },
+      { ts: ts(1), level: "info", source: "api", msg: "GET /api/v1/vms", fields: { status_code: "200", duration_ms: "1", vm_id: "vm-1" } },
       { ts: ts(2), level: "info", source: "cli", msg: "vm list", fields: {} },
-      { ts: ts(3), level: "warn", source: "daemon", msg: "port forward restore skipped", fields: { error: "iptables not available" } },
-      { ts: ts(4), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5" } },
+      { ts: ts(3), level: "warn", source: "daemon", msg: "port forward restore skipped", fields: { error: "iptables not available", vm_id: "vm-2" } },
+      { ts: ts(4), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5", vm_id: "vm-1" } },
     ];
     // Sort whitelist mirrors internal/api/log_sort.go.
     const allowedSort = new Set(["timestamp", "level", "source"]);
@@ -847,11 +847,18 @@ const server = http.createServer(async (req, res) => {
     const level = url.searchParams.get("level") || "debug";
     const limit = parseInt(url.searchParams.get("limit") || "200", 10);
     const source = url.searchParams.get("source") || "";
+    const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     const levelOrder = { debug: 0, info: 1, warn: 2, error: 3 };
     const minLevel = levelOrder[level] ?? 0;
     let filtered = entries.filter(e => (levelOrder[e.level] ?? 0) >= minLevel);
     if (source) filtered = filtered.filter(e => e.source === source);
+    if (vmIDFilter) {
+      // Mirror internal/logger.EntryMatchesVMID: exact-match on the
+      // structured `vm_id` field only. Case-sensitive (VM IDs are
+      // opaque `vm-<unix-nano>` strings).
+      filtered = filtered.filter(e => e.fields && e.fields.vm_id === vmIDFilter);
+    }
     if (search) {
       // Mirror internal/logger.EntryMatchesSearch: message + source + level +
       // every field VALUE; field keys are intentionally excluded.

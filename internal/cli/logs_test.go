@@ -290,3 +290,49 @@ func TestCLI_LogsList_EmptySortAndOrderOmitParams(t *testing.T) {
 		}
 	}
 }
+
+func TestCLI_LogsList_ForwardsVMIDFilter(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--vm-id", "vm-1741234567890"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "vm_id=vm-1741234567890") {
+		t.Fatalf("expected vm_id=vm-1741234567890 in query, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_VMIDFilterIsTrimmed(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--vm-id", "   vm-trimmed   "); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "vm_id=vm-trimmed") {
+		t.Fatalf("expected trimmed vm_id, got %q", state.lastQuery)
+	}
+	if strings.Contains(state.lastQuery, "vm_id=+++vm-trimmed") || strings.Contains(state.lastQuery, "vm_id=%20") {
+		t.Fatalf("query should not retain whitespace: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_EmptyVMIDOmitsParam(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--vm-id", "   "); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "vm_id=") {
+		t.Fatalf("whitespace-only --vm-id must not be forwarded; query=%q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_VMIDFilterComposesWithOtherFilters(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL,
+		"--vm-id", "vm-compose", "--level", "warn", "--source", "daemon", "--search", "boot"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	for _, want := range []string{"vm_id=vm-compose", "level=warn", "source=daemon", "search=boot"} {
+		if !strings.Contains(state.lastQuery, want) {
+			t.Fatalf("expected %q in query, got %q", want, state.lastQuery)
+		}
+	}
+}

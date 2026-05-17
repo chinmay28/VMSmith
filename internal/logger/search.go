@@ -38,3 +38,23 @@ func EntryMatchesSearch(e Entry, query string) bool {
 	}
 	return false
 }
+
+// EntryMatchesVMID reports whether the given log entry's structured fields map
+// carries a `vm_id` value equal to the (already trimmed) target. An empty
+// target matches every entry — callers should short-circuit before invoking to
+// avoid scanning the ring buffer when no filter was requested.
+//
+// VM IDs are opaque `vm-<unix-nano>` strings: case-sensitive by construction,
+// no whitespace, no internal punctuation that varies across callers. Matching
+// is exact so an operator filter for `vm-123` doesn't accidentally swallow
+// `vm-12345`. Matches the contract documented for the `?vm_id=` filter on
+// `GET /api/v1/logs` (roadmap 5.4.18).
+func EntryMatchesVMID(e Entry, target string) bool {
+	if target == "" {
+		return true
+	}
+	if e.Fields == nil {
+		return false
+	}
+	return e.Fields["vm_id"] == target
+}

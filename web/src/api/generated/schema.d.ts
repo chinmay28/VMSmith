@@ -711,13 +711,15 @@ export interface paths {
         };
         /**
          * Stream VM resource metrics (SSE)
-         * @description Server-Sent Events stream of `MetricSample` frames.  Each new sample
+         * @description Server-Sent Events stream of `MetricSample` frames. Each new sample
          *     produced by the metrics collector is delivered as one `vm.stats`
          *     event whose `data` field is a JSON-encoded `MetricSample` and whose
-         *     `id` is the sample's unix-nanosecond timestamp.  Clients should
-         *     seed history with `GET /vms/{vmID}/stats` before subscribing —
-         *     the stream provides no replay.  A `: keepalive` comment frame is
-         *     sent every 30 seconds.  The stream closes when the client
+         *     `id` is the sample's unix-nanosecond timestamp. Clients should
+         *     seed history with `GET /vms/{vmID}/stats` before subscribing.
+         *     Replay is not supported on this stream, so requests that send
+         *     `Last-Event-ID` or `?since=` are rejected with HTTP 400
+         *     `metrics_replay_not_supported`. A `: keepalive` comment frame is
+         *     sent every 30 seconds. The stream closes when the client
          *     disconnects, the VM is deleted, or the daemon shuts down.
          */
         get: {
@@ -740,6 +742,7 @@ export interface paths {
                         "text/event-stream": string;
                     };
                 };
+                400: components["responses"]["APIError"];
                 404: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
@@ -2231,6 +2234,15 @@ export interface paths {
                     since?: string;
                     /** @description Filter by structured log source. */
                     source?: string;
+                    /**
+                     * @description Exact-match filter against each entry's structured `vm_id`
+                     *     field (case-sensitive — VM IDs are opaque `vm-<unix-nano>`
+                     *     strings). Whitespace is trimmed before matching. Empty value
+                     *     disables the filter. Composes additively with `level`,
+                     *     `source`, `since`, `search`, and pagination so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    vm_id?: string;
                     page?: number;
                     per_page?: number;
                     /** @description Alias retained for compatibility. */

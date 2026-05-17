@@ -2055,6 +2055,54 @@ test.describe("Log Viewer", () => {
     const firstRow = page.locator('[data-testid="log-table"] tbody tr').first();
     await expect(firstRow).toContainText("error");
   });
+
+  // 5.4.18 — Per-VM log filter mirrored across API + CLI + GUI.
+  test("vm_id filter scopes the log table to one VM and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // Mock-server seeds two entries with vm_id=vm-1 (api+error) and one with
+    // vm_id=vm-2 (warn daemon). Filter to vm-1 should drop the vm-2 entry.
+    await page.getByTestId("log-vm-id-filter").fill("vm-1");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("vm_id=vm-1");
+
+    // vm-1 entries are sourced from api → both api rows still visible.
+    await expect(page.getByTestId("log-source-api")).toBeVisible();
+    // vm-2 entry (warn daemon) should be filtered out — there is no
+    // "port forward restore skipped" row left in the table.
+    await expect(page.locator('[data-testid="log-table"] tbody')).not.toContainText("port forward restore skipped");
+  });
+
+  test("vm_id filter exact-match prefix does not swallow longer ids", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // `vm-1` should NOT match `vm-12345` — though no `vm-12345` is seeded,
+    // a `vm-` substring filter that the daemon happened to accept would
+    // return both vm-1 and vm-2 entries. Confirm that the exact-match
+    // filter rejects partial IDs by typing one that has no match at all.
+    await page.getByTestId("log-vm-id-filter").fill("vm-no-such-id");
+    await expect(page.getByTestId("log-empty-state")).toContainText(
+      'No log entries for VM "vm-no-such-id".',
+    );
+  });
+
+  test("vm_id filter clear button restores the unfiltered view", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    await page.getByTestId("log-vm-id-filter").fill("vm-1");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("vm_id=vm-1");
+
+    await page.getByTestId("log-vm-id-filter-clear").click();
+    await expect.poll(() => page.url(), { timeout: 2000 }).not.toContain("vm_id=");
+    // After clearing, the daemon "vmSmith daemon listening" entry (no vm_id)
+    // should reappear since the filter no longer hides it.
+    await expect(page.locator('[data-testid="log-table"] tbody')).toContainText("vmSmith daemon listening");
+  });
 });
 
 // ============================================================
