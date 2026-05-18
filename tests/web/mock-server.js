@@ -1048,6 +1048,10 @@ const server = http.createServer(async (req, res) => {
     const sourceFilter = (url.searchParams.get("source") || "").trim();
     const severityFilter = (url.searchParams.get("severity") || "").trim();
     const typeFilter = (url.searchParams.get("type") || "").trim();
+    // Case-insensitive prefix match on the event's Type field (e.g.
+    // "snapshot." matches every snapshot.* subtype). Mirrors the
+    // daemon's lower-then-HasPrefix contract.
+    const typePrefixFilter = (url.searchParams.get("type_prefix") || "").trim().toLowerCase();
     const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const matchesSearch = (e) => {
       if (!searchFilter) return true;
@@ -1067,6 +1071,7 @@ const server = http.createServer(async (req, res) => {
       (!sourceFilter || e.source === sourceFilter) &&
       (!severityFilter || e.severity === severityFilter) &&
       (!typeFilter || e.type === typeFilter) &&
+      (!typePrefixFilter || (e.type && String(e.type).toLowerCase().startsWith(typePrefixFilter))) &&
       matchesSearch(e)
     );
 

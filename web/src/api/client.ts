@@ -343,9 +343,10 @@ export const webhooks = {
 // --- Events ---
 // Filter params line up 1:1 with GET /api/v1/events query params.
 export const events = {
-  list: ({ vmId = '', type = '', source = '', severity = '', search = '', since = '', until = '', sort = '', order = '', page, perPage }: {
+  list: ({ vmId = '', type = '', typePrefix = '', source = '', severity = '', search = '', since = '', until = '', sort = '', order = '', page, perPage }: {
     vmId?: string;
     type?: string;
+    typePrefix?: string;
     source?: 'libvirt' | 'app' | 'system' | '';
     severity?: 'info' | 'warn' | 'error' | '';
     search?: string;
@@ -357,7 +358,7 @@ export const events = {
     perPage?: number;
   } = {}) =>
     unwrap(apiClient.GET('/events', {
-      params: { query: { vm_id: vmId, type, source: source || undefined, severity: severity || undefined, search: search || undefined, since, until, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any },
+      params: { query: { vm_id: vmId, type, type_prefix: typePrefix || undefined, source: source || undefined, severity: severity || undefined, search: search || undefined, since, until, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any },
     }), { withMeta: true }),
 };
 
