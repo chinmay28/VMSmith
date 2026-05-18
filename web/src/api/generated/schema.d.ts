@@ -1049,6 +1049,12 @@ export interface paths {
          *     `tag` is an optional case-insensitive exact-match filter on the
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
+         *
+         *     `page` and `per_page` paginate the result. Pagination is applied
+         *     after filter + sort so the `X-Total-Count` response header reflects
+         *     the post-filter / pre-pagination population. `limit` is accepted as
+         *     a synonym for `per_page`. Omitting both returns the full filtered
+         *     set, preserving the legacy contract.
          */
         get: {
             parameters: {
@@ -1068,6 +1074,8 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
                 };
                 header?: never;
                 path: {
@@ -1080,6 +1088,12 @@ export interface paths {
                 /** @description Port forward list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of port forwards matching the filter +
+                         *     search predicates (pre-pagination). Use this to drive
+                         *     page indicators on the client.
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -2372,6 +2386,14 @@ export interface paths {
                     source?: "libvirt" | "app" | "system";
                     /** @description Filter by severity. */
                     severity?: "info" | "warn" | "error";
+                    /**
+                     * @description Case-sensitive exact-match filter on the event's `actor` field
+                     *     (e.g. `system`, `app`, or an API-key alias). Mirrors `?vm_id=`'s
+                     *     contract: empty disables the filter, whitespace is trimmed.
+                     *     Lets operators slice the timeline to a single human / bot
+                     *     without the noisy substring matches `?search=` gives.
+                     */
+                    actor?: string;
                     /**
                      * @description Case-insensitive substring match across `message`, `type`, `source`,
                      *     `severity`, `actor`, `vm_id`, `resource_id`, and every value in

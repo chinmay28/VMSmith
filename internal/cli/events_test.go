@@ -114,6 +114,103 @@ func TestCLI_EventsList_FilterBySource(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `events list --actor` (4.2.23)
+// ============================================================
+
+func TestCLI_EventsList_FilterByActor_ExactMatch(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_stopped", Actor: "ops-bob", VMID: "vm-A", CreatedAt: now.Add(time.Second)})
+	s.PutEvent(&types.Event{ID: "evt-3", Type: "vm_deleted", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now.Add(2 * time.Second)})
+
+	out, err := runCLI("events", "list", "--actor", "ops-alice")
+	if err != nil {
+		t.Fatalf("events list --actor: %v", err)
+	}
+	if !strings.Contains(out, "vm_started") || !strings.Contains(out, "vm_deleted") {
+		t.Errorf("--actor ops-alice missed expected rows:\n%s", out)
+	}
+	if strings.Contains(out, "vm_stopped") {
+		t.Errorf("--actor ops-alice should not match ops-bob's vm_stopped:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByActor_CaseSensitive(t *testing.T) {
+	// CLI mirrors the API's case-sensitive contract; case-insensitive
+	// matching belongs to --search.
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--actor", "Ops-Alice")
+	if err != nil {
+		t.Fatalf("events list --actor Ops-Alice: %v", err)
+	}
+	if strings.Contains(out, "vm_started") {
+		t.Errorf("--actor Ops-Alice should not match stored ops-alice (case-sensitive):\n%s", out)
+	}
+	if !strings.Contains(out, "No events") {
+		t.Errorf("expected 'No events' message for non-matching actor:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByActor_TrimmedAndEmpty(t *testing.T) {
+	// Whitespace-trimmed; empty after trim is a no-op (renders everything).
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_stopped", Actor: "ops-bob", VMID: "vm-A", CreatedAt: now.Add(time.Second)})
+
+	// "  ops-alice  " → trimmed → matches.
+	out, err := runCLI("events", "list", "--actor", "  ops-alice  ")
+	if err != nil {
+		t.Fatalf("events list --actor=<padded>: %v", err)
+	}
+	if !strings.Contains(out, "vm_started") || strings.Contains(out, "vm_stopped") {
+		t.Errorf("whitespace-padded actor did not match exactly the alice row:\n%s", out)
+	}
+
+	// "   " → empty after trim → no filter applied.
+	out, err = runCLI("events", "list", "--actor", "   ")
+	if err != nil {
+		t.Fatalf("events list --actor=<spaces>: %v", err)
+	}
+	if !strings.Contains(out, "vm_started") || !strings.Contains(out, "vm_stopped") {
+		t.Errorf("blank --actor should be no-op:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByActor_ComposesWithSource(t *testing.T) {
+	// --actor narrows further when stacked with --source; the AND semantics
+	// must mirror the API.
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_started", Source: "app", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_pruned", Source: "system", Actor: "ops-alice", VMID: "vm-A", CreatedAt: now.Add(time.Second)})
+	s.PutEvent(&types.Event{ID: "evt-3", Type: "vm_stopped", Source: "app", Actor: "ops-bob", VMID: "vm-A", CreatedAt: now.Add(2 * time.Second)})
+
+	out, err := runCLI("events", "list", "--actor", "ops-alice", "--source", "app")
+	if err != nil {
+		t.Fatalf("events list --actor --source: %v", err)
+	}
+	if !strings.Contains(out, "vm_started") {
+		t.Errorf("expected vm_started in narrowed output:\n%s", out)
+	}
+	if strings.Contains(out, "vm_pruned") || strings.Contains(out, "vm_stopped") {
+		t.Errorf("--actor ops-alice + --source app should not match other rows:\n%s", out)
+	}
+}
+
 func TestCLI_EventsList_NewestFirst(t *testing.T) {
 	s, cleanup := withTestEventStore(t)
 	defer cleanup()
@@ -732,53 +829,53 @@ func TestCLI_EventsList_DefaultHidesActorAndAttrsColumns(t *testing.T) {
 		t.Fatalf("missing base header columns:\n%s", out)
 	}
 	if strings.Contains(out, "ACTOR") {
-		t.Errorf("ACTOR header should be hidden without --actor:\n%s", out)
+		t.Errorf("ACTOR header should be hidden without --show-actor:\n%s", out)
 	}
 	if strings.Contains(out, "ATTRIBUTES") {
-		t.Errorf("ATTRIBUTES header should be hidden without --attrs:\n%s", out)
+		t.Errorf("ATTRIBUTES header should be hidden without --show-attrs:\n%s", out)
 	}
-	// Without --actor, the alice@ value must not appear either.
+	// Without --show-actor, the alice@ value must not appear either.
 	if strings.Contains(out, "alice@example.com") {
 		t.Errorf("actor leaked into default output:\n%s", out)
 	}
-	// Without --attrs, neither the attribute keys nor the resource_id should leak.
+	// Without --show-attrs, neither the attribute keys nor the resource_id should leak.
 	if strings.Contains(out, "template=rocky9-base") || strings.Contains(out, "resource_id=tpl-rocky9") {
 		t.Errorf("attributes leaked into default output:\n%s", out)
 	}
 }
 
-func TestCLI_EventsList_ActorFlagAddsActorColumn(t *testing.T) {
+func TestCLI_EventsList_ShowActorFlagAddsActorColumn(t *testing.T) {
 	s, cleanup := withTestEventStore(t)
 	defer cleanup()
 	seedRichEvent(t, s)
 
-	out, err := runCLI("events", "list", "--actor")
+	out, err := runCLI("events", "list", "--show-actor")
 	if err != nil {
-		t.Fatalf("events list --actor: %v", err)
+		t.Fatalf("events list --show-actor: %v", err)
 	}
 	if !strings.Contains(out, "ACTOR") {
-		t.Errorf("--actor should print ACTOR header:\n%s", out)
+		t.Errorf("--show-actor should print ACTOR header:\n%s", out)
 	}
 	if !strings.Contains(out, "alice@example.com") {
-		t.Errorf("--actor should print actor value:\n%s", out)
+		t.Errorf("--show-actor should print actor value:\n%s", out)
 	}
-	// --actor alone should NOT add the attributes column.
+	// --show-actor alone should NOT add the attributes column.
 	if strings.Contains(out, "ATTRIBUTES") || strings.Contains(out, "template=rocky9-base") {
-		t.Errorf("--actor alone should not surface attributes:\n%s", out)
+		t.Errorf("--show-actor alone should not surface attributes:\n%s", out)
 	}
 }
 
-func TestCLI_EventsList_AttrsFlagAddsAttributesColumn(t *testing.T) {
+func TestCLI_EventsList_ShowAttrsFlagAddsAttributesColumn(t *testing.T) {
 	s, cleanup := withTestEventStore(t)
 	defer cleanup()
 	seedRichEvent(t, s)
 
-	out, err := runCLI("events", "list", "--attrs")
+	out, err := runCLI("events", "list", "--show-attrs")
 	if err != nil {
-		t.Fatalf("events list --attrs: %v", err)
+		t.Fatalf("events list --show-attrs: %v", err)
 	}
 	if !strings.Contains(out, "ATTRIBUTES") {
-		t.Errorf("--attrs should print ATTRIBUTES header:\n%s", out)
+		t.Errorf("--show-attrs should print ATTRIBUTES header:\n%s", out)
 	}
 	// Keys must appear sorted alphabetically (cpus < ram_mb < template).
 	wantOrder := []string{"cpus=4", "ram_mb=8192", "template=rocky9-base"}
@@ -795,22 +892,22 @@ func TestCLI_EventsList_AttrsFlagAddsAttributesColumn(t *testing.T) {
 	}
 	// resource_id should be folded into the attributes column when set.
 	if !strings.Contains(out, "resource_id=tpl-rocky9") {
-		t.Errorf("--attrs should fold in resource_id:\n%s", out)
+		t.Errorf("--show-attrs should fold in resource_id:\n%s", out)
 	}
-	// --attrs alone should NOT add the actor column.
+	// --show-attrs alone should NOT add the actor column.
 	if strings.Contains(out, "ACTOR") || strings.Contains(out, "alice@example.com") {
-		t.Errorf("--attrs alone should not surface actor:\n%s", out)
+		t.Errorf("--show-attrs alone should not surface actor:\n%s", out)
 	}
 }
 
-func TestCLI_EventsList_ActorAndAttrsBothEnabled(t *testing.T) {
+func TestCLI_EventsList_ShowActorAndShowAttrsBothEnabled(t *testing.T) {
 	s, cleanup := withTestEventStore(t)
 	defer cleanup()
 	seedRichEvent(t, s)
 
-	out, err := runCLI("events", "list", "--actor", "--attrs")
+	out, err := runCLI("events", "list", "--show-actor", "--show-attrs")
 	if err != nil {
-		t.Fatalf("events list --actor --attrs: %v", err)
+		t.Fatalf("events list --show-actor --show-attrs: %v", err)
 	}
 	if !strings.Contains(out, "ACTOR") || !strings.Contains(out, "ATTRIBUTES") {
 		t.Errorf("both columns should be present:\n%s", out)
@@ -841,9 +938,9 @@ func TestCLI_EventsList_AttrsDashOnEmptyAttributes(t *testing.T) {
 		t.Fatalf("PutEvent: %v", err)
 	}
 
-	out, err := runCLI("events", "list", "--attrs")
+	out, err := runCLI("events", "list", "--show-attrs")
 	if err != nil {
-		t.Fatalf("events list --attrs: %v", err)
+		t.Fatalf("events list --show-attrs: %v", err)
 	}
 	// The events table writes one row per event; verify there's a tabwriter
 	// row for vm.stopped (so the empty-attrs case doesn't silently drop it).
@@ -910,6 +1007,35 @@ func TestFormatEventAttributes(t *testing.T) {
 				t.Errorf("formatEventAttributes() = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestCLI_EventsFollow_FiltersByActor checks that the client-side actor
+// predicate filters the SSE stream so operators tailing one human / bot
+// don't have to wade through every event arriving on the wire.
+func TestCLI_EventsFollow_FiltersByActor(t *testing.T) {
+	now := time.Now()
+	srv := newSSETestServer(t, []*types.Event{
+		{ID: "1", Type: "vm.started", Source: "app", Severity: "info", Actor: "ops-alice", VMID: "vm-1", Message: "alice start", OccurredAt: now},
+		{ID: "2", Type: "vm.stopped", Source: "app", Severity: "info", Actor: "ops-bob", VMID: "vm-1", Message: "bob stop", OccurredAt: now.Add(time.Second)},
+		{ID: "3", Type: "vm.deleted", Source: "app", Severity: "info", Actor: "ops-alice", VMID: "vm-1", Message: "alice delete", OccurredAt: now.Add(2 * time.Second)},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := followEventsStream(ctx, srv.URL(), "",
+		eventFilter{actor: "ops-alice"},
+		eventRowOptions{showActor: true}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "alice start") || !strings.Contains(out, "alice delete") {
+		t.Errorf("alice rows missing from follow output:\n%s", out)
+	}
+	if strings.Contains(out, "bob stop") {
+		t.Errorf("bob row should have been filtered out:\n%s", out)
 	}
 }
 
