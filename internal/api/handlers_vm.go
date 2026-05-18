@@ -266,7 +266,8 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	tagFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("tag")))
 	statusFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("status")))
 	searchFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("search")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" {
+	defaultUserFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("default_user")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || defaultUserFilter != "" {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -283,6 +284,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				if !matchedTag {
 					continue
 				}
+			}
+			if defaultUserFilter != "" && !strings.EqualFold(vm.Spec.DefaultUser, defaultUserFilter) {
+				continue
 			}
 			if searchFilter != "" && !types.VMMatchesSearch(vm, searchFilter) {
 				continue

@@ -138,6 +138,7 @@ var vmListCmd = &cobra.Command{
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -145,6 +146,7 @@ var vmListCmd = &cobra.Command{
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
+		defaultUserFilter = strings.TrimSpace(strings.ToLower(defaultUserFilter))
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField == "" {
 			sortField = types.VMSortID
@@ -181,7 +183,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || defaultUserFilter != "" {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -198,6 +200,9 @@ var vmListCmd = &cobra.Command{
 					if !matchedTag {
 						continue
 					}
+				}
+				if defaultUserFilter != "" && !strings.EqualFold(v.Spec.DefaultUser, defaultUserFilter) {
+					continue
 				}
 				if searchFilter != "" && !types.VMMatchesSearch(v, searchFilter) {
 					continue
@@ -979,6 +984,7 @@ Examples:
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
+	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match)")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")

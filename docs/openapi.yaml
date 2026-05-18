@@ -32,6 +32,7 @@ paths:
         - $ref: '#/components/parameters/TagFilter'
         - $ref: '#/components/parameters/StatusFilter'
         - $ref: '#/components/parameters/SearchFilter'
+        - $ref: '#/components/parameters/DefaultUserFilter'
         - $ref: '#/components/parameters/VMSort'
         - $ref: '#/components/parameters/SortOrder'
         - $ref: '#/components/parameters/Page'
@@ -1718,6 +1719,17 @@ components:
         scoping; an empty value matches every VM. ID is intentionally excluded
         from the match — the opaque `vm-<unix-nano>` form rarely matches a
         useful operator query.
+      schema:
+        type: string
+    DefaultUserFilter:
+      name: default_user
+      in: query
+      description: |
+        Case-insensitive exact-match filter on the VM's configured
+        `default_user` field. Whitespace is trimmed before comparison;
+        an empty value disables the filter. Composes additively with the
+        existing `tag`, `status`, and `search` filters; `X-Total-Count`
+        reflects the post-filter / pre-pagination population.
       schema:
         type: string
     VMSort:
