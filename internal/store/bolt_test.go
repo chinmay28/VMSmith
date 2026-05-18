@@ -857,3 +857,118 @@ func TestSnapshotTags_ListByVMPrefixIsolation(t *testing.T) {
 		t.Fatalf("ListSnapshotTagsByVM(vm-1) leaked vm-10's snap-b into the response: %v", out)
 	}
 }
+
+// --- EventFilter.ResourceID tests ---
+
+func seedResourceIDEventsForStore(t *testing.T, s *Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{Type: "snapshot.created", Source: "app", Severity: "info", VMID: "vm-1", ResourceID: "snap-pre", Message: "made", OccurredAt: base.Add(-30 * time.Minute)},
+		{Type: "snapshot.deleted", Source: "app", Severity: "warn", VMID: "vm-1", ResourceID: "snap-pre", Message: "dropped", OccurredAt: base.Add(-25 * time.Minute)},
+		{Type: "image.uploaded", Source: "app", Severity: "info", ResourceID: "img-other", Message: "uploaded", OccurredAt: base.Add(-20 * time.Minute)},
+		{Type: "vm.started", Source: "libvirt", Severity: "info", VMID: "vm-2", Message: "started", OccurredAt: base.Add(-15 * time.Minute)},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEventsFiltered_ResourceID_ExactMatch(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedResourceIDEventsForStore(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{ResourceID: "snap-pre"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 2 || len(got) != 2 {
+		t.Fatalf("ResourceID=snap-pre returned total=%d len=%d, want 2/2", total, len(got))
+	}
+	for _, e := range got {
+		if e.ResourceID != "snap-pre" {
+			t.Errorf("filter leaked event %+v", e)
+		}
+	}
+}
+
+func TestListEventsFiltered_ResourceID_CaseSensitive(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedResourceIDEventsForStore(t, s)
+
+	got, _, err := s.ListEventsFiltered(EventFilter{ResourceID: "SNAP-pre"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("case-mismatched ResourceID should return 0 events, got %d", len(got))
+	}
+}
+
+func TestListEventsFiltered_ResourceID_EmptyDisablesFilter(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedResourceIDEventsForStore(t, s)
+
+	got, _, err := s.ListEventsFiltered(EventFilter{ResourceID: ""})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("empty ResourceID should disable filter, got %d events", len(got))
+	}
+}
+
+func TestListEventsFiltered_ResourceID_NoMatchReturnsEmpty(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedResourceIDEventsForStore(t, s)
+
+	got, _, err := s.ListEventsFiltered(EventFilter{ResourceID: "snap-not-here"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 events for unknown ResourceID, got %d", len(got))
+	}
+}
+
+func TestListEventsFiltered_ResourceID_ComposesWithSeverity(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedResourceIDEventsForStore(t, s)
+
+	// snap-pre carries an info create and a warn delete — narrowing by
+	// severity=warn should leave only the deletion.
+	got, total, err := s.ListEventsFiltered(EventFilter{ResourceID: "snap-pre", Severity: "warn"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 1 || len(got) != 1 || got[0].Type != "snapshot.deleted" {
+		t.Fatalf("ResourceID+Severity returned %+v (total=%d), want one snapshot.deleted", got, total)
+	}
+}
+
+func TestListEventsFiltered_ResourceID_MatchesEmptyResourceIDOnly(t *testing.T) {
+	// When ResourceID is non-empty but no event carries it, the filter
+	// returns zero events even though the store has events with empty
+	// ResourceID. This is the inverse contract of EmptyDisablesFilter.
+	s, cleanup := tempDB(t)
+	defer cleanup()
+
+	if _, err := s.AppendEvent(&types.Event{Type: "vm.started", VMID: "vm-1"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	got, _, err := s.ListEventsFiltered(EventFilter{ResourceID: "snap-something"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("non-empty ResourceID against events with empty ResourceID should return 0, got %d", len(got))
+	}
+}

@@ -282,6 +282,86 @@ func TestCLI_EventsList_FilterBySearch_CombinesWithSource(t *testing.T) {
 	}
 }
 
+func TestCLI_EventsList_FilterByResourceID_ExactMatch(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "snapshot_created", ResourceID: "snap-prod-pre", Message: "made", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "snapshot_deleted", ResourceID: "snap-prod-pre", Message: "dropped", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-3", Type: "image_uploaded", ResourceID: "img-other", Message: "uploaded", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--resource-id", "snap-prod-pre")
+	if err != nil {
+		t.Fatalf("events list --resource-id: %v", err)
+	}
+	if !strings.Contains(out, "snapshot_created") || !strings.Contains(out, "snapshot_deleted") {
+		t.Errorf("expected both snap-prod-pre events:\n%s", out)
+	}
+	if strings.Contains(out, "image_uploaded") {
+		t.Errorf("--resource-id leaked unrelated event:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByResourceID_CaseSensitive(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "snapshot_created", ResourceID: "snap-prod-pre", Message: "made", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--resource-id", "SNAP-prod-pre")
+	if err != nil {
+		t.Fatalf("events list --resource-id: %v", err)
+	}
+	if !strings.Contains(out, "No events.") {
+		t.Errorf("expected 'No events.' for case-mismatched --resource-id:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByResourceID_TrimmedAndEmpty(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "snapshot_created", ResourceID: "snap-prod-pre", Message: "made", CreatedAt: now})
+
+	// Whitespace-only is treated as empty (no filter) — every event is returned.
+	out, err := runCLI("events", "list", "--resource-id", "   ")
+	if err != nil {
+		t.Fatalf("events list --resource-id (blank): %v", err)
+	}
+	if !strings.Contains(out, "snapshot_created") {
+		t.Errorf("expected whitespace --resource-id to disable filter:\n%s", out)
+	}
+
+	// Trim semantics on a non-blank target.
+	out, err = runCLI("events", "list", "--resource-id", "  snap-prod-pre  ")
+	if err != nil {
+		t.Fatalf("events list --resource-id (padded): %v", err)
+	}
+	if !strings.Contains(out, "snapshot_created") {
+		t.Errorf("expected trimmed --resource-id to match:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByResourceID_ComposesWithSource(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "snapshot_created", Source: "app", ResourceID: "snap-prod-pre", Message: "made", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "snapshot_lifecycle", Source: "libvirt", ResourceID: "snap-prod-pre", Message: "host event", CreatedAt: now})
+
+	out, err := runCLI("events", "list", "--resource-id", "snap-prod-pre", "--source", "app")
+	if err != nil {
+		t.Fatalf("events list --resource-id --source: %v", err)
+	}
+	if !strings.Contains(out, "snapshot_created") || strings.Contains(out, "snapshot_lifecycle") {
+		t.Errorf("--resource-id did not compose with --source:\n%s", out)
+	}
+}
+
 // --- events follow tests ---
 
 // sseEventTestServer serves a deterministic SSE stream for testing.
@@ -950,5 +1030,33 @@ func TestCLI_EventsFollow_AttrsAndActorFlagsAddColumns(t *testing.T) {
 	}
 	if !strings.Contains(out, "resource_id=tpl-rocky9") {
 		t.Errorf("--attrs should fold in resource_id in follow output:\n%s", out)
+	}
+}
+
+// TestCLI_EventsFollow_FiltersByResourceID exercises the SSE path so the
+// `events follow --resource-id` filter stays in lockstep with `events list`.
+func TestCLI_EventsFollow_FiltersByResourceID(t *testing.T) {
+	now := time.Now()
+	srv := newSSETestServer(t, []*types.Event{
+		{ID: "1", Type: "snapshot.created", Source: "app", ResourceID: "snap-prod-pre", VMID: "vm-1", Message: "made", OccurredAt: now},
+		{ID: "2", Type: "image.uploaded", Source: "app", ResourceID: "img-other", Message: "uploaded", OccurredAt: now},
+		{ID: "3", Type: "vm.started", Source: "libvirt", VMID: "vm-1", Message: "started", OccurredAt: now},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := followEventsStream(ctx, srv.URL(), "",
+		eventFilter{resourceID: "snap-prod-pre"},
+		eventRowOptions{}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "snapshot.created") {
+		t.Errorf("matching event missing from follow output:\n%s", out)
+	}
+	if strings.Contains(out, "image.uploaded") || strings.Contains(out, "vm.started") {
+		t.Errorf("--resource-id filter leaked in follow output:\n%s", out)
 	}
 }

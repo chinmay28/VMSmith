@@ -550,6 +550,12 @@ type EventFilter struct {
 	Type     string
 	Source   string
 	Severity string
+	// ResourceID is an exact-match predicate against evt.ResourceID. The
+	// match is case-sensitive — resource IDs are opaque server-issued
+	// strings (e.g. `snap-1747591234`, `img-1747591234`, `wh-…`) operators
+	// reference verbatim, and case-insensitive matching is the job of
+	// Search.  Empty disables the filter.
+	ResourceID string
 	// Search is a lowercase needle applied via types.EventMatchesSearch.
 	// Callers are responsible for trimming + lowercasing.
 	Search   string
@@ -621,6 +627,9 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 				continue
 			}
 			if filter.Severity != "" && evt.Severity != filter.Severity {
+				continue
+			}
+			if filter.ResourceID != "" && evt.ResourceID != filter.ResourceID {
 				continue
 			}
 			// Time-based Since: filter individual events by OccurredAt.

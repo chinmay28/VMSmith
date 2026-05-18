@@ -38,20 +38,27 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
 
   const initial = useURL
     ? {
-        vmId:     searchParams.get('vm_id')   || '',
-        type:     searchParams.get('type')    || '',
-        source:   searchParams.get('source')  || '',
-        severity: searchParams.get('severity') || '',
-        search:   searchParams.get('search')  || '',
-        sort:     searchParams.get('sort')    || '',
-        order:    searchParams.get('order')   || '',
+        vmId:       searchParams.get('vm_id')      || '',
+        type:       searchParams.get('type')       || '',
+        source:     searchParams.get('source')     || '',
+        severity:   searchParams.get('severity')   || '',
+        resourceID: searchParams.get('resource_id') || '',
+        search:     searchParams.get('search')     || '',
+        sort:       searchParams.get('sort')       || '',
+        order:      searchParams.get('order')      || '',
       }
-    : { vmId: vmIdProp, type: '', source: '', severity: '', search: '', sort: '', order: '' };
+    : { vmId: vmIdProp, type: '', source: '', severity: '', resourceID: '', search: '', sort: '', order: '' };
 
   const [vmFilter, setVmFilter] = useState(initial.vmId);
   const [typeFilter, setTypeFilter] = useState(initial.type);
   const [sourceFilter, setSourceFilter] = useState(initial.source);
   const [severityFilter, setSeverityFilter] = useState(initial.severity);
+  // resourceIdInput is the live <input> value; resourceIdFilter is the
+  // debounced / committed value that drives the fetch. Same split as
+  // search below — prevents a fetch per keystroke while letting the input
+  // feel responsive.
+  const [resourceIdInput, setResourceIdInput] = useState(initial.resourceID);
+  const [resourceIdFilter, setResourceIdFilter] = useState(initial.resourceID);
   // searchInput is the live <input> value; searchFilter is the debounced /
   // committed value that drives the fetch. Splitting them prevents a fetch
   // per keystroke while letting the input feel responsive.
@@ -74,15 +81,16 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   useEffect(() => {
     if (!useURL) return;
     const next = new URLSearchParams();
-    if (vmFilter)       next.set('vm_id', vmFilter);
-    if (typeFilter)     next.set('type', typeFilter);
-    if (sourceFilter)   next.set('source', sourceFilter);
-    if (severityFilter) next.set('severity', severityFilter);
-    if (searchFilter)   next.set('search', searchFilter);
-    if (sortField)      next.set('sort', sortField);
-    if (sortOrder)      next.set('order', sortOrder);
+    if (vmFilter)         next.set('vm_id', vmFilter);
+    if (typeFilter)       next.set('type', typeFilter);
+    if (sourceFilter)     next.set('source', sourceFilter);
+    if (severityFilter)   next.set('severity', severityFilter);
+    if (resourceIdFilter) next.set('resource_id', resourceIdFilter);
+    if (searchFilter)     next.set('search', searchFilter);
+    if (sortField)        next.set('sort', sortField);
+    if (sortOrder)        next.set('order', sortOrder);
     setSearchParams(next, { replace: true });
-  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder, setSearchParams]);
+  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, resourceIdFilter, searchFilter, sortField, sortOrder, setSearchParams]);
 
   // Debounce the search input: a fetch per keystroke would fan out one
   // request per character. 250 ms is the sweet spot between "feels live"
@@ -92,6 +100,13 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     const id = setTimeout(() => setSearchFilter(searchInput), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [searchInput, searchFilter]);
+
+  // Same debounce for the resource_id input.
+  useEffect(() => {
+    if (resourceIdInput === resourceIdFilter) return;
+    const id = setTimeout(() => setResourceIdFilter(resourceIdInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [resourceIdInput, resourceIdFilter]);
 
   // When the parent prop changes (different VM in the embedded tab), reset.
   useEffect(() => {
@@ -109,6 +124,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         type: typeFilter,
         source: sourceFilter,
         severity: severityFilter,
+        resourceId: resourceIdFilter,
         search: searchFilter,
         sort: sortField,
         order: sortOrder,
@@ -124,7 +140,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     } finally {
       setLoading(false);
     }
-  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder, page, perPage]);
+  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, resourceIdFilter, searchFilter, sortField, sortOrder, page, perPage]);
 
   useEffect(() => {
     setLoading(true);
@@ -136,7 +152,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // Reset to page 1 when filters change.
   useEffect(() => {
     setPage(1);
-  }, [vmFilter, typeFilter, sourceFilter, severityFilter, searchFilter, sortField, sortOrder]);
+  }, [vmFilter, typeFilter, sourceFilter, severityFilter, resourceIdFilter, searchFilter, sortField, sortOrder]);
 
   // Lazily build a VM ID → name map so the timeline can render names.
   // Only top-level Activity needs this; the embedded tab already knows the VM.
@@ -212,6 +228,27 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             onChange={e => setVmFilter(e.target.value.trim())}
             data-testid="activity-filter-vm"
           />
+          <div className="relative" data-testid="activity-resourceid-wrap">
+            <input
+              type="search"
+              className="input py-1 text-xs w-48 pr-7"
+              placeholder="Filter by resource ID"
+              value={resourceIdInput}
+              onChange={e => setResourceIdInput(e.target.value.trim())}
+              data-testid="activity-filter-resource-id"
+            />
+            {resourceIdInput && (
+              <button
+                type="button"
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200 p-1"
+                onClick={() => setResourceIdInput('')}
+                aria-label="Clear resource ID filter"
+                data-testid="btn-activity-clear-resource-id"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
           <select
             className="input py-1 text-xs w-32"
             value={sourceFilter}
@@ -269,10 +306,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="asc">Order: asc</option>
             <option value="desc">Order: desc</option>
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter || searchInput || sortField || sortOrder) && (
+          {(vmFilter || typeFilter || sourceFilter || severityFilter || resourceIdInput || searchInput || sortField || sortOrder) && (
             <button
               className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
+              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setResourceIdInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
               data-testid="btn-activity-clear-filters"
             >
               Clear
