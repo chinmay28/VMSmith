@@ -5912,6 +5912,183 @@ func TestListEvents_FilterByResourceID_TotalCountReflectsFiltered(t *testing.T) 
 	_ = decodeEvents(t, resp)
 }
 
+// ============================================================
+// type_prefix case-insensitive prefix filter on GET /events (4.2.25)
+// ============================================================
+
+// seedTypePrefixEvents writes a mix of snapshot.*, vm.*, and webhook.* events
+// so the ?type_prefix= tests can assert prefix matching on the type axis
+// without depending on the other filters.
+func seedTypePrefixEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{
+			Type:       "snapshot.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-50 * time.Minute),
+		},
+		{
+			Type:       "snapshot.deleted",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-40 * time.Minute),
+		},
+		{
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-30 * time.Minute),
+		},
+		{
+			Type:       "vm.stopped",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-20 * time.Minute),
+		},
+		{
+			Type:       "webhook.delivery_failed",
+			Source:     types.EventSourceSystem,
+			Severity:   types.EventSeverityError,
+			OccurredAt: base.Add(-10 * time.Minute),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_MatchesEntireFamily(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=snapshot.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 snapshot.* matches, got %d", len(got))
+	}
+	for _, e := range got {
+		if !strings.HasPrefix(e.Type, "snapshot.") {
+			t.Errorf("unexpected type %q leaked through prefix filter", e.Type)
+		}
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=SNAPSHOT.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 matches via uppercase prefix, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=%20%20webhook.%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "webhook.delivery_failed" {
+		t.Fatalf("expected 1 webhook.* match after trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_EmptyParamIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 5 {
+		t.Fatalf("empty type_prefix should not filter, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=schedule.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 matches for unknown prefix, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_ComposesWithSource(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// snapshot.* events are source=app in the fixture; narrowing by
+	// source=libvirt should drop them all.
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=snapshot.&source=libvirt")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results when narrowing to libvirt, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_ComposesWithSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// type_prefix=vm. narrows to 2 vm.* events; search=stopped narrows further to 1.
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=vm.&search=stopped")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "vm.stopped" {
+		t.Fatalf("expected 1 vm.stopped match, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=vm.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want \"2\"", got)
+	}
+}
+
 // seedSortableEvents writes a small set of events with distinct types,
 // sources, severities, and occurred_at timestamps so the ?sort= tests can
 // assert exact orderings without depending on insertion order.

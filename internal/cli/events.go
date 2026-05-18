@@ -46,6 +46,7 @@ which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
 		actorFilter, _ := cmd.Flags().GetString("actor")
@@ -85,6 +86,7 @@ which matches the long-standing CLI behaviour.`,
 			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
 			actor:      strings.TrimSpace(actorFilter),
 			resourceID: strings.TrimSpace(resourceIDFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
 			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
 			since:      sinceTime,
 		})
@@ -196,6 +198,10 @@ type eventFilter struct {
 	// Whitespace-trimmed by the caller, case-sensitive (resource IDs are
 	// opaque server-issued strings operators reference verbatim).
 	resourceID string
+	// typePrefix is a lower-cased prefix matched case-insensitively against
+	// the event's Type field. Lets operators slice "snapshot.*" or
+	// "webhook.*" event families without enumerating each subtype.
+	typePrefix string
 	// search is a lower-cased substring needle applied via types.EventMatchesSearch.
 	search string
 	since  time.Time
@@ -211,6 +217,9 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 			continue
 		}
 		if f.typeStr != "" && e.Type != f.typeStr {
+			continue
+		}
+		if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
 			continue
 		}
 		if f.source != "" && !strings.EqualFold(e.Source, f.source) {
@@ -361,6 +370,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
 		actorFilter, _ := cmd.Flags().GetString("actor")
@@ -383,6 +393,7 @@ Examples:
 			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
 			actor:      strings.TrimSpace(actorFilter),
 			resourceID: strings.TrimSpace(resourceIDFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
 			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
@@ -569,6 +580,9 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	if f.typeStr != "" && e.Type != f.typeStr {
 		return false
 	}
+	if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
+		return false
+	}
 	if f.source != "" && !strings.EqualFold(e.Source, f.source) {
 		return false
 	}
@@ -610,6 +624,7 @@ func lastIDToSeq(id string) (string, error) {
 func init() {
 	eventsListCmd.Flags().String("vm", "", "filter events by VM ID")
 	eventsListCmd.Flags().String("type", "", "filter events by type (e.g. vm_started)")
+	eventsListCmd.Flags().String("type-prefix", "", "filter events by type prefix (e.g. 'snapshot.' matches every snapshot.* subtype)")
 	eventsListCmd.Flags().String("source", "", "filter events by source (libvirt|app|system)")
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
 	eventsListCmd.Flags().String("actor", "", "filter events by actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")
@@ -624,6 +639,7 @@ func init() {
 
 	eventsFollowCmd.Flags().String("vm", "", "only print events for this VM ID")
 	eventsFollowCmd.Flags().String("type", "", "only print events of this type (exact match)")
+	eventsFollowCmd.Flags().String("type-prefix", "", "only print events whose type starts with this prefix (e.g. 'snapshot.')")
 	eventsFollowCmd.Flags().String("source", "", "only print events from this source (libvirt|app|system)")
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
 	eventsFollowCmd.Flags().String("actor", "", "only print events from this actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")

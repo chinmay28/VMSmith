@@ -1056,6 +1056,10 @@ const server = http.createServer(async (req, res) => {
     // server-issued strings (e.g. snap-1747..., img-1747...) and the
     // case-sensitive contract mirrors the API.
     const resourceIDFilter = (url.searchParams.get("resource_id") || "").trim();
+    // Case-insensitive prefix match on the event's Type field (e.g.
+    // "snapshot." matches every snapshot.* subtype). Mirrors the
+    // daemon's lower-then-HasPrefix contract.
+    const typePrefixFilter = (url.searchParams.get("type_prefix") || "").trim().toLowerCase();
     const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const matchesSearch = (e) => {
       if (!searchFilter) return true;
@@ -1077,6 +1081,7 @@ const server = http.createServer(async (req, res) => {
       (!typeFilter || e.type === typeFilter) &&
       (!actorFilter || e.actor === actorFilter) &&
       (!resourceIDFilter || e.resource_id === resourceIDFilter) &&
+      (!typePrefixFilter || (e.type && String(e.type).toLowerCase().startsWith(typePrefixFilter))) &&
       matchesSearch(e)
     );
 
