@@ -2309,6 +2309,51 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
   });
 
+  // 4.2.22 — event details disclosure (actor + resource_id + attributes).
+  test("expand reveals actor + resource_id + attributes for events that have them", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // evt-2 (vm_created) is seeded with actor="ops-alice" and
+    // attributes.template="rocky9-base" — it should expose a chevron toggle.
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    const toggle = page.getByTestId("activity-row-toggle-evt-2");
+    await expect(toggle).toBeVisible();
+    // Details row hidden by default.
+    await expect(page.getByTestId("activity-details-evt-2")).toHaveCount(0);
+    // Click expands and shows actor + attributes.
+    await toggle.click();
+    await expect(page.getByTestId("activity-details-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-detail-actor-evt-2")).toContainText("ops-alice");
+    await expect(page.getByTestId("activity-detail-attrs-evt-2")).toContainText("template");
+    await expect(page.getByTestId("activity-detail-attrs-evt-2")).toContainText("rocky9-base");
+    // Click again collapses it.
+    await toggle.click();
+    await expect(page.getByTestId("activity-details-evt-2")).toHaveCount(0);
+  });
+
+  test("events with no structured details do not render a disclosure toggle", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // evt-0 is seeded with no actor / attributes / resource_id, so the
+    // hasDetails gate at web/src/pages/Activity.jsx should suppress the
+    // chevron entirely for that row. Asserting toHaveCount(0) on the
+    // toggle exercises the negative branch end-to-end.
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+    await expect(page.getByTestId("activity-row-toggle-evt-0")).toHaveCount(0);
+    // Sanity-check the positive path on the same render: evt-3 has
+    // actor="system" but no attributes / resource_id, and actor alone is
+    // enough to render the toggle.
+    const row3Toggle = page.getByTestId("activity-row-toggle-evt-3");
+    await expect(row3Toggle).toBeVisible();
+    await row3Toggle.click();
+    await expect(page.getByTestId("activity-detail-actor-evt-3")).toContainText("system");
+  });
+
+  test("row click toggles the details row when details are available", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Clicking the row body (not the toggle) should also expand it.
+    await page.getByTestId("activity-row-evt-2").click();
+    await expect(page.getByTestId("activity-details-evt-2")).toBeVisible();
+  });
+
   // 5.4.16 — sortable events list.
   test("sort dropdowns reorder the activity timeline and round-trip through the URL", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);

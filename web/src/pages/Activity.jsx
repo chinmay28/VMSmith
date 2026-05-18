@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { RefreshCw, Activity as ActivityIcon, Search, X } from 'lucide-react';
+import { RefreshCw, Activity as ActivityIcon, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { events as eventsApi, vms as vmsApi } from '../api/client';
 import { PageHeader, Spinner, ErrorBanner, EmptyState, PaginationControls, SeverityBadge } from '../components/Shared';
 
@@ -300,6 +300,8 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
           <table className="w-full border-collapse">
             <thead className="sticky top-0 z-10 bg-steel-900/95 border-b border-steel-800/60">
               <tr>
+                {/* Disclosure column: chevron toggle for events with structured detail. */}
+                <th className="text-left px-1 py-2 text-[10px] uppercase tracking-widest text-steel-500 font-semibold w-6"></th>
                 <th className="text-left px-3 py-2 text-[10px] uppercase tracking-widest text-steel-500 font-semibold w-44">Time</th>
                 <th className="text-left px-3 py-2 text-[10px] uppercase tracking-widest text-steel-500 font-semibold w-20">Severity</th>
                 <th className="text-left px-3 py-2 text-[10px] uppercase tracking-widest text-steel-500 font-semibold w-24">Source</th>
@@ -312,30 +314,12 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             </thead>
             <tbody>
               {items.map((evt) => (
-                <tr
+                <ActivityRow
                   key={evt.id}
-                  className="border-b border-steel-800/30 hover:bg-steel-800/20"
-                  data-testid={`activity-row-${evt.id}`}
-                >
-                  <td className="px-3 py-1.5 text-steel-500 whitespace-nowrap">{formatEventTime(evt)}</td>
-                  <td className="px-3 py-1.5">
-                    <SeverityBadge severity={evt.severity} />
-                  </td>
-                  <td className="px-3 py-1.5 text-steel-300">{sourceLabel(evt.source)}</td>
-                  <td className="px-3 py-1.5 text-forge-300">{evt.type}</td>
-                  {!embedded && (
-                    <td className="px-3 py-1.5">
-                      {evt.vm_id ? (
-                        <Link to={`/vms/${evt.vm_id}`} className="text-forge-400 hover:underline">
-                          {vmIndex[evt.vm_id] || evt.vm_id}
-                        </Link>
-                      ) : (
-                        <span className="text-steel-600">—</span>
-                      )}
-                    </td>
-                  )}
-                  <td className="px-3 py-1.5 text-steel-200">{evt.message || ''}</td>
-                </tr>
+                  evt={evt}
+                  embedded={embedded}
+                  vmIndex={vmIndex}
+                />
               ))}
             </tbody>
           </table>
@@ -357,5 +341,96 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         />
       )}
     </div>
+  );
+}
+
+// ActivityRow renders a single event row plus an optional expanded details
+// row beneath it. The disclosure surfaces actor / resource_id / attributes —
+// fields that the daemon has always returned but that nothing in the table
+// view exposed, forcing operators to read raw JSON when triaging audit
+// events. The details row only renders when there is something to show, so
+// system-emitted events with no structured detail don't get an empty
+// expander.
+function ActivityRow({ evt, embedded, vmIndex }) {
+  const [expanded, setExpanded] = useState(false);
+  const attrEntries = evt.attributes
+    ? Object.entries(evt.attributes).sort((a, b) => a[0].localeCompare(b[0]))
+    : [];
+  const hasDetails = Boolean(evt.actor || evt.resource_id || attrEntries.length > 0);
+  const colSpan = embedded ? 6 : 7; // expander + 5 base cols (+ VM when not embedded)
+
+  return (
+    <>
+      <tr
+        className={`border-b border-steel-800/30 hover:bg-steel-800/20 ${hasDetails ? 'cursor-pointer' : ''}`}
+        data-testid={`activity-row-${evt.id}`}
+        onClick={() => { if (hasDetails) setExpanded((e) => !e); }}
+      >
+        <td className="px-1 py-1.5 text-steel-500">
+          {hasDetails ? (
+            <button
+              type="button"
+              className="p-0.5 text-steel-500 hover:text-steel-200"
+              aria-label={expanded ? 'Hide event details' : 'Show event details'}
+              data-testid={`activity-row-toggle-${evt.id}`}
+              onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
+            >
+              {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+          ) : (
+            <span className="inline-block w-3" />
+          )}
+        </td>
+        <td className="px-3 py-1.5 text-steel-500 whitespace-nowrap">{formatEventTime(evt)}</td>
+        <td className="px-3 py-1.5">
+          <SeverityBadge severity={evt.severity} />
+        </td>
+        <td className="px-3 py-1.5 text-steel-300">{sourceLabel(evt.source)}</td>
+        <td className="px-3 py-1.5 text-forge-300">{evt.type}</td>
+        {!embedded && (
+          <td className="px-3 py-1.5">
+            {evt.vm_id ? (
+              <Link to={`/vms/${evt.vm_id}`} className="text-forge-400 hover:underline" onClick={(e) => e.stopPropagation()}>
+                {vmIndex[evt.vm_id] || evt.vm_id}
+              </Link>
+            ) : (
+              <span className="text-steel-600">—</span>
+            )}
+          </td>
+        )}
+        <td className="px-3 py-1.5 text-steel-200">{evt.message || ''}</td>
+      </tr>
+      {expanded && hasDetails && (
+        <tr className="bg-steel-900/40 border-b border-steel-800/30" data-testid={`activity-details-${evt.id}`}>
+          <td className="px-1 py-2"></td>
+          <td colSpan={colSpan - 1} className="px-3 py-2">
+            <div className="flex flex-col gap-1 text-[11px]">
+              {evt.actor && (
+                <div data-testid={`activity-detail-actor-${evt.id}`}>
+                  <span className="text-steel-500">Actor: </span>
+                  <span className="text-forge-300">{evt.actor}</span>
+                </div>
+              )}
+              {evt.resource_id && (
+                <div data-testid={`activity-detail-resource-${evt.id}`}>
+                  <span className="text-steel-500">Resource: </span>
+                  <span className="text-forge-300">{evt.resource_id}</span>
+                </div>
+              )}
+              {attrEntries.length > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1" data-testid={`activity-detail-attrs-${evt.id}`}>
+                  {attrEntries.map(([k, v]) => (
+                    <span key={k}>
+                      <span className="text-steel-500">{k}=</span>
+                      <span className="text-forge-300">{v}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

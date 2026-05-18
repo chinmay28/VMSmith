@@ -1008,6 +1008,13 @@ const server = http.createServer(async (req, res) => {
       { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", actor: "system",    message: "VM 'web-server-prod' started",            created_at: new Date(Date.now() - 30_000).toISOString() },
       { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", actor: "ops-alice", message: "VM 'web-server-prod' created", attributes: { template: "rocky9-base" }, created_at: new Date(Date.now() - 60_000).toISOString() },
       { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", actor: "system",    message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
+      // evt-0 deliberately omits actor / attributes / resource_id / vm_id so
+      // the Activity disclosure (hasDetails gate in web/src/pages/Activity.jsx)
+      // is exercised for events that should NOT render a chevron. The type is
+      // chosen to sort after vm_stopped in asc and the id is the lowest so the
+      // existing 5.4.16 default-sort and sort=type/source assertions keep
+      // working unchanged.
+      { id: "evt-0", type: "vm_template_synced", source: "app", severity: "info", message: "Daily template sync completed", created_at: new Date(Date.now() - 180_000).toISOString() },
     ];
     // Sort whitelist mirrors internal/api/event_sort.go.
     const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity"]);
