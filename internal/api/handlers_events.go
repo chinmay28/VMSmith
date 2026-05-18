@@ -15,17 +15,18 @@ import (
 // ListEvents handles GET /api/v1/events
 //
 // Query params:
-//   - vm_id     — filter by VM ID (exact match)
-//   - type      — filter by event type (exact match)
-//   - source    — "libvirt" | "app" | "system"
-//   - severity  — "info" | "warn" | "error"
-//   - search    — case-insensitive substring match across message, type,
+//   - vm_id        — filter by VM ID (exact match)
+//   - type         — filter by event type (exact match)
+//   - source       — "libvirt" | "app" | "system"
+//   - severity     — "info" | "warn" | "error"
+//   - resource_id  — filter by ResourceID (exact match, case-sensitive)
+//   - search       — case-insensitive substring match across message, type,
 //     source, severity, actor, vm_id, resource_id, and attribute values.
 //     The numeric event ID is intentionally excluded.
-//   - since     — RFC3339 timestamp; only events with occurred_at after this
-//   - until     — seq ID (uint64); exclude events with ID ≥ this value
-//   - sort      — id | occurred_at | type | source | severity (default occurred_at)
-//   - order     — asc | desc (default desc — "newest first")
+//   - since        — RFC3339 timestamp; only events with occurred_at after this
+//   - until        — seq ID (uint64); exclude events with ID ≥ this value
+//   - sort         — id | occurred_at | type | source | severity (default occurred_at)
+//   - order        — asc | desc (default desc — "newest first")
 //   - page, per_page — pagination
 func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -40,6 +41,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	evtType := strings.TrimSpace(q.Get("type"))
 	source := strings.TrimSpace(q.Get("source"))
 	severity := strings.TrimSpace(q.Get("severity"))
+	resourceID := strings.TrimSpace(q.Get("resource_id"))
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	untilStr := strings.TrimSpace(q.Get("until"))
 	sinceStr := strings.TrimSpace(q.Get("since"))
@@ -74,12 +76,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	pagination := parsePagination(r)
 
 	filter := store.EventFilter{
-		VMID:     vmID,
-		Type:     evtType,
-		Source:   source,
-		Severity: severity,
-		Search:   search,
-		UntilSeq: untilSeq,
+		VMID:       vmID,
+		Type:       evtType,
+		Source:     source,
+		Severity:   severity,
+		ResourceID: resourceID,
+		Search:     search,
+		UntilSeq:   untilSeq,
 	}
 	if !sinceTime.IsZero() {
 		filter.Since = sinceTime

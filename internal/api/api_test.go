@@ -5610,6 +5610,172 @@ func TestListEvents_FilterBySearch_CombinesWithVMID(t *testing.T) {
 	}
 }
 
+// seedResourceIDEvents writes a small set of events that differ on ResourceID
+// so the ?resource_id= filter can be asserted without depending on the
+// per-axis seeds in seedSearchableEvents.
+func seedResourceIDEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{
+			Type:       "snapshot.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			VMID:       "vm-1",
+			ResourceID: "snap-rocky-pre-deploy",
+			Message:    "snapshot created",
+			OccurredAt: base.Add(-30 * time.Minute),
+		},
+		{
+			Type:       "snapshot.deleted",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityWarn,
+			VMID:       "vm-1",
+			ResourceID: "snap-rocky-pre-deploy",
+			Message:    "snapshot deleted",
+			OccurredAt: base.Add(-25 * time.Minute),
+		},
+		{
+			Type:       "image.uploaded",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			ResourceID: "img-rocky9",
+			Message:    "image uploaded",
+			OccurredAt: base.Add(-20 * time.Minute),
+		},
+		{
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			VMID:       "vm-2",
+			Message:    "vm started", // no resource_id
+			OccurredAt: base.Add(-15 * time.Minute),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_FilterByResourceID_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events for snap-rocky-pre-deploy, got %d", len(got))
+	}
+	for _, e := range got {
+		if e.ResourceID != "snap-rocky-pre-deploy" {
+			t.Errorf("filter leaked unrelated event %+v", e)
+		}
+	}
+}
+
+func TestListEvents_FilterByResourceID_CaseSensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Uppercase target should yield zero matches — the resource_id contract
+	// mirrors vm_id (case-sensitive) so case-insensitive matching stays the
+	// job of ?search=.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=SNAP-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for case-mismatched resource_id, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=%20%20img-rocky9%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].ResourceID != "img-rocky9" {
+		t.Fatalf("expected 1 img-rocky9 event after whitespace trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-does-not-exist")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for unknown resource_id, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_EmptyParamIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Empty / whitespace-only resource_id should disable the filter, so the
+	// response carries every seeded event.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=%20%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 events when filter is empty, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_ComposesWithSeverity(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Two events carry snap-rocky-pre-deploy — one info (created), one warn
+	// (deleted). Narrowing by severity=warn should leave only the deletion.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy&severity=warn")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "snapshot.deleted" {
+		t.Fatalf("expected 1 snapshot.deleted match, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want \"2\"", got)
+	}
+	_ = decodeEvents(t, resp)
+}
+
 // seedSortableEvents writes a small set of events with distinct types,
 // sources, severities, and occurred_at timestamps so the ?sort= tests can
 // assert exact orderings without depending on insertion order.
