@@ -172,6 +172,7 @@ const server = http.createServer(async (req, res) => {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const defaultUserFilter = (url.searchParams.get("default_user") || "").trim().toLowerCase();
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -184,6 +185,12 @@ const server = http.createServer(async (req, res) => {
         if (vm.name && String(vm.name).toLowerCase().includes(search)) return true;
         if (vm.description && String(vm.description).toLowerCase().includes(search)) return true;
         return Array.isArray(vm.tags) && vm.tags.some(t => String(t).toLowerCase().includes(search));
+      });
+    }
+    if (defaultUserFilter) {
+      list = list.filter(vm => {
+        const du = vm?.spec?.default_user || vm?.default_user || "";
+        return String(du).toLowerCase() === defaultUserFilter;
       });
     }
     const cmp = (a, b) => {

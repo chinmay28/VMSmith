@@ -439,6 +439,86 @@ func TestCLI_VMList_FilterBySearch_CombinesWithStatus(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_FilterByDefaultUser_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ubuntu"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ubuntu"}})
+
+	out, err := runCLI("vm", "list", "--default-user", "ubuntu")
+	if err != nil {
+		t.Fatalf("vm list --default-user: %v", err)
+	}
+	if strings.Contains(out, "alpha") || !strings.Contains(out, "beta") || !strings.Contains(out, "gamma") {
+		t.Fatalf("expected only ubuntu VMs (beta, gamma), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDefaultUser_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ec2-user"}})
+
+	out, err := runCLI("vm", "list", "--default-user", "EC2-USER")
+	if err != nil {
+		t.Fatalf("vm list --default-user: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected case-insensitive match for alpha, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDefaultUser_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ubuntu"}})
+
+	out, err := runCLI("vm", "list", "--default-user", "")
+	if err != nil {
+		t.Fatalf("vm list --default-user: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("expected empty filter to return all, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDefaultUser_NoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})
+
+	out, err := runCLI("vm", "list", "--default-user", "nobody")
+	if err != nil {
+		t.Fatalf("vm list --default-user: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected no matches, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDefaultUser_ComposesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ubuntu"}})
+
+	out, err := runCLI("vm", "list", "--default-user", "root", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --default-user --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("expected only alpha (root + running), got %q", out)
+	}
+}
+
 func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

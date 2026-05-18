@@ -785,6 +785,149 @@ func TestListVMs_FilterBySearch_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestListVMs_FilterByDefaultUser_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{DefaultUser: "ubuntu"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{DefaultUser: "ubuntu"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=ubuntu")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 ubuntu vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if !strings.EqualFold(vm.Spec.DefaultUser, "ubuntu") {
+			t.Fatalf("unexpected vm in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: "ec2-user"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=EC2-USER")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: "root"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=%20%20root%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{DefaultUser: "ubuntu"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: "root"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=admin")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected empty result, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "ubuntu"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=root&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected composition to narrow to alpha, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		du := "root"
+		if i%2 == 0 {
+			du = "ubuntu"
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{DefaultUser: du},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=ubuntu&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := resp.Header.Get("X-Total-Count")
+	if got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
