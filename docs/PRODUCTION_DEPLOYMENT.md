@@ -400,6 +400,8 @@ sudo firewall-cmd --reload
 
 If you had previously opened 8080, remove it.
 
+> **Loopback note for console proxying:** browser console traffic is expected to traverse your reverse proxy and then hop from the proxy to VMSmith over `127.0.0.1`. If you run host-level firewall rules that also filter loopback traffic, explicitly allow `lo` traffic between the proxy and VMSmith. On most hosts no action is needed because default iptables/nftables setups do not block loopback.
+
 ---
 
 ## 9. Access control recommendations
