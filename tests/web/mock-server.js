@@ -1048,6 +1048,10 @@ const server = http.createServer(async (req, res) => {
     const sourceFilter = (url.searchParams.get("source") || "").trim();
     const severityFilter = (url.searchParams.get("severity") || "").trim();
     const typeFilter = (url.searchParams.get("type") || "").trim();
+    // Actor is case-sensitive exact-match (mirrors the API contract): the
+    // raw value is trimmed but NOT lowercased; matching uses `===` not
+    // localeCompare. Empty disables the filter.
+    const actorFilter = (url.searchParams.get("actor") || "").trim();
     const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const matchesSearch = (e) => {
       if (!searchFilter) return true;
@@ -1067,6 +1071,7 @@ const server = http.createServer(async (req, res) => {
       (!sourceFilter || e.source === sourceFilter) &&
       (!severityFilter || e.severity === severityFilter) &&
       (!typeFilter || e.type === typeFilter) &&
+      (!actorFilter || e.actor === actorFilter) &&
       matchesSearch(e)
     );
 

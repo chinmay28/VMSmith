@@ -550,6 +550,11 @@ type EventFilter struct {
 	Type     string
 	Source   string
 	Severity string
+	// Actor is a case-sensitive exact-match filter against evt.Actor —
+	// mirrors VMID's contract. Empty disables the filter; whitespace
+	// trimming is the caller's responsibility (the handler / CLI does
+	// it once before constructing the filter).
+	Actor string
 	// Search is a lowercase needle applied via types.EventMatchesSearch.
 	// Callers are responsible for trimming + lowercasing.
 	Search   string
@@ -621,6 +626,9 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 				continue
 			}
 			if filter.Severity != "" && evt.Severity != filter.Severity {
+				continue
+			}
+			if filter.Actor != "" && evt.Actor != filter.Actor {
 				continue
 			}
 			// Time-based Since: filter individual events by OccurredAt.

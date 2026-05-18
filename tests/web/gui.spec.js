@@ -2417,6 +2417,49 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-details-evt-2")).toBeVisible();
   });
 
+  // 4.2.23 — per-actor exact-match filter on the activity timeline.
+  test("actor input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Seeded events: evt-3 actor=system, evt-2 actor=ops-alice, evt-1 actor=system, evt-0 no actor.
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+
+    // Type exact alias — debounce settles after 250 ms.
+    await page.getByTestId("activity-filter-actor").fill("ops-alice");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-0")).toHaveCount(0);
+
+    // URL captures the committed actor so the filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("actor")).toBe("ops-alice");
+  });
+
+  test("actor clear button restores the unfiltered view", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-actor").fill("ops-alice");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+
+    await page.getByTestId("btn-activity-clear-actor").click();
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("actor")).toBe(null);
+  });
+
+  test("actor filter narrows further when combined with the source dropdown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // actor=system narrows to evt-3 + evt-1; source=app then strips evt-3
+    // (libvirt) and evt-1 (libvirt) leaving zero events — empty state.
+    await page.getByTestId("activity-filter-actor").fill("system");
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    await page.getByTestId("activity-filter-source").selectOption("app");
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
   // 5.4.16 — sortable events list.
   test("sort dropdowns reorder the activity timeline and round-trip through the URL", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);

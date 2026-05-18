@@ -5610,6 +5610,138 @@ func TestListEvents_FilterBySearch_CombinesWithVMID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Actor exact-match filter on GET /events (4.2.23)
+// ============================================================
+
+func TestListEvents_FilterByActor_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=ops-alice")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 ops-alice event, got %d", len(got))
+	}
+	if got[0].Actor != "ops-alice" {
+		t.Errorf("actor=%q, want ops-alice", got[0].Actor)
+	}
+}
+
+func TestListEvents_FilterByActor_CaseSensitive(t *testing.T) {
+	// Actor is exact-match (mirrors ?vm_id='s contract); case-insensitive
+	// matching is the job of ?search=.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=Ops-Alice")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for differently-cased actor, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=%20%20ops-alice%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 result after whitespace trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=nobody-by-that-name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_EmptyParamIsNoOp(t *testing.T) {
+	// ?actor= (empty) must not filter — the handler trims, sees empty,
+	// and forwards "" to the store which short-circuits past the predicate.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 4 {
+		t.Fatalf("?actor= empty should be no-op; got %d, want 4 (all seeded)", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_ComposesWithSearch(t *testing.T) {
+	// Combining ?actor= with ?search= must narrow to the intersection.
+	// "ops-alice" matches the snapshot.created event; adding search=before-deploy
+	// also matches it, so the intersection stays at 1.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=ops-alice&search=before-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 intersection match, got %d", len(got))
+	}
+
+	// search=DHCP would match the system event whose Actor is empty;
+	// adding actor=ops-alice short-circuits to zero.
+	resp, err = http.Get(ts.URL + "/api/v1/events?actor=ops-alice&search=DHCP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got = decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for ops-alice+DHCP, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_TotalCountReflectsFiltered(t *testing.T) {
+	// X-Total-Count must reflect the post-filter / pre-pagination count so
+	// the GUI's pagination widget can drive the Activity table correctly.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=system&per_page=10&page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if header := resp.Header.Get("X-Total-Count"); header != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (system actor only matches one seed)", header)
+	}
+}
+
 // seedSortableEvents writes a small set of events with distinct types,
 // sources, severities, and occurred_at timestamps so the ?sort= tests can
 // assert exact orderings without depending on insertion order.
