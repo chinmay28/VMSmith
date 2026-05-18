@@ -979,6 +979,69 @@ test.describe("VM Detail", () => {
     await expect(page.getByText(/No port forwards match "needle-not-present"/)).toBeVisible();
   });
 
+  // 5.4.20 — paginated port-forward list.
+  test("port forward pagination controls reflect X-Total-Count and step pages", async ({ page }) => {
+    // Synthesize 30 rules so the pagination widget has multiple pages.
+    const FIXTURE_COUNT = 30;
+    const synthetic = [];
+    for (let i = 1; i <= FIXTURE_COUNT; i += 1) {
+      synthetic.push({
+        id: `pf-page-${String(i).padStart(2, "0")}`,
+        vm_id: "vm-1",
+        host_port: 30000 + i,
+        guest_port: 22,
+        guest_ip: "192.168.100.10",
+        protocol: "tcp",
+        description: `synthetic rule ${i}`,
+      });
+    }
+    await page.route("**/api/v1/vms/vm-1/ports*", async (route) => {
+      const url = new URL(route.request().url());
+      const perPageRaw = url.searchParams.get("per_page") || url.searchParams.get("limit") || "";
+      const pageRaw = url.searchParams.get("page") || "";
+      const perPage = Number.parseInt(perPageRaw, 10);
+      let pageNum = Number.parseInt(pageRaw, 10);
+      let body = synthetic;
+      if (Number.isFinite(perPage) && perPage > 0) {
+        if (!Number.isFinite(pageNum) || pageNum < 1) pageNum = 1;
+        const start = (pageNum - 1) * perPage;
+        body = start >= synthetic.length ? [] : synthetic.slice(start, start + perPage);
+      }
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": String(FIXTURE_COUNT),
+        },
+        body: JSON.stringify(body),
+      });
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    const pagination = page.getByTestId("port-pagination");
+    await expect(pagination).toBeVisible();
+    // First page: 1-25 of 30 (default perPage=25). The first rule is rendered.
+    await expect(pagination).toContainText("1-25");
+    await expect(pagination).toContainText("of 30");
+    await expect(page.getByTestId("port-row-pf-page-01")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-page-26")).toHaveCount(0);
+
+    // Click Next → page 2 shows rules 26-30 and the first-page rule disappears.
+    await pagination.getByRole("button", { name: "Next" }).click();
+    await expect(pagination).toContainText("26-30");
+    await expect(page.getByTestId("port-row-pf-page-26")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-page-01")).toHaveCount(0);
+
+    // Next is disabled on the last page; Previous is enabled.
+    await expect(pagination.getByRole("button", { name: "Next" })).toBeDisabled();
+    await expect(pagination.getByRole("button", { name: "Previous" })).toBeEnabled();
+
+    // URL captures the page index so the filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_page")).toBe("2");
+  });
+
   test("edit port forward description", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

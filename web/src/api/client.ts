@@ -206,16 +206,18 @@ export const images = {
 export const ports = {
   list: (
     vmId: string,
-    opts: { sort?: string; order?: string; search?: string; tag?: string } = {},
+    opts: { sort?: string; order?: string; search?: string; tag?: string; page?: number; perPage?: number } = {},
   ) => {
-    const query: Record<string, string> = {};
-    if (opts.sort)   query.sort   = opts.sort;
-    if (opts.order)  query.order  = opts.order;
-    if (opts.search) query.search = opts.search;
-    if (opts.tag)    query.tag    = opts.tag;
+    const query: Record<string, string | number> = {};
+    if (opts.sort)    query.sort    = opts.sort;
+    if (opts.order)   query.order   = opts.order;
+    if (opts.search)  query.search  = opts.search;
+    if (opts.tag)     query.tag     = opts.tag;
+    if (opts.page)    query.page    = opts.page;
+    if (opts.perPage) query.per_page = opts.perPage;
     return unwrap(apiClient.GET('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId }, query: query as any },
-    } as any));
+    } as any), { withMeta: true });
   },
   add: (
     vmId: string,

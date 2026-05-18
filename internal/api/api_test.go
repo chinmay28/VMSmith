@@ -7710,6 +7710,134 @@ func TestListPorts_FilterBySearch_IDAndVMIDNotInHaystack(t *testing.T) {
 }
 
 // ============================================================
+// Port-forward list pagination tests (5.4.20)
+// ============================================================
+
+// listPortsWithResponse mirrors listPortsWithQuery but returns the raw
+// *http.Response so callers can read pagination headers (X-Total-Count).
+func listPortsWithResponse(t *testing.T, ts *httptest.Server, vmID, query string) ([]types.PortForward, *http.Response) {
+	t.Helper()
+	url := ts.URL + "/api/v1/vms/" + vmID + "/ports"
+	if query != "" {
+		url += "?" + query
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var ports []types.PortForward
+	if err := json.NewDecoder(resp.Body).Decode(&ports); err != nil {
+		t.Fatalf("decode ports: %v", err)
+	}
+	return ports, resp
+}
+
+func TestListPorts_Pagination_PerPagePage(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-pg")
+
+	// sort=host_port asc → [8081, 9090, 22001]
+	got1, resp1 := listPortsWithResponse(t, ts, "vm-pg", "sort=host_port&per_page=2&page=1")
+	if header := resp1.Header.Get("X-Total-Count"); header != "3" {
+		t.Errorf("page 1 X-Total-Count = %q, want 3", header)
+	}
+	if len(got1) != 2 || got1[0].HostPort != 8081 || got1[1].HostPort != 9090 {
+		t.Fatalf("page 1 = %+v, want host_ports [8081 9090]", got1)
+	}
+
+	got2, resp2 := listPortsWithResponse(t, ts, "vm-pg", "sort=host_port&per_page=2&page=2")
+	if header := resp2.Header.Get("X-Total-Count"); header != "3" {
+		t.Errorf("page 2 X-Total-Count = %q, want 3", header)
+	}
+	if len(got2) != 1 || got2[0].HostPort != 22001 {
+		t.Fatalf("page 2 = %+v, want host_ports [22001]", got2)
+	}
+}
+
+func TestListPorts_Pagination_PageBeyondEndReturnsEmpty(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-pg")
+
+	got, resp := listPortsWithResponse(t, ts, "vm-pg", "per_page=2&page=99")
+	if header := resp.Header.Get("X-Total-Count"); header != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", header)
+	}
+	if len(got) != 0 {
+		t.Errorf("got = %+v, want empty slice for out-of-range page", got)
+	}
+}
+
+func TestListPorts_Pagination_NoParamsReturnsAll(t *testing.T) {
+	// Without pagination params, ListPorts returns the full filtered set —
+	// preserves the existing zero-perPage contract from parsePagination so
+	// the absence of `?page=` / `?per_page=` keeps the legacy CLI/UI
+	// behaviour where every rule is rendered at once.
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-pg")
+
+	got, resp := listPortsWithResponse(t, ts, "vm-pg", "")
+	if header := resp.Header.Get("X-Total-Count"); header != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", header)
+	}
+	if len(got) != 3 {
+		t.Errorf("len = %d, want 3 (full set)", len(got))
+	}
+}
+
+func TestListPorts_Pagination_TotalCountReflectsFilter(t *testing.T) {
+	// X-Total-Count must reflect the post-filter / pre-pagination count so
+	// the GUI can paginate over the filtered population. Mirrors the
+	// contract documented for VMs / images / templates / events / webhooks.
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-pg")
+
+	// "ssh" only matches the 22001 rule.
+	_, resp := listPortsWithResponse(t, ts, "vm-pg", "search=ssh&per_page=10&page=1")
+	if header := resp.Header.Get("X-Total-Count"); header != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (only ssh jumpbox matches)", header)
+	}
+}
+
+func TestListPorts_Pagination_LimitAlias(t *testing.T) {
+	// parsePagination accepts `limit` as a synonym for `per_page`.
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedSortPortFixtures(t, s, "vm-pg")
+
+	got, _ := listPortsWithResponse(t, ts, "vm-pg", "sort=host_port&limit=1")
+	if len(got) != 1 || got[0].HostPort != 8081 {
+		t.Fatalf("limit=1 + sort=host_port asc = %+v, want host_port=8081", got)
+	}
+}
+
+func TestListPorts_Pagination_ComposesWithSortAndTag(t *testing.T) {
+	// Sort + tag filter + pagination must stack: filter narrows the set, sort
+	// fixes the order, then pagination chops the window.
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedPortForward(t, s, &types.PortForward{ID: "vm-pg/8081", VMID: "vm-pg", HostPort: 8081, GuestPort: 80, Protocol: types.ProtocolTCP, Description: "web", Tags: []string{"prod"}})
+	seedPortForward(t, s, &types.PortForward{ID: "vm-pg/9090", VMID: "vm-pg", HostPort: 9090, GuestPort: 9090, Protocol: types.ProtocolTCP, Description: "metrics", Tags: []string{"prod"}})
+	seedPortForward(t, s, &types.PortForward{ID: "vm-pg/2222", VMID: "vm-pg", HostPort: 2222, GuestPort: 22, Protocol: types.ProtocolTCP, Description: "ssh", Tags: []string{"dev"}})
+
+	// tag=prod narrows to two rules; sort=host_port desc puts 9090 first; page 2
+	// of size 1 yields the second prod row (host_port=8081).
+	got, resp := listPortsWithResponse(t, ts, "vm-pg", "tag=prod&sort=host_port&order=desc&per_page=1&page=2")
+	if header := resp.Header.Get("X-Total-Count"); header != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (post-filter, pre-pagination)", header)
+	}
+	if len(got) != 1 || got[0].HostPort != 8081 {
+		t.Fatalf("got = %+v, want host_port=8081", got)
+	}
+}
+
+// ============================================================
 // Template bulk-delete handler tests (2.3.9)
 // ============================================================
 

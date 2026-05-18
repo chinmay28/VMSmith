@@ -2845,6 +2845,143 @@ func TestCLI_PortList_FilterBySearch_ComposesWithSort(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Port-list pagination flags (5.4.20)
+// ============================================================
+
+func TestCLI_PortList_LimitTruncates(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--sort", "host_port", "--limit", "2")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
+	}
+	wantHostPorts := []string{"8081", "9090"}
+	for i, hp := range wantHostPorts {
+		if rows[i+1][1] != hp {
+			t.Errorf("row %d host_port = %q, want %q", i, rows[i+1][1], hp)
+		}
+	}
+}
+
+func TestCLI_PortList_OffsetSkipsFromStart(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--sort", "host_port", "--offset", "1")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d rows from %q", len(rows), out)
+	}
+	wantHostPorts := []string{"9090", "22001"}
+	for i, hp := range wantHostPorts {
+		if rows[i+1][1] != hp {
+			t.Errorf("row %d host_port = %q, want %q", i, rows[i+1][1], hp)
+		}
+	}
+}
+
+func TestCLI_PortList_LimitAndOffsetTogether(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	// sort=host_port asc => [8081, 9090, 22001]; offset=1, limit=1 => [9090]
+	out, err := runCLI("port", "list", "vm-s", "--sort", "host_port", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "9090" {
+		t.Errorf("got host_port = %q, want 9090", rows[1][1])
+	}
+}
+
+func TestCLI_PortList_OffsetBeyondEnd(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--offset", "99")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 1 {
+		t.Fatalf("expected header only, got %d rows from %q", len(rows), out)
+	}
+}
+
+func TestCLI_PortList_RejectsNegativeLimit(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--limit", "-1")
+	if err == nil {
+		t.Fatalf("expected --limit < 0 to error")
+	}
+	if !strings.Contains(err.Error(), "limit") {
+		t.Errorf("err = %v, want it to mention 'limit'", err)
+	}
+}
+
+func TestCLI_PortList_RejectsNegativeOffset(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--offset", "-1")
+	if err == nil {
+		t.Fatalf("expected --offset < 0 to error")
+	}
+	if !strings.Contains(err.Error(), "offset") {
+		t.Errorf("err = %v, want it to mention 'offset'", err)
+	}
+}
+
+func TestCLI_PortList_PaginationComposesWithFilter(t *testing.T) {
+	// Filter narrows to 2 rules, then offset + limit slice within that.
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	for _, p := range []*types.PortForward{
+		{ID: "vm-s/8081", VMID: "vm-s", HostPort: 8081, GuestPort: 80, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "web frontend", Tags: []string{"prod"}},
+		{ID: "vm-s/9090", VMID: "vm-s", HostPort: 9090, GuestPort: 9090, GuestIP: "192.168.100.40", Protocol: types.ProtocolUDP, Description: "metrics", Tags: []string{"prod"}},
+		{ID: "vm-s/2222", VMID: "vm-s", HostPort: 2222, GuestPort: 22, GuestIP: "192.168.100.40", Protocol: types.ProtocolTCP, Description: "ssh jumpbox", Tags: []string{"dev"}},
+	} {
+		if err := s.PutPortForward(p); err != nil {
+			t.Fatalf("seed %s: %v", p.ID, err)
+		}
+	}
+
+	// tag=prod -> [8081, 9090]; sort=host_port desc -> [9090, 8081];
+	// offset=1, limit=1 -> [8081]
+	out, err := runCLI("port", "list", "vm-s", "--tag", "prod", "--sort", "host_port", "--order", "desc", "--offset", "1", "--limit", "1")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][1] != "8081" {
+		t.Errorf("got host_port = %q, want 8081", rows[1][1])
+	}
+}
+
 func TestCLI_PortAdd_NoIP(t *testing.T) {
 	mock, vmCleanup := withMockVM(t)
 	defer vmCleanup()

@@ -125,6 +125,12 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 //     Applied before sort.
 //   - sort=<id|host_port|guest_port|protocol|description>   default id
 //   - order=<asc|desc>           default asc
+//   - page / per_page (see parsePagination) — applied after filter + sort so
+//     the X-Total-Count header reflects the post-filter / pre-pagination
+//     population. `limit` is accepted as a synonym for `per_page`. Mirrors
+//     the pagination surface that VMs (5.4.2), images (5.4.5), templates,
+//     snapshots, events (4.2.17), logs (5.4.13), and webhooks (5.4.19)
+//     already ship.
 //
 // Unknown sort/order values return 400 `invalid_sort` / `invalid_order`.
 // Comparators tiebreak on `id` so repeated requests return a deterministic
@@ -172,6 +178,14 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	types.SortPortForwards(ports, sortField, order)
+
+	total := len(ports)
+	pagination := parsePagination(r)
+	ports = paginateSlice(ports, pagination.Page, pagination.PerPage)
+	if ports == nil {
+		ports = []*types.PortForward{}
+	}
+	setTotalCountHeader(w, total)
 
 	writeJSON(w, http.StatusOK, ports)
 }

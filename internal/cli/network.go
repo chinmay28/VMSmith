@@ -112,6 +112,8 @@ var portListCmd = &cobra.Command{
 		order, _ := cmd.Flags().GetString("order")
 		searchRaw, _ := cmd.Flags().GetString("search")
 		tagRaw, _ := cmd.Flags().GetString("tag")
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
 		searchFilter := strings.ToLower(strings.TrimSpace(searchRaw))
@@ -136,8 +138,12 @@ var portListCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
+		limit, offset, err := normalizeLimitOffset(limit, offset)
+		if err != nil {
+			return err
+		}
 
-		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter)
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter, "limit", fmt.Sprintf("%d", limit), "offset", fmt.Sprintf("%d", offset))
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -173,6 +179,7 @@ var portListCmd = &cobra.Command{
 			ports = filtered
 		}
 		types.SortPortForwards(ports, sortField, order)
+		ports = paginateSlice(ports, limit, offset)
 		logger.Info("cli", "port list result", "vm_id", vmID, "count", fmt.Sprintf("%d", len(ports)))
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -397,6 +404,8 @@ func init() {
 	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, guest_ip, and tags")
 	portListCmd.Flags().String("tag", "", "filter by a single tag (case-insensitive exact match)")
+	portListCmd.Flags().Int("limit", 0, "maximum number of port forwards to show (0 = no limit)")
+	portListCmd.Flags().Int("offset", 0, "number of port forwards to skip before printing results")
 
 	portRemoveCmd.Flags().String("vm", "", "delete every port forward on this VM (mutually exclusive with the positional id)")
 	portRemoveCmd.Flags().String("protocol", "", "when --vm is set, only delete forwards with this protocol (tcp|udp)")
