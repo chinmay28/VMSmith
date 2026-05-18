@@ -46,6 +46,7 @@ which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
 		searchFilter, _ := cmd.Flags().GetString("search")
@@ -77,12 +78,13 @@ which matches the long-standing CLI behaviour.`,
 		}
 
 		filtered := filterEvents(all, eventFilter{
-			vmID:     strings.TrimSpace(vmFilter),
-			typeStr:  strings.TrimSpace(typeFilter),
-			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
-			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
-			since:    sinceTime,
+			vmID:       strings.TrimSpace(vmFilter),
+			typeStr:    strings.TrimSpace(typeFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
+			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
+			since:      sinceTime,
 		})
 
 		if sortField == "" {
@@ -185,6 +187,10 @@ type eventFilter struct {
 	typeStr  string
 	source   string
 	severity string
+	// typePrefix is a lower-cased prefix matched case-insensitively against
+	// the event's Type field. Lets operators slice "snapshot.*" or
+	// "webhook.*" event families without enumerating each subtype.
+	typePrefix string
 	// search is a lower-cased substring needle applied via types.EventMatchesSearch.
 	search string
 	since  time.Time
@@ -200,6 +206,9 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 			continue
 		}
 		if f.typeStr != "" && e.Type != f.typeStr {
+			continue
+		}
+		if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
 			continue
 		}
 		if f.source != "" && !strings.EqualFold(e.Source, f.source) {
@@ -344,6 +353,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
 		searchFilter, _ := cmd.Flags().GetString("search")
@@ -358,11 +368,12 @@ Examples:
 		}
 
 		filter := eventFilter{
-			vmID:     strings.TrimSpace(vmFilter),
-			typeStr:  strings.TrimSpace(typeFilter),
-			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
-			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
+			vmID:       strings.TrimSpace(vmFilter),
+			typeStr:    strings.TrimSpace(typeFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
+			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
 		showActor, _ := cmd.Flags().GetBool("actor")
@@ -548,6 +559,9 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	if f.typeStr != "" && e.Type != f.typeStr {
 		return false
 	}
+	if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
+		return false
+	}
 	if f.source != "" && !strings.EqualFold(e.Source, f.source) {
 		return false
 	}
@@ -583,6 +597,7 @@ func lastIDToSeq(id string) (string, error) {
 func init() {
 	eventsListCmd.Flags().String("vm", "", "filter events by VM ID")
 	eventsListCmd.Flags().String("type", "", "filter events by type (e.g. vm_started)")
+	eventsListCmd.Flags().String("type-prefix", "", "filter events by type prefix (e.g. 'snapshot.' matches every snapshot.* subtype)")
 	eventsListCmd.Flags().String("source", "", "filter events by source (libvirt|app|system)")
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
 	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
@@ -595,6 +610,7 @@ func init() {
 
 	eventsFollowCmd.Flags().String("vm", "", "only print events for this VM ID")
 	eventsFollowCmd.Flags().String("type", "", "only print events of this type (exact match)")
+	eventsFollowCmd.Flags().String("type-prefix", "", "only print events whose type starts with this prefix (e.g. 'snapshot.')")
 	eventsFollowCmd.Flags().String("source", "", "only print events from this source (libvirt|app|system)")
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
 	eventsFollowCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")

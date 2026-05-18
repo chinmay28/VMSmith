@@ -15,11 +15,13 @@ import (
 // ListEvents handles GET /api/v1/events
 //
 // Query params:
-//   - vm_id     — filter by VM ID (exact match)
-//   - type      — filter by event type (exact match)
-//   - source    — "libvirt" | "app" | "system"
-//   - severity  — "info" | "warn" | "error"
-//   - search    — case-insensitive substring match across message, type,
+//   - vm_id        — filter by VM ID (exact match)
+//   - type         — filter by event type (exact match)
+//   - type_prefix  — case-insensitive prefix match on event type (e.g.,
+//     `snapshot.` matches every `snapshot.*` subtype)
+//   - source       — "libvirt" | "app" | "system"
+//   - severity     — "info" | "warn" | "error"
+//   - search       — case-insensitive substring match across message, type,
 //     source, severity, actor, vm_id, resource_id, and attribute values.
 //     The numeric event ID is intentionally excluded.
 //   - since     — RFC3339 timestamp; only events with occurred_at after this
@@ -38,6 +40,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 	vmID := strings.TrimSpace(q.Get("vm_id"))
 	evtType := strings.TrimSpace(q.Get("type"))
+	typePrefix := strings.ToLower(strings.TrimSpace(q.Get("type_prefix")))
 	source := strings.TrimSpace(q.Get("source"))
 	severity := strings.TrimSpace(q.Get("severity"))
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
@@ -74,12 +77,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	pagination := parsePagination(r)
 
 	filter := store.EventFilter{
-		VMID:     vmID,
-		Type:     evtType,
-		Source:   source,
-		Severity: severity,
-		Search:   search,
-		UntilSeq: untilSeq,
+		VMID:       vmID,
+		Type:       evtType,
+		TypePrefix: typePrefix,
+		Source:     source,
+		Severity:   severity,
+		Search:     search,
+		UntilSeq:   untilSeq,
 	}
 	if !sinceTime.IsZero() {
 		filter.Since = sinceTime

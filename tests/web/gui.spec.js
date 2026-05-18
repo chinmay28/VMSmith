@@ -2372,6 +2372,49 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
   });
 
+  // 4.2.25 — type-prefix filter narrows event class without listing each subtype.
+  test("type-prefix input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // All four seeded events visible before typing.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+
+    // Only evt-0 has type "vm_template_synced" — the other three are
+    // vm_started/vm_created/vm_stopped and should not pass the prefix filter.
+    await page.getByTestId("activity-filter-type-prefix").fill("vm_template");
+
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+
+    // Debounced commit lands in the URL so a filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("type_prefix")).toBe("vm_template");
+
+    // In-input X clears the filter and restores the full list.
+    await page.getByTestId("btn-activity-clear-type-prefix").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("type_prefix")).toBe(null);
+  });
+
+  test("type-prefix filter is case-insensitive", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Uppercase prefix still matches the lowercase-typed events because
+    // the daemon's matcher lowercases both sides.
+    await page.getByTestId("activity-filter-type-prefix").fill("VM_STOPPED");
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-0")).toHaveCount(0);
+  });
+
+  test("type-prefix filter matches no events when no type starts with the value", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-type-prefix").fill("schedule.");
+    // Empty-state copy renders once the debounced fetch returns zero rows.
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
   // 4.2.22 — event details disclosure (actor + resource_id + attributes).
   test("expand reveals actor + resource_id + attributes for events that have them", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);

@@ -282,6 +282,101 @@ func TestCLI_EventsList_FilterBySearch_CombinesWithSource(t *testing.T) {
 	}
 }
 
+// seedTypePrefixCLIEvents puts a mix of snapshot.*, vm.*, and webhook.* events
+// into the local CLI store so --type-prefix tests can assert on each family
+// independently.
+func seedTypePrefixCLIEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	now := time.Now()
+	seeds := []*types.Event{
+		{ID: "evt-1", Type: "snapshot.created", VMID: "vm-1", CreatedAt: now.Add(-50 * time.Minute)},
+		{ID: "evt-2", Type: "snapshot.deleted", VMID: "vm-1", CreatedAt: now.Add(-40 * time.Minute)},
+		{ID: "evt-3", Type: "vm.started", VMID: "vm-1", Source: "libvirt", CreatedAt: now.Add(-30 * time.Minute)},
+		{ID: "evt-4", Type: "vm.stopped", VMID: "vm-1", Source: "libvirt", CreatedAt: now.Add(-20 * time.Minute)},
+		{ID: "evt-5", Type: "webhook.delivery_failed", Source: "system", CreatedAt: now.Add(-10 * time.Minute)},
+	}
+	for _, evt := range seeds {
+		if err := s.PutEvent(evt); err != nil {
+			t.Fatalf("PutEvent %s: %v", evt.Type, err)
+		}
+	}
+}
+
+func TestCLI_EventsList_FilterByTypePrefix_MatchesFamily(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedTypePrefixCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--type-prefix", "snapshot.")
+	if err != nil {
+		t.Fatalf("events list --type-prefix: %v", err)
+	}
+	if !strings.Contains(out, "snapshot.created") || !strings.Contains(out, "snapshot.deleted") {
+		t.Errorf("missing snapshot.* events:\n%s", out)
+	}
+	if strings.Contains(out, "vm.started") || strings.Contains(out, "webhook.") {
+		t.Errorf("non-snapshot.* events leaked through prefix filter:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByTypePrefix_CaseInsensitive(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedTypePrefixCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--type-prefix", "WEBHOOK.")
+	if err != nil {
+		t.Fatalf("events list --type-prefix WEBHOOK.: %v", err)
+	}
+	if !strings.Contains(out, "webhook.delivery_failed") {
+		t.Errorf("expected case-insensitive match on uppercase prefix:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByTypePrefix_EmptyOmitsFilter(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedTypePrefixCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--type-prefix", "")
+	if err != nil {
+		t.Fatalf("events list --type-prefix '': %v", err)
+	}
+	for _, want := range []string{"snapshot.created", "vm.started", "webhook.delivery_failed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q present when --type-prefix is empty:\n%s", want, out)
+		}
+	}
+}
+
+func TestCLI_EventsList_FilterByTypePrefix_NoMatchPrintsEmpty(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedTypePrefixCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--type-prefix", "schedule.")
+	if err != nil {
+		t.Fatalf("events list --type-prefix schedule.: %v", err)
+	}
+	if !strings.Contains(out, "No events.") {
+		t.Errorf("expected 'No events.' when prefix has no hits:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByTypePrefix_ComposesWithSource(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedTypePrefixCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--type-prefix", "vm.", "--source", "app")
+	if err != nil {
+		t.Fatalf("events list --type-prefix --source: %v", err)
+	}
+	if !strings.Contains(out, "No events.") {
+		t.Errorf("expected 'No events.' when vm.* + source=app yields nothing:\n%s", out)
+	}
+}
+
 // --- events follow tests ---
 
 // sseEventTestServer serves a deterministic SSE stream for testing.
@@ -410,6 +505,57 @@ func TestFollow_FiltersByTypeSourceSeverity(t *testing.T) {
 	}
 	if strings.Contains(out, "vm.started") || strings.Contains(out, "vm.created") {
 		t.Errorf("non-matching events should be filtered:\n%s", out)
+	}
+}
+
+func TestFollow_FiltersByTypePrefix(t *testing.T) {
+	srv := newSSETestServer(t, []*types.Event{
+		{ID: "1", Type: "snapshot.created", VMID: "vm-A", OccurredAt: time.Now()},
+		{ID: "2", Type: "vm.started", VMID: "vm-A", OccurredAt: time.Now()},
+		{ID: "3", Type: "snapshot.restored", VMID: "vm-A", OccurredAt: time.Now()},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := followEventsStream(ctx, srv.URL(), "",
+		eventFilter{typePrefix: "snapshot."}, eventRowOptions{}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "snapshot.created") || !strings.Contains(out, "snapshot.restored") {
+		t.Errorf("snapshot.* rows should pass type-prefix filter:\n%s", out)
+	}
+	if strings.Contains(out, "vm.started") {
+		t.Errorf("non-snapshot.* events should be filtered:\n%s", out)
+	}
+}
+
+func TestFollow_FiltersByTypePrefix_CaseInsensitive(t *testing.T) {
+	srv := newSSETestServer(t, []*types.Event{
+		{ID: "1", Type: "Snapshot.Created", VMID: "vm-A", OccurredAt: time.Now()},
+		{ID: "2", Type: "vm.started", VMID: "vm-A", OccurredAt: time.Now()},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	// Caller-lowercases contract: the filter value is already lowercased
+	// upstream of matchesEventFilter. Mixed-case event types still match.
+	if err := followEventsStream(ctx, srv.URL(), "",
+		eventFilter{typePrefix: "snapshot."}, eventRowOptions{}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Snapshot.Created") {
+		t.Errorf("Snapshot.Created should match snapshot. prefix case-insensitively:\n%s", out)
+	}
+	if strings.Contains(out, "vm.started") {
+		t.Errorf("vm.started should not match snapshot. prefix:\n%s", out)
 	}
 }
 
@@ -678,6 +824,10 @@ func TestMatchesEventFilter(t *testing.T) {
 		{"vm mismatch", eventFilter{vmID: "vm-B"}, false},
 		{"type match", eventFilter{typeStr: "vm.started"}, true},
 		{"type mismatch", eventFilter{typeStr: "vm.stopped"}, false},
+		{"type-prefix family match", eventFilter{typePrefix: "vm."}, true},
+		{"type-prefix full type match", eventFilter{typePrefix: "vm.started"}, true},
+		{"type-prefix mismatch", eventFilter{typePrefix: "snapshot."}, false},
+		{"type-prefix case-insensitive", eventFilter{typePrefix: "vm."}, true},
 		{"source case-insensitive", eventFilter{source: "LIBVIRT"}, true},
 		{"severity case-insensitive", eventFilter{severity: "INFO"}, true},
 		{"severity mismatch", eventFilter{severity: "error"}, false},

@@ -1049,6 +1049,12 @@ export interface paths {
          *     `tag` is an optional case-insensitive exact-match filter on the
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
+         *
+         *     `page` and `per_page` paginate the result. Pagination is applied
+         *     after filter + sort so the `X-Total-Count` response header reflects
+         *     the post-filter / pre-pagination population. `limit` is accepted as
+         *     a synonym for `per_page`. Omitting both returns the full filtered
+         *     set, preserving the legacy contract.
          */
         get: {
             parameters: {
@@ -1068,6 +1074,8 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
                 };
                 header?: never;
                 path: {
@@ -1080,6 +1088,12 @@ export interface paths {
                 /** @description Port forward list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of port forwards matching the filter +
+                         *     search predicates (pre-pagination). Use this to drive
+                         *     page indicators on the client.
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -2368,6 +2382,14 @@ export interface paths {
                     vm_id?: string;
                     /** @description Filter by event type (e.g., `vm.started`). */
                     type?: string;
+                    /**
+                     * @description Case-insensitive prefix match on event type. Lets operators slice
+                     *     an entire event family (e.g. `snapshot.` matches every `snapshot.*`
+                     *     subtype, `vm.` matches every `vm.*` subtype) without enumerating
+                     *     each fully-qualified type. Composes additively with `type`,
+                     *     `source`, `severity`, `search`, and the time/cursor filters.
+                     */
+                    type_prefix?: string;
                     /** @description Filter by event source. */
                     source?: "libvirt" | "app" | "system";
                     /** @description Filter by severity. */

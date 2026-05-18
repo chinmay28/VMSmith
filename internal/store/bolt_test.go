@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -520,6 +521,133 @@ func TestEventCRUD(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("ListEvents returned %d items, want 2", len(events))
+	}
+}
+
+// seedTypePrefixEvents writes a small set of events covering a mix of dotted
+// type prefixes ("snapshot.*", "vm.*", "webhook.*") so the ?type_prefix= tests
+// can assert on the prefix match independently of the other axes.
+func seedTypePrefixEvents(t *testing.T, s *Store) {
+	t.Helper()
+	seeds := []*types.Event{
+		{Type: "snapshot.created", Source: "app"},
+		{Type: "snapshot.deleted", Source: "app"},
+		{Type: "snapshot.restored", Source: "app"},
+		{Type: "vm.started", Source: "libvirt"},
+		{Type: "vm.stopped", Source: "libvirt"},
+		{Type: "webhook.delivery_failed", Source: "system"},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func collectTypes(events []*types.Event) []string {
+	out := make([]string, 0, len(events))
+	for _, e := range events {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
+func TestListEventsFiltered_TypePrefix_ExactClassMatch(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: "snapshot."})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total=%d, want 3 (got types %v)", total, collectTypes(got))
+	}
+	for _, e := range got {
+		if !strings.HasPrefix(e.Type, "snapshot.") {
+			t.Errorf("unexpected type leaked through prefix filter: %q", e.Type)
+		}
+	}
+}
+
+func TestListEventsFiltered_TypePrefix_CaseInsensitive(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// Filter is documented as caller-lowercases. Seeded types are mixed case
+	// inside one fixture event to lock the contract in.
+	if _, err := s.AppendEvent(&types.Event{Type: "WebHook.queue_overflow", Source: "system"}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	got, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: "webhook."})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total=%d, want 2 (got types %v)", total, collectTypes(got))
+	}
+}
+
+func TestListEventsFiltered_TypePrefix_EmptyDisablesFilter(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: ""})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 6 {
+		t.Errorf("total=%d, want 6 (got types %v)", total, collectTypes(got))
+	}
+}
+
+func TestListEventsFiltered_TypePrefix_NoMatchReturnsEmpty(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: "schedule."})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 0 || len(got) != 0 {
+		t.Errorf("expected empty result, got total=%d got=%v", total, collectTypes(got))
+	}
+}
+
+func TestListEventsFiltered_TypePrefix_ComposesWithSource(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// vm.* is libvirt-only in the fixture, so adding source=app should narrow
+	// the post-filter set to zero.
+	_, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: "vm.", Source: "app"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 vm.* events from source=app, got total=%d", total)
+	}
+}
+
+func TestListEventsFiltered_TypePrefix_FullTypeStillMatchesItself(t *testing.T) {
+	// Documentation contract: TypePrefix is a prefix match, so handing it a
+	// fully-qualified type name is equivalent to ?type= for that single event.
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{TypePrefix: "vm.started"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 1 || got[0].Type != "vm.started" {
+		t.Errorf("expected 1 vm.started match, got total=%d types=%v", total, collectTypes(got))
 	}
 }
 
