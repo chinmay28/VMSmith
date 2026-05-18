@@ -138,6 +138,8 @@ var vmListCmd = &cobra.Command{
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
+		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -145,6 +147,14 @@ var vmListCmd = &cobra.Command{
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
+		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
+		if err != nil {
+			return err
+		}
+		lockedVal, lockedSet, err := parseCLITristateBool(lockedRaw, "--locked")
+		if err != nil {
+			return err
+		}
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField == "" {
 			sortField = types.VMSortID
@@ -163,7 +173,7 @@ var vmListCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", orderField)
 		}
-		limit, offset, err := normalizeLimitOffset(limit, offset)
+		limit, offset, err = normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
@@ -181,7 +191,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || autoStartSet || lockedSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -198,6 +208,12 @@ var vmListCmd = &cobra.Command{
 					if !matchedTag {
 						continue
 					}
+				}
+				if autoStartSet && v.Spec.AutoStart != autoStartVal {
+					continue
+				}
+				if lockedSet && v.Spec.Locked != lockedVal {
+					continue
 				}
 				if searchFilter != "" && !types.VMMatchesSearch(v, searchFilter) {
 					continue
@@ -979,6 +995,8 @@ Examples:
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
+	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
+	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")

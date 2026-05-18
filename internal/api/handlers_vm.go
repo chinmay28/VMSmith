@@ -256,6 +256,18 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := r.URL.Query()
+	autoStartFilter, autoStartSet, apiErr := parseTristateBoolParam(q.Get("auto_start"), "auto_start")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	lockedFilter, lockedSet, apiErr := parseTristateBoolParam(q.Get("locked"), "locked")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -263,10 +275,10 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tagFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("tag")))
-	statusFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("status")))
-	searchFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("search")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" {
+	tagFilter := strings.TrimSpace(strings.ToLower(q.Get("tag")))
+	statusFilter := strings.TrimSpace(strings.ToLower(q.Get("status")))
+	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || autoStartSet || lockedSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -283,6 +295,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				if !matchedTag {
 					continue
 				}
+			}
+			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {
+				continue
+			}
+			if lockedSet && vm.Spec.Locked != lockedFilter {
+				continue
 			}
 			if searchFilter != "" && !types.VMMatchesSearch(vm, searchFilter) {
 				continue

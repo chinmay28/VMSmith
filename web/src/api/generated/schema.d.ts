@@ -27,6 +27,24 @@ export interface paths {
                      */
                     search?: components["parameters"]["SearchFilter"];
                     /**
+                     * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
+                     *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+                     *     absent or whitespace-only disables the filter so every VM is
+                     *     returned. Anything else returns 400 `invalid_auto_start`.
+                     *     Composes additively with every other list filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    auto_start?: components["parameters"]["AutoStartFilter"];
+                    /**
+                     * @description Tristate boolean filter on the VM's `locked` (delete-protection)
+                     *     flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+                     *     aliases); absent or whitespace-only disables the filter so every
+                     *     VM is returned. Anything else returns 400 `invalid_locked`.
+                     *     Composes additively with every other list filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    locked?: components["parameters"]["LockedFilter"];
+                    /**
                      * @description Field to sort the VM list by. Defaults to `id`. Unknown values
                      *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
                      *     pagination is deterministic across backends.
@@ -1049,6 +1067,12 @@ export interface paths {
          *     `tag` is an optional case-insensitive exact-match filter on the
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
+         *
+         *     `page` and `per_page` paginate the result. Pagination is applied
+         *     after filter + sort so the `X-Total-Count` response header reflects
+         *     the post-filter / pre-pagination population. `limit` is accepted as
+         *     a synonym for `per_page`. Omitting both returns the full filtered
+         *     set, preserving the legacy contract.
          */
         get: {
             parameters: {
@@ -1068,6 +1092,8 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
                 };
                 header?: never;
                 path: {
@@ -1080,6 +1106,12 @@ export interface paths {
                 /** @description Port forward list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of port forwards matching the filter +
+                         *     search predicates (pre-pagination). Use this to drive
+                         *     page indicators on the client.
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -3033,6 +3065,24 @@ export interface components {
          *     useful operator query.
          */
         SearchFilter: string;
+        /**
+         * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
+         *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+         *     absent or whitespace-only disables the filter so every VM is
+         *     returned. Anything else returns 400 `invalid_auto_start`.
+         *     Composes additively with every other list filter so
+         *     `X-Total-Count` reflects the post-filter population.
+         */
+        AutoStartFilter: "true" | "false";
+        /**
+         * @description Tristate boolean filter on the VM's `locked` (delete-protection)
+         *     flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+         *     aliases); absent or whitespace-only disables the filter so every
+         *     VM is returned. Anything else returns 400 `invalid_locked`.
+         *     Composes additively with every other list filter so
+         *     `X-Total-Count` reflects the post-filter population.
+         */
+        LockedFilter: "true" | "false";
         /**
          * @description Field to sort the VM list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
