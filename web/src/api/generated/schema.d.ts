@@ -27,6 +27,18 @@ export interface paths {
                      */
                     search?: components["parameters"]["SearchFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's base image
+                     *     (`spec.image`). Closes the operator query "show me every VM built
+                     *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+                     *     filters cannot answer precisely — `?search=rocky` would also
+                     *     match VMs whose description or tag contains the substring, while
+                     *     `?tag=` requires the operator to have tagged every VM by image.
+                     *     Whitespace is trimmed before comparison; empty value disables
+                     *     the filter. Composes additively with `tag`, `status`, `search`,
+                     *     and the sort + pagination params.
+                     */
+                    image?: components["parameters"]["ImageFilter"];
+                    /**
                      * @description Field to sort the VM list by. Defaults to `id`. Unknown values
                      *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
                      *     pagination is deterministic across backends.
@@ -1049,6 +1061,12 @@ export interface paths {
          *     `tag` is an optional case-insensitive exact-match filter on the
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
+         *
+         *     `page` and `per_page` paginate the result. Pagination is applied
+         *     after filter + sort so the `X-Total-Count` response header reflects
+         *     the post-filter / pre-pagination population. `limit` is accepted as
+         *     a synonym for `per_page`. Omitting both returns the full filtered
+         *     set, preserving the legacy contract.
          */
         get: {
             parameters: {
@@ -1068,6 +1086,8 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
                 };
                 header?: never;
                 path: {
@@ -1080,6 +1100,12 @@ export interface paths {
                 /** @description Port forward list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of port forwards matching the filter +
+                         *     search predicates (pre-pagination). Use this to drive
+                         *     page indicators on the client.
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -3033,6 +3059,18 @@ export interface components {
          *     useful operator query.
          */
         SearchFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the VM's base image
+         *     (`spec.image`). Closes the operator query "show me every VM built
+         *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+         *     filters cannot answer precisely — `?search=rocky` would also
+         *     match VMs whose description or tag contains the substring, while
+         *     `?tag=` requires the operator to have tagged every VM by image.
+         *     Whitespace is trimmed before comparison; empty value disables
+         *     the filter. Composes additively with `tag`, `status`, `search`,
+         *     and the sort + pagination params.
+         */
+        ImageFilter: string;
         /**
          * @description Field to sort the VM list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

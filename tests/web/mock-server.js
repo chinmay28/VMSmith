@@ -172,6 +172,7 @@ const server = http.createServer(async (req, res) => {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const imageFilter = (url.searchParams.get("image") || "").trim().toLowerCase();
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -179,6 +180,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
     let list = [...vms.values()];
+    if (imageFilter) {
+      list = list.filter(vm => String(vm.spec?.image || "").toLowerCase() === imageFilter);
+    }
     if (search) {
       list = list.filter(vm => {
         if (vm.name && String(vm.name).toLowerCase().includes(search)) return true;
