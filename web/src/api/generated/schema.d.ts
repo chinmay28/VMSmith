@@ -2395,6 +2395,16 @@ export interface paths {
                      */
                     actor?: string;
                     /**
+                     * @description Filter by `resource_id` (exact match, case-sensitive). Mirrors the
+                     *     `vm_id` filter contract — resource IDs are opaque server-issued
+                     *     strings operators reference verbatim (e.g. `snap-…`, `img-…`,
+                     *     `wh-…`). Whitespace is trimmed before comparison; empty disables
+                     *     the filter. Composes additively with `vm_id`, `type`, `source`,
+                     *     `severity`, `actor`, `search`, `since`, and `until` so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    resource_id?: string;
+                    /**
                      * @description Case-insensitive substring match across `message`, `type`, `source`,
                      *     `severity`, `actor`, `vm_id`, `resource_id`, and every value in
                      *     `attributes`. Combines additively with the other filters.

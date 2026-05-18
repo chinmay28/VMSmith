@@ -2372,6 +2372,50 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
   });
 
+  // 4.2.24 — per-resource_id exact-match filter.
+  test("resource_id input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // All seeded events visible before typing.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    // evt-2 carries resource_id="tpl-rocky9-base" — the input should narrow
+    // to only that row after the 250 ms debounce.
+    await page.getByTestId("activity-filter-resource-id").fill("tpl-rocky9-base");
+
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+
+    // The committed filter lands in the URL so the view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("resource_id")).toBe("tpl-rocky9-base");
+
+    // Clearing via the in-input X drops the param and restores the list.
+    await page.getByTestId("btn-activity-clear-resource-id").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("resource_id")).toBe(null);
+  });
+
+  test("resource_id filter matches no events when target is unknown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-resource-id").fill("snap-does-not-exist");
+    // Empty-state copy after the debounced fetch returns zero rows.
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
+  test("resource_id filter narrows further when combined with the source dropdown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // evt-2 has resource_id=tpl-rocky9-base AND source=app. Narrowing
+    // source=libvirt should produce zero rows — the filters compose.
+    await page.getByTestId("activity-filter-resource-id").fill("tpl-rocky9-base");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await page.getByTestId("activity-filter-source").selectOption("libvirt");
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+    await expect(page.getByText("No events yet")).toBeVisible();
+  });
+
   // 4.2.22 — event details disclosure (actor + resource_id + attributes).
   test("expand reveals actor + resource_id + attributes for events that have them", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);
