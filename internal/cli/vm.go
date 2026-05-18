@@ -138,6 +138,7 @@ var vmListCmd = &cobra.Command{
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		imageFilter, _ := cmd.Flags().GetString("image")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -145,6 +146,7 @@ var vmListCmd = &cobra.Command{
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
+		imageFilter = strings.TrimSpace(strings.ToLower(imageFilter))
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField == "" {
 			sortField = types.VMSortID
@@ -181,10 +183,13 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
+					continue
+				}
+				if imageFilter != "" && !strings.EqualFold(v.Spec.Image, imageFilter) {
 					continue
 				}
 				if tagFilter != "" {
@@ -979,6 +984,7 @@ Examples:
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
+	vmListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the VM's base image")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
