@@ -834,6 +834,131 @@ func TestSnapshotTags_ListByVMOnEmptyStoreReturnsEmpty(t *testing.T) {
 	}
 }
 
+// ============================================================
+// EventFilter.Actor — case-sensitive exact-match filter (4.2.23)
+// ============================================================
+
+func seedEventsForActorFilter(t *testing.T, s *Store) {
+	t.Helper()
+	now := time.Now().Truncate(time.Millisecond)
+	for i, evt := range []*types.Event{
+		{Type: "vm.created", Source: "app", Actor: "system", Message: "boot sweep", OccurredAt: now},
+		{Type: "vm.started", Source: "app", Actor: "ops-alice", Message: "manual start", OccurredAt: now.Add(time.Second)},
+		{Type: "vm.stopped", Source: "app", Actor: "ops-bob", Message: "manual stop", OccurredAt: now.Add(2 * time.Second)},
+		{Type: "vm.deleted", Source: "app", Actor: "ops-alice", Message: "cleanup", OccurredAt: now.Add(3 * time.Second)},
+		{Type: "vm.heartbeat", Source: "libvirt", Actor: "", Message: "polled", OccurredAt: now.Add(4 * time.Second)},
+	} {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("seed evt %d: %v", i, err)
+		}
+	}
+}
+
+func TestListEventsFiltered_Actor_ExactMatch(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{Actor: "ops-alice"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 2 || len(got) != 2 {
+		t.Fatalf("ops-alice total=%d len=%d, want 2/2", total, len(got))
+	}
+	for _, e := range got {
+		if e.Actor != "ops-alice" {
+			t.Errorf("event actor=%q, want ops-alice", e.Actor)
+		}
+	}
+}
+
+func TestListEventsFiltered_Actor_CaseSensitive(t *testing.T) {
+	// Actor is exact-match (mirrors VMID's contract), so "Ops-Alice" must
+	// NOT match the stored "ops-alice" — case-insensitive matching is the
+	// job of ?search=, not the exact-match filter.
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{Actor: "Ops-Alice"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 0 || len(got) != 0 {
+		t.Errorf("expected zero matches for differently-cased actor, got total=%d len=%d", total, len(got))
+	}
+}
+
+func TestListEventsFiltered_Actor_EmptyDisablesFilter(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{Actor: ""})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 5 || len(got) != 5 {
+		t.Errorf("Actor=\"\" should be no-op; got total=%d len=%d, want 5/5", total, len(got))
+	}
+}
+
+func TestListEventsFiltered_Actor_NoMatchReturnsEmpty(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{Actor: "nobody-by-that-name"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 0 || len(got) != 0 {
+		t.Errorf("unknown actor should match nothing, got total=%d len=%d", total, len(got))
+	}
+}
+
+func TestListEventsFiltered_Actor_ComposesWithSourceAndSeverity(t *testing.T) {
+	// Actor filter is additive with the existing exact-match filters —
+	// the combined predicate narrows to events matching every clause.
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	got, total, err := s.ListEventsFiltered(EventFilter{Actor: "ops-alice", Source: "app"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 2 || len(got) != 2 {
+		t.Fatalf("ops-alice+app total=%d, want 2", total)
+	}
+
+	// Wrong source short-circuits ops-alice to zero matches.
+	got, total, err = s.ListEventsFiltered(EventFilter{Actor: "ops-alice", Source: "libvirt"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 0 || len(got) != 0 {
+		t.Errorf("ops-alice+libvirt should be empty, got total=%d", total)
+	}
+}
+
+func TestListEventsFiltered_Actor_MatchesEmptyActor(t *testing.T) {
+	// Sanity check: events with empty Actor are not returned by an
+	// Actor=<non-empty> filter — they only show up under Actor="".
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForActorFilter(t, s)
+
+	_, total, err := s.ListEventsFiltered(EventFilter{Actor: "system"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("Actor=system should match exactly the one boot-sweep event, got total=%d", total)
+	}
+}
+
 // Two VMs with similar IDs (`vm-1` and `vm-10`) must not bleed into each
 // other when their tag rows share a bucket and key prefix.  The cursor walk
 // in ListSnapshotTagsByVM seeks on `vmID + "/"` so the trailing slash

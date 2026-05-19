@@ -19,6 +19,10 @@ import (
 //   - type      — filter by event type (exact match)
 //   - source    — "libvirt" | "app" | "system"
 //   - severity  — "info" | "warn" | "error"
+//   - actor     — case-sensitive exact-match against evt.Actor (e.g.
+//     "system", "app", or an API-key alias). Lets operators slice the
+//     timeline to a single human/bot without the noisy substring matches
+//     ?search= gives. Mirrors the per-VM log filter (5.4.18).
 //   - search    — case-insensitive substring match across message, type,
 //     source, severity, actor, vm_id, resource_id, and attribute values.
 //     The numeric event ID is intentionally excluded.
@@ -40,6 +44,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	evtType := strings.TrimSpace(q.Get("type"))
 	source := strings.TrimSpace(q.Get("source"))
 	severity := strings.TrimSpace(q.Get("severity"))
+	actor := strings.TrimSpace(q.Get("actor"))
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	untilStr := strings.TrimSpace(q.Get("until"))
 	sinceStr := strings.TrimSpace(q.Get("since"))
@@ -78,6 +83,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 		Type:     evtType,
 		Source:   source,
 		Severity: severity,
+		Actor:    actor,
 		Search:   search,
 		UntilSeq: untilSeq,
 	}

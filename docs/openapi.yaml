@@ -1593,6 +1593,16 @@ paths:
             type: string
             enum: [info, warn, error]
           description: Filter by severity.
+        - name: actor
+          in: query
+          schema:
+            type: string
+          description: |
+            Case-sensitive exact-match filter on the event's `actor` field
+            (e.g. `system`, `app`, or an API-key alias). Mirrors `?vm_id=`'s
+            contract: empty disables the filter, whitespace is trimmed.
+            Lets operators slice the timeline to a single human / bot
+            without the noisy substring matches `?search=` gives.
         - name: search
           in: query
           schema:
