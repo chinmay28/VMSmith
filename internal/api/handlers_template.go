@@ -92,6 +92,11 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     `sort`, `order`, and pagination — same shape as 5.4.9 / 5.4.10 /
 //     5.4.11. ID, image, default_user, and network attachments are
 //     intentionally excluded from the haystack.
+//   - image=<value>          case-insensitive exact-match against the
+//     template's `image` field. Closes the operator query "show me every
+//     template built from rocky9.qcow2" that `?search=` matches fuzzily
+//     across name/description/tags and that `?tag=` cannot answer without
+//     pre-tagging every template by its base image. Mirrors 5.4.22.
 //   - sort=<id|name|created_at>  default id; case-insensitive
 //   - order=<asc|desc>       default asc
 //   - page / per_page (see parsePagination)
@@ -114,6 +119,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 
 	if tagFilter := strings.TrimSpace(r.URL.Query().Get("tag")); tagFilter != "" {
 		templates = filterTemplatesByTag(templates, tagFilter)
+	}
+
+	imageFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("image")))
+	if imageFilter != "" {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if strings.EqualFold(tpl.Image, imageFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
 	}
 
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
