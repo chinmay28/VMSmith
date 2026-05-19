@@ -2422,6 +2422,94 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
   });
 
+  // 4.2.24 — per-resource_id exact-match filter.
+  test("resource_id input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // All seeded events visible before typing.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    // evt-2 carries resource_id="tpl-rocky9-base" — the input should narrow
+    // to only that row after the 250 ms debounce.
+    await page.getByTestId("activity-filter-resource-id").fill("tpl-rocky9-base");
+
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+
+    // The committed filter lands in the URL so the view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("resource_id")).toBe("tpl-rocky9-base");
+
+    // Clearing via the in-input X drops the param and restores the list.
+    await page.getByTestId("btn-activity-clear-resource-id").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("resource_id")).toBe(null);
+  });
+
+  test("resource_id filter matches no events when target is unknown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-resource-id").fill("snap-does-not-exist");
+    // Empty-state copy after the debounced fetch returns zero rows.
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
+  test("resource_id filter narrows further when combined with the source dropdown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // evt-2 has resource_id=tpl-rocky9-base AND source=app. Narrowing
+    // source=libvirt should produce zero rows — the filters compose.
+    await page.getByTestId("activity-filter-resource-id").fill("tpl-rocky9-base");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await page.getByTestId("activity-filter-source").selectOption("libvirt");
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+    await expect(page.getByText("No events yet")).toBeVisible();
+  });
+
+  // 4.2.25 — type-prefix filter narrows event class without listing each subtype.
+  test("type-prefix input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // All four seeded events visible before typing.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+
+    // Only evt-0 has type "vm_template_synced" — the other three are
+    // vm_started/vm_created/vm_stopped and should not pass the prefix filter.
+    await page.getByTestId("activity-filter-type-prefix").fill("vm_template");
+
+    await expect(page.getByTestId("activity-row-evt-0")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+
+    // Debounced commit lands in the URL so a filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("type_prefix")).toBe("vm_template");
+
+    // In-input X clears the filter and restores the full list.
+    await page.getByTestId("btn-activity-clear-type-prefix").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("type_prefix")).toBe(null);
+  });
+
+  test("type-prefix filter is case-insensitive", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Uppercase prefix still matches the lowercase-typed events because
+    // the daemon's matcher lowercases both sides.
+    await page.getByTestId("activity-filter-type-prefix").fill("VM_STOPPED");
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-0")).toHaveCount(0);
+  });
+
+  test("type-prefix filter matches no events when no type starts with the value", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-type-prefix").fill("schedule.");
+    // Empty-state copy renders once the debounced fetch returns zero rows.
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+  });
+
+
   // 4.2.22 — event details disclosure (actor + resource_id + attributes).
   test("expand reveals actor + resource_id + attributes for events that have them", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);
@@ -2465,6 +2553,49 @@ test.describe("Activity", () => {
     // Clicking the row body (not the toggle) should also expand it.
     await page.getByTestId("activity-row-evt-2").click();
     await expect(page.getByTestId("activity-details-evt-2")).toBeVisible();
+  });
+
+  // 4.2.23 — per-actor exact-match filter on the activity timeline.
+  test("actor input filters the activity timeline and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Seeded events: evt-3 actor=system, evt-2 actor=ops-alice, evt-1 actor=system, evt-0 no actor.
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+
+    // Type exact alias — debounce settles after 250 ms.
+    await page.getByTestId("activity-filter-actor").fill("ops-alice");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-1")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-0")).toHaveCount(0);
+
+    // URL captures the committed actor so the filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("actor")).toBe("ops-alice");
+  });
+
+  test("actor clear button restores the unfiltered view", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    await page.getByTestId("activity-filter-actor").fill("ops-alice");
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+
+    await page.getByTestId("btn-activity-clear-actor").click();
+    await expect(page.getByTestId("activity-row-evt-2")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("actor")).toBe(null);
+  });
+
+  test("actor filter narrows further when combined with the source dropdown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // actor=system narrows to evt-3 + evt-1; source=app then strips evt-3
+    // (libvirt) and evt-1 (libvirt) leaving zero events — empty state.
+    await page.getByTestId("activity-filter-actor").fill("system");
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    await page.getByTestId("activity-filter-source").selectOption("app");
+    await expect(page.getByText("No events yet")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
   });
 
   // 5.4.16 — sortable events list.

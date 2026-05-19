@@ -2400,10 +2400,36 @@ export interface paths {
                     vm_id?: string;
                     /** @description Filter by event type (e.g., `vm.started`). */
                     type?: string;
+                    /**
+                     * @description Case-insensitive prefix match on event type. Lets operators slice
+                     *     an entire event family (e.g. `snapshot.` matches every `snapshot.*`
+                     *     subtype, `vm.` matches every `vm.*` subtype) without enumerating
+                     *     each fully-qualified type. Composes additively with `type`,
+                     *     `source`, `severity`, `search`, and the time/cursor filters.
+                     */
+                    type_prefix?: string;
                     /** @description Filter by event source. */
                     source?: "libvirt" | "app" | "system";
                     /** @description Filter by severity. */
                     severity?: "info" | "warn" | "error";
+                    /**
+                     * @description Case-sensitive exact-match filter on the event's `actor` field
+                     *     (e.g. `system`, `app`, or an API-key alias). Mirrors `?vm_id=`'s
+                     *     contract: empty disables the filter, whitespace is trimmed.
+                     *     Lets operators slice the timeline to a single human / bot
+                     *     without the noisy substring matches `?search=` gives.
+                     */
+                    actor?: string;
+                    /**
+                     * @description Filter by `resource_id` (exact match, case-sensitive). Mirrors the
+                     *     `vm_id` filter contract — resource IDs are opaque server-issued
+                     *     strings operators reference verbatim (e.g. `snap-…`, `img-…`,
+                     *     `wh-…`). Whitespace is trimmed before comparison; empty disables
+                     *     the filter. Composes additively with `vm_id`, `type`, `source`,
+                     *     `severity`, `actor`, `search`, `since`, and `until` so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    resource_id?: string;
                     /**
                      * @description Case-insensitive substring match across `message`, `type`, `source`,
                      *     `severity`, `actor`, `vm_id`, `resource_id`, and every value in
