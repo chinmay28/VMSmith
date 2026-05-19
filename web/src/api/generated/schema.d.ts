@@ -1049,6 +1049,12 @@ export interface paths {
          *     `tag` is an optional case-insensitive exact-match filter on the
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
+         *
+         *     `page` and `per_page` paginate the result. Pagination is applied
+         *     after filter + sort so the `X-Total-Count` response header reflects
+         *     the post-filter / pre-pagination population. `limit` is accepted as
+         *     a synonym for `per_page`. Omitting both returns the full filtered
+         *     set, preserving the legacy contract.
          */
         get: {
             parameters: {
@@ -1068,6 +1074,8 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    page?: components["parameters"]["Page"];
+                    per_page?: components["parameters"]["PerPage"];
                 };
                 header?: never;
                 path: {
@@ -1080,6 +1088,12 @@ export interface paths {
                 /** @description Port forward list */
                 200: {
                     headers: {
+                        /**
+                         * @description Total number of port forwards matching the filter +
+                         *     search predicates (pre-pagination). Use this to drive
+                         *     page indicators on the client.
+                         */
+                        "X-Total-Count"?: number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -1652,6 +1666,17 @@ export interface paths {
                      *     5.4.9 / 5.4.10 / 5.4.11 `search` filter contract.
                      */
                     search?: string;
+                    /**
+                     * @description Case-insensitive exact-match filter on the template's `image`
+                     *     field. Whitespace is trimmed before comparison; empty value
+                     *     disables the filter. Closes the operator query "show me every
+                     *     template built from `rocky9.qcow2`" that `?search=` would
+                     *     match fuzzily across name / description / tags. Composes
+                     *     additively with `?tag=`, `?search=`, `?sort=`, `?order=`, and
+                     *     pagination so `X-Total-Count` reflects the post-filter
+                     *     population. Mirrors the VMs `?image=` filter (5.4.22).
+                     */
+                    image?: string;
                 };
                 header?: never;
                 path?: never;
