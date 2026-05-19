@@ -4481,6 +4481,67 @@ func TestCLI_WebhookList_EmptyTagOmitsParam(t *testing.T) {
 	}
 }
 
+// =====================================================
+// webhook list --event-type tests (5.4.26)
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsEventTypeFilter(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--event-type", "vm.created"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if state.lastPath != "/api/v1/webhooks" {
+		t.Fatalf("path = %q, want /api/v1/webhooks", state.lastPath)
+	}
+	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
+		t.Fatalf("query missing event_type=vm.created: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_TrimsAndLowercasesEventType(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--event-type", "  VM.CREATED  "); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
+		t.Fatalf("expected normalized event_type=vm.created in query, got %q", state.lastQuery)
+	}
+	if strings.Contains(state.lastQuery, "VM.CREATED") {
+		t.Fatalf("query should not retain uppercase: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_EmptyEventTypeOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--event-type", ""); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "event_type=") {
+		t.Fatalf("empty event-type must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_EventTypeComposesWithSearch(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--event-type", "vm.created", "--search", "audit"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
+		t.Fatalf("query missing event_type=vm.created: %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "search=audit") {
+		t.Fatalf("query missing search=audit: %q", state.lastQuery)
+	}
+}
+
 func TestCLI_WebhookList_ShowsTagsColumn(t *testing.T) {
 	// The webhook list table now includes a TAGS column. Make sure a webhook
 	// with tags renders them in the row.

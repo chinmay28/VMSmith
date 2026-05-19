@@ -1218,6 +1218,21 @@ paths:
             Whitespace-trimmed. Applied before the search filter so the
             response reflects the intersection of tag + search.
         - in: query
+          name: event_type
+          schema:
+            type: string
+          required: false
+          description: |
+            Case-insensitive exact-match filter on the webhook's
+            `event_types` filter list (a webhook matches when any entry in
+            the list equals the value). Whitespace-trimmed. Catch-all
+            webhooks (empty `event_types`) are NOT matched — mirrors the
+            bulk_delete `event_type` selector semantics: this is an
+            explicit-membership query ("which webhooks listen for
+            vm.created"), not "which webhooks will fire for this event".
+            Applied between `tag` and `search` so the post-filter
+            `X-Total-Count` stays correct.
+        - in: query
           name: search
           schema:
             type: string

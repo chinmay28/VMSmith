@@ -1973,6 +1973,18 @@ export interface paths {
                      */
                     tag?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the webhook's
+                     *     `event_types` filter list (a webhook matches when any entry in
+                     *     the list equals the value). Whitespace-trimmed. Catch-all
+                     *     webhooks (empty `event_types`) are NOT matched — mirrors the
+                     *     bulk_delete `event_type` selector semantics: this is an
+                     *     explicit-membership query ("which webhooks listen for
+                     *     vm.created"), not "which webhooks will fire for this event".
+                     *     Applied between `tag` and `search` so the post-filter
+                     *     `X-Total-Count` stays correct.
+                     */
+                    event_type?: string;
+                    /**
                      * @description Case-insensitive substring filter applied across each webhook's
                      *     URL, description, event-type filters, and tags. Whitespace is
                      *     trimmed before matching. Secret, ID, and last_error are

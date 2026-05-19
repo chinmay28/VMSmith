@@ -319,11 +319,16 @@ export const webhooks = {
   // omits the param so the daemon returns every webhook. Mirrors the
   // pattern used for VMs (2.2.13), images (5.4.9), and events (4.2.20).
   //
+  // The `eventType` param is a case-insensitive exact-match against entries
+  // in each webhook's `event_types` filter list. Catch-all webhooks (empty
+  // event_types) are NOT matched — mirrors the bulk_delete event_type
+  // selector semantics. Empty/undefined omits the param. (5.4.26)
+  //
   // `sort` / `order` whitelist mirrors the daemon: sort one of id|url|
   // created_at|last_delivery_at (default id); order asc|desc (default asc).
   // Empty/undefined omits the param so the daemon's defaults apply.
-  list: ({ search = '', tag = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  list: ({ search = '', tag = '', eventType = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>
