@@ -2382,6 +2382,14 @@ export interface paths {
                     vm_id?: string;
                     /** @description Filter by event type (e.g., `vm.started`). */
                     type?: string;
+                    /**
+                     * @description Case-insensitive prefix match on event type. Lets operators slice
+                     *     an entire event family (e.g. `snapshot.` matches every `snapshot.*`
+                     *     subtype, `vm.` matches every `vm.*` subtype) without enumerating
+                     *     each fully-qualified type. Composes additively with `type`,
+                     *     `source`, `severity`, `search`, and the time/cursor filters.
+                     */
+                    type_prefix?: string;
                     /** @description Filter by event source. */
                     source?: "libvirt" | "app" | "system";
                     /** @description Filter by severity. */

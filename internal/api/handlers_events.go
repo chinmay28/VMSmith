@@ -24,6 +24,8 @@ import (
 //     timeline to a single human/bot without the noisy substring matches
 //     ?search= gives. Mirrors the per-VM log filter (5.4.18).
 //   - resource_id  — filter by ResourceID (exact match, case-sensitive)
+//   - type_prefix  — case-insensitive prefix match on event type (e.g.,
+//     `snapshot.` matches every `snapshot.*` subtype)
 //   - search       — case-insensitive substring match across message, type,
 //     source, severity, actor, vm_id, resource_id, and attribute values.
 //     The numeric event ID is intentionally excluded.
@@ -43,6 +45,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 
 	vmID := strings.TrimSpace(q.Get("vm_id"))
 	evtType := strings.TrimSpace(q.Get("type"))
+	typePrefix := strings.ToLower(strings.TrimSpace(q.Get("type_prefix")))
 	source := strings.TrimSpace(q.Get("source"))
 	severity := strings.TrimSpace(q.Get("severity"))
 	actor := strings.TrimSpace(q.Get("actor"))
@@ -87,6 +90,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 		Severity:   severity,
 		Actor:      actor,
 		ResourceID: resourceID,
+		TypePrefix: typePrefix,
 		Search:     search,
 		UntilSeq:   untilSeq,
 	}

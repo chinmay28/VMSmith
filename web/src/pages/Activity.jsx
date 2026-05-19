@@ -44,11 +44,12 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         severity:   searchParams.get('severity')    || '',
         actor:      searchParams.get('actor')       || '',
         resourceID: searchParams.get('resource_id') || '',
+        typePrefix: searchParams.get('type_prefix') || '',
         search:     searchParams.get('search')      || '',
         sort:       searchParams.get('sort')        || '',
         order:      searchParams.get('order')       || '',
       }
-    : { vmId: vmIdProp, type: '', source: '', severity: '', actor: '', resourceID: '', search: '', sort: '', order: '' };
+    : { vmId: vmIdProp, type: '', source: '', severity: '', actor: '', resourceID: '', typePrefix: '', search: '', sort: '', order: '' };
 
   const [vmFilter, setVmFilter] = useState(initial.vmId);
   const [typeFilter, setTypeFilter] = useState(initial.type);
@@ -67,9 +68,12 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   const [resourceIdFilter, setResourceIdFilter] = useState(initial.resourceID);
   // searchInput is the live <input> value; searchFilter is the debounced /
   // committed value that drives the fetch. Splitting them prevents a fetch
-  // per keystroke while letting the input feel responsive.
+  // per keystroke while letting the input feel responsive. The type-prefix
+  // input below follows the same pattern.
   const [searchInput, setSearchInput] = useState(initial.search);
   const [searchFilter, setSearchFilter] = useState(initial.search);
+  const [typePrefixInput, setTypePrefixInput] = useState(initial.typePrefix);
+  const [typePrefixFilter, setTypePrefixFilter] = useState(initial.typePrefix);
   const [sortField, setSortField] = useState(initial.sort);
   const [sortOrder, setSortOrder] = useState(initial.order);
   const [page, setPage] = useState(1);
@@ -93,11 +97,12 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     if (severityFilter)   next.set('severity', severityFilter);
     if (actorFilter)      next.set('actor', actorFilter);
     if (resourceIdFilter) next.set('resource_id', resourceIdFilter);
+    if (typePrefixFilter) next.set('type_prefix', typePrefixFilter);
     if (searchFilter)     next.set('search', searchFilter);
     if (sortField)        next.set('sort', sortField);
     if (sortOrder)        next.set('order', sortOrder);
     setSearchParams(next, { replace: true });
-  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, searchFilter, sortField, sortOrder, setSearchParams]);
+  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, setSearchParams]);
 
   // Debounce the search input: a fetch per keystroke would fan out one
   // request per character. 250 ms is the sweet spot between "feels live"
@@ -121,6 +126,14 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     return () => clearTimeout(id);
   }, [resourceIdInput, resourceIdFilter]);
 
+  // Mirror the search-input debouncing on the type-prefix input — typing
+  // "snapshot." one character at a time should not trigger 9 fetches.
+  useEffect(() => {
+    if (typePrefixInput === typePrefixFilter) return;
+    const id = setTimeout(() => setTypePrefixFilter(typePrefixInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [typePrefixInput, typePrefixFilter]);
+
   // When the parent prop changes (different VM in the embedded tab), reset.
   useEffect(() => {
     if (embedded) {
@@ -135,6 +148,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
       const response = await eventsApi.list({
         vmId: effectiveVm,
         type: typeFilter,
+        typePrefix: typePrefixFilter,
         source: sourceFilter,
         severity: severityFilter,
         actor: actorFilter,
@@ -154,7 +168,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     } finally {
       setLoading(false);
     }
-  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, searchFilter, sortField, sortOrder, page, perPage]);
+  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, page, perPage]);
 
   useEffect(() => {
     setLoading(true);
@@ -166,7 +180,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // Reset to page 1 when filters change.
   useEffect(() => {
     setPage(1);
-  }, [vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, searchFilter, sortField, sortOrder]);
+  }, [vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder]);
 
   // Lazily build a VM ID → name map so the timeline can render names.
   // Only top-level Activity needs this; the embedded tab already knows the VM.
@@ -284,6 +298,27 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
               </button>
             )}
           </div>
+          <div className="relative" data-testid="activity-type-prefix-wrap">
+            <input
+              className="input py-1 text-xs w-44 pr-7"
+              placeholder="Type prefix (e.g. snapshot.)"
+              value={typePrefixInput}
+              onChange={e => setTypePrefixInput(e.target.value)}
+              data-testid="activity-filter-type-prefix"
+              title="Case-insensitive prefix match on event type (e.g. 'snapshot.' matches every snapshot.* subtype)"
+            />
+            {typePrefixInput && (
+              <button
+                type="button"
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200 p-1"
+                onClick={() => setTypePrefixInput('')}
+                aria-label="Clear type prefix"
+                data-testid="btn-activity-clear-type-prefix"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
           <select
             className="input py-1 text-xs w-32"
             value={sourceFilter}
@@ -341,10 +376,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="asc">Order: asc</option>
             <option value="desc">Order: desc</option>
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter || actorInput || resourceIdInput || searchInput || sortField || sortOrder) && (
+          {(vmFilter || typeFilter || sourceFilter || severityFilter || actorInput || resourceIdInput || typePrefixInput || searchInput || sortField || sortOrder) && (
             <button
               className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
+              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setTypePrefixInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
               data-testid="btn-activity-clear-filters"
             >
               Clear
