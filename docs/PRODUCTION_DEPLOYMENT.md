@@ -147,6 +147,8 @@ sudo chmod 0755 /var/log/vmsmith
 
 Binding to `127.0.0.1` is the key production choice here: only the reverse proxy should be publicly reachable.
 
+This becomes even more important once browser console access is enabled: VMSmith's console design keeps libvirt VNC bound to loopback and expects the daemon to proxy authenticated websocket traffic. You should not add firewall or proxy rules that expose raw VNC ports directly. No special firewall rule is needed for loopback traffic — just avoid custom host firewall policies that interfere with `lo`.
+
 If you enable `metrics.scrape_listen`, VMSmith also serves `GET /metrics` on that separate listener in Prometheus text format. This is useful when you want scraping isolated from the main API port or you do not want your reverse proxy in the metrics path.
 
 ---
@@ -406,7 +408,7 @@ If you had previously opened 8080, remove it.
 
 ## 9. Access control recommendations
 
-Because VMSmith does not yet provide built-in auth, **do not** expose it broadly on the public internet unless you add another control layer.
+Even with built-in API-key auth available, you should **not** expose VMSmith broadly on the public internet without an additional control layer.
 
 Safer deployment patterns:
 
