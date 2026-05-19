@@ -1603,6 +1603,18 @@ paths:
             contract: empty disables the filter, whitespace is trimmed.
             Lets operators slice the timeline to a single human / bot
             without the noisy substring matches `?search=` gives.
+        - name: resource_id
+          in: query
+          schema:
+            type: string
+          description: |
+            Filter by `resource_id` (exact match, case-sensitive). Mirrors the
+            `vm_id` filter contract — resource IDs are opaque server-issued
+            strings operators reference verbatim (e.g. `snap-…`, `img-…`,
+            `wh-…`). Whitespace is trimmed before comparison; empty disables
+            the filter. Composes additively with `vm_id`, `type`, `source`,
+            `severity`, `actor`, `search`, `since`, and `until` so
+            `X-Total-Count` reflects the post-filter population.
         - name: search
           in: query
           schema:

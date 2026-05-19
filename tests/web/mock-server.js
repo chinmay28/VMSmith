@@ -1020,8 +1020,8 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/events" && method === "GET") {
     const allEvents = [
       { id: "evt-3", type: "vm_started", source: "libvirt", severity: "info", vm_id: "vm-1", actor: "system",    message: "VM 'web-server-prod' started",            created_at: new Date(Date.now() - 30_000).toISOString() },
-      { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", actor: "ops-alice", message: "VM 'web-server-prod' created", attributes: { template: "rocky9-base" }, created_at: new Date(Date.now() - 60_000).toISOString() },
-      { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", actor: "system",    message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
+      { id: "evt-2", type: "vm_created", source: "app",     severity: "info", vm_id: "vm-1", actor: "ops-alice", resource_id: "tpl-rocky9-base", message: "VM 'web-server-prod' created", attributes: { template: "rocky9-base" }, created_at: new Date(Date.now() - 60_000).toISOString() },
+      { id: "evt-1", type: "vm_stopped", source: "libvirt", severity: "warn", vm_id: "vm-2", actor: "system",    resource_id: "img-2",          message: "VM 'database-staging' stopped unexpectedly", created_at: new Date(Date.now() - 120_000).toISOString() },
       // evt-0 deliberately omits actor / attributes / resource_id / vm_id so
       // the Activity disclosure (hasDetails gate in web/src/pages/Activity.jsx)
       // is exercised for events that should NOT render a chevron. The type is
@@ -1052,6 +1052,10 @@ const server = http.createServer(async (req, res) => {
     // raw value is trimmed but NOT lowercased; matching uses `===` not
     // localeCompare. Empty disables the filter.
     const actorFilter = (url.searchParams.get("actor") || "").trim();
+    // resource_id is whitespace-trimmed but not lowercased — IDs are opaque
+    // server-issued strings (e.g. snap-1747..., img-1747...) and the
+    // case-sensitive contract mirrors the API.
+    const resourceIDFilter = (url.searchParams.get("resource_id") || "").trim();
     const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const matchesSearch = (e) => {
       if (!searchFilter) return true;
@@ -1072,6 +1076,7 @@ const server = http.createServer(async (req, res) => {
       (!severityFilter || e.severity === severityFilter) &&
       (!typeFilter || e.type === typeFilter) &&
       (!actorFilter || e.actor === actorFilter) &&
+      (!resourceIDFilter || e.resource_id === resourceIDFilter) &&
       matchesSearch(e)
     );
 
