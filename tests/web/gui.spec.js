@@ -1667,11 +1667,14 @@ test.describe("Settings — Webhooks", () => {
     await seed("https://metrics.example.com/in", "image.created");
     await seed("https://otherhost.example.com/x", "");
 
+    const search = page.getByTestId("webhook-list-search");
+    await expect(search).toHaveAttribute("placeholder", "Search by URL, description, or event type…");
+
     // All three rows are visible to start.
     await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
 
     // Search by a URL substring — only the audit row should remain.
-    await page.getByTestId("webhook-list-search").fill("audit");
+    await search.fill("audit");
     await expect.poll(async () =>
       page.locator('[data-testid^="webhook-row-"]').count(),
     ).toBe(1);

@@ -14,10 +14,11 @@ export default function Settings() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
 
-  // Free-text search across URL + event_types. `searchInput` is the live
-  // input value; `searchFilter` is the debounced value that drives the
-  // useFetch dependency below. Mirrors the 5.4.x pattern used for VMs,
-  // images, events, snapshots, port forwards, templates, and logs.
+  // Free-text search across URL, description, and event_types.
+  // `searchInput` is the live input value; `searchFilter` is the debounced
+  // value that drives the useFetch dependency below. Mirrors the 5.4.x
+  // pattern used for VMs, images, events, snapshots, port forwards,
+  // templates, and logs.
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
 
@@ -155,7 +156,7 @@ export default function Settings() {
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by URL or event type…"
+            placeholder="Search by URL, description, or event type…"
             className="input w-full pl-8 pr-8 py-1.5 text-sm"
             data-testid="webhook-list-search"
             aria-label="Search webhooks"
@@ -212,7 +213,7 @@ export default function Settings() {
             <EmptyState
               icon={Search}
               title="No webhooks match your search"
-              description={`No webhooks match "${searchFilter}". Try a different URL or event-type fragment.`}
+              description={`No webhooks match "${searchFilter}". Try a different URL, description, or event-type fragment.`}
             />
           ) : (
             <EmptyState
