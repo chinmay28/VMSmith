@@ -46,8 +46,11 @@ which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
+		actorFilter, _ := cmd.Flags().GetString("actor")
+		resourceIDFilter, _ := cmd.Flags().GetString("resource-id")
 		searchFilter, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		sortFlag, _ := cmd.Flags().GetString("sort")
@@ -77,12 +80,15 @@ which matches the long-standing CLI behaviour.`,
 		}
 
 		filtered := filterEvents(all, eventFilter{
-			vmID:     strings.TrimSpace(vmFilter),
-			typeStr:  strings.TrimSpace(typeFilter),
-			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
-			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
-			since:    sinceTime,
+			vmID:       strings.TrimSpace(vmFilter),
+			typeStr:    strings.TrimSpace(typeFilter),
+			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
+			actor:      strings.TrimSpace(actorFilter),
+			resourceID: strings.TrimSpace(resourceIDFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
+			since:      sinceTime,
 		})
 
 		if sortField == "" {
@@ -104,8 +110,8 @@ which matches the long-standing CLI behaviour.`,
 			return nil
 		}
 
-		showActor, _ := cmd.Flags().GetBool("actor")
-		showAttrs, _ := cmd.Flags().GetBool("attrs")
+		showActor, _ := cmd.Flags().GetBool("show-actor")
+		showAttrs, _ := cmd.Flags().GetBool("show-attrs")
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		writeEventsHeader(w, showActor, showAttrs)
@@ -185,6 +191,17 @@ type eventFilter struct {
 	typeStr  string
 	source   string
 	severity string
+	// actor is a case-sensitive exact-match against e.Actor (e.g.
+	// "system", "app", "<api-key-alias>"). Empty disables the filter.
+	actor string
+	// resourceID is an exact-match needle compared against evt.ResourceID.
+	// Whitespace-trimmed by the caller, case-sensitive (resource IDs are
+	// opaque server-issued strings operators reference verbatim).
+	resourceID string
+	// typePrefix is a lower-cased prefix matched case-insensitively against
+	// the event's Type field. Lets operators slice "snapshot.*" or
+	// "webhook.*" event families without enumerating each subtype.
+	typePrefix string
 	// search is a lower-cased substring needle applied via types.EventMatchesSearch.
 	search string
 	since  time.Time
@@ -202,10 +219,19 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 		if f.typeStr != "" && e.Type != f.typeStr {
 			continue
 		}
+		if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
+			continue
+		}
 		if f.source != "" && !strings.EqualFold(e.Source, f.source) {
 			continue
 		}
 		if f.severity != "" && !strings.EqualFold(e.Severity, f.severity) {
+			continue
+		}
+		if f.actor != "" && e.Actor != f.actor {
+			continue
+		}
+		if f.resourceID != "" && e.ResourceID != f.resourceID {
 			continue
 		}
 		if !f.since.IsZero() && eventTimestamp(e).Before(f.since) {
@@ -344,8 +370,11 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
+		typePrefixFilter, _ := cmd.Flags().GetString("type-prefix")
 		sourceFilter, _ := cmd.Flags().GetString("source")
 		severityFilter, _ := cmd.Flags().GetString("severity")
+		actorFilter, _ := cmd.Flags().GetString("actor")
+		resourceIDFilter, _ := cmd.Flags().GetString("resource-id")
 		searchFilter, _ := cmd.Flags().GetString("search")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		if apiURL == "" {
@@ -358,15 +387,18 @@ Examples:
 		}
 
 		filter := eventFilter{
-			vmID:     strings.TrimSpace(vmFilter),
-			typeStr:  strings.TrimSpace(typeFilter),
-			source:   strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity: strings.ToLower(strings.TrimSpace(severityFilter)),
-			search:   strings.ToLower(strings.TrimSpace(searchFilter)),
+			vmID:       strings.TrimSpace(vmFilter),
+			typeStr:    strings.TrimSpace(typeFilter),
+			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
+			actor:      strings.TrimSpace(actorFilter),
+			resourceID: strings.TrimSpace(resourceIDFilter),
+			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
-		showActor, _ := cmd.Flags().GetBool("actor")
-		showAttrs, _ := cmd.Flags().GetBool("attrs")
+		showActor, _ := cmd.Flags().GetBool("show-actor")
+		showAttrs, _ := cmd.Flags().GetBool("show-attrs")
 
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
@@ -548,10 +580,19 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	if f.typeStr != "" && e.Type != f.typeStr {
 		return false
 	}
+	if f.typePrefix != "" && !strings.HasPrefix(strings.ToLower(e.Type), f.typePrefix) {
+		return false
+	}
 	if f.source != "" && !strings.EqualFold(e.Source, f.source) {
 		return false
 	}
 	if f.severity != "" && !strings.EqualFold(e.Severity, f.severity) {
+		return false
+	}
+	if f.actor != "" && e.Actor != f.actor {
+		return false
+	}
+	if f.resourceID != "" && e.ResourceID != f.resourceID {
 		return false
 	}
 	if f.search != "" && !types.EventMatchesSearch(e, f.search) {
@@ -583,24 +624,30 @@ func lastIDToSeq(id string) (string, error) {
 func init() {
 	eventsListCmd.Flags().String("vm", "", "filter events by VM ID")
 	eventsListCmd.Flags().String("type", "", "filter events by type (e.g. vm_started)")
+	eventsListCmd.Flags().String("type-prefix", "", "filter events by type prefix (e.g. 'snapshot.' matches every snapshot.* subtype)")
 	eventsListCmd.Flags().String("source", "", "filter events by source (libvirt|app|system)")
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
+	eventsListCmd.Flags().String("actor", "", "filter events by actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")
+	eventsListCmd.Flags().String("resource-id", "", "filter events by resource ID (exact match, case-sensitive)")
 	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsListCmd.Flags().String("since", "", "show events since (Go duration like 5m, or RFC3339 timestamp)")
 	eventsListCmd.Flags().String("sort", "", "sort field: id, occurred_at, type, source, severity (default: legacy newest-by-timestamp)")
 	eventsListCmd.Flags().String("order", "", "sort order: asc | desc (default: desc when --sort is set)")
 	eventsListCmd.Flags().Int("limit", 100, "maximum number of events to show")
-	eventsListCmd.Flags().Bool("actor", false, "include the ACTOR column (who initiated the event)")
-	eventsListCmd.Flags().Bool("attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
+	eventsListCmd.Flags().Bool("show-actor", false, "include the ACTOR column (who initiated the event)")
+	eventsListCmd.Flags().Bool("show-attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
 
 	eventsFollowCmd.Flags().String("vm", "", "only print events for this VM ID")
 	eventsFollowCmd.Flags().String("type", "", "only print events of this type (exact match)")
+	eventsFollowCmd.Flags().String("type-prefix", "", "only print events whose type starts with this prefix (e.g. 'snapshot.')")
 	eventsFollowCmd.Flags().String("source", "", "only print events from this source (libvirt|app|system)")
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
+	eventsFollowCmd.Flags().String("actor", "", "only print events from this actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")
+	eventsFollowCmd.Flags().String("resource-id", "", "only print events for this resource ID (exact match, case-sensitive)")
 	eventsFollowCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsFollowCmd.Flags().String("api-url", "", "daemon API URL (default: http://<daemon.listen>)")
-	eventsFollowCmd.Flags().Bool("actor", false, "include the ACTOR column (who initiated the event)")
-	eventsFollowCmd.Flags().Bool("attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
+	eventsFollowCmd.Flags().Bool("show-actor", false, "include the ACTOR column (who initiated the event)")
+	eventsFollowCmd.Flags().Bool("show-attrs", false, "include the ATTRIBUTES column (resource_id + structured key=value pairs)")
 
 	eventsCmd.AddCommand(eventsListCmd)
 	eventsCmd.AddCommand(eventsFollowCmd)

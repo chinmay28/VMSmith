@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
@@ -550,6 +551,22 @@ type EventFilter struct {
 	Type     string
 	Source   string
 	Severity string
+	// Actor is a case-sensitive exact-match filter against evt.Actor —
+	// mirrors VMID's contract. Empty disables the filter; whitespace
+	// trimming is the caller's responsibility (the handler / CLI does
+	// it once before constructing the filter).
+	Actor string
+	// ResourceID is an exact-match predicate against evt.ResourceID. The
+	// match is case-sensitive — resource IDs are opaque server-issued
+	// strings (e.g. `snap-1747591234`, `img-1747591234`, `wh-…`) operators
+	// reference verbatim, and case-insensitive matching is the job of
+	// Search.  Empty disables the filter.
+	ResourceID string
+	// TypePrefix is a lowercase prefix matched case-insensitively against
+	// the event's Type field. Lets operators slice "all snapshot.* events"
+	// or "all webhook.* events" without listing every subtype. Callers
+	// are responsible for trimming + lowercasing.
+	TypePrefix string
 	// Search is a lowercase needle applied via types.EventMatchesSearch.
 	// Callers are responsible for trimming + lowercasing.
 	Search   string
@@ -621,6 +638,15 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 				continue
 			}
 			if filter.Severity != "" && evt.Severity != filter.Severity {
+				continue
+			}
+			if filter.Actor != "" && evt.Actor != filter.Actor {
+				continue
+			}
+			if filter.ResourceID != "" && evt.ResourceID != filter.ResourceID {
+				continue
+			}
+			if filter.TypePrefix != "" && !strings.HasPrefix(strings.ToLower(evt.Type), filter.TypePrefix) {
 				continue
 			}
 			// Time-based Since: filter individual events by OccurredAt.

@@ -5753,6 +5753,485 @@ func TestListEvents_FilterBySearch_CombinesWithVMID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Actor exact-match filter on GET /events (4.2.23)
+// ============================================================
+
+func TestListEvents_FilterByActor_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=ops-alice")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 ops-alice event, got %d", len(got))
+	}
+	if got[0].Actor != "ops-alice" {
+		t.Errorf("actor=%q, want ops-alice", got[0].Actor)
+	}
+}
+
+func TestListEvents_FilterByActor_CaseSensitive(t *testing.T) {
+	// Actor is exact-match (mirrors ?vm_id='s contract); case-insensitive
+	// matching is the job of ?search=.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=Ops-Alice")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for differently-cased actor, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=%20%20ops-alice%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 result after whitespace trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=nobody-by-that-name")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_EmptyParamIsNoOp(t *testing.T) {
+	// ?actor= (empty) must not filter — the handler trims, sees empty,
+	// and forwards "" to the store which short-circuits past the predicate.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 4 {
+		t.Fatalf("?actor= empty should be no-op; got %d, want 4 (all seeded)", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_ComposesWithSearch(t *testing.T) {
+	// Combining ?actor= with ?search= must narrow to the intersection.
+	// "ops-alice" matches the snapshot.created event; adding search=before-deploy
+	// also matches it, so the intersection stays at 1.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=ops-alice&search=before-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 intersection match, got %d", len(got))
+	}
+
+	// search=DHCP would match the system event whose Actor is empty;
+	// adding actor=ops-alice short-circuits to zero.
+	resp, err = http.Get(ts.URL + "/api/v1/events?actor=ops-alice&search=DHCP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got = decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for ops-alice+DHCP, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByActor_TotalCountReflectsFiltered(t *testing.T) {
+	// X-Total-Count must reflect the post-filter / pre-pagination count so
+	// the GUI's pagination widget can drive the Activity table correctly.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedSearchableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?actor=system&per_page=10&page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if header := resp.Header.Get("X-Total-Count"); header != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (system actor only matches one seed)", header)
+	}
+}
+
+// ============================================================
+// resource_id exact-match filter on GET /events (4.2.24)
+// ============================================================
+
+// seedResourceIDEvents writes a small set of events that differ on ResourceID
+// so the ?resource_id= filter can be asserted without depending on the
+// per-axis seeds in seedSearchableEvents.
+func seedResourceIDEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{
+			Type:       "snapshot.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			VMID:       "vm-1",
+			ResourceID: "snap-rocky-pre-deploy",
+			Message:    "snapshot created",
+			OccurredAt: base.Add(-30 * time.Minute),
+		},
+		{
+			Type:       "snapshot.deleted",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityWarn,
+			VMID:       "vm-1",
+			ResourceID: "snap-rocky-pre-deploy",
+			Message:    "snapshot deleted",
+			OccurredAt: base.Add(-25 * time.Minute),
+		},
+		{
+			Type:       "image.uploaded",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			ResourceID: "img-rocky9",
+			Message:    "image uploaded",
+			OccurredAt: base.Add(-20 * time.Minute),
+		},
+		{
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			VMID:       "vm-2",
+			Message:    "vm started", // no resource_id
+			OccurredAt: base.Add(-15 * time.Minute),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_FilterByResourceID_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events for snap-rocky-pre-deploy, got %d", len(got))
+	}
+	for _, e := range got {
+		if e.ResourceID != "snap-rocky-pre-deploy" {
+			t.Errorf("filter leaked unrelated event %+v", e)
+		}
+	}
+}
+
+func TestListEvents_FilterByResourceID_CaseSensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Uppercase target should yield zero matches — the resource_id contract
+	// mirrors vm_id (case-sensitive) so case-insensitive matching stays the
+	// job of ?search=.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=SNAP-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for case-mismatched resource_id, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=%20%20img-rocky9%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].ResourceID != "img-rocky9" {
+		t.Fatalf("expected 1 img-rocky9 event after whitespace trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-does-not-exist")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results for unknown resource_id, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_EmptyParamIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Empty / whitespace-only resource_id should disable the filter, so the
+	// response carries every seeded event.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=%20%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 events when filter is empty, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_ComposesWithSeverity(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	// Two events carry snap-rocky-pre-deploy — one info (created), one warn
+	// (deleted). Narrowing by severity=warn should leave only the deletion.
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy&severity=warn")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "snapshot.deleted" {
+		t.Fatalf("expected 1 snapshot.deleted match, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByResourceID_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?resource_id=snap-rocky-pre-deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want \"2\"", got)
+	}
+	_ = decodeEvents(t, resp)
+}
+
+// ============================================================
+// type_prefix case-insensitive prefix filter on GET /events (4.2.25)
+// ============================================================
+
+// seedTypePrefixEvents writes a mix of snapshot.*, vm.*, and webhook.* events
+// so the ?type_prefix= tests can assert prefix matching on the type axis
+// without depending on the other filters.
+func seedTypePrefixEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{
+			Type:       "snapshot.created",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-50 * time.Minute),
+		},
+		{
+			Type:       "snapshot.deleted",
+			Source:     types.EventSourceApp,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-40 * time.Minute),
+		},
+		{
+			Type:       "vm.started",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-30 * time.Minute),
+		},
+		{
+			Type:       "vm.stopped",
+			Source:     types.EventSourceLibvirt,
+			Severity:   types.EventSeverityInfo,
+			OccurredAt: base.Add(-20 * time.Minute),
+		},
+		{
+			Type:       "webhook.delivery_failed",
+			Source:     types.EventSourceSystem,
+			Severity:   types.EventSeverityError,
+			OccurredAt: base.Add(-10 * time.Minute),
+		},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_MatchesEntireFamily(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=snapshot.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 snapshot.* matches, got %d", len(got))
+	}
+	for _, e := range got {
+		if !strings.HasPrefix(e.Type, "snapshot.") {
+			t.Errorf("unexpected type %q leaked through prefix filter", e.Type)
+		}
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=SNAPSHOT.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 matches via uppercase prefix, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=%20%20webhook.%20%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "webhook.delivery_failed" {
+		t.Fatalf("expected 1 webhook.* match after trim, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_EmptyParamIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 5 {
+		t.Fatalf("empty type_prefix should not filter, got %d events", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_NoMatchReturnsEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=schedule.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 matches for unknown prefix, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_ComposesWithSource(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// snapshot.* events are source=app in the fixture; narrowing by
+	// source=libvirt should drop them all.
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=snapshot.&source=libvirt")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 results when narrowing to libvirt, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_ComposesWithSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	// type_prefix=vm. narrows to 2 vm.* events; search=stopped narrows further to 1.
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=vm.&search=stopped")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 || got[0].Type != "vm.stopped" {
+		t.Fatalf("expected 1 vm.stopped match, got %d", len(got))
+	}
+}
+
+func TestListEvents_FilterByTypePrefix_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedTypePrefixEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?type_prefix=vm.")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want \"2\"", got)
+	}
+}
+
 // seedSortableEvents writes a small set of events with distinct types,
 // sources, severities, and occurred_at timestamps so the ?sort= tests can
 // assert exact orderings without depending on insertion order.
