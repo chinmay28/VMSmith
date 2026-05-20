@@ -875,6 +875,39 @@ test.describe("VM Detail", () => {
     await expect(page.getByText(/No snapshots match "needle-not-present"/)).toBeVisible();
   });
 
+  // --- Snapshot time-range filter (roadmap 5.4.28) ---
+
+  test("snapshot ?since= filter narrows the list by created_at and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // Set since=2026-05-07T00:00 — only auto-2026-05-07 should remain (and any
+    // snapshots dated >= 2026-05-07).
+    const sinceInput = page.getByTestId("snap-list-since");
+    await sinceInput.fill("2026-05-07T00:00");
+    // The committed query is persisted to the URL via ?snap_since=.
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_since")).toContain("2026-05-07");
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toHaveCount(0);
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // Clearing restores all snapshots.
+    await page.getByTestId("snap-list-time-range-clear").click();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_since")).toBeNull();
+  });
+
+  test("snapshot ?until= filter narrows the list by created_at upper bound", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("snap-list-until").fill("2026-05-06T23:59");
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_until")).toContain("2026-05-06");
+  });
+
   // --- Snapshot tags (roadmap 2.2.17) ---
 
   test("create snapshot with tags renders chips inline", async ({ page }) => {

@@ -58,10 +58,10 @@ function seed() {
       vm_id: vm1.id,
       name: "before-deploy",
       description: "checkpoint before May deploy",
-      created_at: new Date().toISOString(),
+      created_at: "2026-05-05T00:00:00Z",
     },
-    { id: `${vm1.id}/auto-2026-05-06`, vm_id: vm1.id, name: "auto-2026-05-06", created_at: new Date().toISOString() },
-    { id: `${vm1.id}/auto-2026-05-07`, vm_id: vm1.id, name: "auto-2026-05-07", created_at: new Date().toISOString() },
+    { id: `${vm1.id}/auto-2026-05-06`, vm_id: vm1.id, name: "auto-2026-05-06", created_at: "2026-05-06T00:00:00Z" },
+    { id: `${vm1.id}/auto-2026-05-07`, vm_id: vm1.id, name: "auto-2026-05-07", created_at: "2026-05-07T00:00:00Z" },
   ]);
   // Seed a few port forwards so bulk-delete UI tests have rows to act on.
   portForwards.set(vm1.id, [
@@ -469,6 +469,32 @@ const server = http.createServer(async (req, res) => {
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     if (tagFilter) {
       list = list.filter(s => (s.tags || []).some(t => String(t).toLowerCase() === tagFilter));
+    }
+    // since / until: inclusive RFC3339 time-range filter on created_at;
+    // invalid value → 400; whitespace-only disables; zero/missing
+    // created_at filtered OUT whenever any bound is set (mirrors the API).
+    const parseTime = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const t = new Date(v);
+      if (Number.isNaN(t.getTime())) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a valid RFC3339 timestamp` };
+      }
+      return { set: true, value: t };
+    };
+    const sinceP = parseTime(url.searchParams.get("since"), "since");
+    if (sinceP.invalid) return json(res, 400, { code: sinceP.code, message: sinceP.msg });
+    const untilP = parseTime(url.searchParams.get("until"), "until");
+    if (untilP.invalid) return json(res, 400, { code: untilP.code, message: untilP.msg });
+    if (sinceP.set || untilP.set) {
+      list = list.filter(s => {
+        if (!s.created_at) return false;
+        const t = new Date(s.created_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (sinceP.set && t < sinceP.value) return false;
+        if (untilP.set && t > untilP.value) return false;
+        return true;
+      });
     }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {

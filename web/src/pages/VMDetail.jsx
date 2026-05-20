@@ -27,9 +27,17 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('snap_search') || '';
   });
+  const [snapSince, setSnapSince] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_since') || '';
+  });
+  const [snapUntil, setSnapUntil] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_until') || '';
+  });
   const { data: snapList, refresh: refreshSnaps } = useFetch(
-    () => snapshots.list(id, { sort: snapSort, order: snapOrder, search: snapSearch }),
-    [id, snapSort, snapOrder, snapSearch],
+    () => snapshots.list(id, { sort: snapSort, order: snapOrder, search: snapSearch, since: snapSince, until: snapUntil }),
+    [id, snapSort, snapOrder, snapSearch, snapSince, snapUntil],
     10000,
   );
 
@@ -93,10 +101,12 @@ export default function VMDetail() {
     if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
     if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
+    if (snapSince) sp.set('snap_since', snapSince); else sp.delete('snap_since');
+    if (snapUntil) sp.set('snap_until', snapUntil); else sp.delete('snap_until');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, portPage, portPerPage, snapSearch]);
+  }, [portSort, portOrder, portSearch, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -336,6 +346,41 @@ export default function VMDetail() {
                   aria-label="Clear snapshot search"
                 >
                   <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-steel-400">
+              <label className="flex items-center gap-1">
+                <span>Since</span>
+                <input
+                  type="datetime-local"
+                  value={snapSince}
+                  onChange={(e) => setSnapSince(e.target.value ? `${e.target.value}:00Z` : '')}
+                  data-testid="snap-list-since"
+                  aria-label="Snapshots created on or after"
+                  className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                <span>Until</span>
+                <input
+                  type="datetime-local"
+                  value={snapUntil}
+                  onChange={(e) => setSnapUntil(e.target.value ? `${e.target.value}:00Z` : '')}
+                  data-testid="snap-list-until"
+                  aria-label="Snapshots created on or before"
+                  className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+                />
+              </label>
+              {(snapSince || snapUntil) && (
+                <button
+                  type="button"
+                  className="text-steel-500 hover:text-steel-200"
+                  onClick={() => { setSnapSince(''); setSnapUntil(''); }}
+                  data-testid="snap-list-time-range-clear"
+                  aria-label="Clear snapshot time range"
+                >
+                  Clear range
                 </button>
               )}
             </div>

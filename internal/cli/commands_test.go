@@ -5104,6 +5104,108 @@ func TestCLI_SnapshotList_ShowsTagsColumn(t *testing.T) {
 	}
 }
 
+// --- snapshot list --since / --until (roadmap 5.4.28) ---
+
+func TestCLI_SnapshotList_FilterBySince(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-since", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-since", Name: "early", CreatedAt: day(1)})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-since", Name: "late", CreatedAt: day(30)})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-since", "--since", "2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("snapshot list --since: %v", err)
+	}
+	if !strings.Contains(out, "late") || strings.Contains(out, "early") {
+		t.Fatalf("expected only late, got %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_FilterByUntil(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-until", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-until", Name: "early", CreatedAt: day(1)})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-until", Name: "late", CreatedAt: day(30)})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-until", "--until", "2026-05-15T00:00:00Z")
+	if err != nil {
+		t.Fatalf("snapshot list --until: %v", err)
+	}
+	if !strings.Contains(out, "early") || strings.Contains(out, "late") {
+		t.Fatalf("expected only early, got %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_FilterBySinceAndUntil(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-range", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-1", CreatedAt: day(1)})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-15", CreatedAt: day(15)})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-30", CreatedAt: day(30)})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-range",
+		"--since", "2026-05-10T00:00:00Z", "--until", "2026-05-20T00:00:00Z")
+	if err != nil {
+		t.Fatalf("snapshot list --since --until: %v", err)
+	}
+	if !strings.Contains(out, "snap-15") || strings.Contains(out, "snap-1\t") || strings.Contains(out, "snap-30") {
+		t.Fatalf("expected only snap-15, got %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_RejectsInvalidSince(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-snap-bad", Name: "host"})
+
+	_, err := runCLI("snapshot", "list", "vm-snap-bad", "--since", "yesterday")
+	if err == nil || !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("expected invalid --since error, got %v", err)
+	}
+}
+
+func TestCLI_SnapshotList_RejectsInvalidUntil(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-snap-bad-until", Name: "host"})
+
+	_, err := runCLI("snapshot", "list", "vm-snap-bad-until", "--until", "2026-13-99")
+	if err == nil || !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("expected invalid --until error, got %v", err)
+	}
+}
+
+func TestCLI_SnapshotList_EmptySinceOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-empty", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-empty", Name: "any", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-empty", "--since", "  ")
+	if err != nil {
+		t.Fatalf("snapshot list --since '  ': %v", err)
+	}
+	if !strings.Contains(out, "any") {
+		t.Fatalf("whitespace --since should be no-op, got %q", out)
+	}
+}
+
 // --- webhook list pagination flag forwarding (roadmap 5.4.19) ---
 
 func TestCLI_WebhookList_ForwardsLimit(t *testing.T) {

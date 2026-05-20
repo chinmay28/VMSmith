@@ -95,6 +95,13 @@ func (s *Server) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 //   - search=<needle>            case-insensitive substring filter on name and
 //     description. Applied before sort + pagination so X-Total-Count reflects
 //     the post-search population.
+//   - tag=<tag>                  case-insensitive exact-match filter.
+//   - since=<rfc3339>            keep snapshots with created_at >= since
+//     (inclusive). Whitespace trimmed; empty disables. Invalid values return
+//     400 `invalid_since`.
+//   - until=<rfc3339>            keep snapshots with created_at <= until
+//     (inclusive). Whitespace trimmed; empty disables. Invalid values return
+//     400 `invalid_until`.
 //   - sort=<id|name|created_at>  default id; case-insensitive
 //   - order=<asc|desc>           default asc
 //   - page / per_page (see parsePagination)
@@ -104,6 +111,18 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	sortField, order, err := parseSnapshotSort(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	q := r.URL.Query()
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
 
@@ -118,7 +137,7 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	// X-Total-Count reflects the same population the search/sort/
 	// pagination operate on.  Mirrors the additive-filter contract
 	// documented for VMs/images/templates/webhooks.
-	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	tagFilter := strings.ToLower(strings.TrimSpace(q.Get("tag")))
 	if tagFilter != "" {
 		filtered := snaps[:0]
 		for _, snap := range snaps {
@@ -132,7 +151,18 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		snaps = filtered
 	}
 
-	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if sinceSet || untilSet {
+		filtered := snaps[:0]
+		for _, snap := range snaps {
+			if !snapshotInTimeRange(snap.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+				continue
+			}
+			filtered = append(filtered, snap)
+		}
+		snaps = filtered
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	if searchFilter != "" {
 		filtered := snaps[:0]
 		for _, snap := range snaps {
