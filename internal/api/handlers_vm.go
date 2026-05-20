@@ -278,10 +278,14 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	tagFilter := strings.TrimSpace(strings.ToLower(q.Get("tag")))
 	statusFilter := strings.TrimSpace(strings.ToLower(q.Get("status")))
 	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || autoStartSet || lockedSet {
+	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || autoStartSet || lockedSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
+				continue
+			}
+			if imageFilter != "" && !strings.EqualFold(vm.Spec.Image, imageFilter) {
 				continue
 			}
 			if tagFilter != "" {

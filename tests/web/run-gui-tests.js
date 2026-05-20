@@ -267,6 +267,61 @@ async function main() {
       await p.waitForTimeout(200);
     }, page);
 
+    // 5.4.22 — image filter narrows the VM list to a single base image and
+    // round-trips through the URL.  Seed data: web-server uses image
+    // "ubuntu-22.04", db-server uses image "rocky-9".  The image input is
+    // a 250 ms-debounced text box; the X clear button restores the
+    // unfiltered view.
+    await runTest("image filter narrows the VM list and round-trips through the URL", async (p) => {
+      // Reload to dismiss any modal still open from the previous test and
+      // guarantee a clean URL for the round-trip assertion below.
+      await p.goto(BASE);
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="nav-vms"]').click();
+      await p.waitForTimeout(300);
+
+      await assertVisible(p, "vm-card-web-server");
+      await assertVisible(p, "vm-card-db-server");
+
+      await p.locator('[data-testid="vm-list-image-filter"]').fill("ubuntu-22.04");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-web-server");
+      await assertNotVisible(p, "vm-card-db-server");
+
+      const urlAfter = new URL(p.url());
+      await assert(urlAfter.searchParams.get("image") === "ubuntu-22.04",
+        `expected ?image=ubuntu-22.04, got ${urlAfter.searchParams.get("image")}`);
+
+      await p.locator('[data-testid="vm-list-image-filter-clear"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-web-server");
+      await assertVisible(p, "vm-card-db-server");
+
+      const urlCleared = new URL(p.url());
+      await assert(!urlCleared.searchParams.has("image"),
+        `expected ?image= to be cleared, got ${urlCleared.searchParams.get("image")}`);
+    }, page);
+
+    await runTest("image filter is case-insensitive", async (p) => {
+      await p.locator('[data-testid="vm-list-image-filter"]').fill("ROCKY-9");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-db-server");
+      await assertNotVisible(p, "vm-card-web-server");
+      // Reset for the next test.
+      await p.locator('[data-testid="vm-list-image-filter-clear"]').click();
+      await p.waitForTimeout(400);
+    }, page);
+
+    await runTest("image filter matches no VMs when query has no hits", async (p) => {
+      await p.locator('[data-testid="vm-list-image-filter"]').fill("does-not-exist.qcow2");
+      await p.waitForTimeout(400);
+      await assertNotVisible(p, "vm-card-web-server");
+      await assertNotVisible(p, "vm-card-db-server");
+      // Reset for any subsequent tests on this page.
+      await p.locator('[data-testid="vm-list-image-filter-clear"]').click();
+      await p.waitForTimeout(400);
+    }, page);
+
     await page.close();
 
     // ================== VM Detail Tests ==================

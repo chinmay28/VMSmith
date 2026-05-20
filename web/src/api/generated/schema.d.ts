@@ -27,6 +27,18 @@ export interface paths {
                      */
                     search?: components["parameters"]["SearchFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's base image
+                     *     (`spec.image`). Closes the operator query "show me every VM built
+                     *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+                     *     filters cannot answer precisely — `?search=rocky` would also
+                     *     match VMs whose description or tag contains the substring, while
+                     *     `?tag=` requires the operator to have tagged every VM by image.
+                     *     Whitespace is trimmed before comparison; empty value disables
+                     *     the filter. Composes additively with `tag`, `status`, `search`,
+                     *     and the sort + pagination params.
+                     */
+                    image?: components["parameters"]["ImageFilter"];
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is
@@ -3103,6 +3115,18 @@ export interface components {
          *     useful operator query.
          */
         SearchFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the VM's base image
+         *     (`spec.image`). Closes the operator query "show me every VM built
+         *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+         *     filters cannot answer precisely — `?search=rocky` would also
+         *     match VMs whose description or tag contains the substring, while
+         *     `?tag=` requires the operator to have tagged every VM by image.
+         *     Whitespace is trimmed before comparison; empty value disables
+         *     the filter. Composes additively with `tag`, `status`, `search`,
+         *     and the sort + pagination params.
+         */
+        ImageFilter: string;
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

@@ -396,6 +396,48 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.22 — image filter on the VM list.  Seed data: web-server uses
+  // image "ubuntu-22.04", db-server uses image "rocky-9".  The image input
+  // is a 250 ms-debounced text box with URL round-trip via ?image=.
+  test("image filter narrows the VM list to a single base image and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Both seeded VMs visible without an image filter.
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // Filter by exact image "ubuntu-22.04" -> only web-server visible.
+    await page.getByTestId("vm-list-image-filter").fill("ubuntu-22.04");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("image=ubuntu-22.04");
+
+    // Clearing via the X button restores both VMs and removes the URL param.
+    await page.getByTestId("vm-list-image-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("image=");
+  });
+
+  test("image filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-image-filter").fill("ROCKY-9");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+  });
+
+  test("image filter matches no VMs when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-image-filter").fill("does-not-exist.qcow2");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

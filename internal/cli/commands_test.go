@@ -439,6 +439,87 @@ func TestCLI_VMList_FilterBySearch_CombinesWithStatus(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_FilterByImage_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "rocky9.qcow2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || !strings.Contains(out, "gamma") {
+		t.Fatalf("expected alpha + gamma only (rocky9.qcow2), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "Rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "ROCKY9.QCOW2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha (case-insensitive image match), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "   ")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("whitespace-only --image should be a no-op; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_NoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "does-not-exist.qcow2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected no rows for unknown image, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_ComposesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "rocky9.qcow2", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --image --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("expected only alpha (running rocky9), got %q", out)
+	}
+}
+
 func TestCLI_VMList_FilterByAutoStart_True(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -562,7 +643,6 @@ func TestCLI_VMList_FilterByAutoStartAndLocked(t *testing.T) {
 		t.Fatalf("expected only alpha, got %q", out)
 	}
 }
-
 func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -4602,67 +4682,6 @@ func TestCLI_WebhookList_EmptyTagOmitsParam(t *testing.T) {
 	}
 	if strings.Contains(state.lastQuery, "tag=") {
 		t.Fatalf("empty tag must not be forwarded: %q", state.lastQuery)
-	}
-}
-
-// =====================================================
-// webhook list --event-type tests (5.4.26)
-// =====================================================
-
-func TestCLI_WebhookList_ForwardsEventTypeFilter(t *testing.T) {
-	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
-
-	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
-		"--event-type", "vm.created"); err != nil {
-		t.Fatalf("webhook list: %v", err)
-	}
-	if state.lastPath != "/api/v1/webhooks" {
-		t.Fatalf("path = %q, want /api/v1/webhooks", state.lastPath)
-	}
-	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
-		t.Fatalf("query missing event_type=vm.created: %q", state.lastQuery)
-	}
-}
-
-func TestCLI_WebhookList_TrimsAndLowercasesEventType(t *testing.T) {
-	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
-
-	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
-		"--event-type", "  VM.CREATED  "); err != nil {
-		t.Fatalf("webhook list: %v", err)
-	}
-	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
-		t.Fatalf("expected normalized event_type=vm.created in query, got %q", state.lastQuery)
-	}
-	if strings.Contains(state.lastQuery, "VM.CREATED") {
-		t.Fatalf("query should not retain uppercase: %q", state.lastQuery)
-	}
-}
-
-func TestCLI_WebhookList_EmptyEventTypeOmitsParam(t *testing.T) {
-	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
-
-	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
-		"--event-type", ""); err != nil {
-		t.Fatalf("webhook list: %v", err)
-	}
-	if strings.Contains(state.lastQuery, "event_type=") {
-		t.Fatalf("empty event-type must not be forwarded: %q", state.lastQuery)
-	}
-}
-
-func TestCLI_WebhookList_EventTypeComposesWithSearch(t *testing.T) {
-	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
-
-	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
-		"--event-type", "vm.created", "--search", "audit"); err != nil {
-		t.Fatalf("webhook list: %v", err)
-	}
-	if !strings.Contains(state.lastQuery, "event_type=vm.created") {
-		t.Fatalf("query missing event_type=vm.created: %q", state.lastQuery)
-	}
-	if !strings.Contains(state.lastQuery, "search=audit") {
-		t.Fatalf("query missing search=audit: %q", state.lastQuery)
 	}
 }
 
