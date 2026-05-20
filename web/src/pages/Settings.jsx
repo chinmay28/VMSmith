@@ -24,6 +24,14 @@ export default function Settings() {
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
 
+  // Explicit event-type filter (5.4.26) — case-insensitive exact-match against
+  // entries in each webhook's `event_types` list. Catch-all webhooks (empty
+  // event_types) are NOT matched, mirroring the bulk_delete selector. Both
+  // the live input and the debounced value are tracked separately so typing
+  // doesn't thrash the request loop.
+  const [eventTypeInput, setEventTypeInput] = useState(searchParams.get('event_type') || '');
+  const [eventTypeFilter, setEventTypeFilter] = useState(searchParams.get('event_type') || '');
+
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
   // snapshots, templates, port forwards). Empty == "use the daemon default".
@@ -57,25 +65,32 @@ export default function Settings() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  useEffect(() => {
+    const trimmed = eventTypeInput.trim();
+    const id = setTimeout(() => setEventTypeFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [eventTypeInput]);
+
   // Whenever the filter / sort changes, reset to page 1 so the user doesn't
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    if (eventTypeFilter) next.set('event_type', eventTypeFilter); else next.delete('event_type');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -195,6 +210,28 @@ export default function Settings() {
             </button>
           )}
         </div>
+        <div className="relative min-w-[180px]">
+          <input
+            type="search"
+            value={eventTypeInput}
+            onChange={(e) => setEventTypeInput(e.target.value)}
+            placeholder="Filter by event type…"
+            className="input w-full pl-2.5 pr-8 py-1.5 text-sm"
+            data-testid="webhook-list-event-type-filter"
+            aria-label="Filter by event type"
+          />
+          {eventTypeInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setEventTypeInput('')}
+              data-testid="webhook-list-event-type-filter-clear"
+              aria-label="Clear event-type filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Sort
           <select
@@ -231,7 +268,13 @@ export default function Settings() {
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : hooks.length === 0 ? (
         <div className="card">
-          {searchFilter ? (
+          {eventTypeFilter ? (
+            <EmptyState
+              icon={Search}
+              title="No webhooks subscribed"
+              description={`No webhooks explicitly subscribe to "${eventTypeFilter}". Catch-all webhooks (no event-type filter) are not matched.`}
+            />
+          ) : searchFilter ? (
             <EmptyState
               icon={Search}
               title="No webhooks match your search"

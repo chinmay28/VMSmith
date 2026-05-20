@@ -2034,6 +2034,63 @@ test.describe("Settings — Webhooks", () => {
     await expect(page.getByText(/No webhooks match your search/i)).toBeVisible();
   });
 
+  // 5.4.26 — explicit-membership event-type filter on the webhook list.
+  test("event-type filter narrows the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    // Seed three webhooks: one subscribed to vm.created only, one subscribed
+    // to image.created, and one catch-all (no event_types). The catch-all
+    // matches every event behaviourally, but must NOT be returned by the
+    // explicit-membership filter.
+    const seed = async (url, types) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (types) await page.getByTestId("webhook-event-types-input").fill(types);
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://vm.example.com/hook", "vm.created");
+    await seed("https://image.example.com/hook", "image.created");
+    await seed("https://catchall.example.com/hook", ""); // catch-all (no event_types)
+
+    // All three rows render initially.
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Filter by vm.created — only the vm subscriber should remain; the
+    // catch-all webhook must not appear even though it would fire for the
+    // event behaviourally.
+    await page.getByTestId("webhook-list-event-type-filter").fill("vm.created");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("vm.example.com");
+
+    // URL round-trip — ?event_type=vm.created is reflected in the address bar.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("event_type")).toBe("vm.created");
+
+    // Case-insensitive matching: VM.CREATED is normalised to vm.created on
+    // the wire so the daemon returns the same row.
+    await page.getByTestId("webhook-list-event-type-filter").fill("VM.CREATED");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+
+    // Clear button restores the unfiltered view.
+    await page.getByTestId("webhook-list-event-type-filter-clear").click();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+    await expect.poll(async () => new URL(page.url()).searchParams.get("event_type")).toBe(null);
+
+    // No-match shows the dedicated empty-state copy referencing the filter.
+    await page.getByTestId("webhook-list-event-type-filter").fill("snapshot.taken");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(0);
+    await expect(page.getByText(/No webhooks explicitly subscribe/i)).toBeVisible();
+  });
+
   // 5.4.15 — sortable webhook list (sort + order dropdowns).
   test("sort dropdowns reorder the webhook list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);

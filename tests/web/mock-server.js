@@ -1156,6 +1156,7 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/webhooks" && method === "GET") {
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
+    const eventTypeFilter = (url.searchParams.get("event_type") || "").trim().toLowerCase();
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
     const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
@@ -1174,6 +1175,13 @@ const server = http.createServer(async (req, res) => {
     if (tagFilter) {
       hooks = hooks.filter((wh) => Array.isArray(wh.tags)
         && wh.tags.some((t) => typeof t === "string" && t.toLowerCase() === tagFilter));
+    }
+    if (eventTypeFilter) {
+      // Mirror internal/api/handlers_webhook.go::webhookSubscribedToEventType:
+      // case-insensitive exact-match on the event_types filter list. Catch-all
+      // webhooks (empty event_types) are NOT matched.
+      hooks = hooks.filter((wh) => Array.isArray(wh.event_types)
+        && wh.event_types.some((t) => typeof t === "string" && t.trim().toLowerCase() === eventTypeFilter));
     }
     if (needle) {
       // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types
