@@ -23,6 +23,8 @@ export default function VMList() {
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [imageInput, setImageInput] = useState(searchParams.get('image') || '');
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
+  const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
+  const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [selectedIds, setSelectedIds] = useState([]);
@@ -32,8 +34,8 @@ export default function VMList() {
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
   const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, autoStart: autoStartFilter, locked: lockedFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, autoStartFilter, lockedFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, autoStart: autoStartFilter, locked: lockedFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -66,7 +68,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, autoStartFilter, lockedFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -89,15 +91,24 @@ export default function VMList() {
   }, [imageInput]);
 
   useEffect(() => {
+    const trimmed = defaultUserInput.trim();
+    const handle = setTimeout(() => {
+      setDefaultUserFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [defaultUserInput]);
+
+  useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
+    if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, autoStartFilter, lockedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -177,6 +188,28 @@ export default function VMList() {
               onClick={() => setImageInput('')}
               data-testid="vm-list-image-filter-clear"
               aria-label="Clear image filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-full sm:w-60">
+          <input
+            type="search"
+            value={defaultUserInput}
+            onChange={(e) => setDefaultUserInput(e.target.value)}
+            placeholder="Filter by default user…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="vm-list-default-user-filter"
+            aria-label="Filter by default user"
+          />
+          {defaultUserInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setDefaultUserInput('')}
+              data-testid="vm-list-default-user-filter-clear"
+              aria-label="Clear default user filter"
             >
               <X size={13} />
             </button>

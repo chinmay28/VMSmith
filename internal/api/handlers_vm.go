@@ -279,7 +279,8 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	statusFilter := strings.TrimSpace(strings.ToLower(q.Get("status")))
 	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || autoStartSet || lockedSet {
+	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -297,6 +298,15 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if !matchedTag {
+					continue
+				}
+			}
+			if defaultUserFilter != "" {
+				effectiveUser := vm.Spec.DefaultUser
+				if effectiveUser == "" {
+					effectiveUser = "root"
+				}
+				if !strings.EqualFold(effectiveUser, defaultUserFilter) {
 					continue
 				}
 			}
