@@ -1067,9 +1067,70 @@ async function main() {
     }, page);
 
     // The search test left two seeded webhooks in the mock server state
-    // (audit + metrics). The bulk-delete tests below need a clean slate so
-    // their `count === 3` assertions hold — reset by hitting `/` which calls
-    // `resetState()` server-side, then re-navigate to Settings.
+    // (audit + metrics). Reset before the event-type-filter test so its
+    // explicit-membership count assertions hold.
+    await page.close();
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+
+    // 5.4.26 — explicit-membership ?event_type= filter mirrored on the
+    // Settings page.
+    await runTest("webhook event-type filter narrows the list and excludes catch-alls", async (p) => {
+      await p.locator('[data-testid="nav-settings"]').click();
+      await p.waitForTimeout(400);
+
+      const seed = async (url, types) => {
+        await p.locator('[data-testid="add-webhook-btn"]').click();
+        await p.waitForTimeout(150);
+        await p.locator('[data-testid="webhook-url-input"]').fill(url);
+        await p.locator('[data-testid="webhook-secret-input"]').fill("k");
+        if (types) await p.locator('[data-testid="webhook-event-types-input"]').fill(types);
+        await p.locator('[data-testid="webhook-create-submit"]').click();
+        await p.waitForTimeout(500);
+      };
+      // vm.created subscriber, image.created subscriber, and a catch-all
+      // (no event_types). The catch-all matches every event behaviourally
+      // but must NOT be returned by the explicit-membership filter.
+      await seed("https://vm.example.com/hook", "vm.created");
+      await seed("https://image.example.com/hook", "image.created");
+      await seed("https://catchall.example.com/hook", "");
+
+      const allRows = p.locator('[data-testid^="webhook-row-"]');
+      await assert((await allRows.count()) === 3, `expected 3 seeded rows, got ${await allRows.count()}`);
+
+      // Filter by vm.created — only the explicit vm subscriber remains.
+      await p.locator('[data-testid="webhook-list-event-type-filter"]').fill("vm.created");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 1, `expected 1 row after event_type filter, got ${await allRows.count()}`);
+      const vmText = (await allRows.first().textContent()) || "";
+      await assert(vmText.includes("vm.example.com"), `row should be the vm webhook, got: ${vmText}`);
+
+      // URL round-trip: ?event_type=vm.created lives in the address bar.
+      const urlAfter = new URL(p.url());
+      await assert(urlAfter.searchParams.get("event_type") === "vm.created",
+        `expected ?event_type=vm.created, got ${urlAfter.searchParams.get("event_type")}`);
+
+      // Clear restores all three rows including the catch-all.
+      await p.locator('[data-testid="webhook-list-event-type-filter-clear"]').click();
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 3, `expected 3 rows after clear, got ${await allRows.count()}`);
+
+      // Case-insensitive match: VM.CREATED is normalised on the wire.
+      await p.locator('[data-testid="webhook-list-event-type-filter"]').fill("VM.CREATED");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 1, `expected 1 row after case-insensitive filter, got ${await allRows.count()}`);
+
+      // No-match shows the dedicated empty-state copy referencing the filter.
+      await p.locator('[data-testid="webhook-list-event-type-filter"]').fill("snapshot.taken");
+      await p.waitForTimeout(450);
+      await assert((await allRows.count()) === 0, "expected zero rows for no-match event type");
+      const empty = (await p.locator('text=/No webhooks explicitly subscribe/i').first().textContent()) || "";
+      await assert(empty.length > 0, "expected explicit-membership empty-state copy");
+    }, page);
+
+    // Reset state for the bulk-delete suite — the event-type test left three
+    // webhooks behind.
     await page.close();
     page = await context.newPage();
     await page.goto(BASE);

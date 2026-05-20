@@ -33,6 +33,8 @@ paths:
         - $ref: '#/components/parameters/StatusFilter'
         - $ref: '#/components/parameters/SearchFilter'
         - $ref: '#/components/parameters/ImageFilter'
+        - $ref: '#/components/parameters/AutoStartFilter'
+        - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
         - $ref: '#/components/parameters/SortOrder'
         - $ref: '#/components/parameters/Page'
@@ -1219,6 +1221,21 @@ paths:
             Whitespace-trimmed. Applied before the search filter so the
             response reflects the intersection of tag + search.
         - in: query
+          name: event_type
+          schema:
+            type: string
+          required: false
+          description: |
+            Case-insensitive exact-match filter on the webhook's
+            `event_types` filter list (a webhook matches when any entry in
+            the list equals the value). Whitespace-trimmed. Catch-all
+            webhooks (empty `event_types`) are NOT matched — mirrors the
+            bulk_delete `event_type` selector semantics: this is an
+            explicit-membership query ("which webhooks listen for
+            vm.created"), not "which webhooks will fire for this event".
+            Applied between `tag` and `search` so the post-filter
+            `X-Total-Count` stays correct.
+        - in: query
           name: search
           schema:
             type: string
@@ -1768,6 +1785,32 @@ components:
         and the sort + pagination params.
       schema:
         type: string
+    AutoStartFilter:
+      name: auto_start
+      in: query
+      description: |
+        Tristate boolean filter on the VM's `auto_start` flag. Accepts
+        `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+        absent or whitespace-only disables the filter so every VM is
+        returned. Anything else returns 400 `invalid_auto_start`.
+        Composes additively with every other list filter so
+        `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
+        enum: ["true", "false"]
+    LockedFilter:
+      name: locked
+      in: query
+      description: |
+        Tristate boolean filter on the VM's `locked` (delete-protection)
+        flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+        aliases); absent or whitespace-only disables the filter so every
+        VM is returned. Anything else returns 400 `invalid_locked`.
+        Composes additively with every other list filter so
+        `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
+        enum: ["true", "false"]
     VMSort:
       name: sort
       in: query
