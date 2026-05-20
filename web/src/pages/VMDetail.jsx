@@ -56,6 +56,10 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_search') || '';
   });
+  const [portProtocol, setPortProtocol] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_protocol') || '';
+  });
   const [portPage, setPortPage] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     const raw = Number.parseInt(sp.get('port_page') || '', 10);
@@ -67,15 +71,15 @@ export default function VMDetail() {
     return Number.isFinite(raw) && raw > 0 ? raw : 25;
   });
   const { data: portResponse, refresh: refreshPorts } = useFetch(
-    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, page: portPage, perPage: portPerPage }),
-    [id, portSort, portOrder, portSearch, portPage, portPerPage],
+    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, protocol: portProtocol, page: portPage, perPage: portPerPage }),
+    [id, portSort, portOrder, portSearch, portProtocol, portPage, portPerPage],
     10000,
   );
   const portList = portResponse?.data || [];
   const portTotal = portResponse?.meta?.totalCount ?? portList.length;
   // Whenever filter / sort / search changes, snap back to page 1 so the user
   // never lands beyond the post-filter page count.
-  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portPerPage]);
+  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portProtocol, portPerPage]);
 
   // Debounce the port-forward search box. `portSearchInput` is what the user
   // types; `portSearch` is the committed query that drives the API call.
@@ -90,13 +94,14 @@ export default function VMDetail() {
     if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
     if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
     if (portSearch) sp.set('port_search', portSearch); else sp.delete('port_search');
+    if (portProtocol) sp.set('port_protocol', portProtocol); else sp.delete('port_protocol');
     if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
     if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, portPage, portPerPage, snapSearch]);
+  }, [portSort, portOrder, portSearch, portProtocol, portPage, portPerPage, snapSearch]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -373,6 +378,17 @@ export default function VMDetail() {
               >
                 <option value="asc">Asc</option>
                 <option value="desc">Desc</option>
+              </select>
+              <select
+                className="form-select text-xs"
+                value={portProtocol}
+                onChange={(e) => setPortProtocol(e.target.value)}
+                data-testid="port-protocol-filter"
+                aria-label="Filter port forwards by protocol"
+              >
+                <option value="">Any protocol</option>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
               </select>
               <button className="btn-ghost text-xs" onClick={() => setShowPortModal(true)} data-testid="btn-new-port">
                 <Plus size={13} /> Add

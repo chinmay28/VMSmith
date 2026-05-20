@@ -8935,6 +8935,141 @@ func TestListPorts_FilterBySearch_IDAndVMIDNotInHaystack(t *testing.T) {
 }
 
 // ============================================================
+// Port-forward list ?protocol= filter tests (5.4.25)
+// ============================================================
+
+func seedProtocolPorts(t *testing.T, s *store.Store, vmID string) {
+	t.Helper()
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8080", VMID: vmID, HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Description: "http", Tags: []string{"web"}})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8443", VMID: vmID, HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Description: "https", Tags: []string{"web"}})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/53000", VMID: vmID, HostPort: 53000, GuestPort: 53, GuestIP: "192.168.100.10", Protocol: types.ProtocolUDP, Description: "dns"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/123000", VMID: vmID, HostPort: 123000, GuestPort: 123, GuestIP: "192.168.100.10", Protocol: types.ProtocolUDP, Description: "ntp"})
+}
+
+func TestListPorts_FilterByProtocol_TCP(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-tcp")
+
+	got := listPortsWithQuery(t, ts, "vm-proto-tcp", "protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 tcp rules, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolTCP {
+			t.Errorf("unexpected protocol in tcp filter: %s", p.Protocol)
+		}
+	}
+}
+
+func TestListPorts_FilterByProtocol_UDP(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-udp")
+
+	got := listPortsWithQuery(t, ts, "vm-proto-udp", "protocol=udp")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 udp rules, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolUDP {
+			t.Errorf("unexpected protocol in udp filter: %s", p.Protocol)
+		}
+	}
+}
+
+func TestListPorts_FilterByProtocol_CaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-case")
+
+	got := listPortsWithQuery(t, ts, "vm-proto-case", "protocol=TCP")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 tcp rules with uppercase filter, got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByProtocol_WhitespaceTrimmed(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-trim")
+
+	got := listPortsWithQuery(t, ts, "vm-proto-trim", "protocol=%20udp%20")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 udp rules with padded filter, got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByProtocol_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-proto-empty", "protocol=")
+	if len(got) != 4 {
+		t.Fatalf("empty protocol filter should return all 4 rules, got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByProtocol_InvalidReturns400(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-bad")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-proto-bad/ports?protocol=sctp")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_protocol" {
+		t.Errorf("error code = %q, want invalid_protocol", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByProtocol_ComposesWithTag(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedPortForward(t, s, &types.PortForward{ID: "pf-a", VMID: "vm-proto-cmb", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"web"}})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-b", VMID: "vm-proto-cmb", HostPort: 53000, GuestPort: 53, GuestIP: "192.168.100.10", Protocol: types.ProtocolUDP, Tags: []string{"web"}})
+	seedPortForward(t, s, &types.PortForward{ID: "pf-c", VMID: "vm-proto-cmb", HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"admin"}})
+
+	got := listPortsWithQuery(t, ts, "vm-proto-cmb", "protocol=tcp&tag=web")
+	if len(got) != 1 || got[0].ID != "pf-a" {
+		t.Fatalf("intersection = %+v, want [pf-a]", got)
+	}
+}
+
+func TestListPorts_FilterByProtocol_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+
+	seedProtocolPorts(t, s, "vm-proto-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-proto-cnt/ports?protocol=tcp")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
 // Port-forward list pagination tests (5.4.20)
 // ============================================================
 

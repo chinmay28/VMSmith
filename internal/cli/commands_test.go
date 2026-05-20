@@ -3743,6 +3743,107 @@ func TestCLI_PortList_FilterByTag(t *testing.T) {
 	}
 }
 
+func TestCLI_PortList_FilterByProtocol_TCP(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--protocol", "tcp")
+	if err != nil {
+		t.Fatalf("port list --protocol tcp: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("expected header + 2 tcp rows, got %d rows from %q", len(rows), out)
+	}
+	for _, row := range rows[1:] {
+		if row[3] != "tcp" {
+			t.Errorf("unexpected protocol column %q in tcp filter", row[3])
+		}
+	}
+}
+
+func TestCLI_PortList_FilterByProtocol_UDP(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--protocol", "udp")
+	if err != nil {
+		t.Fatalf("port list --protocol udp: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 udp row, got %d rows from %q", len(rows), out)
+	}
+	if rows[1][3] != "udp" {
+		t.Errorf("row protocol = %q, want udp", rows[1][3])
+	}
+}
+
+func TestCLI_PortList_FilterByProtocol_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--protocol", "UDP")
+	if err != nil {
+		t.Fatalf("port list --protocol UDP: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 {
+		t.Fatalf("expected header + 1 udp row from uppercase flag, got %d", len(rows))
+	}
+}
+
+func TestCLI_PortList_FilterByProtocol_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-s", "--protocol", "")
+	if err != nil {
+		t.Fatalf("port list --protocol '': %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 4 {
+		t.Fatalf("empty protocol should return all 3 rules + header, got %d rows", len(rows))
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidProtocol(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--protocol", "sctp")
+	if err == nil {
+		t.Fatalf("expected invalid protocol to error")
+	}
+	if !strings.Contains(err.Error(), "invalid --protocol") {
+		t.Errorf("error = %v, want 'invalid --protocol' message", err)
+	}
+}
+
+func TestCLI_PortList_FilterByProtocol_ComposesWithTag(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	s.PutPortForward(&types.PortForward{ID: "pf-a", VMID: "vm-pcmb", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"web"}})
+	s.PutPortForward(&types.PortForward{ID: "pf-b", VMID: "vm-pcmb", HostPort: 53000, GuestPort: 53, GuestIP: "192.168.100.10", Protocol: types.ProtocolUDP, Tags: []string{"web"}})
+	s.PutPortForward(&types.PortForward{ID: "pf-c", VMID: "vm-pcmb", HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP, Tags: []string{"admin"}})
+
+	out, err := runCLI("port", "list", "vm-pcmb", "--protocol", "tcp", "--tag", "web")
+	if err != nil {
+		t.Fatalf("port list --protocol --tag: %v", err)
+	}
+	if !strings.Contains(out, "pf-a") {
+		t.Errorf("expected pf-a in output, got %q", out)
+	}
+	if strings.Contains(out, "pf-b") || strings.Contains(out, "pf-c") {
+		t.Errorf("expected only pf-a, got %q", out)
+	}
+}
+
 func TestCLI_PortList_ShowsTagsColumn(t *testing.T) {
 	s, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()
