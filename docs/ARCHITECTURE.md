@@ -677,6 +677,52 @@ make dev-web   # Vite dev server on :3000, proxies /api/* → :8080
 
 ---
 
+### 9.1 Console Access Foundation
+
+VMSmith now ships the first half of the browser-console stack: an in-memory
+single-use ticket store (`internal/console/`) plus `POST /api/v1/vms/{id}/console/ticket`.
+The daemon still keeps libvirt's VNC listener bound to loopback, and the browser
+never talks to the VNC socket directly.
+
+#### Current ticket flow
+
+1. The browser calls `POST /api/v1/vms/{id}/console/ticket` with the normal API-key auth.
+2. The handler verifies the VM exists and is currently `running`.
+3. The console store issues a random single-use ticket scoped to:
+   - the VM ID
+   - the caller's API key
+   - a short expiry window
+4. The API returns:
+   - `ticket`
+   - `expires_at`
+   - `websocket_url`
+
+Tickets are consumed on first successful use and periodically swept by a janitor
+goroutine, so stale URLs naturally die off.
+
+#### Intended proxy design
+
+The remaining console work is designed around an authenticated websocket proxy,
+not a directly exposed VNC port:
+
+- browser opens `GET /api/v1/vms/{id}/console?ticket=...`
+- daemon validates and consumes the ticket
+- daemon resolves the VM's current loopback-only VNC endpoint
+- daemon bridges websocket frames to the local VNC TCP socket
+- daemon tracks active sessions so VM stop/delete or daemon shutdown can tear them down cleanly
+
+That shape keeps two important invariants in place:
+
+1. the host's VNC socket stays private on `127.0.0.1`
+2. browser access remains time-limited, VM-scoped, and auditable through the daemon
+
+#### Security notes
+
+- Query-param secrets like `ticket=` must be redacted from request logs.
+- Console tickets are intentionally short-lived and single-use.
+- The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`.
+- Future websocket sessions should be counted alongside SSE clients in host-level stats.
+
 ### 10. Configuration
 
 File: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
