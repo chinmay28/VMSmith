@@ -738,6 +738,10 @@ const server = http.createServer(async (req, res) => {
     if (tag) {
       list = list.filter(img => (img.tags || []).some(t => String(t).toLowerCase() === tag));
     }
+    const sourceVM = (url.searchParams.get("source_vm") || "").trim().toLowerCase();
+    if (sourceVM) {
+      list = list.filter(img => String(img.source_vm || "").toLowerCase() === sourceVM);
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(img => {

@@ -591,6 +591,44 @@ async function main() {
 
     await page.close();
 
+    // ImageList source_vm filter (5.4.27) — reload the page so the mock-server
+    // seed is fresh (the bulk-delete test above removed img-2 from the in-
+    // memory store).
+    page = await context.newPage();
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="nav-images"]').click();
+    await page.waitForTimeout(400);
+
+    await runTest("image source-vm filter narrows the image list and round-trips through the URL", async (p) => {
+      // page.goto(BASE) above re-seeded the mock-server state, so both
+      // ubuntu-base (source_vm=vm-1) and rocky-experimental (no source_vm)
+      // are present.
+      await assertVisible(p, "image-row-ubuntu-base");
+      await assertVisible(p, "image-row-rocky-experimental");
+      await assertVisible(p, "image-list-source-vm");
+
+      // Filter by vm-1 — only ubuntu-base survives.
+      await p.locator('[data-testid="image-list-source-vm"]').fill("vm-1");
+      await p.waitForTimeout(400); // debounce settles
+      await assertVisible(p, "image-row-ubuntu-base");
+      await assertNotVisible(p, "image-row-rocky-experimental");
+      const url = new URL(p.url());
+      await assert(url.searchParams.get("source_vm") === "vm-1",
+        `expected ?source_vm=vm-1 in URL, got ${url.search}`);
+
+      // Clear via the X button — rocky-experimental returns and the URL
+      // drops the param.
+      await p.locator('[data-testid="image-list-source-vm-clear"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "image-row-rocky-experimental");
+      const urlAfter = new URL(p.url());
+      await assert(!urlAfter.searchParams.has("source_vm"),
+        `expected source_vm param to be cleared, got ${urlAfter.search}`);
+    }, page);
+
+    await page.close();
+
     // ================== Templates Tests ==================
     console.log("\nTemplates:");
 

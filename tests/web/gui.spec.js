@@ -1521,6 +1521,44 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
   });
+
+  // 5.4.27 — `?source_vm=` filter on /api/v1/images. The mock seeds img-1
+  // (ubuntu-base) with source_vm = "vm-1" and img-2 (rocky-experimental) with
+  // no source_vm, so filtering by "vm-1" should drop the rocky row.
+  test("source-vm filter narrows the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Both seeded images visible initially.
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Filter by the bastion VM ID — only the ubuntu-base image (exported from
+    // vm-1) survives. The rocky image has no source_vm so it drops out.
+    await page.getByTestId("image-list-source-vm").fill("vm-1");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).toContain("source_vm=vm-1");
+
+    // Mixed-case input matches case-insensitively.
+    await page.getByTestId("image-list-source-vm").fill("VM-1");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+
+    // Clear the filter — rocky comes back and the URL drops the param.
+    await page.getByTestId("image-list-source-vm-clear").click();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("source_vm=");
+  });
+
+  test("source-vm filter empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("image-list-source-vm").fill("vm-does-not-exist");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByText("No images were exported from source VM \"vm-does-not-exist\".")).toBeVisible();
+  });
 });
 
 // ============================================================

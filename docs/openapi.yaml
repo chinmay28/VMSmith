@@ -855,6 +855,16 @@ paths:
             type: string
           description: Filter to images carrying this tag (case-insensitive).
         - in: query
+          name: source_vm
+          schema:
+            type: string
+          description: |
+            Case-insensitive exact-match on the image's `source_vm` field —
+            i.e. the VM ID the image was exported from. Whitespace is trimmed;
+            an empty value disables the filter. Composes additively with
+            `tag`, `search`, `sort`, and pagination so `X-Total-Count` reflects
+            the post-filter population.
+        - in: query
           name: search
           schema:
             type: string
@@ -862,7 +872,8 @@ paths:
             Case-insensitive substring filter on image name, description, and
             tags. Whitespace is trimmed; ID is intentionally excluded so opaque
             `img-<unix-nano>` strings don't produce numeric false positives.
-            Composes additively with `tag`, `sort`, and pagination.
+            Composes additively with `tag`, `source_vm`, `sort`, and
+            pagination.
       responses:
         '200':
           description: Image list

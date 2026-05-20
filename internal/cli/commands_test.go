@@ -2232,6 +2232,97 @@ func TestCLI_ImageList_FilterBySearch_CombinesWithTag(t *testing.T) {
 	}
 }
 
+// --- Image list --source-vm filter (5.4.27) ---
+
+func TestCLI_ImageList_FilterBySourceVM_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-a", Name: "from-bastion", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000001", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-b", Name: "from-worker", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000002", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--source-vm", "vm-1700000000000000001")
+	if err != nil {
+		t.Fatalf("image list --source-vm: %v", err)
+	}
+	if !strings.Contains(out, "from-bastion") || strings.Contains(out, "from-worker") {
+		t.Fatalf("filter result = %q, want only from-bastion", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySourceVM_IsCaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-a", Name: "from-mixed", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "VM-ABC123", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-b", Name: "from-other", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000002", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--source-vm", "vm-abc123")
+	if err != nil {
+		t.Fatalf("image list --source-vm: %v", err)
+	}
+	if !strings.Contains(out, "from-mixed") || strings.Contains(out, "from-other") {
+		t.Fatalf("filter result = %q, want only from-mixed", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySourceVM_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-a", Name: "from-bastion", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000001", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-b", Name: "from-worker", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000002", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-c", Name: "uploaded", Path: "/tmp/c.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: now}) // no SourceVM
+
+	out, err := runCLI("image", "list", "--source-vm", "   ")
+	if err != nil {
+		t.Fatalf("image list --source-vm: %v", err)
+	}
+	if !strings.Contains(out, "from-bastion") || !strings.Contains(out, "from-worker") || !strings.Contains(out, "uploaded") {
+		t.Fatalf("empty filter should be no-op, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySourceVM_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-a", Name: "from-bastion", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000001", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--source-vm", "vm-does-not-exist")
+	if err != nil {
+		t.Fatalf("image list --source-vm: %v", err)
+	}
+	if strings.Contains(out, "from-bastion") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySourceVM_ComposesWithTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-a", Name: "bastion-release", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000001", Tags: []string{"release"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-b", Name: "bastion-rc", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000001", Tags: []string{"rc"}, CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-c", Name: "worker-release", Path: "/tmp/c.qcow2", SizeBytes: 1024, Format: "qcow2", SourceVM: "vm-1700000000000000002", Tags: []string{"release"}, CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--source-vm", "vm-1700000000000000001", "--tag", "release")
+	if err != nil {
+		t.Fatalf("image list --source-vm --tag: %v", err)
+	}
+	if !strings.Contains(out, "bastion-release") {
+		t.Fatalf("expected bastion-release (intersection of source-vm+tag), got %q", out)
+	}
+	if strings.Contains(out, "bastion-rc") || strings.Contains(out, "worker-release") {
+		t.Fatalf("did not expect non-intersecting images, got %q", out)
+	}
+}
+
 func TestCLI_TemplateCreate_List_Delete(t *testing.T) {
 	s, _, cleanup := withTestStorage(t)
 	defer cleanup()
