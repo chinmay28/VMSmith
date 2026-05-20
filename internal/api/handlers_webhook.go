@@ -133,6 +133,15 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     Whitespace-trimmed. Applied before the search filter so `X-Total-Count`
 //     reflects the post-filter population. Mirrors the `?tag=` surface that
 //     VMs (2.2.4), images (2.2.7), and templates (2.2.10) already ship.
+//   - event_type=<value>  case-insensitive exact-match filter on the
+//     webhook's `event_types` filter list (a webhook matches when any entry
+//     in the list equals the value). Whitespace-trimmed. Catch-all webhooks
+//     (empty `event_types`) are NOT matched — mirroring the bulk_delete
+//     `event_type` selector semantics, the operator intent here is
+//     explicit-membership lookup ("which webhooks listen for vm.created"),
+//     not "which webhooks will fire for this event". Applied between `?tag=`
+//     and `?search=` so the post-filter / pre-pagination `X-Total-Count`
+//     stays correct.
 //   - search=<value>  case-insensitive substring filter applied to `url`,
 //     `description`, `event_types`, and `tags`. Trimmed + lowercased once
 //     before delegating to the shared predicate. Mirrors the symmetric search
@@ -171,11 +180,15 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	eventTypeFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("event_type")))
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 
 	out := make([]*types.Webhook, 0, len(hooks))
 	for _, h := range hooks {
 		if tagFilter != "" && !webhookHasTag(h, tagFilter) {
+			continue
+		}
+		if eventTypeFilter != "" && !webhookSubscribedToEventType(h, eventTypeFilter) {
 			continue
 		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {
@@ -206,6 +219,25 @@ func webhookHasTag(wh *types.Webhook, lowercased string) bool {
 	}
 	for _, t := range wh.Tags {
 		if strings.ToLower(t) == lowercased {
+			return true
+		}
+	}
+	return false
+}
+
+// webhookSubscribedToEventType reports whether the webhook's `event_types`
+// filter list contains an entry case-insensitively equal to the (already
+// lowercased + trimmed) needle. Catch-all webhooks (nil/empty event_types)
+// return false — mirroring the bulk_delete `event_type` selector semantics:
+// the operator intent for this filter is explicit-membership lookup, not
+// "which webhooks will fire for this event". Use the existing `?search=`
+// filter (or no filter at all) when looking for behavioural matches.
+func webhookSubscribedToEventType(wh *types.Webhook, lowercased string) bool {
+	if wh == nil {
+		return false
+	}
+	for _, t := range wh.EventTypes {
+		if strings.ToLower(strings.TrimSpace(t)) == lowercased {
 			return true
 		}
 	}

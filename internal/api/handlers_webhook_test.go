@@ -1243,6 +1243,183 @@ func TestListWebhooks_FilterByTag_ComposesWithSearch(t *testing.T) {
 	}
 }
 
+// =====================================================
+// `?event_type=` filter (5.4.26)
+// =====================================================
+//
+// Mirrors the bulk_delete `event_type` selector: case-insensitive exact-match
+// against entries in `event_types`. Catch-all webhooks (empty event_types)
+// are NOT matched.
+
+func seedEventTypeWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	now := time.Now().UTC()
+	hooks := []*types.Webhook{
+		{
+			ID: "wh-vm-only", URL: "https://a.example.com", Secret: "k", Active: true,
+			EventTypes: []string{"vm.started", "vm.stopped"},
+			CreatedAt:  now,
+		},
+		{
+			ID: "wh-vm-and-image", URL: "https://b.example.com", Secret: "k", Active: true,
+			EventTypes: []string{"vm.created", "image.created"},
+			CreatedAt:  now.Add(time.Second),
+		},
+		{
+			ID: "wh-image-only", URL: "https://c.example.com", Secret: "k", Active: true,
+			EventTypes: []string{"image.created"},
+			CreatedAt:  now.Add(2 * time.Second),
+		},
+		{
+			ID: "wh-catchall", URL: "https://d.example.com", Secret: "k", Active: true,
+			EventTypes: nil, // matches every event behaviourally, but NOT this filter
+			CreatedAt:  now.Add(3 * time.Second),
+		},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByEventType_ExactMatch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=image.created")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 image.created subscribers, got %d: %+v", len(hooks), hooks)
+	}
+	got := map[string]bool{}
+	for _, h := range hooks {
+		got[h.ID] = true
+	}
+	if !got["wh-vm-and-image"] || !got["wh-image-only"] {
+		t.Fatalf("missing expected subscribers in %v", got)
+	}
+}
+
+func TestListWebhooks_FilterByEventType_CaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=IMAGE.CREATED")
+	if len(hooks) != 2 {
+		t.Fatalf("expected case-insensitive match to find 2, got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByEventType_WhitespaceTrimmed(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=%20%20vm.started%20%20")
+	if len(hooks) != 1 || hooks[0].ID != "wh-vm-only" {
+		t.Fatalf("expected whitespace-trimmed filter to match wh-vm-only, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByEventType_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=")
+	if len(hooks) != 4 {
+		t.Fatalf("expected empty filter to return all 4, got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByEventType_NoMatch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=snapshot.taken")
+	if len(hooks) != 0 {
+		t.Fatalf("expected no matches, got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByEventType_CatchAllExcluded(t *testing.T) {
+	// Catch-all webhooks (nil/empty event_types) match every event
+	// behaviourally but are NOT swept by the explicit-membership filter.
+	// Mirrors the bulk_delete `event_type` selector semantics.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=vm.created")
+	if len(hooks) != 1 || hooks[0].ID != "wh-vm-and-image" {
+		t.Fatalf("catch-all webhook leaked into explicit-membership filter: %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByEventType_ComposesWithTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-prod-vm", URL: "https://a", Secret: "k", Active: true,
+		Tags:       []string{"production"},
+		EventTypes: []string{"vm.created"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-staging-vm", URL: "https://b", Secret: "k", Active: true,
+		Tags:       []string{"staging"},
+		EventTypes: []string{"vm.created"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-prod-image", URL: "https://c", Secret: "k", Active: true,
+		Tags:       []string{"production"},
+		EventTypes: []string{"image.created"},
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "tag=production&event_type=vm.created")
+	if len(hooks) != 1 || hooks[0].ID != "wh-prod-vm" {
+		t.Fatalf("expected intersection of tag=production AND event_type=vm.created to be wh-prod-vm only, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByEventType_ComposesWithSearch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-audit-vm", URL: "https://hooks.example.com/audit", Secret: "k", Active: true,
+		EventTypes: []string{"vm.created"},
+	})
+	fake.PutWebhook(&types.Webhook{
+		ID: "wh-metrics-vm", URL: "https://hooks.example.com/metrics", Secret: "k", Active: true,
+		EventTypes: []string{"vm.created"},
+	})
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "event_type=vm.created&search=audit")
+	if len(hooks) != 1 || hooks[0].ID != "wh-audit-vm" {
+		t.Fatalf("expected intersection of event_type=vm.created AND search=audit to be wh-audit-vm only, got %v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByEventType_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedEventTypeWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?event_type=image.created")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter population)", got)
+	}
+}
+
 func TestListWebhooks_FilterBySearch_SecretAndLastErrorNotInHaystack(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()
