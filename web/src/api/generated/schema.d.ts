@@ -39,6 +39,18 @@ export interface paths {
                      */
                     image?: components["parameters"]["ImageFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's configured
+                     *     `default_user` field. Whitespace is trimmed before comparison;
+                     *     an empty value disables the filter. An empty `spec.default_user`
+                     *     is treated as `root` to mirror `lifecycle.go`'s runtime semantics
+                     *     — `?default_user=root` matches every VM that SSHes in as root,
+                     *     whether the field was explicitly set or left blank at create
+                     *     time. Composes additively with the existing `tag`, `status`, and
+                     *     `search` filters; `X-Total-Count` reflects the post-filter /
+                     *     pre-pagination population.
+                     */
+                    default_user?: components["parameters"]["DefaultUserFilter"];
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is
@@ -3127,6 +3139,18 @@ export interface components {
          *     and the sort + pagination params.
          */
         ImageFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the VM's configured
+         *     `default_user` field. Whitespace is trimmed before comparison;
+         *     an empty value disables the filter. An empty `spec.default_user`
+         *     is treated as `root` to mirror `lifecycle.go`'s runtime semantics
+         *     — `?default_user=root` matches every VM that SSHes in as root,
+         *     whether the field was explicitly set or left blank at create
+         *     time. Composes additively with the existing `tag`, `status`, and
+         *     `search` filters; `X-Total-Count` reflects the post-filter /
+         *     pre-pagination population.
+         */
+        DefaultUserFilter: string;
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
