@@ -33,6 +33,7 @@ paths:
         - $ref: '#/components/parameters/StatusFilter'
         - $ref: '#/components/parameters/SearchFilter'
         - $ref: '#/components/parameters/ImageFilter'
+        - $ref: '#/components/parameters/DefaultUserFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
@@ -1797,6 +1798,21 @@ components:
         Whitespace is trimmed before comparison; empty value disables
         the filter. Composes additively with `tag`, `status`, `search`,
         and the sort + pagination params.
+      schema:
+        type: string
+    DefaultUserFilter:
+      name: default_user
+      in: query
+      description: |
+        Case-insensitive exact-match filter on the VM's configured
+        `default_user` field. Whitespace is trimmed before comparison;
+        an empty value disables the filter. An empty `spec.default_user`
+        is treated as `root` to mirror `lifecycle.go`'s runtime semantics
+        — `?default_user=root` matches every VM that SSHes in as root,
+        whether the field was explicitly set or left blank at create
+        time. Composes additively with the existing `tag`, `status`, and
+        `search` filters; `X-Total-Count` reflects the post-filter /
+        pre-pagination population.
       schema:
         type: string
     AutoStartFilter:

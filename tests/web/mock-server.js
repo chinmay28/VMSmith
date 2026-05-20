@@ -173,6 +173,7 @@ const server = http.createServer(async (req, res) => {
     const order = url.searchParams.get("order") || "asc";
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     const imageFilter = (url.searchParams.get("image") || "").trim().toLowerCase();
+    const defaultUserFilter = (url.searchParams.get("default_user") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -203,6 +204,13 @@ const server = http.createServer(async (req, res) => {
         if (vm.name && String(vm.name).toLowerCase().includes(search)) return true;
         if (vm.description && String(vm.description).toLowerCase().includes(search)) return true;
         return Array.isArray(vm.tags) && vm.tags.some(t => String(t).toLowerCase().includes(search));
+      });
+    }
+    if (defaultUserFilter) {
+      list = list.filter(vm => {
+        const du = vm?.spec?.default_user || vm?.default_user || "";
+        const effective = du === "" ? "root" : String(du).toLowerCase();
+        return effective === defaultUserFilter;
       });
     }
     if (autoStart.set) {
