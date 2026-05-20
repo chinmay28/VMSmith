@@ -532,6 +532,34 @@ async function main() {
       await assertText(p, "vm-detail-locked", "Locked");
     }, page);
 
+    let clonePage = await context.newPage();
+    await clonePage.goto(BASE);
+    await clonePage.waitForTimeout(500);
+    await clonePage.locator('[data-testid="vm-row-web-server"]').click();
+    await clonePage.waitForTimeout(500);
+
+    await runTest("clone VM flow", async (p) => {
+      await p.locator('[data-testid="btn-clone-vm"]').click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "input-clone-name");
+      await p.locator('[data-testid="input-clone-name"]').fill("web-server-copy");
+      await p.locator('[data-testid="btn-submit-clone"]').click();
+      await p.waitForTimeout(1000);
+      await assertText(p, "vm-detail-name", "web-server-copy");
+      await assertText(p, "vm-detail-state", "stopped");
+      await assertText(p, "vm-detail-image", "ubuntu-22.04");
+      await assertText(p, "vm-detail-resources", "2 vCPU");
+    }, clonePage);
+
+    await runTest("back link after clone returns to VM list with cloned VM", async (p) => {
+      await p.locator('[data-testid="back-link"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "vm-card-web-server-copy");
+      await assertVisible(p, "vm-card-web-server");
+    }, clonePage);
+
+    await clonePage.close();
+
     await runTest("back link returns to VM list", async (p) => {
       await p.locator('[data-testid="back-link"]').click();
       await p.waitForTimeout(500);
