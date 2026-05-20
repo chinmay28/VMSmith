@@ -30,6 +30,8 @@ var imageListCmd = &cobra.Command{
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
+		sourceVMFilter, _ := cmd.Flags().GetString("source-vm")
+		sourceVMFilter = strings.ToLower(strings.TrimSpace(sourceVMFilter))
 		searchFilter, _ := cmd.Flags().GetString("search")
 		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -56,7 +58,7 @@ var imageListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger.Info("cli", "image list", "tag", tagFilter, "search", searchFilter, "sort", sortField, "order", order)
+		logger.Info("cli", "image list", "tag", tagFilter, "source_vm", sourceVMFilter, "search", searchFilter, "sort", sortField, "order", order)
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
 			logger.Error("cli", "image list: failed to init storage manager", "error", err.Error())
@@ -71,6 +73,15 @@ var imageListCmd = &cobra.Command{
 		}
 		if tagFilter != "" {
 			imgs = storage.FilterImagesByTag(imgs, tagFilter)
+		}
+		if sourceVMFilter != "" {
+			filtered := imgs[:0]
+			for _, img := range imgs {
+				if strings.EqualFold(img.SourceVM, sourceVMFilter) {
+					filtered = append(filtered, img)
+				}
+			}
+			imgs = filtered
 		}
 		if searchFilter != "" {
 			filtered := imgs[:0]
@@ -351,6 +362,7 @@ func init() {
 	imageListCmd.Flags().Int("limit", 0, "maximum number of images to show (0 = no limit)")
 	imageListCmd.Flags().Int("offset", 0, "number of images to skip before printing results")
 	imageListCmd.Flags().String("tag", "", "filter to images carrying this tag")
+	imageListCmd.Flags().String("source-vm", "", "filter to images exported from this source VM ID (case-insensitive exact match)")
 	imageListCmd.Flags().String("search", "", "case-insensitive substring filter on name, description, and tags")
 	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at")
 	imageListCmd.Flags().String("order", "asc", "order: asc or desc")

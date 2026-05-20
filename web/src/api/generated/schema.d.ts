@@ -1408,10 +1408,19 @@ export interface paths {
                     /** @description Filter to images carrying this tag (case-insensitive). */
                     tag?: string;
                     /**
+                     * @description Case-insensitive exact-match on the image's `source_vm` field —
+                     *     i.e. the VM ID the image was exported from. Whitespace is trimmed;
+                     *     an empty value disables the filter. Composes additively with
+                     *     `tag`, `search`, `sort`, and pagination so `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    source_vm?: string;
+                    /**
                      * @description Case-insensitive substring filter on image name, description, and
                      *     tags. Whitespace is trimmed; ID is intentionally excluded so opaque
                      *     `img-<unix-nano>` strings don't produce numeric false positives.
-                     *     Composes additively with `tag`, `sort`, and pagination.
+                     *     Composes additively with `tag`, `source_vm`, `sort`, and
+                     *     pagination.
                      */
                     search?: string;
                 };

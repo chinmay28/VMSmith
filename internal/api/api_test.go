@@ -7386,6 +7386,187 @@ func TestListImages_FilterBySearch_CombinesWithSort(t *testing.T) {
 	}
 }
 
+// --- Image source_vm filter (5.4.27) ---
+
+// seedStoredImageWithSourceVM writes an image record with an explicit source_vm
+// so the 5.4.27 filter tests can assert exact-match / case-insensitive /
+// no-match behaviour without spinning up a real VM.
+func seedStoredImageWithSourceVM(t *testing.T, s *store.Store, id, name, sourceVM string, tags []string) *types.Image {
+	t.Helper()
+	now := time.Now()
+	img := &types.Image{
+		ID:        id,
+		Name:      name,
+		Path:      "/tmp/" + name + ".qcow2",
+		SizeBytes: 1024,
+		Format:    "qcow2",
+		SourceVM:  sourceVM,
+		Tags:      tags,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.PutImage(img); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+	return img
+}
+
+func TestListImages_FilterBySourceVM_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-bastion", "vm-1700000000000000001", nil)
+	seedStoredImageWithSourceVM(t, s, "img-b", "from-worker", "vm-1700000000000000002", nil)
+
+	resp, err := http.Get(ts.URL + "/api/v1/images?source_vm=vm-1700000000000000001")
+	if err != nil {
+		t.Fatalf("GET /images?source_vm=...: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "from-bastion" {
+		t.Errorf("filter result = %+v, want only from-bastion", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// SourceVM normally lowercase since VM IDs are `vm-<unix-nano>`, but if a
+	// future feature ever uses mixed-case IDs the filter still matches.
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-mixed", "VM-ABC123", nil)
+	seedStoredImageWithSourceVM(t, s, "img-b", "from-other", "vm-1700000000000000002", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=vm-abc123")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (case-insensitive)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "from-mixed" {
+		t.Errorf("filter result = %+v, want only from-mixed", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-bastion", "vm-1700000000000000001", nil)
+	seedStoredImageWithSourceVM(t, s, "img-b", "from-worker", "vm-1700000000000000002", nil)
+
+	// URL-encoded whitespace must be trimmed before the equality check.
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=%20vm-1700000000000000001%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (whitespace-trimmed)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "from-bastion" {
+		t.Errorf("filter result = %+v, want only from-bastion", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-bastion", "vm-1700000000000000001", nil)
+	seedStoredImageWithSourceVM(t, s, "img-b", "from-worker", "vm-1700000000000000002", nil)
+	seedStoredImage(t, s, "img-c", "uploaded", "", nil) // no source_vm
+
+	// Whitespace-only is identical to the empty case.
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=%20%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3 (empty filter is no-op)", got)
+	}
+}
+
+func TestListImages_FilterBySourceVM_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-bastion", "vm-1700000000000000001", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=vm-does-not-exist")
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Errorf("X-Total-Count = %q, want 0", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 0 {
+		t.Errorf("want empty list, got %+v", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_IgnoresImagesWithEmptySourceVM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// Uploaded image has no source_vm; should not match any non-empty filter.
+	seedStoredImageWithSourceVM(t, s, "img-a", "from-bastion", "vm-1700000000000000001", nil)
+	seedStoredImage(t, s, "img-b", "uploaded", "", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=vm-1700000000000000001")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (uploaded image excluded)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "from-bastion" {
+		t.Errorf("filter result = %+v, want only from-bastion", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// Two images from the same VM; one tagged "release", one tagged "rc".
+	seedStoredImageWithSourceVM(t, s, "img-a", "bastion-release", "vm-1700000000000000001", []string{"release"})
+	seedStoredImageWithSourceVM(t, s, "img-b", "bastion-rc", "vm-1700000000000000001", []string{"rc"})
+	// And an image from a different VM that also happens to be tagged "release".
+	seedStoredImageWithSourceVM(t, s, "img-c", "worker-release", "vm-1700000000000000002", []string{"release"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=vm-1700000000000000001&tag=release")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1 (intersection)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 1 || imgs[0].Name != "bastion-release" {
+		t.Errorf("filter result = %+v, want only bastion-release", imgs)
+	}
+}
+
+func TestListImages_FilterBySourceVM_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	for i := 0; i < 3; i++ {
+		seedStoredImageWithSourceVM(t, s, fmt.Sprintf("img-bastion-%d", i),
+			fmt.Sprintf("bastion-%d", i), "vm-1700000000000000001", nil)
+	}
+	for i := 0; i < 2; i++ {
+		seedStoredImageWithSourceVM(t, s, fmt.Sprintf("img-worker-%d", i),
+			fmt.Sprintf("worker-%d", i), "vm-1700000000000000002", nil)
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?source_vm=vm-1700000000000000001&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3 (post-filter / pre-pagination total)", got)
+	}
+	var imgs []*types.Image
+	decodeJSON(t, resp, &imgs)
+	if len(imgs) != 2 {
+		t.Errorf("page size = %d, want 2", len(imgs))
+	}
+}
+
 func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

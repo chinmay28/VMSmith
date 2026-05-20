@@ -112,6 +112,17 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		imgs = storage.FilterImagesByTag(imgs, tagFilter)
 	}
 
+	sourceVMFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source_vm")))
+	if sourceVMFilter != "" {
+		filtered := imgs[:0]
+		for _, img := range imgs {
+			if strings.EqualFold(img.SourceVM, sourceVMFilter) {
+				filtered = append(filtered, img)
+			}
+		}
+		imgs = filtered
+	}
+
 	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 	if searchFilter != "" {
 		filtered := imgs[:0]
