@@ -32,6 +32,8 @@ paths:
         - $ref: '#/components/parameters/TagFilter'
         - $ref: '#/components/parameters/StatusFilter'
         - $ref: '#/components/parameters/SearchFilter'
+        - $ref: '#/components/parameters/AutoStartFilter'
+        - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
         - $ref: '#/components/parameters/SortOrder'
         - $ref: '#/components/parameters/Page'
@@ -1752,6 +1754,32 @@ components:
         useful operator query.
       schema:
         type: string
+    AutoStartFilter:
+      name: auto_start
+      in: query
+      description: |
+        Tristate boolean filter on the VM's `auto_start` flag. Accepts
+        `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+        absent or whitespace-only disables the filter so every VM is
+        returned. Anything else returns 400 `invalid_auto_start`.
+        Composes additively with every other list filter so
+        `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
+        enum: ["true", "false"]
+    LockedFilter:
+      name: locked
+      in: query
+      description: |
+        Tristate boolean filter on the VM's `locked` (delete-protection)
+        flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+        aliases); absent or whitespace-only disables the filter so every
+        VM is returned. Anything else returns 400 `invalid_locked`.
+        Composes additively with every other list filter so
+        `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
+        enum: ["true", "false"]
     VMSort:
       name: sort
       in: query

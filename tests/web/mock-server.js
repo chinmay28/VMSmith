@@ -172,6 +172,21 @@ const server = http.createServer(async (req, res) => {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const parseTristate = (name) => {
+      const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
+      if (raw === "") return { set: false, value: false };
+      if (raw === "true" || raw === "1") return { set: true, value: true };
+      if (raw === "false" || raw === "0") return { set: true, value: false };
+      return { set: true, value: false, invalid: true };
+    };
+    const autoStart = parseTristate("auto_start");
+    if (autoStart.invalid) {
+      return json(res, 400, { code: "invalid_auto_start", message: "auto_start must be 'true' or 'false'" });
+    }
+    const locked = parseTristate("locked");
+    if (locked.invalid) {
+      return json(res, 400, { code: "invalid_locked", message: "locked must be 'true' or 'false'" });
+    }
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -185,6 +200,12 @@ const server = http.createServer(async (req, res) => {
         if (vm.description && String(vm.description).toLowerCase().includes(search)) return true;
         return Array.isArray(vm.tags) && vm.tags.some(t => String(t).toLowerCase().includes(search));
       });
+    }
+    if (autoStart.set) {
+      list = list.filter(vm => !!(vm.spec && vm.spec.auto_start) === autoStart.value);
+    }
+    if (locked.set) {
+      list = list.filter(vm => !!(vm.spec && vm.spec.locked) === locked.value);
     }
     const cmp = (a, b) => {
       let l;

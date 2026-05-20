@@ -21,6 +21,8 @@ export default function VMList() {
   const [tagFilter, setTagFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
+  const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
+  const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
@@ -28,8 +30,8 @@ export default function VMList() {
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
   const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, autoStart: autoStartFilter, locked: lockedFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, autoStartFilter, lockedFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -62,7 +64,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, sort, order]);
+  }, [tagFilter, searchFilter, autoStartFilter, lockedFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -79,8 +81,10 @@ export default function VMList() {
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
+    if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, autoStartFilter, lockedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -177,6 +181,30 @@ export default function VMList() {
         >
           <option value="asc">Ascending</option>
           <option value="desc">Descending</option>
+        </select>
+        <span className="ml-2">Auto-start</span>
+        <select
+          value={autoStartFilter}
+          onChange={(e) => setAutoStartFilter(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-auto-start-filter"
+          aria-label="Filter by auto-start"
+        >
+          <option value="">Any</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+        <span className="ml-2">Locked</span>
+        <select
+          value={lockedFilter}
+          onChange={(e) => setLockedFilter(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-locked-filter"
+          aria-label="Filter by locked"
+        >
+          <option value="">Any</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
         </select>
       </div>
 

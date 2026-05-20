@@ -417,6 +417,56 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("sort=name");
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
+
+  test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Flip auto_start=true on web-server via the API so we have one VM with the flag
+    // set and one without. Using page.request keeps the seed shape stable for other
+    // tests in this describe block while giving the filter a concrete population.
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-1`, { data: { auto_start: true } });
+
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("true");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("auto_start=true");
+
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("false");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("auto_start=false");
+
+    // "Any" clears the filter and the URL param.
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("auto_start=");
+  });
+
+  test("locked filter narrows the VM list", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-2`, { data: { locked: true } });
+
+    await page.getByTestId("vm-list-locked-filter").selectOption("true");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("locked=true");
+  });
+
+  test("auto-start and locked filter values hydrate from the URL on load", async ({ page }) => {
+    // Pre-seed: flip flags on both VMs then load the page with both filters set.
+    await page.goto(BASE_URL);
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-1`, { data: { auto_start: true, locked: true } });
+
+    await page.goto(`${BASE_URL}/vms?auto_start=true&locked=true`);
+    await expect(page.getByTestId("vm-list-auto-start-filter")).toHaveValue("true");
+    await expect(page.getByTestId("vm-list-locked-filter")).toHaveValue("true");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
 });
 
 // ============================================================
