@@ -396,6 +396,48 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.22 — image filter on the VM list.  Seed data: web-server uses
+  // image "ubuntu-22.04", db-server uses image "rocky-9".  The image input
+  // is a 250 ms-debounced text box with URL round-trip via ?image=.
+  test("image filter narrows the VM list to a single base image and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Both seeded VMs visible without an image filter.
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // Filter by exact image "ubuntu-22.04" -> only web-server visible.
+    await page.getByTestId("vm-list-image-filter").fill("ubuntu-22.04");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("image=ubuntu-22.04");
+
+    // Clearing via the X button restores both VMs and removes the URL param.
+    await page.getByTestId("vm-list-image-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("image=");
+  });
+
+  test("image filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-image-filter").fill("ROCKY-9");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+  });
+
+  test("image filter matches no VMs when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-image-filter").fill("does-not-exist.qcow2");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
@@ -416,6 +458,56 @@ test.describe("VM List", () => {
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
     await expect.poll(() => new URL(page.url()).search).toContain("sort=name");
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
+
+  test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Flip auto_start=true on web-server via the API so we have one VM with the flag
+    // set and one without. Using page.request keeps the seed shape stable for other
+    // tests in this describe block while giving the filter a concrete population.
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-1`, { data: { auto_start: true } });
+
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("true");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("auto_start=true");
+
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("false");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("auto_start=false");
+
+    // "Any" clears the filter and the URL param.
+    await page.getByTestId("vm-list-auto-start-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("auto_start=");
+  });
+
+  test("locked filter narrows the VM list", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-2`, { data: { locked: true } });
+
+    await page.getByTestId("vm-list-locked-filter").selectOption("true");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("locked=true");
+  });
+
+  test("auto-start and locked filter values hydrate from the URL on load", async ({ page }) => {
+    // Pre-seed: flip flags on both VMs then load the page with both filters set.
+    await page.goto(BASE_URL);
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-1`, { data: { auto_start: true, locked: true } });
+
+    await page.goto(`${BASE_URL}/vms?auto_start=true&locked=true`);
+    await expect(page.getByTestId("vm-list-auto-start-filter")).toHaveValue("true");
+    await expect(page.getByTestId("vm-list-locked-filter")).toHaveValue("true");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 });
 
@@ -1970,11 +2062,14 @@ test.describe("Settings — Webhooks", () => {
     await seed("https://metrics.example.com/in", "image.created");
     await seed("https://otherhost.example.com/x", "");
 
+    const search = page.getByTestId("webhook-list-search");
+    await expect(search).toHaveAttribute("placeholder", "Search by URL, description, or event type…");
+
     // All three rows are visible to start.
     await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
 
     // Search by a URL substring — only the audit row should remain.
-    await page.getByTestId("webhook-list-search").fill("audit");
+    await search.fill("audit");
     await expect.poll(async () =>
       page.locator('[data-testid^="webhook-row-"]').count(),
     ).toBe(1);
@@ -2011,6 +2106,63 @@ test.describe("Settings — Webhooks", () => {
       page.locator('[data-testid^="webhook-row-"]').count(),
     ).toBe(0);
     await expect(page.getByText(/No webhooks match your search/i)).toBeVisible();
+  });
+
+  // 5.4.26 — explicit-membership event-type filter on the webhook list.
+  test("event-type filter narrows the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    // Seed three webhooks: one subscribed to vm.created only, one subscribed
+    // to image.created, and one catch-all (no event_types). The catch-all
+    // matches every event behaviourally, but must NOT be returned by the
+    // explicit-membership filter.
+    const seed = async (url, types) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (types) await page.getByTestId("webhook-event-types-input").fill(types);
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://vm.example.com/hook", "vm.created");
+    await seed("https://image.example.com/hook", "image.created");
+    await seed("https://catchall.example.com/hook", ""); // catch-all (no event_types)
+
+    // All three rows render initially.
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Filter by vm.created — only the vm subscriber should remain; the
+    // catch-all webhook must not appear even though it would fire for the
+    // event behaviourally.
+    await page.getByTestId("webhook-list-event-type-filter").fill("vm.created");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("vm.example.com");
+
+    // URL round-trip — ?event_type=vm.created is reflected in the address bar.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("event_type")).toBe("vm.created");
+
+    // Case-insensitive matching: VM.CREATED is normalised to vm.created on
+    // the wire so the daemon returns the same row.
+    await page.getByTestId("webhook-list-event-type-filter").fill("VM.CREATED");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+
+    // Clear button restores the unfiltered view.
+    await page.getByTestId("webhook-list-event-type-filter-clear").click();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+    await expect.poll(async () => new URL(page.url()).searchParams.get("event_type")).toBe(null);
+
+    // No-match shows the dedicated empty-state copy referencing the filter.
+    await page.getByTestId("webhook-list-event-type-filter").fill("snapshot.taken");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(0);
+    await expect(page.getByText(/No webhooks explicitly subscribe/i)).toBeVisible();
   });
 
   // 5.4.15 — sortable webhook list (sort + order dropdowns).
