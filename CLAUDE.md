@@ -34,6 +34,7 @@ vmsmith/
 │   │   ├── handlers_image.go    # Image upload/download/list/delete
 │   │   ├── handlers_network.go  # Port forward + host interface endpoints
 │   │   ├── handlers_logs.go     # Log viewer endpoint (GET /api/v1/logs)
+│   │   ├── handlers_console.go  # Console ticket issuance endpoint (POST /api/v1/vms/{id}/console/ticket)
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
@@ -46,6 +47,8 @@ vmsmith/
 │   │   ├── host.go              # vmsmith host stats|quotas (thin HTTP clients for `GET /api/v1/host/stats` and `GET /api/v1/quotas/usage` — same data that powers the GUI Dashboard cards; `--json` for scripting)
 │   │   └── daemon.go            # vmsmith daemon start
 │   ├── config/config.go         # Config struct, DefaultConfig(), EnsureDirs()
+│   ├── console/
+│   │   └── store.go             # In-memory single-use console ticket store + janitor
 │   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, graceful shutdown orchestration, logger init
 │   ├── logger/
 │   │   └── logger.go            # Structured logger: global singleton, ring buffer, file output
@@ -74,6 +77,7 @@ vmsmith/
 │   ├── image.go                 # Image type
 │   ├── network.go               # NetworkAttachment, PortForward, HostInterface
 │   ├── quota.go                 # Quota usage response types
+│   ├── console.go               # Console ticket + endpoint response types
 │   └── errors.go                # Typed API errors
 ├── web/                         # React source (separate npm project)
 │   ├── src/api/client.ts        # OpenAPI-backed REST API client wrapper (vms, snapshots, images, ports, host, logs)
