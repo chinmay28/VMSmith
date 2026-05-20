@@ -601,6 +601,34 @@ The `/events` REST endpoint returns events from the `events` bucket in reverse-c
 
 The `/metrics` endpoint emits Prometheus text-format gauges for the latest in-memory VM metrics. Each series is labeled with `vm_id` and `vm_name`; unavailable fields are omitted rather than emitted as zero.
 
+#### Browser console proxy
+
+Browser-based console access is split into a short-lived ticket-issuance hop and a websocket proxy hop so the daemon never exposes raw libvirt VNC sockets directly to the client.
+
+1. The authenticated caller requests `POST /api/v1/vms/{id}/console/ticket`.
+2. The API verifies the VM exists and is running, then issues a single-use ticket with a short TTL.
+3. The response includes a websocket URL under the same VMSmith origin (`/api/v1/vms/{id}/console?...`).
+4. The browser opens that websocket, presents the ticket, and the daemon validates and consumes it.
+5. The daemon dials the VM's local console endpoint, then relays bytes bidirectionally until either side closes or an idle/session limit is reached.
+
+Keeping the websocket endpoint on the same origin as the main UI avoids exposing host-local console ports, lets the reverse proxy enforce TLS and access controls uniformly, and gives the daemon one place to apply audit logging and concurrency limits.
+
+**Ticket flow and trust boundaries:**
+
+- tickets are single-use and expire quickly; a consumed or expired ticket is rejected
+- ticket issuance is the authenticated step; the websocket uses the ticket rather than repeating a long-lived API key in the browser URL
+- the daemon only issues tickets for running VMs, so a stale VM state fails fast before any websocket upgrade
+- the websocket proxy is intended to sit behind HTTPS; if the page is loaded over HTTPS, the console websocket must also be `wss://` to avoid mixed-content failures
+
+**Security checklist:**
+
+- require `Authorization: Bearer` on ticket issuance
+- keep the daemon on localhost or a private interface behind a reverse proxy
+- enforce global session caps and per-session idle / lifetime limits from `daemon.console.*`
+- never expose raw VNC listeners directly to the internet
+- treat tickets as secrets: short TTL, single use, no reuse after reconnect
+- log ticket issuance and session termination so operators can audit who opened a console and when
+
 ---
 
 ### 9. Web GUI
@@ -648,6 +676,52 @@ make dev-web   # Vite dev server on :3000, proxies /api/* → :8080
 ```
 
 ---
+
+### 9.1 Console Access Foundation
+
+VMSmith now ships the first half of the browser-console stack: an in-memory
+single-use ticket store (`internal/console/`) plus `POST /api/v1/vms/{id}/console/ticket`.
+The daemon still keeps libvirt's VNC listener bound to loopback, and the browser
+never talks to the VNC socket directly.
+
+#### Current ticket flow
+
+1. The browser calls `POST /api/v1/vms/{id}/console/ticket` with the normal API-key auth.
+2. The handler verifies the VM exists and is currently `running`.
+3. The console store issues a random single-use ticket scoped to:
+   - the VM ID
+   - the caller's API key
+   - a short expiry window
+4. The API returns:
+   - `ticket`
+   - `expires_at`
+   - `websocket_url`
+
+Tickets are consumed on first successful use and periodically swept by a janitor
+goroutine, so stale URLs naturally die off.
+
+#### Intended proxy design
+
+The remaining console work is designed around an authenticated websocket proxy,
+not a directly exposed VNC port:
+
+- browser opens `GET /api/v1/vms/{id}/console?ticket=...`
+- daemon validates and consumes the ticket
+- daemon resolves the VM's current loopback-only VNC endpoint
+- daemon bridges websocket frames to the local VNC TCP socket
+- daemon tracks active sessions so VM stop/delete or daemon shutdown can tear them down cleanly
+
+That shape keeps two important invariants in place:
+
+1. the host's VNC socket stays private on `127.0.0.1`
+2. browser access remains time-limited, VM-scoped, and auditable through the daemon
+
+#### Security notes
+
+- Query-param secrets like `ticket=` must be redacted from request logs.
+- Console tickets are intentionally short-lived and single-use.
+- The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`.
+- Future websocket sessions should be counted alongside SSE clients in host-level stats.
 
 ### 10. Configuration
 

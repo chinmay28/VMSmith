@@ -138,7 +138,10 @@ var vmListCmd = &cobra.Command{
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		statusFilter, _ := cmd.Flags().GetString("status")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
+		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
+		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -146,7 +149,16 @@ var vmListCmd = &cobra.Command{
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
 		statusFilter = strings.TrimSpace(strings.ToLower(statusFilter))
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
+		imageFilter = strings.TrimSpace(strings.ToLower(imageFilter))
 		defaultUserFilter = strings.TrimSpace(strings.ToLower(defaultUserFilter))
+		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
+		if err != nil {
+			return err
+		}
+		lockedVal, lockedSet, err := parseCLITristateBool(lockedRaw, "--locked")
+		if err != nil {
+			return err
+		}
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField == "" {
 			sortField = types.VMSortID
@@ -165,7 +177,7 @@ var vmListCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", orderField)
 		}
-		limit, offset, err := normalizeLimitOffset(limit, offset)
+		limit, offset, err = normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
@@ -183,10 +195,13 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || defaultUserFilter != "" {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
+					continue
+				}
+				if imageFilter != "" && !strings.EqualFold(v.Spec.Image, imageFilter) {
 					continue
 				}
 				if tagFilter != "" {
@@ -201,7 +216,19 @@ var vmListCmd = &cobra.Command{
 						continue
 					}
 				}
-				if defaultUserFilter != "" && !strings.EqualFold(v.Spec.DefaultUser, defaultUserFilter) {
+				if defaultUserFilter != "" {
+					effectiveUser := v.Spec.DefaultUser
+					if effectiveUser == "" {
+						effectiveUser = "root"
+					}
+					if !strings.EqualFold(effectiveUser, defaultUserFilter) {
+						continue
+					}
+				}
+				if autoStartSet && v.Spec.AutoStart != autoStartVal {
+					continue
+				}
+				if lockedSet && v.Spec.Locked != lockedVal {
 					continue
 				}
 				if searchFilter != "" && !types.VMMatchesSearch(v, searchFilter) {
@@ -984,7 +1011,10 @@ Examples:
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
 	vmListCmd.Flags().String("status", "", "filter VMs by status (e.g. running, stopped)")
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
-	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match)")
+	vmListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the VM's base image")
+	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match; empty matches 'root')")
+	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
+	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")

@@ -27,13 +27,47 @@ export interface paths {
                      */
                     search?: components["parameters"]["SearchFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's base image
+                     *     (`spec.image`). Closes the operator query "show me every VM built
+                     *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+                     *     filters cannot answer precisely — `?search=rocky` would also
+                     *     match VMs whose description or tag contains the substring, while
+                     *     `?tag=` requires the operator to have tagged every VM by image.
+                     *     Whitespace is trimmed before comparison; empty value disables
+                     *     the filter. Composes additively with `tag`, `status`, `search`,
+                     *     and the sort + pagination params.
+                     */
+                    image?: components["parameters"]["ImageFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the VM's configured
                      *     `default_user` field. Whitespace is trimmed before comparison;
-                     *     an empty value disables the filter. Composes additively with the
-                     *     existing `tag`, `status`, and `search` filters; `X-Total-Count`
-                     *     reflects the post-filter / pre-pagination population.
+                     *     an empty value disables the filter. An empty `spec.default_user`
+                     *     is treated as `root` to mirror `lifecycle.go`'s runtime semantics
+                     *     — `?default_user=root` matches every VM that SSHes in as root,
+                     *     whether the field was explicitly set or left blank at create
+                     *     time. Composes additively with the existing `tag`, `status`, and
+                     *     `search` filters; `X-Total-Count` reflects the post-filter /
+                     *     pre-pagination population.
                      */
                     default_user?: components["parameters"]["DefaultUserFilter"];
+                    /**
+                     * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
+                     *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+                     *     absent or whitespace-only disables the filter so every VM is
+                     *     returned. Anything else returns 400 `invalid_auto_start`.
+                     *     Composes additively with every other list filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    auto_start?: components["parameters"]["AutoStartFilter"];
+                    /**
+                     * @description Tristate boolean filter on the VM's `locked` (delete-protection)
+                     *     flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+                     *     aliases); absent or whitespace-only disables the filter so every
+                     *     VM is returned. Anything else returns 400 `invalid_locked`.
+                     *     Composes additively with every other list filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    locked?: components["parameters"]["LockedFilter"];
                     /**
                      * @description Field to sort the VM list by. Defaults to `id`. Unknown values
                      *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
@@ -1981,6 +2015,18 @@ export interface paths {
                      */
                     tag?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the webhook's
+                     *     `event_types` filter list (a webhook matches when any entry in
+                     *     the list equals the value). Whitespace-trimmed. Catch-all
+                     *     webhooks (empty `event_types`) are NOT matched — mirrors the
+                     *     bulk_delete `event_type` selector semantics: this is an
+                     *     explicit-membership query ("which webhooks listen for
+                     *     vm.created"), not "which webhooks will fire for this event".
+                     *     Applied between `tag` and `search` so the post-filter
+                     *     `X-Total-Count` stays correct.
+                     */
+                    event_type?: string;
+                    /**
                      * @description Case-insensitive substring filter applied across each webhook's
                      *     URL, description, event-type filters, and tags. Whitespace is
                      *     trimmed before matching. Secret, ID, and last_error are
@@ -3082,13 +3128,47 @@ export interface components {
          */
         SearchFilter: string;
         /**
+         * @description Case-insensitive exact-match filter on the VM's base image
+         *     (`spec.image`). Closes the operator query "show me every VM built
+         *     from `rocky9.qcow2`" that the existing `?search=` and `?tag=`
+         *     filters cannot answer precisely — `?search=rocky` would also
+         *     match VMs whose description or tag contains the substring, while
+         *     `?tag=` requires the operator to have tagged every VM by image.
+         *     Whitespace is trimmed before comparison; empty value disables
+         *     the filter. Composes additively with `tag`, `status`, `search`,
+         *     and the sort + pagination params.
+         */
+        ImageFilter: string;
+        /**
          * @description Case-insensitive exact-match filter on the VM's configured
          *     `default_user` field. Whitespace is trimmed before comparison;
-         *     an empty value disables the filter. Composes additively with the
-         *     existing `tag`, `status`, and `search` filters; `X-Total-Count`
-         *     reflects the post-filter / pre-pagination population.
+         *     an empty value disables the filter. An empty `spec.default_user`
+         *     is treated as `root` to mirror `lifecycle.go`'s runtime semantics
+         *     — `?default_user=root` matches every VM that SSHes in as root,
+         *     whether the field was explicitly set or left blank at create
+         *     time. Composes additively with the existing `tag`, `status`, and
+         *     `search` filters; `X-Total-Count` reflects the post-filter /
+         *     pre-pagination population.
          */
         DefaultUserFilter: string;
+        /**
+         * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
+         *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
+         *     absent or whitespace-only disables the filter so every VM is
+         *     returned. Anything else returns 400 `invalid_auto_start`.
+         *     Composes additively with every other list filter so
+         *     `X-Total-Count` reflects the post-filter population.
+         */
+        AutoStartFilter: "true" | "false";
+        /**
+         * @description Tristate boolean filter on the VM's `locked` (delete-protection)
+         *     flag. Accepts `true` / `false` (case-insensitive, plus `1` / `0`
+         *     aliases); absent or whitespace-only disables the filter so every
+         *     VM is returned. Anything else returns 400 `invalid_locked`.
+         *     Composes additively with every other list filter so
+         *     `X-Total-Count` reflects the post-filter population.
+         */
+        LockedFilter: "true" | "false";
         /**
          * @description Field to sort the VM list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

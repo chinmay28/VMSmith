@@ -256,6 +256,18 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := r.URL.Query()
+	autoStartFilter, autoStartSet, apiErr := parseTristateBoolParam(q.Get("auto_start"), "auto_start")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	lockedFilter, lockedSet, apiErr := parseTristateBoolParam(q.Get("locked"), "locked")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -263,14 +275,18 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tagFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("tag")))
-	statusFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("status")))
-	searchFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("search")))
-	defaultUserFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("default_user")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || defaultUserFilter != "" {
+	tagFilter := strings.TrimSpace(strings.ToLower(q.Get("tag")))
+	statusFilter := strings.TrimSpace(strings.ToLower(q.Get("status")))
+	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
+	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
+	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
+				continue
+			}
+			if imageFilter != "" && !strings.EqualFold(vm.Spec.Image, imageFilter) {
 				continue
 			}
 			if tagFilter != "" {
@@ -285,7 +301,19 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			if defaultUserFilter != "" && !strings.EqualFold(vm.Spec.DefaultUser, defaultUserFilter) {
+			if defaultUserFilter != "" {
+				effectiveUser := vm.Spec.DefaultUser
+				if effectiveUser == "" {
+					effectiveUser = "root"
+				}
+				if !strings.EqualFold(effectiveUser, defaultUserFilter) {
+					continue
+				}
+			}
+			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {
+				continue
+			}
+			if lockedSet && vm.Spec.Locked != lockedFilter {
 				continue
 			}
 			if searchFilter != "" && !types.VMMatchesSearch(vm, searchFilter) {

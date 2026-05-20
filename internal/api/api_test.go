@@ -928,6 +928,428 @@ func TestListVMs_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// TestListVMs_FilterByDefaultUser_RootMatchesEmpty verifies that
+// `?default_user=root` matches VMs whose Spec.DefaultUser is empty.
+// `lifecycle.go` documents "empty means root" — the filter mirrors that
+// runtime semantic so operators searching for root-SSH VMs find both
+// explicit-root and unset entries.
+func TestListVMs_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: ""}})        // implicit root
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{DefaultUser: "root"}})    // explicit root
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{DefaultUser: "ubuntu"}}) // not root
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?default_user=root")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 root-SSH VMs (implicit + explicit), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["alpha"] || !names["beta"] {
+		t.Fatalf("expected alpha (empty) and beta (root), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "ubuntu-22.04.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=rocky9.qcow2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 rocky9.qcow2 vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if vm.Spec.Image != "rocky9.qcow2" {
+			t.Fatalf("unexpected vm in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterByImage_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "Rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=ROCKY9.QCOW2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("case-insensitive image match expected alpha, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=%20%20rocky9.qcow2%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected whitespace-trimmed match for alpha, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only image filter should be a no-op; got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=does-not-exist.qcow2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected zero matches for unknown image, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=rocky9.qcow2&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected only running rocky9 vm (alpha), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_ComposesWithSearch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-01", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-staging", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-primary", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=rocky9.qcow2&search=web")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "web-prod-01" {
+		t.Fatalf("expected only web-prod-01, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByImage_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{Image: "ubuntu.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?image=rocky9.qcow2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want \"2\"", got)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_True(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{AutoStart: false}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{AutoStart: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=true")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 auto-start vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if !vm.Spec.AutoStart {
+			t.Fatalf("unexpected vm in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterByAutoStart_False(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{AutoStart: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=false")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "beta" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByLocked_True(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Locked: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Locked: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?locked=true")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByLocked_False(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Locked: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Locked: false}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{Locked: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?locked=false")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 unlocked vms, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=TrUe")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_WhitespaceTrimmed(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=%20true%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected all vms when auto_start is empty, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=maybe")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_auto_start" {
+		t.Fatalf("code = %q, want invalid_auto_start", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByLocked_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?locked=yes")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_locked" {
+		t.Fatalf("code = %q, want invalid_locked", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByAutoStartAndLocked(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true, Locked: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{AutoStart: true, Locked: false}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{AutoStart: false, Locked: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=true&locked=true")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=true&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms = %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByLocked_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Locked: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{Locked: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{Locked: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?locked=true")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+func TestListVMs_FilterByAutoStart_AcceptsNumericAliases(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{AutoStart: false}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("filtered vms (1=true) = %+v", vms)
+	}
+
+	resp, _ = http.Get(ts.URL + "/api/v1/vms?auto_start=0")
+	var vms2 []*types.VM
+	decodeJSON(t, resp, &vms2)
+	if len(vms2) != 1 || vms2[0].Name != "beta" {
+		t.Fatalf("filtered vms (0=false) = %+v", vms2)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
