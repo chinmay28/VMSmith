@@ -841,6 +841,26 @@ export interface paths {
                      *     resource (VMs, images, templates, port forwards, webhooks).
                      */
                     tag?: string;
+                    /**
+                     * @description RFC3339 timestamp lower bound (inclusive) on the snapshot's
+                     *     `created_at`. Snapshots created before this instant are
+                     *     filtered out. Whitespace is trimmed; empty disables the
+                     *     filter. Invalid values return 400 `invalid_since`. A snapshot
+                     *     with a zero / unknown `created_at` is filtered OUT whenever
+                     *     any bound is set — operators querying a time window don't
+                     *     want unbounded entries silently included. Composes additively
+                     *     with `tag`, `search`, and pagination so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    since?: string;
+                    /**
+                     * @description RFC3339 timestamp upper bound (inclusive) on the snapshot's
+                     *     `created_at`. Snapshots created after this instant are
+                     *     filtered out. Whitespace is trimmed; empty disables the
+                     *     filter. Invalid values return 400 `invalid_until`. Same
+                     *     zero / unknown / additive-composition semantics as `since`.
+                     */
+                    until?: string;
                 };
                 header?: never;
                 path: {

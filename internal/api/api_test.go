@@ -9709,3 +9709,183 @@ func TestListSnapshots_FilterBySearch_MatchesTag(t *testing.T) {
 		t.Errorf("?search=prod must match against tags, got %+v", listed)
 	}
 }
+
+// ============================================================
+// 5.4.28: ?since / ?until snapshot time-range filter
+// ============================================================
+
+func TestListSnapshots_FilterBySince(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-since", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-since", Name: "early", CreatedAt: day(1)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-since", Name: "mid", CreatedAt: day(15)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-since", Name: "late", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-since/snapshots?since=2026-05-10T00:00:00Z")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, s := range listed {
+		names[s.Name] = true
+	}
+	if !names["mid"] || !names["late"] || names["early"] {
+		t.Fatalf("expected mid+late, got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterByUntil(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-until", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-until", Name: "early", CreatedAt: day(1)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-until", Name: "mid", CreatedAt: day(15)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-until", Name: "late", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-until/snapshots?until=2026-05-20T00:00:00Z")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 snapshots <= until, got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterBySinceAndUntil(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-range", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-1", CreatedAt: day(1)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-15", CreatedAt: day(15)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-range", Name: "snap-30", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-range/snapshots?since=2026-05-10T00:00:00Z&until=2026-05-20T00:00:00Z")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "snap-15" {
+		t.Fatalf("expected only snap-15, got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterBySince_Inclusive(t *testing.T) {
+	// Exact boundary timestamp matches under "inclusive" semantics.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-incl", Name: "host"})
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-incl", Name: "edge", CreatedAt: boundary})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-incl/snapshots?since=2026-05-01T00:00:00Z")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterByInvalidSince(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/anyvm/snapshots?since=last-tuesday")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_since" {
+		t.Fatalf("code = %q, want invalid_since", apiErr.Code)
+	}
+}
+
+func TestListSnapshots_FilterByInvalidUntil(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/anyvm/snapshots?until=2026-13-99")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_until" {
+		t.Fatalf("code = %q, want invalid_until", apiErr.Code)
+	}
+}
+
+func TestListSnapshots_FilterBySince_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-noop", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-noop", Name: "s1", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-noop", Name: "s2", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-noop/snapshots?since=%20%20")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("whitespace-only since should be a no-op; got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterByTimeRange_ExcludesZeroCreatedAt(t *testing.T) {
+	// A snapshot with zero CreatedAt is filtered out whenever any bound is
+	// set — operators querying a time window don't want unbounded entries
+	// silently included.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-zero", Name: "host"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-zero", Name: "no-time"}) // zero CreatedAt
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-zero", Name: "dated", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-zero/snapshots?since=2026-05-01T00:00:00Z")
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "dated" {
+		t.Fatalf("expected only dated (zero-time excluded), got %+v", listed)
+	}
+}
+
+func TestListSnapshots_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-comp", Name: "host"})
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-comp", Name: "pre-deploy-old", CreatedAt: day(1), Tags: []string{"prod"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-comp", Name: "pre-deploy-new", CreatedAt: day(20), Tags: []string{"prod"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-comp", Name: "rollback", CreatedAt: day(20), Tags: []string{"prod"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-comp", Name: "pre-deploy-staging", CreatedAt: day(20), Tags: []string{"staging"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-comp/snapshots?since=2026-05-10T00:00:00Z&tag=prod&search=pre-deploy")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "pre-deploy-new" {
+		t.Fatalf("expected only pre-deploy-new, got %+v", listed)
+	}
+}

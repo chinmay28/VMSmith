@@ -23,3 +23,6 @@
 *.pid
 /vmsmith.db
 __pycache__/
+
+# Claude Code harness state (sub-agent worktrees, transcripts, etc.)
+/.claude/
