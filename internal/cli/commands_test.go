@@ -439,6 +439,210 @@ func TestCLI_VMList_FilterBySearch_CombinesWithStatus(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_FilterByImage_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "rocky9.qcow2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || !strings.Contains(out, "gamma") {
+		t.Fatalf("expected alpha + gamma only (rocky9.qcow2), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "Rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "ROCKY9.QCOW2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha (case-insensitive image match), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "   ")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("whitespace-only --image should be a no-op; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_NoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "does-not-exist.qcow2")
+	if err != nil {
+		t.Fatalf("vm list --image: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected no rows for unknown image, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByImage_ComposesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "rocky9.qcow2"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, Image: "ubuntu.qcow2"}})
+
+	out, err := runCLI("vm", "list", "--image", "rocky9.qcow2", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --image --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("expected only alpha (running rocky9), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByAutoStart_True(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: false}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true}})
+
+	out, err := runCLI("vm", "list", "--auto-start", "true")
+	if err != nil {
+		t.Fatalf("vm list --auto-start true: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || !strings.Contains(out, "gamma") {
+		t.Fatalf("expected alpha+gamma only, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByAutoStart_False(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: false}})
+
+	out, err := runCLI("vm", "list", "--auto-start", "false")
+	if err != nil {
+		t.Fatalf("vm list --auto-start false: %v", err)
+	}
+	if strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("expected only beta, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByLocked_True(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Locked: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Locked: false}})
+
+	out, err := runCLI("vm", "list", "--locked", "true")
+	if err != nil {
+		t.Fatalf("vm list --locked true: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByAutoStart_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--auto-start", "TrUe")
+	if err != nil {
+		t.Fatalf("vm list --auto-start TrUe: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByAutoStart_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--auto-start", "")
+	if err != nil {
+		t.Fatalf("vm list --auto-start <empty>: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("expected all rows when --auto-start is empty, got %q", out)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidAutoStart(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--auto-start", "maybe")
+	if err == nil {
+		t.Fatalf("expected error from invalid --auto-start")
+	}
+	if !strings.Contains(err.Error(), "must be 'true' or 'false'") {
+		t.Fatalf("err = %v, want contains \"must be 'true' or 'false'\"", err)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidLocked(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--locked", "yes")
+	if err == nil {
+		t.Fatalf("expected error from invalid --locked")
+	}
+	if !strings.Contains(err.Error(), "must be 'true' or 'false'") {
+		t.Fatalf("err = %v, want contains \"must be 'true' or 'false'\"", err)
+	}
+}
+
+func TestCLI_VMList_FilterByAutoStartAndLocked(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true, Locked: true}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: true, Locked: false}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, AutoStart: false, Locked: true}})
+
+	out, err := runCLI("vm", "list", "--auto-start", "true", "--locked", "true")
+	if err != nil {
+		t.Fatalf("vm list --auto-start true --locked true: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+		t.Fatalf("expected only alpha, got %q", out)
+	}
+}
 func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

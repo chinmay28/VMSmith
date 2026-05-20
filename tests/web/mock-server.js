@@ -172,6 +172,22 @@ const server = http.createServer(async (req, res) => {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const imageFilter = (url.searchParams.get("image") || "").trim().toLowerCase();
+    const parseTristate = (name) => {
+      const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
+      if (raw === "") return { set: false, value: false };
+      if (raw === "true" || raw === "1") return { set: true, value: true };
+      if (raw === "false" || raw === "0") return { set: true, value: false };
+      return { set: true, value: false, invalid: true };
+    };
+    const autoStart = parseTristate("auto_start");
+    if (autoStart.invalid) {
+      return json(res, 400, { code: "invalid_auto_start", message: "auto_start must be 'true' or 'false'" });
+    }
+    const locked = parseTristate("locked");
+    if (locked.invalid) {
+      return json(res, 400, { code: "invalid_locked", message: "locked must be 'true' or 'false'" });
+    }
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -179,12 +195,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
     let list = [...vms.values()];
+    if (imageFilter) {
+      list = list.filter(vm => String(vm.spec?.image || "").toLowerCase() === imageFilter);
+    }
     if (search) {
       list = list.filter(vm => {
         if (vm.name && String(vm.name).toLowerCase().includes(search)) return true;
         if (vm.description && String(vm.description).toLowerCase().includes(search)) return true;
         return Array.isArray(vm.tags) && vm.tags.some(t => String(t).toLowerCase().includes(search));
       });
+    }
+    if (autoStart.set) {
+      list = list.filter(vm => !!(vm.spec && vm.spec.auto_start) === autoStart.value);
+    }
+    if (locked.set) {
+      list = list.filter(vm => !!(vm.spec && vm.spec.locked) === locked.value);
     }
     const cmp = (a, b) => {
       let l;
@@ -1142,6 +1167,7 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/webhooks" && method === "GET") {
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
+    const eventTypeFilter = (url.searchParams.get("event_type") || "").trim().toLowerCase();
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
     const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
@@ -1160,6 +1186,13 @@ const server = http.createServer(async (req, res) => {
     if (tagFilter) {
       hooks = hooks.filter((wh) => Array.isArray(wh.tags)
         && wh.tags.some((t) => typeof t === "string" && t.toLowerCase() === tagFilter));
+    }
+    if (eventTypeFilter) {
+      // Mirror internal/api/handlers_webhook.go::webhookSubscribedToEventType:
+      // case-insensitive exact-match on the event_types filter list. Catch-all
+      // webhooks (empty event_types) are NOT matched.
+      hooks = hooks.filter((wh) => Array.isArray(wh.event_types)
+        && wh.event_types.some((t) => typeof t === "string" && t.trim().toLowerCase() === eventTypeFilter));
     }
     if (needle) {
       // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types

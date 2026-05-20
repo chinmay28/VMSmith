@@ -119,6 +119,16 @@ Optional filters and ordering:
                         equals the value).  Whitespace-trimmed.  Composes
                         additively with --search.
 
+  --event-type <type>   Case-insensitive exact-match filter on the webhook's
+                        event-type filter list (a webhook matches when any
+                        entry in its event_types list equals the value).
+                        Whitespace-trimmed.  Catch-all webhooks (empty
+                        event_types) are NOT matched — mirrors the
+                        bulk_delete event_type selector semantics: this is an
+                        explicit-membership query ("which webhooks listen for
+                        vm.created"), not "which webhooks will fire for this
+                        event".
+
   --search <q>          Case-insensitive substring filter applied to each
                         webhook's URL, description, event-type list, and
                         tags.  IDs, secrets, and last_error are intentionally
@@ -144,6 +154,7 @@ Optional filters and ordering:
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		search, _ := cmd.Flags().GetString("search")
 		tag, _ := cmd.Flags().GetString("tag")
+		eventType, _ := cmd.Flags().GetString("event-type")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -177,6 +188,9 @@ Optional filters and ordering:
 		}
 		if t := strings.ToLower(strings.TrimSpace(tag)); t != "" {
 			q.Set("tag", t)
+		}
+		if et := strings.ToLower(strings.TrimSpace(eventType)); et != "" {
+			q.Set("event_type", et)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -637,6 +651,7 @@ func init() {
 
 	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL, description, event-type names, and tags)")
 	webhookListCmd.Flags().String("tag", "", "filter by exact tag match (case-insensitive)")
+	webhookListCmd.Flags().String("event-type", "", "filter by explicit event_types membership (case-insensitive exact match; catch-alls excluded)")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")
