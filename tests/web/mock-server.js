@@ -804,6 +804,10 @@ const server = http.createServer(async (req, res) => {
     if (tag) {
       list = list.filter(img => (img.tags || []).some(t => String(t).toLowerCase() === tag));
     }
+    const sourceVM = (url.searchParams.get("source_vm") || "").trim().toLowerCase();
+    if (sourceVM) {
+      list = list.filter(img => String(img.source_vm || "").toLowerCase() === sourceVM);
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(img => {
@@ -883,6 +887,10 @@ const server = http.createServer(async (req, res) => {
     if (tag) {
       const lc = tag.toLowerCase();
       list = list.filter(t => (t.tags || []).some(x => String(x).toLowerCase() === lc));
+    }
+    const image = (url.searchParams.get("image") || "").trim().toLowerCase();
+    if (image) {
+      list = list.filter(t => String(t.image || "").toLowerCase() === image);
     }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {

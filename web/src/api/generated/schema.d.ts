@@ -1428,10 +1428,19 @@ export interface paths {
                     /** @description Filter to images carrying this tag (case-insensitive). */
                     tag?: string;
                     /**
+                     * @description Case-insensitive exact-match on the image's `source_vm` field —
+                     *     i.e. the VM ID the image was exported from. Whitespace is trimmed;
+                     *     an empty value disables the filter. Composes additively with
+                     *     `tag`, `search`, `sort`, and pagination so `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    source_vm?: string;
+                    /**
                      * @description Case-insensitive substring filter on image name, description, and
                      *     tags. Whitespace is trimmed; ID is intentionally excluded so opaque
                      *     `img-<unix-nano>` strings don't produce numeric false positives.
-                     *     Composes additively with `tag`, `sort`, and pagination.
+                     *     Composes additively with `tag`, `source_vm`, `sort`, and
+                     *     pagination.
                      */
                     search?: string;
                 };
@@ -1742,6 +1751,17 @@ export interface paths {
                      *     5.4.9 / 5.4.10 / 5.4.11 `search` filter contract.
                      */
                     search?: string;
+                    /**
+                     * @description Case-insensitive exact-match filter on the template's `image`
+                     *     field. Whitespace is trimmed before comparison; empty value
+                     *     disables the filter. Closes the operator query "show me every
+                     *     template built from `rocky9.qcow2`" that `?search=` would
+                     *     match fuzzily across name / description / tags. Composes
+                     *     additively with `?tag=`, `?search=`, `?sort=`, `?order=`, and
+                     *     pagination so `X-Total-Count` reflects the post-filter
+                     *     population. Mirrors the VMs `?image=` filter (5.4.22).
+                     */
+                    image?: string;
                 };
                 header?: never;
                 path?: never;

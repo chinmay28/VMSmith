@@ -1695,6 +1695,44 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
   });
+
+  // 5.4.27 — `?source_vm=` filter on /api/v1/images. The mock seeds img-1
+  // (ubuntu-base) with source_vm = "vm-1" and img-2 (rocky-experimental) with
+  // no source_vm, so filtering by "vm-1" should drop the rocky row.
+  test("source-vm filter narrows the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Both seeded images visible initially.
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Filter by the bastion VM ID — only the ubuntu-base image (exported from
+    // vm-1) survives. The rocky image has no source_vm so it drops out.
+    await page.getByTestId("image-list-source-vm").fill("vm-1");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).toContain("source_vm=vm-1");
+
+    // Mixed-case input matches case-insensitively.
+    await page.getByTestId("image-list-source-vm").fill("VM-1");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+
+    // Clear the filter — rocky comes back and the URL drops the param.
+    await page.getByTestId("image-list-source-vm-clear").click();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("source_vm=");
+  });
+
+  test("source-vm filter empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    await page.getByTestId("image-list-source-vm").fill("vm-does-not-exist");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByText("No images were exported from source VM \"vm-does-not-exist\".")).toBeVisible();
+  });
 });
 
 // ============================================================
@@ -1733,6 +1771,38 @@ test.describe("Templates", () => {
     await page.getByTestId("template-list-search-clear").click();
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await expect.poll(() => new URL(page.url()).search).not.toContain("search=");
+  });
+
+  test("image filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/images/rocky9.qcow2");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("image")).toBe("/images/rocky9.qcow2");
+
+    await page.getByTestId("template-list-image-filter-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("image=");
+  });
+
+  test("image filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/IMAGES/ROCKY9.QCOW2");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  test("image filter matches no templates when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/images/fedora.qcow2");
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {

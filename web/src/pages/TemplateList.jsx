@@ -13,6 +13,8 @@ export default function TemplateList() {
   const [tagFilter, setTagFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
+  const [imageInput, setImageInput] = useState(searchParams.get('image') || '');
+  const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -21,8 +23,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -35,7 +37,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -44,13 +46,21 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  // Debounce the image filter input.
+  useEffect(() => {
+    const trimmed = imageInput.trim();
+    const id = setTimeout(() => setImageFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [imageInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -107,7 +117,7 @@ export default function TemplateList() {
 
       <EditTemplateModal template={editing} onClose={() => setEditing(null)} onSaved={refresh} />
 
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
@@ -126,6 +136,28 @@ export default function TemplateList() {
               onClick={() => setSearchInput('')}
               data-testid="template-list-search-clear"
               aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-64">
+          <input
+            type="text"
+            value={imageInput}
+            onChange={(e) => setImageInput(e.target.value)}
+            placeholder="Filter by image…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="template-list-image-filter"
+            aria-label="Filter templates by image"
+          />
+          {imageInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setImageInput('')}
+              data-testid="template-list-image-filter-clear"
+              aria-label="Clear image filter"
             >
               <X size={13} />
             </button>
@@ -188,6 +220,8 @@ export default function TemplateList() {
             description={
               searchFilter
                 ? `No templates match "${searchFilter}".`
+                : imageFilter
+                ? `No templates use image "${imageFilter}".`
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'

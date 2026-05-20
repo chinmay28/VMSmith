@@ -119,6 +119,7 @@ var templateListCmd = &cobra.Command{
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		searchFlag, _ := cmd.Flags().GetString("search")
+		imageFilter, _ := cmd.Flags().GetString("image")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -158,6 +159,15 @@ var templateListCmd = &cobra.Command{
 		}
 		if tagFilter = strings.TrimSpace(tagFilter); tagFilter != "" {
 			templates = filterTemplatesByTag(templates, tagFilter)
+		}
+		if imageQuery := strings.TrimSpace(strings.ToLower(imageFilter)); imageQuery != "" {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if strings.EqualFold(tpl.Image, imageQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
 		}
 		if searchQuery := strings.ToLower(strings.TrimSpace(searchFlag)); searchQuery != "" {
 			filtered := templates[:0]
@@ -372,6 +382,7 @@ func init() {
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
 	templateListCmd.Flags().String("tag", "", "filter templates by tag (case-insensitive)")
 	templateListCmd.Flags().String("search", "", "case-insensitive substring filter applied to name, description, and tags")
+	templateListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the template's base image")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 

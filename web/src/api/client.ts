@@ -187,8 +187,8 @@ function uploadImageWithProgress(file: File, name: string, options: { descriptio
 
 // --- Images ---
 export const images = {
-  list: ({ page, perPage, tag = '', search = '', sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage, tag: tag || undefined, search: search || undefined, sort, order } as any } }), { withMeta: true }),
+  list: ({ page, perPage, tag = '', sourceVM = '', search = '', sort, order }: { page?: number; perPage?: number; tag?: string; sourceVM?: string; search?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/images', { params: { query: { page, per_page: perPage, tag: tag || undefined, source_vm: sourceVM || undefined, search: search || undefined, sort, order } as any } }), { withMeta: true }),
   create: (vmId: string, name: string, options: { description?: string; tags?: string[] } = {}) =>
     unwrap(apiClient.POST('/images', { body: { vm_id: vmId, name, description: options.description, tags: options.tags } })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>
@@ -266,8 +266,8 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage, tag, search, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, sort, order } as any } }), { withMeta: true }),
+  list: ({ page, perPage, tag, search, image, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, sort, order } as any } }), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>
