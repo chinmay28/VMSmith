@@ -858,6 +858,10 @@ const server = http.createServer(async (req, res) => {
       const lc = tag.toLowerCase();
       list = list.filter(t => (t.tags || []).some(x => String(x).toLowerCase() === lc));
     }
+    const image = (url.searchParams.get("image") || "").trim().toLowerCase();
+    if (image) {
+      list = list.filter(t => String(t.image || "").toLowerCase() === image);
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(t => {

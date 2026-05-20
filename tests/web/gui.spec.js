@@ -1702,6 +1702,38 @@ test.describe("Templates", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("search=");
   });
 
+  test("image filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/images/rocky9.qcow2");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("image")).toBe("/images/rocky9.qcow2");
+
+    await page.getByTestId("template-list-image-filter-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("image=");
+  });
+
+  test("image filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/IMAGES/ROCKY9.QCOW2");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  test("image filter matches no templates when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-image-filter").fill("/images/fedora.qcow2");
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

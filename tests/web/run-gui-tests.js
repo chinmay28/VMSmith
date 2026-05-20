@@ -676,6 +676,16 @@ async function main() {
       await assertVisible(p, "template-row-small-ubuntu");
     }, page);
 
+    await runTest("image filter narrows the template list", async (p) => {
+      await p.locator('[data-testid="template-list-image-filter"]').fill("/images/rocky9.qcow2");
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-big-rocky");
+      await assertNotVisible(p, "template-row-small-ubuntu");
+      await p.locator('[data-testid="template-list-image-filter-clear"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-small-ubuntu");
+    }, page);
+
     await runTest("edit modal updates description and tags", async (p) => {
       await p.locator('[data-testid="btn-edit-template-big-rocky"]').click();
       await p.waitForTimeout(300);

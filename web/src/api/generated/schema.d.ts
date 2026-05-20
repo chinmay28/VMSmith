@@ -1722,6 +1722,17 @@ export interface paths {
                      *     5.4.9 / 5.4.10 / 5.4.11 `search` filter contract.
                      */
                     search?: string;
+                    /**
+                     * @description Case-insensitive exact-match filter on the template's `image`
+                     *     field. Whitespace is trimmed before comparison; empty value
+                     *     disables the filter. Closes the operator query "show me every
+                     *     template built from `rocky9.qcow2`" that `?search=` would
+                     *     match fuzzily across name / description / tags. Composes
+                     *     additively with `?tag=`, `?search=`, `?sort=`, `?order=`, and
+                     *     pagination so `X-Total-Count` reflects the post-filter
+                     *     population. Mirrors the VMs `?image=` filter (5.4.22).
+                     */
+                    image?: string;
                 };
                 header?: never;
                 path?: never;

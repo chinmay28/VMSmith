@@ -4616,6 +4616,124 @@ func TestCLI_TemplateList_FilterBySearch_CombinesWithTag(t *testing.T) {
 }
 
 // =====================================================
+// template list --image tests
+// =====================================================
+
+func TestCLI_TemplateList_FilterByImage_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--image", "rocky9.qcow2")
+	if err != nil {
+		t.Fatalf("template list --image: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base") {
+		t.Fatalf("expected rocky9-base in output, got %q", out)
+	}
+	if strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("did not expect ubuntu-22 in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByImage_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "Rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--image", "ROCKY9.QCOW2")
+	if err != nil {
+		t.Fatalf("template list --image: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base") {
+		t.Fatalf("expected case-insensitive match for rocky9-base, got %q", out)
+	}
+	if strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("did not expect ubuntu-22 in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByImage_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--image", "   ")
+	if err != nil {
+		t.Fatalf("template list --image: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base") || !strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("expected every template (whitespace --image is a no-op), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByImage_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--image", "fedora.qcow2")
+	if err != nil {
+		t.Fatalf("template list --image: %v", err)
+	}
+	if strings.Contains(out, "rocky9-base") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByImage_ComposesWithTag(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-prod", Image: "rocky9.qcow2", Tags: []string{"prod"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "rocky9-qa", Image: "rocky9.qcow2", Tags: []string{"qa"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-prod", Image: "ubuntu.qcow2", Tags: []string{"prod"}, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--image", "rocky9.qcow2", "--tag", "prod")
+	if err != nil {
+		t.Fatalf("template list --image --tag: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-prod") {
+		t.Fatalf("expected rocky9-prod (intersection of image+tag), got %q", out)
+	}
+	if strings.Contains(out, "rocky9-qa") || strings.Contains(out, "ubuntu-prod") {
+		t.Fatalf("did not expect non-intersecting templates, got %q", out)
+	}
+}
+
+// =====================================================
 // webhook list --search tests
 // =====================================================
 //
