@@ -1104,6 +1104,55 @@ test.describe("VM Detail", () => {
     await expect(page.getByText(/No port forwards match "needle-not-present"/)).toBeVisible();
   });
 
+  test("protocol filter narrows the port-forward list and round-trips through the URL (5.4.25)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Both seeded port forwards are tcp — udp filter should show neither.
+    await page.getByTestId("port-protocol-filter").selectOption("udp");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_protocol")).toBe("udp");
+
+    // tcp filter shows both seeded rules.
+    await page.getByTestId("port-protocol-filter").selectOption("tcp");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_protocol")).toBe("tcp");
+  });
+
+  test("protocol filter \"Any protocol\" returns every rule (5.4.25)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Switch through tcp then back to "" to confirm Any clears the URL param
+    // and restores every rule.
+    await page.getByTestId("port-protocol-filter").selectOption("tcp");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+
+    await page.getByTestId("port-protocol-filter").selectOption("");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_protocol")).toBeNull();
+  });
+
+  test("protocol filter composes with the existing search filter (5.4.25)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // search for "jumpbox" (matches only pf-seed-ssh) AND protocol=tcp.
+    await page.getByTestId("port-protocol-filter").selectOption("tcp");
+    await page.getByTestId("port-list-search").fill("jumpbox");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+
+    // Same search but protocol=udp — should leave the list empty since
+    // pf-seed-ssh is tcp.
+    await page.getByTestId("port-protocol-filter").selectOption("udp");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+  });
+
   // 5.4.20 — paginated port-forward list.
   test("port forward pagination controls reflect X-Total-Count and step pages", async ({ page }) => {
     // Synthesize 30 rules so the pagination widget has multiple pages.

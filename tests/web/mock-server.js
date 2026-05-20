@@ -612,10 +612,17 @@ const server = http.createServer(async (req, res) => {
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
+    const protocolFilter = (url.searchParams.get("protocol") || "").trim().toLowerCase();
+    if (protocolFilter && protocolFilter !== "tcp" && protocolFilter !== "udp") {
+      return json(res, 400, { code: "invalid_protocol", message: "protocol must be 'tcp' or 'udp'" });
+    }
     let list = (portForwards.get(m[1]) || []).slice();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     if (tagFilter) {
       list = list.filter(pf => Array.isArray(pf.tags) && pf.tags.some(t => t === tagFilter));
+    }
+    if (protocolFilter) {
+      list = list.filter(pf => (pf.protocol || "").toLowerCase() === protocolFilter);
     }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
