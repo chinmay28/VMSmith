@@ -527,7 +527,7 @@ func TestCLI_VMList_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
 
-	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: ""}})        // implicit root
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: ""}})       // implicit root
 	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "root"}})    // explicit root
 	mock.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DefaultUser: "ubuntu"}}) // not root
 
@@ -2625,6 +2625,108 @@ func TestCLI_ImageList_FilterBySourceVM_ComposesWithTag(t *testing.T) {
 	}
 	if strings.Contains(out, "bastion-rc") || strings.Contains(out, "worker-release") {
 		t.Fatalf("did not expect non-intersecting images, got %q", out)
+	}
+}
+
+// --- Image list --since / --until (roadmap 5.4.29) ---
+
+func TestCLI_ImageList_FilterBySince(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	s.PutImage(&types.Image{ID: "img-a", Name: "early", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(1)})
+	s.PutImage(&types.Image{ID: "img-b", Name: "late", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(30)})
+
+	out, err := runCLI("image", "list", "--since", "2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("image list --since: %v", err)
+	}
+	if !strings.Contains(out, "late") || strings.Contains(out, "early") {
+		t.Fatalf("expected only late, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterByUntil(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	s.PutImage(&types.Image{ID: "img-a", Name: "early", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(1)})
+	s.PutImage(&types.Image{ID: "img-b", Name: "late", Path: "/tmp/b.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(30)})
+
+	out, err := runCLI("image", "list", "--until", "2026-05-15T00:00:00Z")
+	if err != nil {
+		t.Fatalf("image list --until: %v", err)
+	}
+	if !strings.Contains(out, "early") || strings.Contains(out, "late") {
+		t.Fatalf("expected only early, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySinceAndUntil(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	s.PutImage(&types.Image{ID: "img-1", Name: "img-1", Path: "/tmp/1.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(1)})
+	s.PutImage(&types.Image{ID: "img-15", Name: "img-15", Path: "/tmp/15.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(15)})
+	s.PutImage(&types.Image{ID: "img-30", Name: "img-30", Path: "/tmp/30.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: day(30)})
+
+	out, err := runCLI("image", "list",
+		"--since", "2026-05-10T00:00:00Z", "--until", "2026-05-20T00:00:00Z")
+	if err != nil {
+		t.Fatalf("image list --since --until: %v", err)
+	}
+	if !strings.Contains(out, "img-15") {
+		t.Fatalf("expected img-15 in window, got %q", out)
+	}
+	// The tabwriter aligns columns so "img-1" appears as a prefix of "img-15"
+	// — anchor the boundary checks against the trailing whitespace separator
+	// the tabwriter inserts after each cell.
+	if strings.Contains(out, "img-30") || strings.Contains(out, "img-1\t") || strings.Contains(out, "img-1 ") {
+		t.Fatalf("expected only img-15, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_RejectsInvalidSince(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--since", "yesterday")
+	if err == nil || !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("expected invalid --since error, got %v", err)
+	}
+}
+
+func TestCLI_ImageList_RejectsInvalidUntil(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--until", "2026-13-99")
+	if err == nil || !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("expected invalid --until error, got %v", err)
+	}
+}
+
+func TestCLI_ImageList_EmptySinceOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	s.PutImage(&types.Image{ID: "img-a", Name: "any", Path: "/tmp/a.qcow2", SizeBytes: 1024, Format: "qcow2", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)})
+
+	out, err := runCLI("image", "list", "--since", "  ")
+	if err != nil {
+		t.Fatalf("image list --since '  ': %v", err)
+	}
+	if !strings.Contains(out, "any") {
+		t.Fatalf("whitespace --since should be no-op, got %q", out)
 	}
 }
 

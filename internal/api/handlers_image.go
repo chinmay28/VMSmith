@@ -92,11 +92,39 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, img)
 }
 
-// ListImages handles GET /api/v1/images
+// ListImages handles GET /api/v1/images.
+//
+// Optional query params (applied in order so X-Total-Count reflects the
+// post-filter / pre-pagination population):
+//   - tag=<tag>                       case-insensitive exact-match
+//   - source_vm=<vm-id>               case-insensitive exact-match
+//   - since=<rfc3339>                 keep images with created_at >= since
+//     (inclusive). Whitespace trimmed; empty disables. Invalid values
+//     return 400 `invalid_since`.
+//   - until=<rfc3339>                 keep images with created_at <= until
+//     (inclusive). Same shape as since; 400 `invalid_until` on garbage.
+//     An image with a zero / unknown created_at is filtered OUT whenever
+//     any bound is set — operators querying a time window don't want
+//     unbounded entries silently included.
+//   - search=<needle>                 case-insensitive substring on name,
+//     description, and tags
+//   - sort / order / page / per_page  see parseImageSort / parsePagination
 func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 	sortField, order, err := parseImageSort(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	q := r.URL.Query()
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
 
@@ -107,12 +135,12 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	tagFilter := strings.ToLower(strings.TrimSpace(q.Get("tag")))
 	if tagFilter != "" {
 		imgs = storage.FilterImagesByTag(imgs, tagFilter)
 	}
 
-	sourceVMFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source_vm")))
+	sourceVMFilter := strings.ToLower(strings.TrimSpace(q.Get("source_vm")))
 	if sourceVMFilter != "" {
 		filtered := imgs[:0]
 		for _, img := range imgs {
@@ -123,7 +151,18 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		imgs = filtered
 	}
 
-	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if sinceSet || untilSet {
+		filtered := imgs[:0]
+		for _, img := range imgs {
+			if !snapshotInTimeRange(img.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+				continue
+			}
+			filtered = append(filtered, img)
+		}
+		imgs = filtered
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	if searchFilter != "" {
 		filtered := imgs[:0]
 		for _, img := range imgs {

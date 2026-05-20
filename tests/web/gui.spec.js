@@ -1733,6 +1733,50 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
     await expect(page.getByText("No images were exported from source VM \"vm-does-not-exist\".")).toBeVisible();
   });
+
+  // 5.4.29 — `?since=` / `?until=` time-range filter on /api/v1/images. The
+  // mock seeds img-1 (ubuntu-base, created 2026-05-05) and img-2
+  // (rocky-experimental, created 2026-05-12) with fixed timestamps so the
+  // boundary checks are deterministic.
+  test("?since= filter narrows the image list by created_at and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Set since=2026-05-10T00:00 — only the rocky-experimental (2026-05-12) survives.
+    await page.getByTestId("image-list-since").fill("2026-05-10T00:00");
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toContain("2026-05-10");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toHaveCount(0);
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Clearing the range restores both images and drops `since=` from the URL.
+    await page.getByTestId("image-list-time-range-clear").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toBeNull();
+  });
+
+  test("?until= filter narrows the image list by created_at upper bound", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // Upper bound 2026-05-10 drops the newer rocky image (2026-05-12), keeps ubuntu-base (2026-05-05).
+    await page.getByTestId("image-list-until").fill("2026-05-10T00:00");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toContain("2026-05-10");
+  });
+
+  test("time-range filter empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // A window that contains neither seeded image (both are in May 2026).
+    await page.getByTestId("image-list-since").fill("2027-01-01T00:00");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByText("No images were created in the selected time range.")).toBeVisible();
+  });
 });
 
 // ============================================================
