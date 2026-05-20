@@ -112,12 +112,17 @@ var portListCmd = &cobra.Command{
 		order, _ := cmd.Flags().GetString("order")
 		searchRaw, _ := cmd.Flags().GetString("search")
 		tagRaw, _ := cmd.Flags().GetString("tag")
+		protocolRaw, _ := cmd.Flags().GetString("protocol")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		order = strings.TrimSpace(strings.ToLower(order))
 		searchFilter := strings.ToLower(strings.TrimSpace(searchRaw))
 		tagFilter := strings.ToLower(strings.TrimSpace(tagRaw))
+		protocolFilter := types.Protocol(strings.ToLower(strings.TrimSpace(protocolRaw)))
+		if protocolFilter != "" && protocolFilter != types.ProtocolTCP && protocolFilter != types.ProtocolUDP {
+			return fmt.Errorf("invalid --protocol %q: must be 'tcp' or 'udp'", protocolRaw)
+		}
 		if sortField == "" {
 			sortField = types.PortForwardSortID
 		}
@@ -143,7 +148,7 @@ var portListCmd = &cobra.Command{
 			return err
 		}
 
-		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter, "limit", fmt.Sprintf("%d", limit), "offset", fmt.Sprintf("%d", offset))
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter, "protocol", string(protocolFilter), "limit", fmt.Sprintf("%d", limit), "offset", fmt.Sprintf("%d", offset))
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -165,6 +170,15 @@ var portListCmd = &cobra.Command{
 						filtered = append(filtered, p)
 						break
 					}
+				}
+			}
+			ports = filtered
+		}
+		if protocolFilter != "" {
+			filtered := ports[:0]
+			for _, p := range ports {
+				if p.Protocol == protocolFilter {
+					filtered = append(filtered, p)
 				}
 			}
 			ports = filtered
@@ -404,6 +418,7 @@ func init() {
 	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, guest_ip, and tags")
 	portListCmd.Flags().String("tag", "", "filter by a single tag (case-insensitive exact match)")
+	portListCmd.Flags().String("protocol", "", "filter by transport protocol: tcp or udp (case-insensitive; empty = no filter)")
 	portListCmd.Flags().Int("limit", 0, "maximum number of port forwards to show (0 = no limit)")
 	portListCmd.Flags().Int("offset", 0, "number of port forwards to skip before printing results")
 

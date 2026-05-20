@@ -1092,6 +1092,13 @@ export interface paths {
          *     rule's tag list. Composes additively with `search` (the tag filter
          *     is applied first).
          *
+         *     `protocol` is an optional case-insensitive exact-match filter on
+         *     the rule's transport protocol (`tcp` or `udp`). Empty disables;
+         *     anything other than tcp/udp returns 400 `invalid_protocol`.
+         *     Mirrors the bulk_delete `protocol` selector so the filter and
+         *     bulk-action surfaces agree. Composes additively with `tag` and
+         *     `search`.
+         *
          *     `page` and `per_page` paginate the result. Pagination is applied
          *     after filter + sort so the `X-Total-Count` response header reflects
          *     the post-filter / pre-pagination population. `limit` is accepted as
@@ -1116,6 +1123,13 @@ export interface paths {
                      *     Applied before search + sort; composes additively with search.
                      */
                     tag?: string;
+                    /**
+                     * @description Case-insensitive exact-match filter on transport protocol.
+                     *     Empty disables; anything other than tcp/udp returns 400
+                     *     `invalid_protocol`. Composes additively with `tag` and
+                     *     `search`.
+                     */
+                    protocol?: "tcp" | "udp";
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };

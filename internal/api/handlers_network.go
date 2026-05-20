@@ -119,7 +119,11 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 //
 // Optional query params:
 //   - tag=<tag>                  case-insensitive exact-match filter over the
-//     rule's tag list. Applied before search + sort.
+//     rule's tag list. Applied before protocol + search + sort.
+//   - protocol=<tcp|udp>         case-insensitive exact-match filter on the
+//     rule's transport protocol. Empty disables; anything other than
+//     tcp/udp returns 400 `invalid_protocol`. Mirrors the bulk_delete
+//     `protocol` selector so the filter and bulk-action surfaces agree.
 //   - search=<needle>            case-insensitive substring filter across
 //     description, protocol, host_port, guest_port, guest_ip, and tags.
 //     Applied before sort.
@@ -145,6 +149,13 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	protocolFilter := types.Protocol(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("protocol"))))
+	if protocolFilter != "" && protocolFilter != types.ProtocolTCP && protocolFilter != types.ProtocolUDP {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_protocol",
+			"protocol must be 'tcp' or 'udp'"))
+		return
+	}
+
 	ports, err := s.portFwd.List(vmID)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -161,6 +172,16 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 					filtered = append(filtered, pf)
 					break
 				}
+			}
+		}
+		ports = filtered
+	}
+
+	if protocolFilter != "" {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			if pf.Protocol == protocolFilter {
+				filtered = append(filtered, pf)
 			}
 		}
 		ports = filtered
