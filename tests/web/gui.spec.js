@@ -1959,6 +1959,50 @@ test.describe("Templates", () => {
     await page.getByTestId("btn-delete-template-small-ubuntu").click();
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
+
+  // --- roadmap 5.4.31: ?since=/?until= time-range filter on template list ---
+  // Seed templates carry fixed created_at timestamps (2026-05-05 for
+  // small-ubuntu and 2026-05-15 for big-rocky) so the boundary check at
+  // 2026-05-10 cleanly splits them.
+  test("?since= filter narrows the template list by created_at and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Set since=2026-05-10T00:00 — only big-rocky (2026-05-15) survives.
+    await page.getByTestId("template-list-since").fill("2026-05-10T00:00");
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toContain("2026-05-10");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clearing the range restores both templates and drops `since=` from URL.
+    await page.getByTestId("template-list-time-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toBeNull();
+  });
+
+  test("?until= filter narrows the template list by created_at upper bound", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    // Upper bound 2026-05-10 keeps small-ubuntu (2026-05-05), drops big-rocky (2026-05-15).
+    await page.getByTestId("template-list-until").fill("2026-05-10T00:00");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toContain("2026-05-10");
+  });
+
+  test("time-range filter empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    // A window that contains neither seeded template (both are in May 2026).
+    await page.getByTestId("template-list-since").fill("2027-01-01T00:00");
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByText("No templates were created in the selected time range.")).toBeVisible();
+  });
 });
 
 // ============================================================

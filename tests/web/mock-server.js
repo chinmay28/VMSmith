@@ -100,8 +100,8 @@ function seed() {
     tags: ["starter", "ubuntu"],
     default_user: "ubuntu",
     networks: [],
-    created_at: "2025-01-01T00:00:00Z",
-    updated_at: "2025-01-01T00:00:00Z",
+    created_at: "2026-05-05T12:00:00Z",
+    updated_at: "2026-05-05T12:00:00Z",
   });
   templates.set("tmpl-2", {
     id: "tmpl-2",
@@ -114,8 +114,8 @@ function seed() {
     tags: ["prod", "rocky"],
     default_user: "root",
     networks: [],
-    created_at: "2025-02-01T00:00:00Z",
-    updated_at: "2025-02-01T00:00:00Z",
+    created_at: "2026-05-15T12:00:00Z",
+    updated_at: "2026-05-15T12:00:00Z",
   });
 }
 
@@ -954,6 +954,32 @@ const server = http.createServer(async (req, res) => {
     const image = (url.searchParams.get("image") || "").trim().toLowerCase();
     if (image) {
       list = list.filter(t => String(t.image || "").toLowerCase() === image);
+    }
+    // since / until: inclusive RFC3339 time-range filter on created_at;
+    // invalid value → 400; whitespace-only disables; zero/missing
+    // created_at filtered OUT whenever any bound is set (mirrors the API).
+    const parseTplTime = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const t = new Date(v);
+      if (Number.isNaN(t.getTime())) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a valid RFC3339 timestamp` };
+      }
+      return { set: true, value: t };
+    };
+    const tplSince = parseTplTime(url.searchParams.get("since"), "since");
+    if (tplSince.invalid) return json(res, 400, { code: tplSince.code, message: tplSince.msg });
+    const tplUntil = parseTplTime(url.searchParams.get("until"), "until");
+    if (tplUntil.invalid) return json(res, 400, { code: tplUntil.code, message: tplUntil.msg });
+    if (tplSince.set || tplUntil.set) {
+      list = list.filter(t => {
+        if (!t.created_at) return false;
+        const ts = new Date(t.created_at);
+        if (Number.isNaN(ts.getTime())) return false;
+        if (tplSince.set && ts < tplSince.value) return false;
+        if (tplUntil.set && ts > tplUntil.value) return false;
+        return true;
+      });
     }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {

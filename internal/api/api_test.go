@@ -9129,6 +9129,141 @@ func TestListTemplates_FilterByImage_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestListTemplates_FilterBySince(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-early", Name: "early", Image: "rocky9.qcow2", CreatedAt: day(1)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", CreatedAt: day(15)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-late", Name: "late", Image: "rocky9.qcow2", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=2026-05-10T00:00:00Z")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["mid"] || !names["late"] || names["early"] {
+		t.Fatalf("expected mid+late, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByUntil(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-early", Name: "early", Image: "rocky9.qcow2", CreatedAt: day(1)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", CreatedAt: day(15)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-late", Name: "late", Image: "rocky9.qcow2", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?until=2026-05-20T00:00:00Z")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 templates <= until, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterBySinceAndUntil(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "tmpl-1", Image: "rocky9.qcow2", CreatedAt: day(1)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-15", Name: "tmpl-15", Image: "rocky9.qcow2", CreatedAt: day(15)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-30", Name: "tmpl-30", Image: "rocky9.qcow2", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=2026-05-10T00:00:00Z&until=2026-05-20T00:00:00Z")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "tmpl-15" {
+		t.Fatalf("expected only tmpl-15, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterBySince_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", CreatedAt: boundary})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=2026-05-01T00:00:00Z")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidSince(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=last-tuesday")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_since")
+}
+
+func TestListTemplates_FilterByInvalidUntil(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?until=2026-13-99")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_until")
+}
+
+func TestListTemplates_FilterBySince_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "t1", Image: "rocky9.qcow2", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "t2", Image: "rocky9.qcow2", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only since should be a no-op; got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByTimeRange_ExcludesZeroCreatedAt(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-no-time", Name: "no-time", Image: "rocky9.qcow2"}) // zero CreatedAt
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-dated", Name: "dated", Image: "rocky9.qcow2", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=2026-05-01T00:00:00Z")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "dated" {
+		t.Fatalf("expected only dated (zero-time excluded), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-old", Name: "rocky-base-old", Image: "rocky9.qcow2", CreatedAt: day(1), Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-new", Name: "rocky-base-new", Image: "rocky9.qcow2", CreatedAt: day(20), Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-stg", Name: "rocky-staging", Image: "rocky9.qcow2", CreatedAt: day(20), Tags: []string{"staging"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-other", Name: "other", Image: "rocky9.qcow2", CreatedAt: day(20), Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?since=2026-05-10T00:00:00Z&tag=prod&search=rocky-base")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-base-new" {
+		t.Fatalf("expected only rocky-base-new, got %+v", got)
+	}
+}
+
 // listPortsWithQuery is a small helper that GETs /vms/{vmID}/ports?<query>
 // and decodes the JSON body into a slice. Tests for sort ordering use it.
 func listPortsWithQuery(t *testing.T, ts *httptest.Server, vmID, query string) []types.PortForward {

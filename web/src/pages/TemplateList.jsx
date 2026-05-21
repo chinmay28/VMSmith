@@ -15,6 +15,8 @@ export default function TemplateList() {
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [imageInput, setImageInput] = useState(searchParams.get('image') || '');
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
+  const [since, setSince] = useState(searchParams.get('since') || '');
+  const [until, setUntil] = useState(searchParams.get('until') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -23,8 +25,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, since, until, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, since, until, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -37,7 +39,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, since, until, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -59,8 +61,10 @@ export default function TemplateList() {
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
+    if (since) next.set('since', since); else next.delete('since');
+    if (until) next.set('until', until); else next.delete('until');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -163,6 +167,41 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Since</span>
+            <input
+              type="datetime-local"
+              value={since}
+              onChange={(e) => setSince(e.target.value ? `${e.target.value}:00Z` : '')}
+              data-testid="template-list-since"
+              aria-label="Templates created on or after"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Until</span>
+            <input
+              type="datetime-local"
+              value={until}
+              onChange={(e) => setUntil(e.target.value ? `${e.target.value}:00Z` : '')}
+              data-testid="template-list-until"
+              aria-label="Templates created on or before"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          {(since || until) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setSince(''); setUntil(''); }}
+              data-testid="template-list-time-range-clear"
+              aria-label="Clear template time range"
+            >
+              Clear range
+            </button>
+          )}
+        </div>
       </div>
 
       {allTags.length > 0 && (
@@ -222,6 +261,8 @@ export default function TemplateList() {
                 ? `No templates match "${searchFilter}".`
                 : imageFilter
                 ? `No templates use image "${imageFilter}".`
+                : (since || until)
+                ? 'No templates were created in the selected time range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'
