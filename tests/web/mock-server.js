@@ -72,13 +72,15 @@ function seed() {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
     size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id,
     description: "Stock Ubuntu cloud image", tags: ["ubuntu", "stable"],
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    // Fixed timestamps so the 5.4.29 since/until UI tests can filter
+    // deterministically. img-1 is older, img-2 is newer.
+    created_at: "2026-05-05T12:00:00Z", updated_at: "2026-05-05T12:00:00Z",
   });
   images.set("img-2", {
     id: "img-2", name: "rocky-experimental", path: "/images/rocky-experimental.qcow2",
     size_bytes: 2147483648, format: "qcow2",
     description: "Lab build", tags: ["rocky", "experimental"],
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    created_at: "2026-05-12T12:00:00Z", updated_at: "2026-05-12T12:00:00Z",
   });
   templates.set("tmpl-1", {
     id: "tmpl-1",
@@ -807,6 +809,32 @@ const server = http.createServer(async (req, res) => {
     const sourceVM = (url.searchParams.get("source_vm") || "").trim().toLowerCase();
     if (sourceVM) {
       list = list.filter(img => String(img.source_vm || "").toLowerCase() === sourceVM);
+    }
+    // since / until: inclusive RFC3339 time-range filter on created_at;
+    // invalid value → 400; whitespace-only disables; zero/missing
+    // created_at filtered OUT whenever any bound is set (mirrors the API).
+    const parseTime = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const t = new Date(v);
+      if (Number.isNaN(t.getTime())) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a valid RFC3339 timestamp` };
+      }
+      return { set: true, value: t };
+    };
+    const sinceP = parseTime(url.searchParams.get("since"), "since");
+    if (sinceP.invalid) return json(res, 400, { code: sinceP.code, message: sinceP.msg });
+    const untilP = parseTime(url.searchParams.get("until"), "until");
+    if (untilP.invalid) return json(res, 400, { code: untilP.code, message: untilP.msg });
+    if (sinceP.set || untilP.set) {
+      list = list.filter(img => {
+        if (!img.created_at) return false;
+        const t = new Date(img.created_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (sinceP.set && t < sinceP.value) return false;
+        if (untilP.set && t > untilP.value) return false;
+        return true;
+      });
     }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {

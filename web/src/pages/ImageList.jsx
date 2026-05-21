@@ -16,6 +16,8 @@ export default function ImageList() {
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [sourceVMInput, setSourceVMInput] = useState(searchParams.get('source_vm') || '');
   const [sourceVMFilter, setSourceVMFilter] = useState(searchParams.get('source_vm') || '');
+  const [since, setSince] = useState(searchParams.get('since') || '');
+  const [until, setUntil] = useState(searchParams.get('until') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -23,8 +25,8 @@ export default function ImageList() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, sort, order }),
-    [page, perPage, tagFilter, sourceVMFilter, searchFilter, sort, order],
+    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, since, until, sort, order }),
+    [page, perPage, tagFilter, sourceVMFilter, searchFilter, since, until, sort, order],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
@@ -36,7 +38,7 @@ export default function ImageList() {
     [imageList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, since, until, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -62,8 +64,10 @@ export default function ImageList() {
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (sourceVMFilter) next.set('source_vm', sourceVMFilter); else next.delete('source_vm');
+    if (since) next.set('since', since); else next.delete('since');
+    if (until) next.set('until', until); else next.delete('until');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, sourceVMFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, sourceVMFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -178,6 +182,41 @@ export default function ImageList() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Since</span>
+            <input
+              type="datetime-local"
+              value={since}
+              onChange={(e) => setSince(e.target.value ? `${e.target.value}:00Z` : '')}
+              data-testid="image-list-since"
+              aria-label="Images created on or after"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Until</span>
+            <input
+              type="datetime-local"
+              value={until}
+              onChange={(e) => setUntil(e.target.value ? `${e.target.value}:00Z` : '')}
+              data-testid="image-list-until"
+              aria-label="Images created on or before"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          {(since || until) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setSince(''); setUntil(''); }}
+              data-testid="image-list-time-range-clear"
+              aria-label="Clear image time range"
+            >
+              Clear range
+            </button>
+          )}
+        </div>
       </div>
 
       {allTags.length > 0 && (
@@ -238,6 +277,8 @@ export default function ImageList() {
                 ? `No images match "${searchFilter}".`
                 : sourceVMFilter
                 ? `No images were exported from source VM "${sourceVMFilter}".`
+                : (since || until)
+                ? 'No images were created in the selected time range.'
                 : tagFilter
                 ? `No images carry tag "${tagFilter}".`
                 : 'Export a VM to create a portable disk image.'

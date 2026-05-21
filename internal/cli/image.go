@@ -34,6 +34,16 @@ var imageListCmd = &cobra.Command{
 		sourceVMFilter = strings.ToLower(strings.TrimSpace(sourceVMFilter))
 		searchFilter, _ := cmd.Flags().GetString("search")
 		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
+		sinceRaw, _ := cmd.Flags().GetString("since")
+		untilRaw, _ := cmd.Flags().GetString("until")
+		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
+		if err != nil {
+			return err
+		}
+		untilTime, untilSet, err := parseCLITimeRange(untilRaw, "--until")
+		if err != nil {
+			return err
+		}
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -54,7 +64,7 @@ var imageListCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
-		limit, offset, err := normalizeLimitOffset(limit, offset)
+		limit, offset, err = normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
@@ -80,6 +90,16 @@ var imageListCmd = &cobra.Command{
 				if strings.EqualFold(img.SourceVM, sourceVMFilter) {
 					filtered = append(filtered, img)
 				}
+			}
+			imgs = filtered
+		}
+		if sinceSet || untilSet {
+			filtered := imgs[:0]
+			for _, img := range imgs {
+				if !snapshotInCLITimeRange(img.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+					continue
+				}
+				filtered = append(filtered, img)
 			}
 			imgs = filtered
 		}
@@ -364,6 +384,8 @@ func init() {
 	imageListCmd.Flags().String("tag", "", "filter to images carrying this tag")
 	imageListCmd.Flags().String("source-vm", "", "filter to images exported from this source VM ID (case-insensitive exact match)")
 	imageListCmd.Flags().String("search", "", "case-insensitive substring filter on name, description, and tags")
+	imageListCmd.Flags().String("since", "", "keep images created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
+	imageListCmd.Flags().String("until", "", "keep images created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at")
 	imageListCmd.Flags().String("order", "asc", "order: asc or desc")
 

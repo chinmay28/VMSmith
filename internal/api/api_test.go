@@ -937,7 +937,7 @@ func TestListVMs_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
 
-	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: ""}})        // implicit root
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{DefaultUser: ""}})       // implicit root
 	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{DefaultUser: "root"}})    // explicit root
 	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{DefaultUser: "ubuntu"}}) // not root
 
@@ -7564,6 +7564,203 @@ func TestListImages_FilterBySourceVM_TotalCountReflectsFiltered(t *testing.T) {
 	decodeJSON(t, resp, &imgs)
 	if len(imgs) != 2 {
 		t.Errorf("page size = %d, want 2", len(imgs))
+	}
+}
+
+// ============================================================
+// 5.4.29: ?since / ?until image time-range filter
+// ============================================================
+
+// seedStoredImageWithCreatedAt writes an image record with an explicit
+// CreatedAt so the time-range filter tests can pin the boundary timestamps
+// without relying on wall-clock time.
+func seedStoredImageWithCreatedAt(t *testing.T, s *store.Store, id, name string, createdAt time.Time, tags []string) *types.Image {
+	t.Helper()
+	img := &types.Image{
+		ID:        id,
+		Name:      name,
+		Path:      "/tmp/" + name + ".qcow2",
+		SizeBytes: 1024,
+		Format:    "qcow2",
+		Tags:      tags,
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+	}
+	if err := s.PutImage(img); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+	return img
+}
+
+func TestListImages_FilterBySince(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	seedStoredImageWithCreatedAt(t, s, "img-early", "early", day(1), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-mid", "mid", day(15), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-late", "late", day(30), nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=2026-05-10T00:00:00Z")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, img := range listed {
+		names[img.Name] = true
+	}
+	if !names["mid"] || !names["late"] || names["early"] {
+		t.Fatalf("expected mid+late, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByUntil(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	seedStoredImageWithCreatedAt(t, s, "img-early", "early", day(1), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-mid", "mid", day(15), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-late", "late", day(30), nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?until=2026-05-20T00:00:00Z")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 images <= until, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterBySinceAndUntil(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	seedStoredImageWithCreatedAt(t, s, "img-1", "img-1", day(1), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-15", "img-15", day(15), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-30", "img-30", day(30), nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=2026-05-10T00:00:00Z&until=2026-05-20T00:00:00Z")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "img-15" {
+		t.Fatalf("expected only img-15, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterBySince_Inclusive(t *testing.T) {
+	// Exact boundary timestamp matches under "inclusive" semantics.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageWithCreatedAt(t, s, "img-edge", "edge", boundary, nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=2026-05-01T00:00:00Z")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByInvalidSince(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=last-tuesday")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_since" {
+		t.Fatalf("code = %q, want invalid_since", apiErr.Code)
+	}
+}
+
+func TestListImages_FilterByInvalidUntil(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?until=2026-13-99")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_until" {
+		t.Fatalf("code = %q, want invalid_until", apiErr.Code)
+	}
+}
+
+func TestListImages_FilterBySince_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	seedStoredImageWithCreatedAt(t, s, "img-a", "img-a", day(1), nil)
+	seedStoredImageWithCreatedAt(t, s, "img-b", "img-b", day(15), nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=%20%20")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("whitespace-only since should be a no-op; got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByTimeRange_ExcludesZeroCreatedAt(t *testing.T) {
+	// An image with zero CreatedAt is filtered out whenever any bound is
+	// set — operators querying a time window don't want unbounded entries
+	// silently included.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithCreatedAt(t, s, "img-no-time", "no-time", time.Time{}, nil)
+	seedStoredImageWithCreatedAt(t, s, "img-dated", "dated", time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC), nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=2026-05-01T00:00:00Z")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "dated" {
+		t.Fatalf("expected only dated (zero-time excluded), got %+v", listed)
+	}
+}
+
+func TestListImages_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	seedStoredImageWithCreatedAt(t, s, "img-old-prod", "release-old", day(1), []string{"prod"})
+	seedStoredImageWithCreatedAt(t, s, "img-new-prod", "release-new", day(20), []string{"prod"})
+	seedStoredImageWithCreatedAt(t, s, "img-rollback", "rollback", day(20), []string{"prod"})
+	seedStoredImageWithCreatedAt(t, s, "img-staging", "release-staging", day(20), []string{"staging"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?since=2026-05-10T00:00:00Z&tag=prod&search=release")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "release-new" {
+		t.Fatalf("expected only release-new, got %+v", listed)
 	}
 }
 
