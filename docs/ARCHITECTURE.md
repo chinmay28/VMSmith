@@ -250,6 +250,50 @@ A Netplan v2 `network-config` is also written. It uses `match: macaddress:` for 
 
 ---
 
+### Console Ticketing and Proxy Design
+
+VMSmith's browser-console path is intentionally split into two halves:
+
+1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket`
+2. **Console proxying** via the forthcoming websocket endpoint that will consume that ticket and bridge the browser to a loopback-only libvirt console endpoint
+
+The daemon already ships the first half and the discovery primitives for the second half.
+
+#### Ticket flow
+
+1. Caller authenticates to the normal API with `Authorization: Bearer <api-key>`.
+2. `IssueConsoleTicket` validates that the VM exists and is currently `running`.
+3. The handler stores a short-TTL, single-use ticket in `internal/console.Store`, together with the VM ID and the caller's API key.
+4. The response returns:
+   - `ticket`
+   - `expires_at`
+   - `websocket_url` (currently a future-facing URL of the form `/api/v1/vms/{id}/console?ticket=...`)
+5. The websocket handler will later consume the ticket exactly once, recover the caller identity, and reject reuse / expiry / VM-scope mismatch.
+
+#### Proxy boundary
+
+The daemon is the trust boundary between the browser and libvirt:
+
+- The browser never talks to raw VNC or serial endpoints directly.
+- `vm.Manager.GetConsoleEndpoint` resolves the live endpoint from libvirt domain XML at request time.
+- VNC is expected to stay on loopback / host-local sockets; serial access is expected to stay on host-local PTYs.
+- The daemon websocket proxy is responsible for translating an authenticated browser session into a short-lived host-local dial.
+
+This design keeps long-lived libvirt console coordinates out of the public API surface and avoids asking operators to expose a second unauthenticated port range.
+
+#### Security checklist
+
+Operators enabling console access should keep these constraints intact:
+
+- Keep the main daemon behind API-key auth; console tickets inherit that trust boundary, they do not replace it.
+- Treat tickets as bearer secrets: they are single-use and short-lived, but possession is enough to attempt a console session until they expire.
+- Never expose raw libvirt VNC listeners directly to the network; publish only the authenticated HTTPS/API surface.
+- Preserve loopback reachability on the host so the daemon can dial host-local console endpoints.
+- Keep request logging redaction for `?ticket=` enabled so secrets do not land in logs.
+- Prefer TLS termination in front of the daemon for any browser-facing deployment so console websocket traffic is protected in transit.
+
+---
+
 ### 2. Networking
 
 #### Default NAT Network
