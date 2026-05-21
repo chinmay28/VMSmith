@@ -1313,6 +1313,28 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
 
+    // Time-range filter on created_at — mirror snapshotInTimeRange. Whitespace
+    // trimmed; invalid → 400 invalid_since / invalid_until; zero-time excluded
+    // when any bound is set. (5.4.32)
+    const sinceRaw = (url.searchParams.get("since") || "").trim();
+    const untilRaw = (url.searchParams.get("until") || "").trim();
+    let sinceTime = null;
+    let untilTime = null;
+    if (sinceRaw) {
+      const t = new Date(sinceRaw);
+      if (isNaN(t.getTime())) {
+        return json(res, 400, { code: "invalid_since", message: "since must be a valid RFC3339 timestamp" });
+      }
+      sinceTime = t;
+    }
+    if (untilRaw) {
+      const t = new Date(untilRaw);
+      if (isNaN(t.getTime())) {
+        return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
+      }
+      untilTime = t;
+    }
+
     let hooks = [...webhookList.values()];
     if (tagFilter) {
       hooks = hooks.filter((wh) => Array.isArray(wh.tags)
@@ -1324,6 +1346,16 @@ const server = http.createServer(async (req, res) => {
       // webhooks (empty event_types) are NOT matched.
       hooks = hooks.filter((wh) => Array.isArray(wh.event_types)
         && wh.event_types.some((t) => typeof t === "string" && t.trim().toLowerCase() === eventTypeFilter));
+    }
+    if (sinceTime || untilTime) {
+      hooks = hooks.filter((wh) => {
+        if (!wh.created_at) return false; // zero-time excluded when any bound set
+        const ct = new Date(wh.created_at);
+        if (isNaN(ct.getTime()) || ct.getTime() === 0) return false;
+        if (sinceTime && ct.getTime() < sinceTime.getTime()) return false;
+        if (untilTime && ct.getTime() > untilTime.getTime()) return false;
+        return true;
+      });
     }
     if (needle) {
       // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types

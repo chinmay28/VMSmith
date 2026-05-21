@@ -127,21 +127,28 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 
 // ListWebhooks handles GET /api/v1/webhooks.
 //
-// Optional query params:
+// Optional query params (applied in order so X-Total-Count reflects the
+// post-filter / pre-pagination population):
 //   - tag=<value>    case-insensitive exact-match filter on the webhook tag
 //     list (a webhook matches when any of its tags equals the value).
-//     Whitespace-trimmed. Applied before the search filter so `X-Total-Count`
-//     reflects the post-filter population. Mirrors the `?tag=` surface that
-//     VMs (2.2.4), images (2.2.7), and templates (2.2.10) already ship.
+//     Whitespace-trimmed. Mirrors the `?tag=` surface that VMs (2.2.4),
+//     images (2.2.7), and templates (2.2.10) already ship.
 //   - event_type=<value>  case-insensitive exact-match filter on the
 //     webhook's `event_types` filter list (a webhook matches when any entry
 //     in the list equals the value). Whitespace-trimmed. Catch-all webhooks
 //     (empty `event_types`) are NOT matched — mirroring the bulk_delete
 //     `event_type` selector semantics, the operator intent here is
 //     explicit-membership lookup ("which webhooks listen for vm.created"),
-//     not "which webhooks will fire for this event". Applied between `?tag=`
-//     and `?search=` so the post-filter / pre-pagination `X-Total-Count`
-//     stays correct.
+//     not "which webhooks will fire for this event".
+//   - since=<rfc3339>  keep webhooks with `created_at >= since` (inclusive).
+//     Whitespace trimmed; empty disables. Invalid values return 400
+//     `invalid_since`. A webhook with a zero / unknown `created_at` is
+//     filtered OUT whenever any bound is set — operators querying a time
+//     window don't want unbounded entries silently included. Mirrors the
+//     snapshot (5.4.28), image (5.4.29), VM (5.4.30), and template (5.4.31)
+//     time-range filters.
+//   - until=<rfc3339>  keep webhooks with `created_at <= until` (inclusive).
+//     Same shape as since; 400 `invalid_until` on garbage.
 //   - search=<value>  case-insensitive substring filter applied to `url`,
 //     `description`, `event_types`, and `tags`. Trimmed + lowercased once
 //     before delegating to the shared predicate. Mirrors the symmetric search
@@ -170,6 +177,17 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	q := r.URL.Query()
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 	hooks, err := s.webhookStore.ListWebhooks()
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list webhooks")
@@ -179,9 +197,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		hooks = []*types.Webhook{}
 	}
 
-	tagFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
-	eventTypeFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("event_type")))
-	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	tagFilter := strings.ToLower(strings.TrimSpace(q.Get("tag")))
+	eventTypeFilter := strings.ToLower(strings.TrimSpace(q.Get("event_type")))
+	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
 	out := make([]*types.Webhook, 0, len(hooks))
 	for _, h := range hooks {
@@ -189,6 +207,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if eventTypeFilter != "" && !webhookSubscribedToEventType(h, eventTypeFilter) {
+			continue
+		}
+		if !snapshotInTimeRange(h.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
 			continue
 		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {

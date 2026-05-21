@@ -135,6 +135,17 @@ Optional filters and ordering:
                         excluded from the haystack.  Trimmed and lowercased
                         before being forwarded to the daemon.
 
+  --since <rfc3339>     Keep webhooks with created_at >= <rfc3339> (inclusive).
+                        Whitespace-trimmed; empty disables.  Invalid values
+                        are rejected client-side before contacting the daemon.
+                        Mirrors the snapshot (5.4.28), image (5.4.29), VM
+                        (5.4.30), and template (5.4.31) time-range filters.
+
+  --until <rfc3339>     Keep webhooks with created_at <= <rfc3339> (inclusive).
+                        Same shape as --since.  A webhook with a zero /
+                        unknown created_at is filtered OUT whenever any bound
+                        is set.
+
   --sort <field>        Whitelisted to one of:
                           id, url, created_at, last_delivery_at
                         Default: id.
@@ -155,10 +166,19 @@ Optional filters and ordering:
 		search, _ := cmd.Flags().GetString("search")
 		tag, _ := cmd.Flags().GetString("tag")
 		eventType, _ := cmd.Flags().GetString("event-type")
+		sinceFlag, _ := cmd.Flags().GetString("since")
+		untilFlag, _ := cmd.Flags().GetString("until")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		page, _ := cmd.Flags().GetInt("page")
+
+		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField != "" {
@@ -191,6 +211,12 @@ Optional filters and ordering:
 		}
 		if et := strings.ToLower(strings.TrimSpace(eventType)); et != "" {
 			q.Set("event_type", et)
+		}
+		if v := strings.TrimSpace(sinceFlag); v != "" {
+			q.Set("since", v)
+		}
+		if v := strings.TrimSpace(untilFlag); v != "" {
+			q.Set("until", v)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -652,6 +678,8 @@ func init() {
 	webhookListCmd.Flags().String("search", "", "case-insensitive substring filter (matches URL, description, event-type names, and tags)")
 	webhookListCmd.Flags().String("tag", "", "filter by exact tag match (case-insensitive)")
 	webhookListCmd.Flags().String("event-type", "", "filter by explicit event_types membership (case-insensitive exact match; catch-alls excluded)")
+	webhookListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
+	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")
