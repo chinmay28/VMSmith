@@ -267,6 +267,16 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
@@ -280,7 +290,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -314,6 +324,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if lockedSet && vm.Spec.Locked != lockedFilter {
+				continue
+			}
+			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
 				continue
 			}
 			if searchFilter != "" && !types.VMMatchesSearch(vm, searchFilter) {

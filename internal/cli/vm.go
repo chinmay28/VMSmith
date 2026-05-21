@@ -144,6 +144,8 @@ var vmListCmd = &cobra.Command{
 		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
 		orderField, _ := cmd.Flags().GetString("order")
+		sinceRaw, _ := cmd.Flags().GetString("since")
+		untilRaw, _ := cmd.Flags().GetString("until")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
@@ -156,6 +158,14 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 		lockedVal, lockedSet, err := parseCLITristateBool(lockedRaw, "--locked")
+		if err != nil {
+			return err
+		}
+		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
+		if err != nil {
+			return err
+		}
+		untilTime, untilSet, err := parseCLITimeRange(untilRaw, "--until")
 		if err != nil {
 			return err
 		}
@@ -195,7 +205,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -229,6 +239,9 @@ var vmListCmd = &cobra.Command{
 					continue
 				}
 				if lockedSet && v.Spec.Locked != lockedVal {
+					continue
+				}
+				if !snapshotInCLITimeRange(v.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
 					continue
 				}
 				if searchFilter != "" && !types.VMMatchesSearch(v, searchFilter) {
@@ -1017,6 +1030,8 @@ Examples:
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
+	vmListCmd.Flags().String("since", "", "keep VMs created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
+	vmListCmd.Flags().String("until", "", "keep VMs created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
 	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")

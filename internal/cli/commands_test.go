@@ -744,6 +744,102 @@ func TestCLI_VMList_FilterByAutoStartAndLocked(t *testing.T) {
 		t.Fatalf("expected only alpha, got %q", out)
 	}
 }
+
+// --- 5.4.30: vm list --since / --until time-range filter on created_at ---
+
+func TestCLI_VMList_FilterBySince(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "early", CreatedAt: day(1), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "late", CreatedAt: day(30), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--since", "2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("vm list --since: %v", err)
+	}
+	if !strings.Contains(out, "late") || strings.Contains(out, "early") {
+		t.Fatalf("expected only late, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByUntil(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "early", CreatedAt: day(1), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "late", CreatedAt: day(30), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--until", "2026-05-15T00:00:00Z")
+	if err != nil {
+		t.Fatalf("vm list --until: %v", err)
+	}
+	if !strings.Contains(out, "early") || strings.Contains(out, "late") {
+		t.Fatalf("expected only early, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterBySinceAndUntil(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "vm-1", CreatedAt: day(1), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "vm-15", CreatedAt: day(15), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "vm-30", CreatedAt: day(30), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--since", "2026-05-10T00:00:00Z", "--until", "2026-05-20T00:00:00Z")
+	if err != nil {
+		t.Fatalf("vm list --since --until: %v", err)
+	}
+	if !strings.Contains(out, "vm-15") || strings.Contains(out, "vm-1\t") || strings.Contains(out, "vm-30") {
+		t.Fatalf("expected only vm-15, got %q", out)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidSince(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--since", "yesterday")
+	if err == nil || !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("expected invalid --since error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidUntil(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--until", "2026-13-99")
+	if err == nil || !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("expected invalid --until error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_EmptySinceOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "any", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--since", "  ")
+	if err != nil {
+		t.Fatalf("vm list --since '  ': %v", err)
+	}
+	if !strings.Contains(out, "any") {
+		t.Fatalf("whitespace --since should be no-op, got %q", out)
+	}
+}
+
 func TestCLI_VMList_LimitAndOffset(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

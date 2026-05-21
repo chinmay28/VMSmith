@@ -49,9 +49,16 @@ const webhookList = new Map();
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
+  // Fixed timestamps so the 5.4.30 created-at time-range filter tests are
+  // deterministic. vm-1 sits before 2026-05-10, vm-2 after — letting the GUI
+  // boundary at 2026-05-10 split them cleanly.
+  vm1.created_at = "2026-05-05T00:00:00Z";
+  vm1.updated_at = "2026-05-05T00:00:00Z";
   const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100 });
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
+  vm2.created_at = "2026-05-15T00:00:00Z";
+  vm2.updated_at = "2026-05-15T00:00:00Z";
   snapshots.set(vm1.id, [
     {
       id: `${vm1.id}/before-deploy`,
@@ -191,6 +198,24 @@ const server = http.createServer(async (req, res) => {
     if (locked.invalid) {
       return json(res, 400, { code: "invalid_locked", message: "locked must be 'true' or 'false'" });
     }
+    // since / until: inclusive RFC3339 time-range filter on created_at;
+    // whitespace-trimmed, empty disables, invalid -> 400, VMs with zero
+    // created_at filtered OUT whenever any bound is set (mirrors the API).
+    const parseTime = (name) => {
+      const raw = (url.searchParams.get(name) || "").trim();
+      if (raw === "") return { set: false, value: null };
+      const ts = new Date(raw);
+      if (Number.isNaN(ts.getTime())) return { set: false, value: null, invalid: true };
+      return { set: true, value: ts };
+    };
+    const since = parseTime("since");
+    if (since.invalid) {
+      return json(res, 400, { code: "invalid_since", message: "since must be a valid RFC3339 timestamp" });
+    }
+    const until = parseTime("until");
+    if (until.invalid) {
+      return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
+    }
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -220,6 +245,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (locked.set) {
       list = list.filter(vm => !!(vm.spec && vm.spec.locked) === locked.value);
+    }
+    if (since.set || until.set) {
+      list = list.filter(vm => {
+        if (!vm.created_at) return false;
+        const t = new Date(vm.created_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (since.set && t < since.value) return false;
+        if (until.set && t > until.value) return false;
+        return true;
+      });
     }
     const cmp = (a, b) => {
       let l;

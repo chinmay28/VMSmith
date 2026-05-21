@@ -509,6 +509,54 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
+
+  // --- 5.4.30: ?since= / ?until= time-range filter on VM created_at ---
+  // Seed data: vm-1 (web-server) created 2026-05-05, vm-2 (db-server) created
+  // 2026-05-15 (see mock-server seed). The GUI boundary at 2026-05-10 cleanly
+  // splits them so the assertions are robust against TZ drift.
+
+  test("created-since filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // Without a filter both seeded VMs are visible.
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // since=2026-05-10T00:00 (local) — only db-server (created 2026-05-15) survives.
+    await page.getByTestId("vm-list-since-filter").fill("2026-05-10T00:00");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toContain("2026-05-10");
+
+    // The Clear-range button drops both filters and the URL params.
+    await page.getByTestId("vm-list-time-range-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toBeNull();
+  });
+
+  test("created-until filter narrows the VM list by upper bound", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // until=2026-05-10T00:00 — only web-server (created 2026-05-05) remains.
+    await page.getByTestId("vm-list-until-filter").fill("2026-05-10T00:00");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toContain("2026-05-10");
+  });
+
+  test("created-at range empty-state when both bounds exclude every VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    // A window before both seeded VMs returns nothing.
+    await page.getByTestId("vm-list-since-filter").fill("2024-01-01T00:00");
+    await page.getByTestId("vm-list-until-filter").fill("2024-12-31T00:00");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
 });
 
 // ============================================================
