@@ -191,6 +191,72 @@ func signWith(secret string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func TestManager_RetriesAndEventuallySucceeds(t *testing.T) {
+	store := newMemStore()
+	bus := events.New(store)
+	bus.Start()
+	defer bus.Stop()
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hits, 1) == 1 {
+			http.Error(w, "try again", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	mgr := newTestManager(t, store, bus, []string{host, "127.0.0.1"})
+
+	wh := &types.Webhook{
+		ID:        "wh-retry-success",
+		URL:       srv.URL,
+		Secret:    "k",
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	_ = store.PutWebhook(wh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	bus.Publish(&types.Event{Type: "vm.started", Source: types.EventSourceApp, VMID: "vm-retry"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&hits) >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("receiver hit %d times, want 2 (initial failure + retry success)", got)
+	}
+	if failures := store.eventsByType("webhook.delivery_failed"); len(failures) != 0 {
+		t.Fatalf("expected no webhook.delivery_failed event after retry success, got %v", failures)
+	}
+
+	persisted, err := store.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != http.StatusNoContent {
+		t.Fatalf("LastStatus = %d, want 204 after retry success", persisted.LastStatus)
+	}
+	if persisted.LastError != "" {
+		t.Fatalf("LastError = %q, want empty after retry success", persisted.LastError)
+	}
+	if persisted.LastDeliveryAt.IsZero() {
+		t.Fatal("LastDeliveryAt was not updated after retry success")
+	}
+}
+
 func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	store := newMemStore()
 	bus := events.New(store)
