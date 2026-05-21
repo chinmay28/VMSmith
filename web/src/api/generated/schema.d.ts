@@ -1443,6 +1443,26 @@ export interface paths {
                      *     pagination.
                      */
                     search?: string;
+                    /**
+                     * @description RFC3339 timestamp lower bound (inclusive) on the image's
+                     *     `created_at`. Images created before this instant are filtered
+                     *     out. Whitespace is trimmed; empty disables the filter. Invalid
+                     *     values return 400 `invalid_since`. An image with a zero /
+                     *     unknown `created_at` is filtered OUT whenever any bound is set
+                     *     — operators querying a time window don't want unbounded entries
+                     *     silently included. Composes additively with `tag`, `source_vm`,
+                     *     `search`, `sort`, and pagination so `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    since?: string;
+                    /**
+                     * @description RFC3339 timestamp upper bound (inclusive) on the image's
+                     *     `created_at`. Images created after this instant are filtered
+                     *     out. Whitespace is trimmed; empty disables the filter. Invalid
+                     *     values return 400 `invalid_until`. Same zero / unknown /
+                     *     additive-composition semantics as `since`.
+                     */
+                    until?: string;
                 };
                 header?: never;
                 path?: never;
