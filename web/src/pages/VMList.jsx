@@ -14,6 +14,17 @@ const VM_LIFECYCLE_TYPES = new Set([
 
 const DEFAULT_PER_PAGE = 25;
 
+// `<input type="datetime-local">` returns a naive local-time string
+// (`YYYY-MM-DDTHH:MM`). Convert to RFC3339 in UTC so the daemon's
+// `parseTimeRangeParam` accepts it. Empty / invalid input → empty string
+// so the API client drops the param.
+function datetimeLocalToISO(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString();
+}
+
 export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
@@ -27,15 +38,19 @@ export default function VMList() {
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
+  const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
+  const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
   const [order, setOrder] = useState(searchParams.get('order') || 'asc');
+  const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
+  const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, autoStart: autoStartFilter, locked: lockedFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -68,7 +83,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -107,8 +122,10 @@ export default function VMList() {
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
+    if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
+    if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -274,6 +291,35 @@ export default function VMList() {
           <option value="true">Yes</option>
           <option value="false">No</option>
         </select>
+        <span className="ml-2">Created since</span>
+        <input
+          type="datetime-local"
+          value={sinceFilter}
+          onChange={(e) => setSinceFilter(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-since-filter"
+          aria-label="Filter by created since"
+        />
+        <span className="ml-2">until</span>
+        <input
+          type="datetime-local"
+          value={untilFilter}
+          onChange={(e) => setUntilFilter(e.target.value)}
+          className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-steel-200"
+          data-testid="vm-list-until-filter"
+          aria-label="Filter by created until"
+        />
+        {(sinceFilter || untilFilter) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setSinceFilter(''); setUntilFilter(''); }}
+            data-testid="vm-list-time-range-clear"
+            aria-label="Clear created-at range"
+          >
+            Clear range
+          </button>
+        )}
       </div>
 
       {!!visibleVMs.length && (

@@ -1350,6 +1350,176 @@ func TestListVMs_FilterByAutoStart_AcceptsNumericAliases(t *testing.T) {
 	}
 }
 
+// --- 5.4.30: ?since= / ?until= time-range filter on VM created_at ---
+
+func TestListVMs_FilterBySince(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "early", CreatedAt: day(1)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "mid", CreatedAt: day(15)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "late", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=2026-05-10T00:00:00Z")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, v := range listed {
+		names[v.Name] = true
+	}
+	if !names["mid"] || !names["late"] || names["early"] {
+		t.Fatalf("expected mid+late, got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterByUntil(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "early", CreatedAt: day(1)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "mid", CreatedAt: day(15)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "late", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?until=2026-05-20T00:00:00Z")
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 VMs <= until, got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterBySinceAndUntil(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "vm-1", CreatedAt: day(1)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "vm-15", CreatedAt: day(15)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "vm-30", CreatedAt: day(30)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=2026-05-10T00:00:00Z&until=2026-05-20T00:00:00Z")
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "vm-15" {
+		t.Fatalf("expected only vm-15, got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterBySince_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	mockMgr.SeedVM(&types.VM{ID: "vm-edge", Name: "edge", CreatedAt: boundary})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=2026-05-01T00:00:00Z")
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterByInvalidSince(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=last-tuesday")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_since" {
+		t.Fatalf("code = %q, want invalid_since", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByInvalidUntil(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?until=2026-13-99")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_until" {
+		t.Fatalf("code = %q, want invalid_until", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterBySince_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=%20%20")
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("whitespace-only since should be a no-op; got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterByTimeRange_ExcludesZeroCreatedAt(t *testing.T) {
+	// A VM with zero CreatedAt is filtered out whenever any bound is set —
+	// operators querying a time window don't want unbounded entries silently
+	// included.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-zero", Name: "no-time"}) // zero CreatedAt
+	mockMgr.SeedVM(&types.VM{ID: "vm-dated", Name: "dated", CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=2026-05-01T00:00:00Z")
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "dated" {
+		t.Fatalf("expected only dated (zero-time excluded), got %+v", listed)
+	}
+}
+
+func TestListVMs_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	day := func(d int) time.Time {
+		return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC)
+	}
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-old", CreatedAt: day(1), Tags: []string{"prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-prod-new", CreatedAt: day(20), Tags: []string{"prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-prod-new", CreatedAt: day(20), Tags: []string{"prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "web-staging-new", CreatedAt: day(20), Tags: []string{"staging"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?since=2026-05-10T00:00:00Z&tag=prod&search=web")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.VM
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "web-prod-new" {
+		t.Fatalf("expected only web-prod-new, got %+v", listed)
+	}
+}
+
 func TestListVMs_Empty(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
