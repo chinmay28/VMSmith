@@ -38,6 +38,13 @@ func newSSEWriter(w http.ResponseWriter) *sseWriter {
 //
 //	id: <id>\nevent: <name>\ndata: <data>\n\n
 func (s *sseWriter) WriteEvent(id, name, data string) error {
+	if id == "" {
+		_, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, data)
+		if err != nil {
+			return err
+		}
+		return s.rc.Flush()
+	}
 	_, err := fmt.Fprintf(s.w, "id: %s\nevent: %s\ndata: %s\n\n", id, name, data)
 	if err != nil {
 		return err

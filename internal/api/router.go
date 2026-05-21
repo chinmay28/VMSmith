@@ -48,6 +48,8 @@ type Server struct {
 	rateLimiter          *ipRateLimiter
 	inflight             sync.WaitGroup
 	shuttingDown         atomic.Bool
+	shutdownOnce         sync.Once
+	shutdownNotify       chan struct{}
 	eventStreamConns     atomic.Int64
 	webhookStore         WebhookStore
 	webhookManager       WebhookRegistrar
@@ -117,6 +119,7 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
 		authConfig:           cfg.Daemon.Auth,
 		rateLimiter:          newIPRateLimiter(cfg.Daemon.RateLimitPerSecond, cfg.Daemon.RateLimitBurst),
+		shutdownNotify:       make(chan struct{}),
 	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
@@ -295,6 +298,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // BeginShutdown marks the API server as draining so new requests are rejected.
 func (s *Server) BeginShutdown() {
 	s.shuttingDown.Store(true)
+	s.shutdownOnce.Do(func() {
+		close(s.shutdownNotify)
+	})
 }
 
 // WaitForDrain waits until in-flight requests finish or the context expires.

@@ -210,6 +210,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-r.Context().Done():
 				return
+			case <-s.shutdownNotify:
+				_ = sw.WriteEvent("", "shutdown", `{"message":"server is shutting down"}`)
+				return
 			case <-ticker.C:
 				if err := sw.Heartbeat(); err != nil {
 					return
@@ -227,6 +230,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.shutdownNotify:
+			_ = sw.WriteEvent("", "shutdown", `{"message":"server is shutting down"}`)
 			return
 		case evt, ok := <-ch:
 			if !ok {
