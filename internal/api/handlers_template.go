@@ -82,21 +82,26 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 
 // ListTemplates handles GET /api/v1/templates.
 //
-// Optional query params:
+// Optional query params (applied in order so X-Total-Count reflects the
+// post-filter / pre-pagination population):
 //   - tag=<value>            case-insensitive filter; only templates carrying
-//     this tag are returned. Filtering happens before sort + pagination so
-//     the X-Total-Count header reflects the filtered population.
-//   - search=<value>         case-insensitive substring filter applied to
-//     `name`, `description`, and `tags`. Trimmed + lowercased once before
-//     delegating to the shared predicate. Composes additively with `tag`,
-//     `sort`, `order`, and pagination — same shape as 5.4.9 / 5.4.10 /
-//     5.4.11. ID, image, default_user, and network attachments are
-//     intentionally excluded from the haystack.
+//     this tag are returned.
 //   - image=<value>          case-insensitive exact-match against the
 //     template's `image` field. Closes the operator query "show me every
 //     template built from rocky9.qcow2" that `?search=` matches fuzzily
 //     across name/description/tags and that `?tag=` cannot answer without
 //     pre-tagging every template by its base image. Mirrors 5.4.22.
+//   - since=<rfc3339>        keep templates with created_at >= since
+//     (inclusive). Whitespace trimmed; empty disables. Invalid values
+//     return 400 `invalid_since`.
+//   - until=<rfc3339>        keep templates with created_at <= until
+//     (inclusive). Same shape as since; 400 `invalid_until` on garbage.
+//     A template with a zero / unknown created_at is filtered OUT whenever
+//     any bound is set — operators querying a time window don't want
+//     unbounded entries silently included.
+//   - search=<value>         case-insensitive substring filter applied to
+//     `name`, `description`, and `tags`. ID, image, default_user, and
+//     network attachments are intentionally excluded from the haystack.
 //   - sort=<id|name|created_at>  default id; case-insensitive
 //   - order=<asc|desc>       default asc
 //   - page / per_page (see parsePagination)
@@ -110,6 +115,18 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := r.URL.Query()
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+
 	templates, err := s.storageMgr.ListTemplates()
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -117,11 +134,11 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tagFilter := strings.TrimSpace(r.URL.Query().Get("tag")); tagFilter != "" {
+	if tagFilter := strings.TrimSpace(q.Get("tag")); tagFilter != "" {
 		templates = filterTemplatesByTag(templates, tagFilter)
 	}
 
-	imageFilter := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("image")))
+	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	if imageFilter != "" {
 		filtered := templates[:0]
 		for _, tpl := range templates {
@@ -132,7 +149,18 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		templates = filtered
 	}
 
-	searchFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+	if sinceSet || untilSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if !snapshotInTimeRange(tpl.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+				continue
+			}
+			filtered = append(filtered, tpl)
+		}
+		templates = filtered
+	}
+
+	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	if searchFilter != "" {
 		filtered := templates[:0]
 		for _, tpl := range templates {

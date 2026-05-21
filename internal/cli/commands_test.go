@@ -5022,6 +5022,112 @@ func TestCLI_TemplateList_FilterByImage_ComposesWithTag(t *testing.T) {
 	}
 }
 
+// --- template list --since / --until (roadmap 5.4.31) ---
+
+func TestCLI_TemplateList_FilterBySince(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-early", Name: "early", Image: "rocky9.qcow2", CreatedAt: day(1), UpdatedAt: day(1)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-late", Name: "late", Image: "rocky9.qcow2", CreatedAt: day(30), UpdatedAt: day(30)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--since", "2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("template list --since: %v", err)
+	}
+	if !strings.Contains(out, "late") || strings.Contains(out, "early") {
+		t.Fatalf("expected only late, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByUntil(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-early", Name: "early", Image: "rocky9.qcow2", CreatedAt: day(1), UpdatedAt: day(1)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-late", Name: "late", Image: "rocky9.qcow2", CreatedAt: day(30), UpdatedAt: day(30)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--until", "2026-05-15T00:00:00Z")
+	if err != nil {
+		t.Fatalf("template list --until: %v", err)
+	}
+	if !strings.Contains(out, "early") || strings.Contains(out, "late") {
+		t.Fatalf("expected only early, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterBySinceAndUntil(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "tmpl-1", Image: "rocky9.qcow2", CreatedAt: day(1), UpdatedAt: day(1)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-15", Name: "tmpl-15", Image: "rocky9.qcow2", CreatedAt: day(15), UpdatedAt: day(15)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-30", Name: "tmpl-30", Image: "rocky9.qcow2", CreatedAt: day(30), UpdatedAt: day(30)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--since", "2026-05-10T00:00:00Z", "--until", "2026-05-20T00:00:00Z")
+	if err != nil {
+		t.Fatalf("template list --since --until: %v", err)
+	}
+	if !strings.Contains(out, "tmpl-15") || strings.Contains(out, "tmpl-1\t") || strings.Contains(out, "tmpl-30") {
+		t.Fatalf("expected only tmpl-15, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidSince(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("template", "list", "--since", "yesterday")
+	if err == nil || !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("expected invalid --since error, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidUntil(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("template", "list", "--until", "2026-13-99")
+	if err == nil || !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("expected invalid --until error, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_EmptySinceOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-any", Name: "any", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--since", "  ")
+	if err != nil {
+		t.Fatalf("template list --since '  ': %v", err)
+	}
+	if !strings.Contains(out, "any") {
+		t.Fatalf("whitespace --since should be no-op, got %q", out)
+	}
+}
+
 // =====================================================
 // webhook list --search tests
 // =====================================================

@@ -1187,6 +1187,34 @@ paths:
             population. Mirrors the VMs `?image=` filter (5.4.22).
           schema:
             type: string
+        - in: query
+          name: since
+          required: false
+          description: |
+            RFC3339 timestamp lower bound (inclusive) on the template's
+            `created_at`. Templates created before this instant are
+            filtered out. Whitespace is trimmed; empty disables the
+            filter. Invalid values return 400 `invalid_since`. A template
+            with a zero / unknown `created_at` is filtered OUT whenever
+            any bound is set — operators querying a time window don't
+            want unbounded entries silently included. Composes additively
+            with `tag`, `image`, `search`, `sort`, and pagination so
+            `X-Total-Count` reflects the post-filter population. Mirrors
+            the snapshot (5.4.28), image (5.4.29), and VM (5.4.30)
+            time-range filters.
+          schema:
+            type: string
+        - in: query
+          name: until
+          required: false
+          description: |
+            RFC3339 timestamp upper bound (inclusive) on the template's
+            `created_at`. Templates created after this instant are
+            filtered out. Whitespace is trimmed; empty disables the
+            filter. Invalid values return 400 `invalid_until`. Same zero
+            / unknown / additive-composition semantics as `since`.
+          schema:
+            type: string
       responses:
         '200':
           description: Template list
