@@ -760,12 +760,14 @@ That shape keeps two important invariants in place:
 1. the host's VNC socket stays private on `127.0.0.1`
 2. browser access remains time-limited, VM-scoped, and auditable through the daemon
 
-#### Security notes
+#### Security checklist
 
+- Keep libvirt's VNC listener bound to `127.0.0.1`; the browser should only reach it through the authenticated websocket proxy.
 - Query-param secrets like `ticket=` must be redacted from request logs.
-- Console tickets are intentionally short-lived and single-use.
+- Console tickets should stay intentionally short-lived and single-use.
 - The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`.
 - Future websocket sessions should be counted alongside SSE clients in host-level stats.
+- When TLS is enabled or terminated by a trusted reverse proxy, browser console access should use `wss://`, not plaintext `ws://`.
 
 ### 10. Configuration
 
