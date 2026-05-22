@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -563,6 +564,7 @@ type sseEventTestServer struct {
 	replay      []*types.Event   // events to send when Last-Event-ID is set
 	authHeaders []string         // captured Authorization headers
 	lastIDSeen  []string         // captured Last-Event-ID headers
+	queries     []url.Values     // captured request query strings
 	statusOnce  int              // optional one-shot status code (0 = 200)
 	server      *httptest.Server // backing test server
 }
@@ -581,6 +583,7 @@ func (s *sseEventTestServer) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.authHeaders = append(s.authHeaders, r.Header.Get("Authorization"))
 	s.lastIDSeen = append(s.lastIDSeen, r.Header.Get("Last-Event-ID"))
+	s.queries = append(s.queries, r.URL.Query())
 	statusOnce := s.statusOnce
 	s.statusOnce = 0
 	events := s.events
@@ -1334,5 +1337,77 @@ func TestCLI_EventsFollow_FiltersByResourceID(t *testing.T) {
 	}
 	if strings.Contains(out, "image.uploaded") || strings.Contains(out, "vm.started") {
 		t.Errorf("--resource-id filter leaked in follow output:\n%s", out)
+	}
+}
+
+// TestCLI_EventsFollow_ForwardsFiltersAsQueryParams pins the contract that
+// `events follow` pushes the filter set to the daemon as query params so the
+// SSE server-side predicate (5.4.33) can short-circuit non-matching events
+// before they cross the wire.
+func TestCLI_EventsFollow_ForwardsFiltersAsQueryParams(t *testing.T) {
+	srv := newSSETestServer(t, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	_ = followEventsStream(ctx, srv.URL(), "",
+		eventFilter{
+			vmID:       "vm-42",
+			typeStr:    "vm.started",
+			typePrefix: "vm.",
+			source:     "app",
+			severity:   "info",
+			actor:      "ops-alice",
+			resourceID: "snap-1",
+			search:     "needle",
+		},
+		eventRowOptions{}, &buf)
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if len(srv.queries) == 0 {
+		t.Fatal("no requests captured")
+	}
+	q := srv.queries[0]
+	checks := map[string]string{
+		"vm_id":       "vm-42",
+		"type":        "vm.started",
+		"type_prefix": "vm.",
+		"source":      "app",
+		"severity":    "info",
+		"actor":       "ops-alice",
+		"resource_id": "snap-1",
+		"search":      "needle",
+	}
+	for key, want := range checks {
+		if got := q.Get(key); got != want {
+			t.Errorf("query param %q = %q, want %q (full = %v)", key, got, want, q)
+		}
+	}
+}
+
+// TestCLI_EventsFollow_EmptyFilterOmitsQueryParams verifies the default
+// follow path emits no filter params, preserving the pre-5.4.33 wire
+// behaviour for users who don't want server-side filtering.
+func TestCLI_EventsFollow_EmptyFilterOmitsQueryParams(t *testing.T) {
+	srv := newSSETestServer(t, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	_ = followEventsStream(ctx, srv.URL(), "", eventFilter{}, eventRowOptions{}, &buf)
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if len(srv.queries) == 0 {
+		t.Fatal("no requests captured")
+	}
+	q := srv.queries[0]
+	for _, key := range []string{"vm_id", "type", "type_prefix", "source", "severity", "actor", "resource_id", "search"} {
+		if got := q.Get(key); got != "" {
+			t.Errorf("expected no %q param when filter is empty, got %q (full = %v)", key, got, q)
+		}
 	}
 }
