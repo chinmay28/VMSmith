@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock, Search, X } from 'lucide-react';
 import { webhooks as webhooksApi } from '../api/client';
@@ -6,6 +6,18 @@ import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
 
 const DEFAULT_WEBHOOK_PER_PAGE = 25;
+
+// `<input type="datetime-local">` returns a naive local-time string
+// (`YYYY-MM-DDTHH:MM`). Convert to RFC3339 in UTC so the daemon's
+// `parseTimeRangeParam` accepts it. Empty / invalid input → empty string
+// so the API client drops the param. Mirrors the helper used by
+// VMList / TemplateList / ImageList for the 5.4.30-5.4.32 time-range filters.
+function datetimeLocalToISO(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString();
+}
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -31,6 +43,14 @@ export default function Settings() {
   // doesn't thrash the request loop.
   const [eventTypeInput, setEventTypeInput] = useState(searchParams.get('event_type') || '');
   const [eventTypeFilter, setEventTypeFilter] = useState(searchParams.get('event_type') || '');
+
+  // Time-range filter (5.4.32) — inclusive bounds on the webhook's created_at.
+  // The datetime-local controls hand the browser-naive local-time string back
+  // to us; we convert to RFC3339-UTC before forwarding so the daemon receives
+  // a canonical value (see datetimeLocalToISO below). URL round-trips the
+  // RFC3339 value verbatim.
+  const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
+  const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
 
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
@@ -75,22 +95,27 @@ export default function Settings() {
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, eventTypeFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, sinceFilter, untilFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (eventTypeFilter) next.set('event_type', eventTypeFilter); else next.delete('event_type');
+    if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
+    if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, eventTypeFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
+  const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, eventTypeFilter, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -262,6 +287,38 @@ export default function Settings() {
             <option value="desc">desc</option>
           </select>
         </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Created since
+          <input
+            type="datetime-local"
+            value={sinceFilter}
+            onChange={(e) => setSinceFilter(e.target.value)}
+            data-testid="webhook-list-since"
+            aria-label="Created since"
+            className="input py-1 text-xs"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Created until
+          <input
+            type="datetime-local"
+            value={untilFilter}
+            onChange={(e) => setUntilFilter(e.target.value)}
+            data-testid="webhook-list-until"
+            aria-label="Created until"
+            className="input py-1 text-xs"
+          />
+        </label>
+        {(sinceFilter || untilFilter) && (
+          <button
+            type="button"
+            onClick={() => { setSinceFilter(''); setUntilFilter(''); }}
+            data-testid="webhook-list-clear-range"
+            className="text-xs text-steel-400 hover:text-steel-200"
+          >
+            Clear range
+          </button>
+        )}
       </div>
 
       {loading && !hookResponse ? (

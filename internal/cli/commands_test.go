@@ -5418,6 +5418,81 @@ func TestCLI_WebhookList_ShowsTagsColumn(t *testing.T) {
 	}
 }
 
+// =====================================================
+// webhook list --since / --until tests
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsSince(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--since", "2026-05-01T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --since: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "since=2026-05-01") {
+		t.Fatalf("query missing since=2026-05-01: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsUntil(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--until", "2026-05-20T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --until: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "until=2026-05-20") {
+		t.Fatalf("query missing until=2026-05-20: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsSinceAndUntil(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--since", "2026-05-01T00:00:00Z", "--until", "2026-05-20T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --since --until: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "since=2026-05-01") || !strings.Contains(state.lastQuery, "until=2026-05-20") {
+		t.Fatalf("query missing since/until: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidSince(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--since", "yesterday")
+	if err == nil {
+		t.Fatalf("expected error for invalid --since, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --since") {
+		t.Fatalf("error = %q, want it to mention 'invalid --since'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidUntil(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--until", "2026-13-99")
+	if err == nil {
+		t.Fatalf("expected error for invalid --until, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("error = %q, want it to mention 'invalid --until'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_EmptySinceOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--since", "  "); err != nil {
+		t.Fatalf("webhook list --since '  ': %v", err)
+	}
+	if strings.Contains(state.lastQuery, "since=") {
+		t.Fatalf("whitespace-only --since must not be forwarded: %q", state.lastQuery)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // vmsmith webhook test <id> — CLI parallel of POST /webhooks/{id}/test.
 //

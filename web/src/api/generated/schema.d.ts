@@ -2143,6 +2143,28 @@ export interface paths {
                      */
                     event_type?: string;
                     /**
+                     * @description RFC3339 timestamp lower bound (inclusive) on the webhook's
+                     *     `created_at`. Webhooks created before this instant are
+                     *     filtered out. Whitespace is trimmed; empty disables the
+                     *     filter. Invalid values return 400 `invalid_since`. A webhook
+                     *     with a zero / unknown `created_at` is filtered OUT whenever
+                     *     any bound is set — operators querying a time window don't
+                     *     want unbounded entries silently included. Composes additively
+                     *     with `tag`, `event_type`, `search`, `sort`, and pagination so
+                     *     `X-Total-Count` reflects the post-filter population. Mirrors
+                     *     the snapshot (5.4.28), image (5.4.29), VM (5.4.30), and
+                     *     template (5.4.31) time-range filters.
+                     */
+                    since?: string;
+                    /**
+                     * @description RFC3339 timestamp upper bound (inclusive) on the webhook's
+                     *     `created_at`. Webhooks created after this instant are
+                     *     filtered out. Whitespace is trimmed; empty disables the
+                     *     filter. Invalid values return 400 `invalid_until`. Same zero
+                     *     / unknown / additive-composition semantics as `since`.
+                     */
+                    until?: string;
+                    /**
                      * @description Case-insensitive substring filter applied across each webhook's
                      *     URL, description, event-type filters, and tags. Whitespace is
                      *     trimmed before matching. Secret, ID, and last_error are

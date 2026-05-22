@@ -1392,6 +1392,34 @@ paths:
             Applied between `tag` and `search` so the post-filter
             `X-Total-Count` stays correct.
         - in: query
+          name: since
+          required: false
+          schema:
+            type: string
+          description: |
+            RFC3339 timestamp lower bound (inclusive) on the webhook's
+            `created_at`. Webhooks created before this instant are
+            filtered out. Whitespace is trimmed; empty disables the
+            filter. Invalid values return 400 `invalid_since`. A webhook
+            with a zero / unknown `created_at` is filtered OUT whenever
+            any bound is set — operators querying a time window don't
+            want unbounded entries silently included. Composes additively
+            with `tag`, `event_type`, `search`, `sort`, and pagination so
+            `X-Total-Count` reflects the post-filter population. Mirrors
+            the snapshot (5.4.28), image (5.4.29), VM (5.4.30), and
+            template (5.4.31) time-range filters.
+        - in: query
+          name: until
+          required: false
+          schema:
+            type: string
+          description: |
+            RFC3339 timestamp upper bound (inclusive) on the webhook's
+            `created_at`. Webhooks created after this instant are
+            filtered out. Whitespace is trimmed; empty disables the
+            filter. Invalid values return 400 `invalid_until`. Same zero
+            / unknown / additive-composition semantics as `since`.
+        - in: query
           name: search
           schema:
             type: string

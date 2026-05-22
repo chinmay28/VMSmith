@@ -2421,6 +2421,30 @@ test.describe("Settings — Webhooks", () => {
     await expect(page.getByText(/No webhooks explicitly subscribe/i)).toBeVisible();
   });
 
+  // 5.4.32 — time-range filter (?since= / ?until=) on the webhook list.
+  // Mirrors the snapshot (5.4.28), image (5.4.29), VM (5.4.30), and template
+  // (5.4.31) time-range filters. Webhooks created via the modal get
+  // `created_at: now()` on the mock server, so this test exercises the
+  // URL round-trip + "Clear range" affordance rather than boundary-splitting
+  // (which is covered by the API and CLI integration tests).
+  test("created-since/until inputs round-trip through the URL and clear via the Clear range button", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+
+    // Set a since bound — the URL must reflect it.
+    await page.getByTestId("webhook-list-since").fill("2026-05-01T00:00");
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toContain("2026-05-01");
+
+    // Set an until bound — both bounds round-trip simultaneously.
+    await page.getByTestId("webhook-list-until").fill("2026-05-20T00:00");
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toContain("2026-05-20");
+
+    // "Clear range" drops both bounds from the URL in a single click.
+    await page.getByTestId("webhook-list-clear-range").click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toBeNull();
+  });
+
   // 5.4.15 — sortable webhook list (sort + order dropdowns).
   test("sort dropdowns reorder the webhook list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);

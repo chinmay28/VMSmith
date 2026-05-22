@@ -1420,6 +1420,177 @@ func TestListWebhooks_FilterByEventType_TotalCountReflectsFiltered(t *testing.T)
 	}
 }
 
+// seedTimeRangeWebhooks pins three webhooks at deterministic CreatedAt
+// timestamps (2026-05-01, 2026-05-15, 2026-05-30) so the ?since= / ?until=
+// boundary tests below split them cleanly. Mirrors the snapshot (5.4.28),
+// image (5.4.29), VM (5.4.30), and template (5.4.31) time-range fixtures.
+func seedTimeRangeWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	hooks := []*types.Webhook{
+		{ID: "wh-early", URL: "https://a.example.com", Secret: "k", Active: true, CreatedAt: day(1)},
+		{ID: "wh-mid", URL: "https://b.example.com", Secret: "k", Active: true, CreatedAt: day(15)},
+		{ID: "wh-late", URL: "https://c.example.com", Secret: "k", Active: true, CreatedAt: day(30)},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_FilterBySince(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedTimeRangeWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?since=2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	ids := map[string]bool{}
+	for _, h := range hooks {
+		ids[h.ID] = true
+	}
+	if !ids["wh-mid"] || !ids["wh-late"] || ids["wh-early"] {
+		t.Fatalf("expected wh-mid + wh-late, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByUntil(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedTimeRangeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "until=2026-05-20T00:00:00Z")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 webhooks <= until, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySinceAndUntil(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedTimeRangeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "since=2026-05-10T00:00:00Z&until=2026-05-20T00:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-mid" {
+		t.Fatalf("expected only wh-mid, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySince_Inclusive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-edge", URL: "https://edge.example.com", Secret: "k", Active: true, CreatedAt: boundary}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "since=2026-05-01T00:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-edge" {
+		t.Fatalf("expected boundary match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByInvalidSince(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?since=last-tuesday")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_since")
+}
+
+func TestListWebhooks_FilterByInvalidUntil(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?until=2026-13-99")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_until")
+}
+
+func TestListWebhooks_FilterBySince_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedTimeRangeWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "since=%20%20")
+	if len(hooks) != 3 {
+		t.Fatalf("whitespace-only since should be a no-op; got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByTimeRange_ExcludesZeroCreatedAt(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-zero", URL: "https://zero.example.com", Secret: "k", Active: true}); err != nil { // zero CreatedAt
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-dated", URL: "https://dated.example.com", Secret: "k", Active: true, CreatedAt: time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "since=2026-05-01T00:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-dated" {
+		t.Fatalf("expected only wh-dated (zero-time excluded), got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-old", URL: "https://hooks.example.com/audit-old", Secret: "k", Active: true, CreatedAt: day(1), Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-new", URL: "https://hooks.example.com/audit-new", Secret: "k", Active: true, CreatedAt: day(20), Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-staging-new", URL: "https://hooks.example.com/audit-stg", Secret: "k", Active: true, CreatedAt: day(20), Tags: []string{"staging"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-other", URL: "https://hooks.example.com/metrics", Secret: "k", Active: true, CreatedAt: day(20), Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?since=2026-05-10T00:00:00Z&tag=production&search=audit")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 || hooks[0].ID != "wh-prod-new" {
+		t.Fatalf("expected only wh-prod-new, got %+v", hooks)
+	}
+}
+
 func TestListWebhooks_FilterBySearch_SecretAndLastErrorNotInHaystack(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()
