@@ -299,7 +299,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) BeginShutdown() {
 	s.shuttingDown.Store(true)
 	s.shutdownOnce.Do(func() {
-		close(s.shutdownNotify)
+		if s.shutdownNotify != nil {
+			close(s.shutdownNotify)
+		}
 	})
 }
 
