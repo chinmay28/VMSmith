@@ -165,6 +165,43 @@ func TestStreamEvents_ReplayOverflowReturnsGone(t *testing.T) {
 // Race-robust by design: there is no synchronous signal the SSE handler emits
 // when its Subscribe() returns, so we publish on a 50ms tick until the SSE
 // reader picks up a frame or the overall deadline elapses.
+func TestStreamEvents_ShutdownFrameOnBeginShutdown(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/events/stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	srv := ts.Config.Handler.(*Server)
+	srv.BeginShutdown()
+
+	frame, err := readSSEFrame(bufio.NewReader(resp.Body))
+	if err != nil {
+		t.Fatalf("read shutdown frame: %v", err)
+	}
+	if frame.id != "" {
+		t.Fatalf("shutdown frame id = %q, want empty", frame.id)
+	}
+	if frame.event != "shutdown" {
+		t.Fatalf("shutdown frame event = %q, want shutdown", frame.event)
+	}
+	if frame.data != `{"message":"server is shutting down"}` {
+		t.Fatalf("shutdown frame data = %q", frame.data)
+	}
+}
+
 func TestStreamEvents_LiveDeliveryAfterReplay(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()
