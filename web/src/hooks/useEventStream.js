@@ -7,6 +7,7 @@ export const STATE_CONNECTING = 'connecting';
 export const STATE_LIVE = 'live';
 export const STATE_RECONNECTING = 'reconnecting';
 export const STATE_FALLBACK = 'fallback';
+export const STATE_SHUTDOWN = 'shutdown';
 export const STATE_CLOSED = 'closed';
 
 const FALLBACK_AFTER_FAILURES = 3;
@@ -77,6 +78,7 @@ export function useEventStream({ onEvent, enabled = true, filter } = {}) {
   const lastIdRef = useRef(null);
   const failureCountRef = useRef(0);
   const closedRef = useRef(false);
+  const shutdownRef = useRef(false);
   const sourceRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const fallbackTimerRef = useRef(null);
@@ -161,9 +163,31 @@ export function useEventStream({ onEvent, enabled = true, filter } = {}) {
       dispatchEvent(parsed);
     };
 
+    es.addEventListener('shutdown', (msg) => {
+      let parsed = { type: 'shutdown', message: 'Server shutting down' };
+      if (msg?.data) {
+        try {
+          parsed = JSON.parse(msg.data);
+        } catch {
+          // Keep the default control-frame payload.
+        }
+      }
+      shutdownRef.current = true;
+      failureCountRef.current = 0;
+      clearReconnectTimer();
+      clearFallbackTimers();
+      setStatus(STATE_SHUTDOWN);
+      dispatchEvent(parsed);
+      es.close();
+      sourceRef.current = null;
+    });
+
     es.onerror = () => {
       es.close();
       sourceRef.current = null;
+      if (shutdownRef.current || closedRef.current) {
+        return;
+      }
       failureCountRef.current += 1;
       if (failureCountRef.current >= FALLBACK_AFTER_FAILURES) {
         clearReconnectTimer();
@@ -231,6 +255,7 @@ export function useEventStream({ onEvent, enabled = true, filter } = {}) {
     }
 
     closedRef.current = false;
+    shutdownRef.current = false;
     failureCountRef.current = 0;
 
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {

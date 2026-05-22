@@ -3185,6 +3185,32 @@ test.describe("Live Indicator", () => {
     ).toMatch(/reconnecting|fallback/);
   });
 
+  test("indicator shows shutdown when the daemon emits a shutdown control frame", async ({ page }) => {
+    await page.route("**/api/v1/events/stream*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        },
+        body: [
+          'event: shutdown',
+          'data: {"type":"shutdown","message":"daemon stopping"}',
+          '',
+          '',
+        ].join("\n"),
+      });
+    });
+    await page.goto(BASE_URL);
+    const indicator = page.getByTestId("live-indicator");
+    await expect.poll(
+      async () => indicator.getAttribute("data-status"),
+      { timeout: 5000 },
+    ).toBe("shutdown");
+    await expect(indicator).toContainText("shutdown");
+  });
+
   test("dashboard shows SSE connection count when host_stats reports >0 consumers", async ({ page }) => {
     await page.goto(BASE_URL);
     const sseBadge = page.getByTestId("sse-connection-count");
