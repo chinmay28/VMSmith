@@ -149,7 +149,7 @@ Binding to `127.0.0.1` is the key production choice here: only the reverse proxy
 
 This becomes even more important once browser console access is enabled: VMSmith's console design keeps libvirt VNC bound to loopback and expects the daemon to proxy authenticated websocket traffic. You should not add firewall or proxy rules that expose raw VNC ports directly.
 
-**Loopback firewall note:** no special allow-rule is needed for `lo` on a normal host, but do verify that custom nftables / iptables policies do not block localhost-to-localhost traffic. If your host firewall has an explicit default-drop policy, keep `lo` permitted both inbound and outbound so the daemon can reach host-local VNC / serial endpoints while still keeping them off the public network.
+**Loopback firewall note:** no special allow-rule is needed for `lo` on a normal host, but do verify that custom nftables / iptables policies do not block localhost-to-localhost traffic. If your host firewall has an explicit default-drop policy, keep `lo` permitted both inbound and outbound so the daemon can reach host-local VNC / serial endpoints while still keeping them off the public network. If you terminate TLS or websocket upgrades in a reverse proxy, make sure its access logs also redact `ticket=` query params so console URLs do not leak into log retention.
 
 If you enable `metrics.scrape_listen`, VMSmith also serves `GET /metrics` on that separate listener in Prometheus text format. This is useful when you want scraping isolated from the main API port or you do not want your reverse proxy in the metrics path.
 

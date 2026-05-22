@@ -671,6 +671,9 @@ Keeping the websocket endpoint on the same origin as the main UI avoids exposing
 - enforce global session caps and per-session idle / lifetime limits from `daemon.console.*`
 - never expose raw VNC listeners directly to the internet
 - treat tickets as secrets: short TTL, single use, no reuse after reconnect
+- redact `ticket=` query params in daemon logs, reverse-proxy access logs, and error reporting
+- tie ticket consumption to the authenticated websocket upgrade so a leaked URL cannot be replayed by a different caller
+- tear down active console sessions when the VM stops, is deleted, or the daemon begins shutdown
 - log ticket issuance and session termination so operators can audit who opened a console and when
 
 ---
