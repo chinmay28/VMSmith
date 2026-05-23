@@ -571,3 +571,65 @@ func TestManager_TestDeliver_SSRFBlocked(t *testing.T) {
 		t.Fatalf("expected error to describe SSRF block")
 	}
 }
+
+func TestManager_QueueOverflowPublishesSystemEvent(t *testing.T) {
+	store := newMemStore()
+	bus := events.New(store)
+	bus.Start()
+	defer bus.Stop()
+
+	mgr := newTestManager(t, store, bus, []string{"127.0.0.1"})
+	wh := &types.Webhook{
+		ID:        "wh-overflow",
+		URL:       "http://127.0.0.1:1/blocked",
+		Secret:    "k",
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	if err := store.PutWebhook(wh); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	mgr.mu.Lock()
+	worker := mgr.workers[wh.ID]
+	mgr.mu.Unlock()
+	if worker == nil {
+		t.Fatal("expected webhook worker to be registered")
+	}
+
+	for i := 0; i < cap(worker.queue); i++ {
+		worker.queue <- &types.Event{ID: fmt.Sprintf("preload-%d", i), Type: "vm.started"}
+	}
+
+	overflowEvt := &types.Event{ID: "evt-overflow", Type: "vm.started", Source: types.EventSourceApp}
+	worker.publishOverflow(overflowEvt)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events := store.eventsByType("webhook.queue_overflow")
+		if len(events) == 0 {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		evt := events[len(events)-1]
+		if evt.Attributes["webhook_id"] != wh.ID {
+			t.Fatalf("webhook_id = %q, want %q", evt.Attributes["webhook_id"], wh.ID)
+		}
+		if evt.Attributes["event_id"] != overflowEvt.ID {
+			t.Fatalf("event_id = %q, want %q", evt.Attributes["event_id"], overflowEvt.ID)
+		}
+		if evt.Attributes["event_type"] != overflowEvt.Type {
+			t.Fatalf("event_type = %q, want %q", evt.Attributes["event_type"], overflowEvt.Type)
+		}
+		return
+	}
+
+	t.Fatal("expected webhook.queue_overflow event")
+}
