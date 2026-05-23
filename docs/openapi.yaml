@@ -1666,7 +1666,23 @@ paths:
           schema:
             type: string
             format: date-time
-          description: Return entries at or after this timestamp.
+          description: |
+            Return entries strictly AFTER this RFC3339 timestamp. Whitespace
+            is trimmed; empty disables the bound; invalid values return 400
+            `invalid_since`. (Strict-after semantics are preserved from the
+            legacy `logger.Entries` contract.)
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Return entries at-or-BEFORE this RFC3339 timestamp (inclusive
+            upper bound — mirrors the snapshot/image/VM/template/webhook
+            time-range filters). Whitespace is trimmed; empty disables the
+            bound; invalid values return 400 `invalid_until`. Composes
+            additively with `since` and the other filters so `X-Total-Count`
+            reflects the post-filter population.
         - name: source
           in: query
           schema:

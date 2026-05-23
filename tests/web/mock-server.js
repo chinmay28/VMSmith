@@ -1106,6 +1106,22 @@ const server = http.createServer(async (req, res) => {
     const source = url.searchParams.get("source") || "";
     const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+    // 5.4.34 — time-range bounds. The daemon's parseTimeRangeParam returns
+    // 400 on garbage; mirror that contract here so the frontend can exercise
+    // the error path.
+    const parseLogTime = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const t = new Date(v);
+      if (Number.isNaN(t.getTime())) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a valid RFC3339 timestamp` };
+      }
+      return { set: true, value: t.getTime() };
+    };
+    const sinceLogP = parseLogTime(url.searchParams.get("since"), "since");
+    if (sinceLogP.invalid) return json(res, 400, { code: sinceLogP.code, message: sinceLogP.msg });
+    const untilLogP = parseLogTime(url.searchParams.get("until"), "until");
+    if (untilLogP.invalid) return json(res, 400, { code: untilLogP.code, message: untilLogP.msg });
     const levelOrder = { debug: 0, info: 1, warn: 2, error: 3 };
     const minLevel = levelOrder[level] ?? 0;
     let filtered = entries.filter(e => (levelOrder[e.level] ?? 0) >= minLevel);
@@ -1115,6 +1131,16 @@ const server = http.createServer(async (req, res) => {
       // structured `vm_id` field only. Case-sensitive (VM IDs are
       // opaque `vm-<unix-nano>` strings).
       filtered = filtered.filter(e => e.fields && e.fields.vm_id === vmIDFilter);
+    }
+    if (sinceLogP.set) {
+      // Mirror internal/logger.Entries: since is strict `>` (entries
+      // STRICTLY after the bound), not at-or-after.
+      filtered = filtered.filter(e => new Date(e.ts).getTime() > sinceLogP.value);
+    }
+    if (untilLogP.set) {
+      // 5.4.34 — until is INCLUSIVE (at-or-before), matching the
+      // snapshot/image/VM/template/webhook time-range family.
+      filtered = filtered.filter(e => new Date(e.ts).getTime() <= untilLogP.value);
     }
     if (search) {
       // Mirror internal/logger.EntryMatchesSearch: message + source + level +

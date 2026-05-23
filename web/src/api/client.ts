@@ -298,9 +298,9 @@ export const logs = {
   // timestamp|level|source (default timestamp); order asc|desc (default
   // asc — preserves the legacy oldest-first contract).  Empty/undefined
   // omits the param so the daemon's defaults apply.
-  list: ({ level = 'debug', page, perPage, limit, since = '', source = '', vmId = '', search = '', sort = '', order = '' }: { level?: string; page?: number; perPage?: number; limit?: number; since?: string; source?: string; vmId?: string; search?: string; sort?: 'timestamp' | 'level' | 'source' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
+  list: ({ level = 'debug', page, perPage, limit, since = '', until = '', source = '', vmId = '', search = '', sort = '', order = '' }: { level?: string; page?: number; perPage?: number; limit?: number; since?: string; until?: string; source?: string; vmId?: string; search?: string; sort?: 'timestamp' | 'level' | 'source' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
     unwrap(apiClient.GET('/logs', {
-      params: { query: { level, page, per_page: perPage, limit, since, source, vm_id: vmId || undefined, search, sort: sort || undefined, order: order || undefined } as any },
+      params: { query: { level, page, per_page: perPage, limit, since: since || undefined, until: until || undefined, source, vm_id: vmId || undefined, search, sort: sort || undefined, order: order || undefined } as any },
     }), { withMeta: true }),
 };
 

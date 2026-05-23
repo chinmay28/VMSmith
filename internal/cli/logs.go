@@ -42,6 +42,12 @@ Filters mirror the API one-to-one:
   --since <when>       Show entries strictly after this point in time.
                        Accepts a Go duration (e.g. 5m, 2h) or an RFC3339
                        timestamp.
+  --until <when>       Show entries at-or-before this point in time
+                       (inclusive upper bound — mirrors the snapshot /
+                       image / VM / template / webhook time-range
+                       filters). Accepts a Go duration (e.g. 5m, 2h —
+                       resolved as "at or before <duration> ago") or an
+                       RFC3339 timestamp.
   --search <text>      Case-insensitive substring match across each
                        entry's message, source, level, and every value
                        in the structured fields map.  Field *keys* are
@@ -75,6 +81,7 @@ var logsListCmd = &cobra.Command{
 		source, _ := cmd.Flags().GetString("source")
 		vmID, _ := cmd.Flags().GetString("vm-id")
 		since, _ := cmd.Flags().GetString("since")
+		until, _ := cmd.Flags().GetString("until")
 		search, _ := cmd.Flags().GetString("search")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
@@ -104,6 +111,15 @@ var logsListCmd = &cobra.Command{
 		} else if !t.IsZero() {
 			sinceParam = t.UTC().Format(time.RFC3339Nano)
 		}
+		// --until uses the same duration-or-RFC3339 parser so `--until 1m`
+		// reads as "everything older than a minute ago" — symmetric with
+		// `--since`.
+		var untilParam string
+		if t, perr := parseUntilFlag(until); perr != nil {
+			return perr
+		} else if !t.IsZero() {
+			untilParam = t.UTC().Format(time.RFC3339Nano)
+		}
 
 		if limit < 0 {
 			return fmt.Errorf("--limit must be >= 0 (0 = daemon default)")
@@ -126,6 +142,9 @@ var logsListCmd = &cobra.Command{
 		}
 		if sinceParam != "" {
 			q.Set("since", sinceParam)
+		}
+		if untilParam != "" {
+			q.Set("until", untilParam)
 		}
 		if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
 			q.Set("search", needle)
@@ -284,6 +303,7 @@ func init() {
 	logsListCmd.Flags().String("source", "", "filter by source: cli|api|daemon (empty = all)")
 	logsListCmd.Flags().String("vm-id", "", "filter by exact match on the entry's structured vm_id field (empty = all)")
 	logsListCmd.Flags().String("since", "", "show entries since (Go duration like 5m, or RFC3339 timestamp)")
+	logsListCmd.Flags().String("until", "", "show entries until (Go duration like 5m, or RFC3339 timestamp; inclusive upper bound)")
 	logsListCmd.Flags().String("search", "", "case-insensitive substring match across message, source, level, and structured field values")
 	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source (empty = daemon default = timestamp)")
 	logsListCmd.Flags().String("order", "", "sort order: asc|desc (empty = daemon default = asc)")
