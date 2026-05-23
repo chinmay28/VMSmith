@@ -162,6 +162,75 @@ func TestCLI_LogsList_SinceInvalidIsRejected(t *testing.T) {
 	}
 }
 
+// ── --until (5.4.34) ──────────────────────────────────────────────────────
+
+func TestCLI_LogsList_ForwardsUntil(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--until", "2026-05-01T00:00:00Z"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "until=") {
+		t.Fatalf("expected ?until= in query: %q", state.lastQuery)
+	}
+	// The CLI re-formats to RFC3339Nano (zero-fractional rendering), so look
+	// for the URL-encoded date stem rather than the exact value.
+	if !strings.Contains(state.lastQuery, "2026-05-01") {
+		t.Fatalf("expected encoded date in until= value, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_UntilDurationBecomesRFC3339(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--until", "1m"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "until=") {
+		t.Fatalf("expected ?until= in query: %q", state.lastQuery)
+	}
+	// Encoded RFC3339 nano timestamp shape — date 'T' time 'Z'.
+	if !strings.Contains(state.lastQuery, "T") || !strings.Contains(state.lastQuery, "Z") {
+		t.Fatalf("expected RFC3339 until= value, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_UntilInvalidIsRejected(t *testing.T) {
+	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--until", "definitely-not-a-time")
+	if err == nil {
+		t.Fatalf("expected error for invalid --until, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --until") {
+		t.Fatalf("error = %q, want it to mention 'invalid --until'", err.Error())
+	}
+}
+
+func TestCLI_LogsList_ForwardsSinceAndUntil(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list",
+		"--api-url", srv.URL,
+		"--since", "2026-05-01T00:00:00Z",
+		"--until", "2026-05-31T23:59:59Z",
+	)
+	if err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	for _, want := range []string{"since=", "until=", "2026-05-01", "2026-05-31"} {
+		if !strings.Contains(state.lastQuery, want) {
+			t.Fatalf("query missing %q: %q", want, state.lastQuery)
+		}
+	}
+}
+
+func TestCLI_LogsList_EmptyUntilOmitsParam(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--until", ""); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "until=") {
+		t.Fatalf("empty --until must not forward param; query=%q", state.lastQuery)
+	}
+}
+
 func TestCLI_LogsList_RejectsInvalidLevel(t *testing.T) {
 	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
 	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--level", "shout")

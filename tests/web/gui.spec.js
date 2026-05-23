@@ -2759,6 +2759,36 @@ test.describe("Log Viewer", () => {
     // should reappear since the filter no longer hides it.
     await expect(page.locator('[data-testid="log-table"] tbody')).toContainText("vmSmith daemon listening");
   });
+
+  // ── 5.4.34 time-range filter ────────────────────────────────────────
+  test("until filter narrows the log table and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    // The mock-server seeds 5 entries at baseTs+0..+4ms. Picking a value
+    // far in the past as the upper bound should empty the table — and the
+    // empty-state copy must call out the time-range branch.
+    await page.getByTestId("log-until-filter").fill("2020-01-01T00:00");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("until=");
+    await expect(page.getByTestId("log-empty-state")).toContainText("time range");
+
+    // Clearing the range must drop both query params and re-populate.
+    await page.getByTestId("log-time-range-clear").click();
+    await expect.poll(() => page.url(), { timeout: 2000 }).not.toContain("until=");
+    await expect.poll(() => page.url(), { timeout: 2000 }).not.toContain("since=");
+    await expect(page.locator('[data-testid="log-table"] tbody')).toContainText("vmSmith daemon listening");
+  });
+
+  test("since and until filter values hydrate from the URL on load", async ({ page }) => {
+    await page.goto(`${BASE_URL}/logs?since=2020-01-01T00%3A00&until=2020-01-01T01%3A00`);
+    await expect(page.getByTestId("log-table")).toBeVisible();
+    // Range entirely in the past → empty table with the dedicated copy.
+    await expect(page.getByTestId("log-empty-state")).toContainText("time range");
+    // The inputs hydrate from the URL.
+    await expect(page.getByTestId("log-since-filter")).toHaveValue("2020-01-01T00:00");
+    await expect(page.getByTestId("log-until-filter")).toHaveValue("2020-01-01T01:00");
+  });
 });
 
 // ============================================================

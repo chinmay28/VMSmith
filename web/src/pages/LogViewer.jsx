@@ -25,6 +25,17 @@ const sourceBadge = (source) => {
 
 const DEFAULT_PER_PAGE = 100;
 
+// Convert a browser `datetime-local` string (no timezone) to RFC3339 UTC
+// before forwarding to the daemon. The daemon's parseTimeRangeParam helper
+// accepts RFC3339 / RFC3339Nano so the local-to-UTC reinterpretation is
+// the only conversion we need.
+function datetimeLocalToISO(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString();
+}
+
 export default function LogViewer() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [entries, setEntries] = useState([]);
@@ -37,6 +48,8 @@ export default function LogViewer() {
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [vmIDInput, setVMIDInput] = useState(searchParams.get('vm_id') || '');
   const [vmIDFilter, setVMIDFilter] = useState(searchParams.get('vm_id') || '');
+  const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
+  const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
   const sortFromUrl = searchParams.get('sort') || '';
   const orderFromUrl = searchParams.get('order') || '';
   const [sortField, setSortField] = useState(
@@ -66,6 +79,8 @@ export default function LogViewer() {
         source: sourceFilter,
         vmId: vmIDFilter,
         search: searchFilter,
+        since: datetimeLocalToISO(sinceFilter),
+        until: datetimeLocalToISO(untilFilter),
         sort: sortField,
         order: sortOrder,
       });
@@ -78,7 +93,7 @@ export default function LogViewer() {
     } finally {
       setLoading(false);
     }
-  }, [levelFilter, page, perPage, sourceFilter, vmIDFilter, searchFilter, sortField, sortOrder, paused]);
+  }, [levelFilter, page, perPage, sourceFilter, vmIDFilter, searchFilter, sinceFilter, untilFilter, sortField, sortOrder, paused]);
 
   // Initial load + polling every 3 seconds.
   useEffect(() => {
@@ -90,7 +105,7 @@ export default function LogViewer() {
 
   useEffect(() => {
     setPage(1);
-  }, [levelFilter, sourceFilter, vmIDFilter, searchFilter, sortField, sortOrder]);
+  }, [levelFilter, sourceFilter, vmIDFilter, searchFilter, sinceFilter, untilFilter, sortField, sortOrder]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -126,6 +141,15 @@ export default function LogViewer() {
     if (vmIDFilter) next.set('vm_id', vmIDFilter); else next.delete('vm_id');
     setSearchParams(next, { replace: true });
   }, [vmIDFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mirror committed since/until in the URL so the time-range view is
+  // shareable / bookmarkable / survives a refresh.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
+    if (untilFilter) next.set('until', untilFilter); else next.delete('until');
+    setSearchParams(next, { replace: true });
+  }, [sinceFilter, untilFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mirror sort field + order in the URL so the alternate view is
   // shareable / bookmarkable / survives a refresh.  Empty value means
@@ -298,6 +322,37 @@ export default function LogViewer() {
             </button>
           )}
         </div>
+        <div className="flex items-center gap-1.5 text-xs text-steel-500">
+          <span className="whitespace-nowrap">Since</span>
+          <input
+            type="datetime-local"
+            value={sinceFilter}
+            onChange={(e) => setSinceFilter(e.target.value)}
+            className="input py-1 text-xs w-44"
+            data-testid="log-since-filter"
+            aria-label="Filter logs by lower-bound timestamp"
+          />
+          <span className="whitespace-nowrap">Until</span>
+          <input
+            type="datetime-local"
+            value={untilFilter}
+            onChange={(e) => setUntilFilter(e.target.value)}
+            className="input py-1 text-xs w-44"
+            data-testid="log-until-filter"
+            aria-label="Filter logs by upper-bound timestamp"
+          />
+          {(sinceFilter || untilFilter) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200 px-1"
+              onClick={() => { setSinceFilter(''); setUntilFilter(''); }}
+              data-testid="log-time-range-clear"
+              aria-label="Clear time range"
+            >
+              Clear range
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Log table */}
@@ -316,7 +371,9 @@ export default function LogViewer() {
               ? `No log entries for VM "${vmIDFilter}".`
               : searchFilter
                 ? `No log entries match "${searchFilter}".`
-                : 'No log entries yet.'}
+                : (sinceFilter || untilFilter)
+                  ? 'No log entries in the selected time range.'
+                  : 'No log entries yet.'}
           </p>
         ) : (
           <table className="w-full border-collapse">

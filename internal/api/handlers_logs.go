@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/vmsmith/vmsmith/internal/logger"
 )
@@ -21,7 +20,14 @@ type logsResponse struct {
 //	page      – 1-indexed page number (default: 1)
 //	per_page  – page size (default: 200, max: 2000)
 //	limit     – alias for per_page
-//	since     – RFC3339 timestamp; only return entries after this time
+//	since     – RFC3339 timestamp; only return entries strictly AFTER
+//	            this time.  Whitespace is trimmed; empty disables the
+//	            bound; invalid values return 400 `invalid_since`.
+//	until     – RFC3339 timestamp; only return entries at-or-BEFORE
+//	            this time (inclusive upper bound — mirrors the
+//	            snapshot/image/VM/template/webhook time-range filters
+//	            family).  Whitespace is trimmed; empty disables the
+//	            bound; invalid values return 400 `invalid_until`.
 //	source    – filter by source: cli | api | daemon (empty = all)
 //	vm_id     – exact-match filter against the entry's structured
 //	            `vm_id` field. Whitespace-trimmed; empty = no filter.
@@ -44,19 +50,33 @@ func (s *Server) GetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	since, _, sinceErr := parseTimeRangeParam(q.Get("since"), "since")
+	if sinceErr != nil {
+		writeAPIError(w, http.StatusBadRequest, sinceErr)
+		return
+	}
+	until, untilSet, untilErr := parseTimeRangeParam(q.Get("until"), "until")
+	if untilErr != nil {
+		writeAPIError(w, http.StatusBadRequest, untilErr)
+		return
+	}
+
 	level := q.Get("level")
 	if level == "" {
 		level = "debug"
 	}
 
-	var since time.Time
-	if raw := q.Get("since"); raw != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			since = parsed
-		}
-	}
-
 	entries := logger.Get().Entries(level, since, 0)
+
+	if untilSet {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if !e.Timestamp.After(until) {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
 
 	if src := q.Get("source"); src != "" {
 		filtered := entries[:0]

@@ -308,6 +308,23 @@ func parseSinceFlag(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid --since value %q (want duration like 5m or RFC3339 timestamp)", s)
 }
 
+// parseUntilFlag mirrors parseSinceFlag for upper-bound filters. A Go
+// duration like "5m" resolves to "five minutes ago" so `--until 5m` reads
+// as "every entry at-or-before five minutes ago" — symmetric with --since.
+func parseUntilFlag(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		return time.Now().Add(-d), nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("invalid --until value %q (want duration like 5m or RFC3339 timestamp)", s)
+}
+
 func orDash(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "-"

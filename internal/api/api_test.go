@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -5871,6 +5872,237 @@ func TestGetLogs_RejectsInvalidOrder(t *testing.T) {
 	decodeJSON(t, resp, &body)
 	if body["code"] != "invalid_order" {
 		t.Errorf("code = %v, want invalid_order", body["code"])
+	}
+}
+
+// ── time-range filter (5.4.34) ─────────────────────────────────────────────
+
+func TestGetLogs_FilterByUntil(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Drive a request, then take the cutoff, then drive another. The
+	// post-cutoff entries should be filtered out by ?until=.
+	http.Get(ts.URL + "/api/v1/vms")
+	time.Sleep(2 * time.Millisecond)
+	cutoff := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+
+	until := cutoff.UTC().Format(time.RFC3339Nano)
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&until=" + until)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Entries) == 0 {
+		t.Fatalf("expected at least one entry at-or-before cutoff, got 0")
+	}
+	for _, e := range result.Entries {
+		if e.Timestamp.After(cutoff) {
+			t.Errorf("until filter returned entry at %v, want at-or-before %v", e.Timestamp, cutoff)
+		}
+	}
+}
+
+func TestGetLogs_FilterByUntil_Inclusive(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	http.Get(ts.URL + "/api/v1/vms")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&per_page=2000")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var all logsResponse
+	decodeJSON(t, resp, &all)
+	if len(all.Entries) == 0 {
+		t.Fatalf("no entries to test inclusivity against")
+	}
+
+	// Pick a real entry's exact timestamp and assert it is INCLUDED when
+	// passed as the upper bound (?until=t implies "at or before t").
+	target := all.Entries[len(all.Entries)/2].Timestamp
+	until := target.UTC().Format(time.RFC3339Nano)
+	resp2, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&until=" + until + "&per_page=2000")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp2.StatusCode)
+	}
+	var bounded logsResponse
+	decodeJSON(t, resp2, &bounded)
+
+	found := false
+	for _, e := range bounded.Entries {
+		if e.Timestamp.Equal(target) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("until filter excluded the boundary entry at %v; should be inclusive", target)
+	}
+}
+
+func TestGetLogs_FilterBySinceAndUntil(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	http.Get(ts.URL + "/api/v1/vms")
+	time.Sleep(2 * time.Millisecond)
+	lower := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+	time.Sleep(2 * time.Millisecond)
+	upper := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+
+	since := lower.UTC().Format(time.RFC3339Nano)
+	until := upper.UTC().Format(time.RFC3339Nano)
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&since=" + since + "&until=" + until)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Entries) == 0 {
+		t.Fatalf("expected at least one entry inside [%v, %v]", lower, upper)
+	}
+	for _, e := range result.Entries {
+		if !e.Timestamp.After(lower) {
+			t.Errorf("entry at %v not strictly after lower bound %v", e.Timestamp, lower)
+		}
+		if e.Timestamp.After(upper) {
+			t.Errorf("entry at %v past upper bound %v", e.Timestamp, upper)
+		}
+	}
+}
+
+func TestGetLogs_FilterByInvalidSince(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?since=not-a-time")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["code"] != "invalid_since" {
+		t.Errorf("code = %v, want invalid_since", body["code"])
+	}
+}
+
+func TestGetLogs_FilterByInvalidUntil(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?until=garbage")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["code"] != "invalid_until" {
+		t.Errorf("code = %v, want invalid_until", body["code"])
+	}
+}
+
+func TestGetLogs_FilterByUntil_EmptyIsNoOp(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	http.Get(ts.URL + "/api/v1/vms")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("baseline status = %d, want 200", resp.StatusCode)
+	}
+	var baseline logsResponse
+	decodeJSON(t, resp, &baseline)
+
+	// `until=` (empty) and `until=   ` (whitespace) must both behave as
+	// "no filter" — same count as the baseline request above.
+	for _, untilValue := range []string{"", "%20%20%20"} {
+		resp2, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&until=" + untilValue)
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("until=%q status = %d, want 200", untilValue, resp2.StatusCode)
+		}
+		var got logsResponse
+		decodeJSON(t, resp2, &got)
+		if len(got.Entries) != len(baseline.Entries) {
+			t.Errorf("until=%q returned %d entries; want %d (no-op)", untilValue, len(got.Entries), len(baseline.Entries))
+		}
+	}
+}
+
+func TestGetLogs_FilterByUntil_ComposesWithLevel(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	http.Get(ts.URL + "/api/v1/vms")
+	time.Sleep(2 * time.Millisecond)
+	cutoff := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+
+	until := cutoff.UTC().Format(time.RFC3339Nano)
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=info&until=" + until)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	for _, e := range result.Entries {
+		if e.Timestamp.After(cutoff) {
+			t.Errorf("entry past cutoff: %v", e.Timestamp)
+		}
+		if e.Level == "debug" {
+			t.Errorf("level=info should exclude debug entries; got %+v", e)
+		}
+	}
+}
+
+func TestGetLogs_FilterByUntil_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Generate at least one log entry, then take the cutoff, then generate
+	// more — the post-cutoff entries should be filtered out.
+	http.Get(ts.URL + "/api/v1/vms")
+	time.Sleep(2 * time.Millisecond)
+	cutoff := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	http.Get(ts.URL + "/api/v1/vms")
+	http.Get(ts.URL + "/api/v1/vms")
+
+	until := cutoff.UTC().Format(time.RFC3339Nano)
+	respFiltered, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&until=" + until + "&per_page=1")
+	if respFiltered.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", respFiltered.StatusCode)
+	}
+	filtered, err := strconv.Atoi(respFiltered.Header.Get("X-Total-Count"))
+	if err != nil {
+		t.Fatalf("X-Total-Count not numeric: %q", respFiltered.Header.Get("X-Total-Count"))
+	}
+
+	// Baseline run AFTER all log-emitting calls — captures every entry that
+	// exists in the ring (avoids ring-buffer ordering issues from prior
+	// tests in the suite).
+	respAll, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&per_page=1")
+	allTotal, _ := strconv.Atoi(respAll.Header.Get("X-Total-Count"))
+
+	if filtered <= 0 {
+		t.Fatalf("post-filter total = %d, want > 0", filtered)
+	}
+	if filtered > allTotal {
+		t.Errorf("post-filter total (%d) > unfiltered total (%d); until filter should never add entries", filtered, allTotal)
 	}
 }
 
