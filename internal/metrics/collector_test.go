@@ -265,6 +265,39 @@ func TestProcessSamples_CPUClampedAt100(t *testing.T) {
 	}
 }
 
+func TestProcessSamples_HandlesLargeUint64Counters(t *testing.T) {
+	const nearMax = ^uint64(0) - 50_000
+	rounds := [][]domainSample{
+		{{Name: "v1", State: "running", HasCPU: true, CPUTimeNs: nearMax, NumVcpus: 1, HasDisk: true, DiskRdBytes: nearMax, DiskWrBytes: nearMax, HasNet: true, NetRxBytes: nearMax, NetTxBytes: nearMax}},
+		{{Name: "v1", State: "running", HasCPU: true, CPUTimeNs: nearMax + 10_000, NumVcpus: 1, HasDisk: true, DiskRdBytes: nearMax + 20_000, DiskWrBytes: nearMax + 30_000, HasNet: true, NetRxBytes: nearMax + 40_000, NetTxBytes: nearMax + 50_000}},
+	}
+	m := newTestManager(rounds, map[string]string{"v1": "vm-overflow"})
+
+	t0 := time.Unix(1000, 0)
+	m.processSamples(rounds[0], t0)
+	m.processSamples(rounds[1], t0.Add(10*time.Second))
+
+	snap, _ := m.Snapshot("vm-overflow")
+	if snap == nil || snap.Current == nil {
+		t.Fatal("expected snapshot with current sample")
+	}
+	if snap.Current.CPUPercent == nil || *snap.Current.CPUPercent <= 0 {
+		t.Fatalf("CPUPercent = %v, want positive rate", snap.Current.CPUPercent)
+	}
+	if snap.Current.DiskReadBps == nil || *snap.Current.DiskReadBps != 2000 {
+		t.Fatalf("DiskReadBps = %v, want 2000", snap.Current.DiskReadBps)
+	}
+	if snap.Current.DiskWriteBps == nil || *snap.Current.DiskWriteBps != 3000 {
+		t.Fatalf("DiskWriteBps = %v, want 3000", snap.Current.DiskWriteBps)
+	}
+	if snap.Current.NetRxBps == nil || *snap.Current.NetRxBps != 4000 {
+		t.Fatalf("NetRxBps = %v, want 4000", snap.Current.NetRxBps)
+	}
+	if snap.Current.NetTxBps == nil || *snap.Current.NetTxBps != 5000 {
+		t.Fatalf("NetTxBps = %v, want 5000", snap.Current.NetTxBps)
+	}
+}
+
 func TestProcessSamples_NoResolverFallsBackToName(t *testing.T) {
 	// When no resolver is wired (legacy / direct test path), keying falls back
 	// to the domain name.  Verifies back-compat.
