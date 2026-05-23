@@ -331,8 +331,13 @@ export const webhooks = {
   // `sort` / `order` whitelist mirrors the daemon: sort one of id|url|
   // created_at|last_delivery_at (default id); order asc|desc (default asc).
   // Empty/undefined omits the param so the daemon's defaults apply.
-  list: ({ search = '', tag = '', eventType = '', since = '', until = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; since?: string; until?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  //
+  // `deliveryStatus` filters by the webhook's most-recent delivery
+  // classification: 'never' (no attempt yet), 'healthy' (last attempt was
+  // 2xx + no error), 'failing' (last attempt did not meet the healthy
+  // contract). Whitespace/empty omits the param. (5.4.35)
+  list: ({ search = '', tag = '', eventType = '', deliveryStatus = '', since = '', until = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; deliveryStatus?: 'never' | 'healthy' | 'failing' | ''; since?: string; until?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, delivery_status: deliveryStatus || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>

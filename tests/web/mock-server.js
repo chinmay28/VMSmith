@@ -1325,6 +1325,11 @@ const server = http.createServer(async (req, res) => {
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     const eventTypeFilter = (url.searchParams.get("event_type") || "").trim().toLowerCase();
+    // Delivery-status filter (5.4.35) — mirror IsValidWebhookDeliveryStatus.
+    const deliveryStatusFilter = (url.searchParams.get("delivery_status") || "").trim().toLowerCase();
+    if (deliveryStatusFilter && !["never", "healthy", "failing"].includes(deliveryStatusFilter)) {
+      return json(res, 400, { code: "invalid_delivery_status", message: "delivery_status must be one of: never, healthy, failing" });
+    }
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
     const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
@@ -1381,6 +1386,20 @@ const server = http.createServer(async (req, res) => {
         if (sinceTime && ct.getTime() < sinceTime.getTime()) return false;
         if (untilTime && ct.getTime() > untilTime.getTime()) return false;
         return true;
+      });
+    }
+    if (deliveryStatusFilter) {
+      // Mirror pkg/types.WebhookDeliveryStatus (5.4.35).
+      hooks = hooks.filter((wh) => {
+        const lastAt = wh.last_delivery_at && new Date(wh.last_delivery_at);
+        const hasLast = lastAt && !isNaN(lastAt.getTime()) && lastAt.getTime() !== 0;
+        const status = typeof wh.last_status === "number" ? wh.last_status : 0;
+        const lastErr = typeof wh.last_error === "string" ? wh.last_error : "";
+        let classification = "never";
+        if (hasLast) {
+          classification = (lastErr === "" && status >= 200 && status < 300) ? "healthy" : "failing";
+        }
+        return classification === deliveryStatusFilter;
       });
     }
     if (needle) {

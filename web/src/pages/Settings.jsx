@@ -52,6 +52,17 @@ export default function Settings() {
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
   const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
 
+  // Delivery-status filter (5.4.35) — categorical enum filter on the
+  // webhook's most-recent delivery classification. URL round-trip via
+  // `?delivery_status=`. Unknown values fall back to '' (no filter) so a
+  // stale link cannot leave the page in a wedged state.
+  const VALID_DELIVERY_STATUSES = ['', 'never', 'healthy', 'failing'];
+  const initialDeliveryStatus = (() => {
+    const raw = (searchParams.get('delivery_status') || '').toLowerCase();
+    return VALID_DELIVERY_STATUSES.includes(raw) ? raw : '';
+  })();
+  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState(initialDeliveryStatus);
+
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
   // snapshots, templates, port forwards). Empty == "use the daemon default".
@@ -95,12 +106,13 @@ export default function Settings() {
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, eventTypeFilter, sinceFilter, untilFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceFilter, untilFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (eventTypeFilter) next.set('event_type', eventTypeFilter); else next.delete('event_type');
+    if (deliveryStatusFilter) next.set('delivery_status', deliveryStatusFilter); else next.delete('delivery_status');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
@@ -108,14 +120,14 @@ export default function Settings() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, eventTypeFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, eventTypeFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -258,6 +270,21 @@ export default function Settings() {
           )}
         </div>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Delivery
+          <select
+            value={deliveryStatusFilter}
+            onChange={(e) => setDeliveryStatusFilter(e.target.value)}
+            data-testid="webhook-list-delivery-status"
+            aria-label="Filter by delivery status"
+            className="input py-1 text-xs"
+          >
+            <option value="">All</option>
+            <option value="never">Never delivered</option>
+            <option value="healthy">Healthy</option>
+            <option value="failing">Failing</option>
+          </select>
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Sort
           <select
             value={sortField}
@@ -330,6 +357,18 @@ export default function Settings() {
               icon={Search}
               title="No webhooks subscribed"
               description={`No webhooks explicitly subscribe to "${eventTypeFilter}". Catch-all webhooks (no event-type filter) are not matched.`}
+            />
+          ) : deliveryStatusFilter ? (
+            <EmptyState
+              icon={Search}
+              title="No webhooks in this delivery state"
+              description={
+                deliveryStatusFilter === 'never'
+                  ? 'No webhooks are waiting for their first delivery — every registered webhook has been attempted at least once.'
+                  : deliveryStatusFilter === 'healthy'
+                    ? 'No webhooks have a healthy last delivery. Check the "Failing" bucket for receivers needing attention.'
+                    : 'No webhooks are currently failing. Check the "Healthy" or "Never delivered" buckets instead.'
+              }
             />
           ) : searchFilter ? (
             <EmptyState

@@ -5493,6 +5493,59 @@ func TestCLI_WebhookList_EmptySinceOmitsParam(t *testing.T) {
 	}
 }
 
+// =====================================================
+// webhook list --delivery-status tests (5.4.35)
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsDeliveryStatus(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--delivery-status", "failing"); err != nil {
+		t.Fatalf("webhook list --delivery-status: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "delivery_status=failing") {
+		t.Fatalf("query missing delivery_status=failing: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_DeliveryStatus_NormalisesCaseAndWhitespace(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--delivery-status", "  HEALTHY  "); err != nil {
+		t.Fatalf("webhook list --delivery-status: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "delivery_status=healthy") {
+		t.Fatalf("expected normalised 'delivery_status=healthy' in query: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidDeliveryStatus(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--delivery-status", "alive")
+	if err == nil {
+		t.Fatalf("expected error for invalid --delivery-status, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --delivery-status") {
+		t.Fatalf("error = %q, want it to mention 'invalid --delivery-status'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_EmptyDeliveryStatusOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--delivery-status", "  "); err != nil {
+		t.Fatalf("webhook list --delivery-status '  ': %v", err)
+	}
+	if strings.Contains(state.lastQuery, "delivery_status=") {
+		t.Fatalf("whitespace-only --delivery-status must not be forwarded: %q", state.lastQuery)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // vmsmith webhook test <id> — CLI parallel of POST /webhooks/{id}/test.
 //

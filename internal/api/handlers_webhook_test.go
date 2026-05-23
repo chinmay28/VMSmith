@@ -2112,3 +2112,143 @@ func TestListWebhooks_Pagination_CapsAtMaxPerPage(t *testing.T) {
 		t.Errorf("len = %d, want 3", len(hooks))
 	}
 }
+
+// seedDeliveryStatusWebhooks seeds one webhook in each delivery-status bucket
+// (never, healthy, failing) so the 5.4.35 enum filter tests can assert which
+// bucket each value selects.
+func seedDeliveryStatusWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	// never — no LastDeliveryAt
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-never", URL: "https://never.example.com", Secret: "k", Active: true}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// healthy — 2xx + no LastError
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-healthy", URL: "https://healthy.example.com", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 200}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// failing transport — LastStatus == 0 with a non-empty error
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-fail-tx", URL: "https://fail-tx.example.com", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 0, LastError: "connection refused"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// failing 5xx
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-fail-5xx", URL: "https://fail-5xx.example.com", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 503, LastError: "service unavailable"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_Never(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=never")
+	if len(hooks) != 1 || hooks[0].ID != "wh-never" {
+		t.Fatalf("expected only wh-never, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_Healthy(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=healthy")
+	if len(hooks) != 1 || hooks[0].ID != "wh-healthy" {
+		t.Fatalf("expected only wh-healthy, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_Failing(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=failing")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 failing webhooks (transport + 5xx), got %d: %+v", len(hooks), hooks)
+	}
+	for _, h := range hooks {
+		if h.ID != "wh-fail-tx" && h.ID != "wh-fail-5xx" {
+			t.Fatalf("unexpected webhook in failing set: %s", h.ID)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_CaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=HEALTHY")
+	if len(hooks) != 1 || hooks[0].ID != "wh-healthy" {
+		t.Fatalf("expected case-insensitive match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_TrimsWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=%20%20never%20%20")
+	if len(hooks) != 1 || hooks[0].ID != "wh-never" {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=")
+	if len(hooks) != 4 {
+		t.Fatalf("expected all 4 webhooks (empty filter no-op), got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_Invalid(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDeliveryStatusWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?delivery_status=unknown")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_delivery_status")
+}
+
+func TestListWebhooks_FilterByDeliveryStatus_ComposesWithTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-fail", URL: "https://a", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 500, LastError: "internal", Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-stg-fail", URL: "https://b", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 500, LastError: "internal", Tags: []string{"staging"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-ok", URL: "https://c", Secret: "k", Active: true, LastDeliveryAt: now, LastStatus: 200, Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?delivery_status=failing&tag=production")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 || hooks[0].ID != "wh-prod-fail" {
+		t.Fatalf("expected only wh-prod-fail, got %+v", hooks)
+	}
+}
