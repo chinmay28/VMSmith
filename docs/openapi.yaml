@@ -34,6 +34,7 @@ paths:
         - $ref: '#/components/parameters/SearchFilter'
         - $ref: '#/components/parameters/ImageFilter'
         - $ref: '#/components/parameters/DefaultUserFilter'
+        - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
@@ -2018,6 +2019,23 @@ components:
         whether the field was explicitly set or left blank at create
         time. Composes additively with the existing `tag`, `status`, and
         `search` filters; `X-Total-Count` reflects the post-filter /
+        pre-pagination population.
+      schema:
+        type: string
+    NetworkFilter:
+      name: network
+      in: query
+      description: |
+        Case-insensitive exact-match filter on the name of any of the VM's
+        additional network attachments (`spec.networks[].name`). A VM matches
+        when any attachment name equals the value (any-of). Whitespace is
+        trimmed before comparison; an empty value disables the filter. The
+        implicit primary NAT network is NOT matched — it is not represented
+        in `spec.networks`, so this filter only ever scopes to the
+        explicitly-attached extra networks operators name and group by
+        ("data-net", "storage-net"). Composes additively with `tag`,
+        `status`, `search`, `image`, `default_user`, and the sort +
+        pagination params; `X-Total-Count` reflects the post-filter /
         pre-pagination population.
       schema:
         type: string

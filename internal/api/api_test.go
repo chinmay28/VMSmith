@@ -1108,6 +1108,153 @@ func TestListVMs_FilterByImage_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.4.36 — per-network filter on the VM list.
+func seedVMWithNetwork(id, name string, netNames ...string) *types.VM {
+	attachments := make([]types.NetworkAttachment, 0, len(netNames))
+	for _, n := range netNames {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{Networks: attachments}}
+}
+
+func TestListVMs_FilterByNetwork_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta", "storage-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-3", "gamma", "data-net", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=data-net")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 data-net vms, got %+v", vms)
+	}
+	for _, vm := range vms {
+		if vm.Name != "alpha" && vm.Name != "gamma" {
+			t.Fatalf("unexpected vm in filtered list: %+v", vm)
+		}
+	}
+}
+
+func TestListVMs_FilterByNetwork_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "Data-Net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=DATA-NET")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("case-insensitive network match expected alpha, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNetwork_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=%20%20data-net%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected whitespace-trimmed match for alpha, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNetwork_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only network filter should be a no-op; got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNetwork_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=does-not-exist")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected zero matches for unknown network, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNetwork_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	running := seedVMWithNetwork("vm-1", "alpha", "data-net")
+	running.State = types.VMStateRunning
+	stopped := seedVMWithNetwork("vm-2", "beta", "data-net")
+	stopped.State = types.VMStateStopped
+	other := seedVMWithNetwork("vm-3", "gamma", "storage-net")
+	other.State = types.VMStateRunning
+	mockMgr.SeedVM(running)
+	mockMgr.SeedVM(stopped)
+	mockMgr.SeedVM(other)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=data-net&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "alpha" {
+		t.Fatalf("expected only running data-net vm (alpha), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithNetwork("vm-1", "alpha", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-2", "beta", "data-net"))
+	mockMgr.SeedVM(seedVMWithNetwork("vm-3", "gamma", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?network=data-net")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want \"2\"", got)
+	}
+}
+
 func TestListVMs_FilterByAutoStart_True(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

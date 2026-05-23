@@ -540,6 +540,82 @@ func TestCLI_VMList_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
 	}
 }
 
+// 5.4.36 — per-network filter on `vmsmith vm list`.
+func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
+	attachments := make([]types.NetworkAttachment, 0, len(netNames))
+	for _, n := range netNames {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Networks: attachments}}
+}
+
+func TestCLI_VMList_FilterByNetwork_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(cliVMWithNetwork("vm-1", "alpha", "data-net"))
+	mock.SeedVM(cliVMWithNetwork("vm-2", "beta", "storage-net"))
+	mock.SeedVM(cliVMWithNetwork("vm-3", "gamma", "data-net", "storage-net"))
+
+	out, err := runCLI("vm", "list", "--network", "data-net")
+	if err != nil {
+		t.Fatalf("vm list --network: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") || !strings.Contains(out, "gamma") {
+		t.Fatalf("expected only data-net VMs (alpha, gamma), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNetwork_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(cliVMWithNetwork("vm-1", "alpha", "Data-Net"))
+
+	out, err := runCLI("vm", "list", "--network", "DATA-NET")
+	if err != nil {
+		t.Fatalf("vm list --network: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected case-insensitive match for alpha, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNetwork_NoMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(cliVMWithNetwork("vm-1", "alpha", "data-net"))
+
+	out, err := runCLI("vm", "list", "--network", "nope")
+	if err != nil {
+		t.Fatalf("vm list --network: %v", err)
+	}
+	if strings.Contains(out, "alpha") {
+		t.Fatalf("expected no matches, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNetwork_ComposesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	running := cliVMWithNetwork("vm-1", "alpha", "data-net")
+	running.State = types.VMStateRunning
+	stopped := cliVMWithNetwork("vm-2", "beta", "data-net")
+	stopped.State = types.VMStateStopped
+	mock.SeedVM(running)
+	mock.SeedVM(stopped)
+
+	out, err := runCLI("vm", "list", "--network", "data-net", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list --network --status: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || strings.Contains(out, "beta") {
+		t.Fatalf("expected only alpha (data-net + running), got %q", out)
+	}
+}
+
 func TestCLI_VMList_FilterByImage_ExactMatch(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

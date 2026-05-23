@@ -36,6 +36,8 @@ export default function VMList() {
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
   const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
+  const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
+  const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
@@ -49,8 +51,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -83,7 +85,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -113,6 +115,15 @@ export default function VMList() {
     return () => clearTimeout(handle);
   }, [defaultUserInput]);
 
+  // Same debounce shape for the network-filter input.
+  useEffect(() => {
+    const trimmed = networkInput.trim();
+    const handle = setTimeout(() => {
+      setNetworkFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [networkInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -120,12 +131,13 @@ export default function VMList() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
+    if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -227,6 +239,28 @@ export default function VMList() {
               onClick={() => setDefaultUserInput('')}
               data-testid="vm-list-default-user-filter-clear"
               aria-label="Clear default user filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-full sm:w-60">
+          <input
+            type="search"
+            value={networkInput}
+            onChange={(e) => setNetworkInput(e.target.value)}
+            placeholder="Filter by network…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="vm-list-network-filter"
+            aria-label="Filter by network"
+          />
+          {networkInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setNetworkInput('')}
+              data-testid="vm-list-network-filter-clear"
+              aria-label="Clear network filter"
             >
               <X size={13} />
             </button>

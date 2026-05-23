@@ -290,7 +290,8 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	searchFilter := strings.TrimSpace(strings.ToLower(q.Get("search")))
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
+	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -324,6 +325,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if lockedSet && vm.Spec.Locked != lockedFilter {
+				continue
+			}
+			if networkFilter != "" && !types.VMMatchesNetwork(vm, networkFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

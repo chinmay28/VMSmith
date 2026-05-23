@@ -140,6 +140,7 @@ var vmListCmd = &cobra.Command{
 		searchFilter, _ := cmd.Flags().GetString("search")
 		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
+		networkFilter, _ := cmd.Flags().GetString("network")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -153,6 +154,7 @@ var vmListCmd = &cobra.Command{
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
 		imageFilter = strings.TrimSpace(strings.ToLower(imageFilter))
 		defaultUserFilter = strings.TrimSpace(strings.ToLower(defaultUserFilter))
+		networkFilter = strings.TrimSpace(strings.ToLower(networkFilter))
 		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
 		if err != nil {
 			return err
@@ -205,7 +207,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -234,6 +236,9 @@ var vmListCmd = &cobra.Command{
 					if !strings.EqualFold(effectiveUser, defaultUserFilter) {
 						continue
 					}
+				}
+				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
+					continue
 				}
 				if autoStartSet && v.Spec.AutoStart != autoStartVal {
 					continue
@@ -1026,6 +1031,7 @@ Examples:
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
 	vmListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the VM's base image")
 	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match; empty matches 'root')")
+	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
