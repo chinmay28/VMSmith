@@ -40,7 +40,7 @@ concurrency:
 jobs:
   regenerate:
     name: regenerate README progress block
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     # Skip the job's own auto-commits to avoid a self-trigger loop. The
     # commit author is set explicitly below; the same value is checked here.
     if: github.event_name == 'workflow_dispatch' || github.event.head_commit.author.email != 'helix-bot@users.noreply.github.com'
