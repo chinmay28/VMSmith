@@ -474,14 +474,44 @@ func isFatalStreamErr(err error) bool {
 // so a subsequent call can resume after the last seen ID.
 func streamEventsOnce(ctx context.Context, apiURL, apiKey string, lastID *string, filter eventFilter, opts eventRowOptions, out io.Writer) error {
 	streamURL := strings.TrimRight(apiURL, "/") + "/api/v1/events/stream"
+	q := url.Values{}
 	if *lastID != "" {
 		// Pass the last seen seq via ?since= as a uint64 fallback for clients
 		// that can't send Last-Event-ID (the daemon honours both).
 		if seq, err := lastIDToSeq(*lastID); err == nil {
-			q := url.Values{}
 			q.Set("since", seq)
-			streamURL += "?" + q.Encode()
 		}
+	}
+	// Forward server-side filter params so the daemon drops non-matching
+	// events on its side rather than wasting bandwidth + the post-filter
+	// pass on every wire frame. The CLI also re-applies the predicate
+	// client-side as defense-in-depth.
+	if filter.vmID != "" {
+		q.Set("vm_id", filter.vmID)
+	}
+	if filter.typeStr != "" {
+		q.Set("type", filter.typeStr)
+	}
+	if filter.typePrefix != "" {
+		q.Set("type_prefix", filter.typePrefix)
+	}
+	if filter.source != "" {
+		q.Set("source", filter.source)
+	}
+	if filter.severity != "" {
+		q.Set("severity", filter.severity)
+	}
+	if filter.actor != "" {
+		q.Set("actor", filter.actor)
+	}
+	if filter.resourceID != "" {
+		q.Set("resource_id", filter.resourceID)
+	}
+	if filter.search != "" {
+		q.Set("search", filter.search)
+	}
+	if encoded := q.Encode(); encoded != "" {
+		streamURL += "?" + encoded
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)

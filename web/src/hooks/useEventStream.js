@@ -15,13 +15,25 @@ const RECONNECT_MAX_MS = 30_000;
 const FALLBACK_WINDOW_MS = 30_000;
 const FALLBACK_POLL_INTERVAL_MS = 10_000;
 
-function buildStreamUrl({ since, apiKey }) {
+function buildStreamUrl({ since, apiKey, filter }) {
   const params = new URLSearchParams();
   if (since) params.set('since', since);
   // EventSource cannot send custom headers, so the daemon also accepts
   // ?api_key= for same-origin GUI use. The token never leaves the browser
   // since the page is served from the same daemon.
   if (apiKey) params.set('api_key', apiKey);
+  // Optional server-side filters. The daemon mirrors the predicate set on
+  // GET /events so callers can scope the live stream to a single VM, event
+  // family, or actor without dropping frames client-side.
+  if (filter) {
+    const fields = ['vm_id', 'type', 'type_prefix', 'source', 'severity', 'actor', 'resource_id', 'search'];
+    for (const key of fields) {
+      const value = filter[key];
+      if (value != null && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+  }
   const qs = params.toString();
   return `${API_BASE}/events/stream${qs ? `?${qs}` : ''}`;
 }
@@ -38,9 +50,13 @@ function buildStreamUrl({ since, apiKey }) {
  * @param {object} options
  * @param {(event: object) => void} [options.onEvent] Called for each parsed event.
  * @param {boolean} [options.enabled=true] When false, no connection is opened.
+ * @param {object} [options.filter] Optional server-side filters forwarded as
+ *   query params. Supported keys: `vm_id`, `type`, `type_prefix`, `source`,
+ *   `severity`, `actor`, `resource_id`, `search`. Mirrors the predicate set on
+ *   `GET /api/v1/events` so scoping the stream skips wasted client-side work.
  * @returns {{ status: string, lastEventId: string|null, lastEvent: object|null }}
  */
-export function useEventStream({ onEvent, enabled = true } = {}) {
+export function useEventStream({ onEvent, enabled = true, filter } = {}) {
   const [status, setStatus] = useState(STATE_CLOSED);
   const [lastEventId, setLastEventId] = useState(null);
   const [lastEvent, setLastEvent] = useState(null);
@@ -49,6 +65,14 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
+
+  // Capture the latest filter object behind a ref so reconnects always pick up
+  // the freshest value without rewiring the connect callback on every prop
+  // change (which would tear down and re-open the EventSource).
+  const filterRef = useRef(filter);
+  useEffect(() => {
+    filterRef.current = filter;
+  }, [filter]);
 
   const lastIdRef = useRef(null);
   const failureCountRef = useRef(0);
@@ -107,6 +131,7 @@ export function useEventStream({ onEvent, enabled = true } = {}) {
     const url = buildStreamUrl({
       since: lastIdRef.current ?? '',
       apiKey: getAuthToken() ?? '',
+      filter: filterRef.current,
     });
 
     let es;

@@ -148,6 +148,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 // Returns 410 Gone with code event_stream_replay_window_exceeded when the
 // client is more than sseReplayLimit events behind — the client should fall
 // back to GET /api/v1/events with pagination to catch up.
+//
+// Server-side filters mirror the cross-cutting predicate set on
+// GET /api/v1/events: ?vm_id=, ?type=, ?type_prefix=, ?source=, ?severity=,
+// ?actor=, ?resource_id=, ?search=. Filters apply to both replayed and live
+// events so the client sees the same membership it would from /events. The
+// replay-overflow check counts pre-filter so a faraway client still gets the
+// 410 fail-fast even if their filter would have dropped the noise.
 func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	const sseReplayLimit = 1000
 
@@ -155,6 +162,18 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	// it is running (covers replay overflow path and post-write disconnects).
 	s.eventStreamConns.Add(1)
 	defer s.eventStreamConns.Add(-1)
+
+	q := r.URL.Query()
+	filter := types.EventStreamFilter{
+		VMID:       strings.TrimSpace(q.Get("vm_id")),
+		Type:       strings.TrimSpace(q.Get("type")),
+		Source:     strings.TrimSpace(q.Get("source")),
+		Severity:   strings.TrimSpace(q.Get("severity")),
+		Actor:      strings.TrimSpace(q.Get("actor")),
+		ResourceID: strings.TrimSpace(q.Get("resource_id")),
+		TypePrefix: strings.ToLower(strings.TrimSpace(q.Get("type_prefix"))),
+		Search:     strings.ToLower(strings.TrimSpace(q.Get("search"))),
+	}
 
 	// Determine replay starting point from Last-Event-ID or ?since= (uint64).
 	// Computed before the SSE response status is committed so a replay-overflow
@@ -164,7 +183,7 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		if seq, err := strconv.ParseUint(lastID, 10, 64); err == nil {
 			afterSeq = seq
 		}
-	} else if sinceStr := strings.TrimSpace(r.URL.Query().Get("since")); sinceStr != "" {
+	} else if sinceStr := strings.TrimSpace(q.Get("since")); sinceStr != "" {
 		if seq, err := strconv.ParseUint(sinceStr, 10, 64); err == nil {
 			afterSeq = seq
 		}
@@ -195,6 +214,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, evt := range replayed {
+		if filter.HasAny() && !types.EventMatchesStreamFilter(evt, filter) {
+			continue
+		}
 		data, _ := json.Marshal(evt)
 		if err := sw.WriteEvent(evt.ID, evt.Type, string(data)); err != nil {
 			return
@@ -237,6 +259,9 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		case evt, ok := <-ch:
 			if !ok {
 				return
+			}
+			if filter.HasAny() && !types.EventMatchesStreamFilter(evt, filter) {
+				continue
 			}
 			data, _ := json.Marshal(evt)
 			if err := sw.WriteEvent(evt.ID, evt.Type, string(data)); err != nil {
