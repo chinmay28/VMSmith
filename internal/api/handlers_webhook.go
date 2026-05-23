@@ -156,6 +156,15 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     port forwards (5.4.11), templates (5.4.12), events (4.2.20), and
 //     logs (5.4.13). Secret, ID, and last_error are intentionally excluded
 //     from the haystack — see pkg/types/webhook_search.go.
+//   - delivery_status=<healthy|failing|never>  case-insensitive enum filter
+//     applied to the webhook's most-recent delivery classification (5.4.35).
+//     `never` = LastDeliveryAt is zero (no attempt yet); `healthy` = last
+//     attempt returned 2xx with empty LastError; `failing` = last attempt
+//     existed and did not meet the healthy contract (transport error, 4xx,
+//     5xx, 3xx, or a 2xx with a stale LastError). Whitespace trimmed; empty
+//     disables. Unknown values return 400 `invalid_delivery_status`.
+//     Applied before `?search=` so X-Total-Count reflects the post-filter
+//     population.
 //   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
 //     Default `id`. Unknown values return 400 `invalid_sort`.
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
@@ -188,6 +197,12 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	deliveryStatusFilter := strings.ToLower(strings.TrimSpace(q.Get("delivery_status")))
+	if deliveryStatusFilter != "" && !types.IsValidWebhookDeliveryStatus(deliveryStatusFilter) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_delivery_status",
+			"delivery_status must be one of: never, healthy, failing")
+		return
+	}
 	hooks, err := s.webhookStore.ListWebhooks()
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list webhooks")
@@ -210,6 +225,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !snapshotInTimeRange(h.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+			continue
+		}
+		if deliveryStatusFilter != "" && types.WebhookDeliveryStatus(h) != deliveryStatusFilter {
 			continue
 		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {
