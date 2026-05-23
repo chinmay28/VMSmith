@@ -766,11 +766,21 @@ That shape keeps two important invariants in place:
 #### Security checklist
 
 - Keep libvirt's VNC listener bound to `127.0.0.1`; the browser should only reach it through the authenticated websocket proxy.
-- Query-param secrets like `ticket=` must be redacted from request logs.
-- Console tickets should stay intentionally short-lived and single-use.
-- The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`.
-- Future websocket sessions should be counted alongside SSE clients in host-level stats.
+- Query-param secrets like `ticket=` must be redacted from daemon request logs, reverse-proxy access logs, and any error-reporting pipeline that captures raw URLs.
+- Console tickets should stay intentionally short-lived and single-use. The websocket handler should consume the ticket exactly once during upgrade so a copied URL cannot be replayed after the legitimate session connects.
+- The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`, and the stored ticket carries the caller's API-key identity forward into the websocket session for audit and teardown decisions.
+- Track active console sessions centrally so VM stop, VM delete, daemon shutdown, or future API-key revocation can force-close them instead of leaving orphaned bridges to the local VNC socket.
+- Future websocket sessions should be counted alongside SSE clients in host-level stats, but session payloads themselves should not be logged.
 - When TLS is enabled or terminated by a trusted reverse proxy, browser console access should use `wss://`, not plaintext `ws://`.
+
+#### Reverse-proxy expectations
+
+The browser-facing websocket terminates at the reverse proxy first and then hops to the daemon over loopback. That keeps the host's VNC socket private, but it also means operators should preserve the websocket upgrade path deliberately:
+
+1. Forward websocket upgrade headers (`Upgrade`, `Connection`) and avoid buffering the proxied stream.
+2. Do not expose raw VNC ports directly on the host firewall or the proxy.
+3. Redact `ticket=` in proxy access logs just like the daemon redacts it from request logs.
+4. Treat the public console URL as `wss://...` whenever TLS is enabled at the proxy boundary, even though the loopback hop behind the proxy can remain plain `ws://127.0.0.1`.
 
 ### 10. Configuration
 
