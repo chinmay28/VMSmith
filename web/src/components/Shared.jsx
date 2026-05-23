@@ -1,5 +1,5 @@
-import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot } from 'lucide-react';
-import { STATE_LIVE, STATE_RECONNECTING, STATE_FALLBACK } from '../hooks/useEventStream.js';
+import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot, Power } from 'lucide-react';
+import { STATE_LIVE, STATE_RECONNECTING, STATE_FALLBACK, STATE_SHUTDOWN } from '../hooks/useEventStream.js';
 
 // --- Status Badge ---
 const stateStyles = {
@@ -127,6 +127,10 @@ export function LiveIndicator({ status }) {
     className += ' bg-blue-900/40 text-blue-300 border-blue-700/30';
     label = 'polling';
     Icon = WifiOff;
+  } else if (status === STATE_SHUTDOWN) {
+    className += ' bg-red-950/50 text-red-300 border-red-800/40';
+    label = 'shutdown';
+    Icon = Power;
   } else {
     className += ' bg-steel-800/60 text-steel-400 border-steel-700/30';
     label = status || 'offline';
