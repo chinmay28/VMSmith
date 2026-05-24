@@ -120,6 +120,7 @@ var templateListCmd = &cobra.Command{
 		tagFilter, _ := cmd.Flags().GetString("tag")
 		searchFlag, _ := cmd.Flags().GetString("search")
 		imageFilter, _ := cmd.Flags().GetString("image")
+		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
@@ -174,6 +175,15 @@ var templateListCmd = &cobra.Command{
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if strings.EqualFold(tpl.Image, imageQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
+		}
+		if userQuery := strings.TrimSpace(strings.ToLower(defaultUserFilter)); userQuery != "" {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if strings.EqualFold(tpl.DefaultUser, userQuery) {
 					filtered = append(filtered, tpl)
 				}
 			}
@@ -403,6 +413,7 @@ func init() {
 	templateListCmd.Flags().String("tag", "", "filter templates by tag (case-insensitive)")
 	templateListCmd.Flags().String("search", "", "case-insensitive substring filter applied to name, description, and tags")
 	templateListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the template's base image")
+	templateListCmd.Flags().String("default-user", "", "case-insensitive exact-match filter on the template's default login user")
 	templateListCmd.Flags().String("since", "", "keep templates created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	templateListCmd.Flags().String("until", "", "keep templates created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
