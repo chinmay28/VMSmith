@@ -9,15 +9,37 @@ import (
 
 // Config holds the full vmSmith configuration.
 type Config struct {
-	Daemon   DaemonConfig   `yaml:"daemon"`
-	Libvirt  LibvirtConfig  `yaml:"libvirt"`
-	Storage  StorageConfig  `yaml:"storage"`
-	Network  NetworkConfig  `yaml:"network"`
-	Defaults DefaultsConfig `yaml:"defaults"`
-	Quotas   QuotasConfig   `yaml:"quotas"`
-	Metrics  MetricsConfig  `yaml:"metrics"`
-	Events   EventsConfig   `yaml:"events"`
-	Webhooks WebhooksConfig `yaml:"webhooks"`
+	Daemon    DaemonConfig    `yaml:"daemon"`
+	Libvirt   LibvirtConfig   `yaml:"libvirt"`
+	Storage   StorageConfig   `yaml:"storage"`
+	Network   NetworkConfig   `yaml:"network"`
+	Defaults  DefaultsConfig  `yaml:"defaults"`
+	Quotas    QuotasConfig    `yaml:"quotas"`
+	Metrics   MetricsConfig   `yaml:"metrics"`
+	Events    EventsConfig    `yaml:"events"`
+	Webhooks  WebhooksConfig  `yaml:"webhooks"`
+	Schedules SchedulesConfig `yaml:"schedules"`
+}
+
+// SchedulesConfig controls the recurring VM-action scheduler.
+type SchedulesConfig struct {
+	// Enabled controls whether the scheduler subsystem runs (default true).
+	// When false, the /api/v1/schedules endpoints return 503.
+	Enabled bool `yaml:"enabled"`
+	// WorkerPoolSize bounds concurrent schedule fires (default 4).
+	WorkerPoolSize int `yaml:"worker_pool_size"`
+	// QueueSize bounds the dispatch backlog; overflow records a queue_full
+	// skip instead of blocking the cron goroutine (default 64).
+	QueueSize int `yaml:"queue_size"`
+	// MaxRetries is the number of retries after the first attempt for a
+	// transient action error (default 2).
+	MaxRetries int `yaml:"max_retries"`
+	// ActionTimeoutSeconds bounds a single action attempt (default 300).
+	ActionTimeoutSeconds int `yaml:"action_timeout_seconds"`
+	// MaxCatchUp caps replayed missed fires per schedule on startup (default 100).
+	MaxCatchUp int `yaml:"max_catch_up"`
+	// TickIntervalSeconds is how often the catch-up cursor is advanced (default 60).
+	TickIntervalSeconds int `yaml:"tick_interval_seconds"`
 }
 
 type DaemonConfig struct {
@@ -194,6 +216,15 @@ func DefaultConfig() *Config {
 			MaxRecords:        50000,
 			MaxAgeSeconds:     30 * 24 * 60 * 60, // 30 days
 			RetentionInterval: 60,
+		},
+		Schedules: SchedulesConfig{
+			Enabled:              true,
+			WorkerPoolSize:       4,
+			QueueSize:            64,
+			MaxRetries:           2,
+			ActionTimeoutSeconds: 300,
+			MaxCatchUp:           100,
+			TickIntervalSeconds:  60,
 		},
 	}
 }

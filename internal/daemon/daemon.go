@@ -24,6 +24,7 @@ import (
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/metrics"
 	"github.com/vmsmith/vmsmith/internal/network"
+	"github.com/vmsmith/vmsmith/internal/scheduler"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
@@ -46,6 +47,7 @@ type Daemon struct {
 	retention      *events.Retention
 	webhookMgr     *webhooks.Manager
 	consoleStore   *console.Store
+	scheduler      *scheduler.Engine
 	apiServer      *api.Server
 	server         *http.Server
 	metricsSrv     *http.Server // optional separate Prometheus scrape server
@@ -184,6 +186,25 @@ func New(cfg *config.Config) (*Daemon, error) {
 	consoleStore := console.NewStore()
 	apiServer.SetConsoleStore(consoleStore)
 
+	// Scheduled-operations subsystem. Always wire the REST surface; the engine
+	// only ticks when enabled. The engine shares the store, VM manager, and
+	// event bus so fires flow through the same audit log as operator actions.
+	var schedEngine *scheduler.Engine
+	if cfg.Schedules.Enabled {
+		schedEngine = scheduler.New(s, vmMgr, eventBus, scheduler.Config{
+			WorkerPoolSize: cfg.Schedules.WorkerPoolSize,
+			QueueSize:      cfg.Schedules.QueueSize,
+			MaxRetries:     cfg.Schedules.MaxRetries,
+			ActionTimeout:  time.Duration(cfg.Schedules.ActionTimeoutSeconds) * time.Second,
+			MaxCatchUp:     cfg.Schedules.MaxCatchUp,
+			TickInterval:   time.Duration(cfg.Schedules.TickIntervalSeconds) * time.Second,
+		})
+		apiServer.SetScheduleSubsystem(s, schedEngine)
+		logger.Info("daemon", "scheduler subsystem wired")
+	} else {
+		logger.Info("daemon", "scheduler subsystem disabled by config")
+	}
+
 	server := &http.Server{
 		Addr:    cfg.Daemon.Listen,
 		Handler: apiServer,
@@ -204,6 +225,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		retention:      retention,
 		webhookMgr:     webhookMgr,
 		consoleStore:   consoleStore,
+		scheduler:      schedEngine,
 		apiServer:      apiServer,
 		server:         server,
 	}
@@ -271,6 +293,16 @@ func (d *Daemon) Run() error {
 	// Start retention loop.
 	if d.retention != nil {
 		go d.retention.Run(ctx)
+	}
+
+	// Start the scheduler after the bus is live so fire events are delivered.
+	// Start runs catch-up for missed fires before beginning to tick.
+	if d.scheduler != nil {
+		if err := d.scheduler.Start(ctx); err != nil {
+			logger.Warn("daemon", "scheduler failed to start", "error", err.Error())
+		} else {
+			logger.Info("daemon", "scheduler started")
+		}
 	}
 
 	// Start metrics sampler.
@@ -503,6 +535,12 @@ func autoCertTLSConfig(cfg *config.Config) *tls.Config {
 
 func (d *Daemon) closeResources() error {
 	var errs []error
+
+	// Stop the scheduler before the bus so in-flight fires finish and no new
+	// fire events are published onto a stopped bus.
+	if d.scheduler != nil {
+		d.scheduler.Stop()
+	}
 
 	// Stop the webhook manager before the bus so its workers drain on a
 	// quiescent queue and don't try to publish onto a stopped bus.

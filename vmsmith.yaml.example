@@ -69,3 +69,12 @@ webhooks:
   # or controlled test environments — production deployments should leave
   # this empty.
   allowed_hosts: []
+
+schedules:
+  enabled: true             # set to false to disable recurring schedules; /api/v1/schedules then returns 503
+  worker_pool_size: 4       # max concurrent schedule fires
+  queue_size: 64            # dispatch backlog; overflow records a queue_full skip instead of blocking
+  max_retries: 2            # retries after the first attempt for a transient action error
+  action_timeout_seconds: 300  # per-attempt timeout for a single action
+  max_catch_up: 100         # cap on replayed missed fires per schedule on startup (run_all policy)
+  tick_interval_seconds: 60 # how often the catch-up cursor (last_tick) is advanced

@@ -2503,6 +2503,320 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List scheduled operations */
+        get: {
+            parameters: {
+                query?: {
+                    /**
+                     * @description Exact-match filter on the schedule's target `vm_id`.
+                     *     Whitespace-trimmed; empty disables the filter.
+                     */
+                    vm_id?: string;
+                    /**
+                     * @description Exact-match filter on the schedule's `action`.
+                     *     Whitespace-trimmed; empty disables the filter.
+                     */
+                    action?: "snapshot" | "start" | "stop" | "restart";
+                    /**
+                     * @description Tristate boolean filter on the schedule's `enabled` flag.
+                     *     Case-insensitive `true` / `false`; whitespace-trimmed; empty
+                     *     disables the filter; anything else returns 400 `invalid_enabled`.
+                     */
+                    enabled?: "true" | "false";
+                    /**
+                     * @description Case-insensitive substring filter applied across each schedule's
+                     *     name, action, vm_id, and tag_selector. Whitespace is trimmed
+                     *     before matching. ID is intentionally excluded from the haystack.
+                     */
+                    search?: string;
+                    /**
+                     * @description Field to sort by. `name` matches case-insensitively;
+                     *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
+                     *     unscheduled) at the tail of the ascending list. All comparators
+                     *     tiebreak on `id` so repeated requests return a deterministic order.
+                     */
+                    sort?: "id" | "name" | "created_at" | "next_fire_at";
+                    /** @description Sort direction. Default `asc`. */
+                    order?: "asc" | "desc";
+                    /**
+                     * @description 1-based page number when paginating the filtered + sorted
+                     *     response. Has no effect when `per_page` is unset.
+                     */
+                    page?: number;
+                    /**
+                     * @description Maximum number of schedules to return per page. When omitted the
+                     *     full filtered set is returned. Pagination is applied after filter
+                     *     + sort so the `X-Total-Count` response header reflects the
+                     *     post-filter / pre-pagination population.
+                     */
+                    per_page?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Schedule list */
+                200: {
+                    headers: {
+                        /**
+                         * @description Total number of schedules matching the active filters before
+                         *     pagination is applied.
+                         */
+                        "X-Total-Count"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"][];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        /** Create a scheduled operation */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description Schedule created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{scheduleID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scheduleID: string;
+            };
+            cookie?: never;
+        };
+        /** Get a single schedule */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    scheduleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a schedule */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    scheduleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update editable schedule fields
+         * @description Mutates one or more editable fields on an existing schedule. Every field in the request body is optional — omit a key to leave the corresponding field unchanged. At least one editable field must be present; an empty body returns 400 `noop_update`.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    scheduleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScheduleUpdateSpec"];
+                };
+            };
+            responses: {
+                /** @description Schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        trace?: never;
+    };
+    "/schedules/{scheduleID}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scheduleID: string;
+            };
+            cookie?: never;
+        };
+        /** List recent runs for a schedule (newest first) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 1-based page number when paginating the run history. */
+                    page?: number;
+                    /**
+                     * @description Maximum number of runs to return per page. When omitted the full
+                     *     run history is returned. The `X-Total-Count` response header
+                     *     reflects the pre-pagination population.
+                     */
+                    per_page?: number;
+                };
+                header?: never;
+                path: {
+                    scheduleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Schedule run list (newest first) */
+                200: {
+                    headers: {
+                        /** @description Total number of runs for this schedule before pagination. */
+                        "X-Total-Count"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleRun"][];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{scheduleID}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scheduleID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fire a schedule immediately, out of band
+         * @description Triggers the schedule's action right now without waiting for the next cron fire. Returns the (possibly updated) schedule.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    scheduleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/logs": {
         parameters: {
             query?: never;
@@ -3215,6 +3529,105 @@ export interface components {
             attempted_at: string;
             /** @description ID of the synthetic system.webhook_test event used for the probe. */
             event_id?: string;
+        };
+        Schedule: {
+            /** @example sch-1741234567890123 */
+            id: string;
+            name: string;
+            /** @description Target VM ID. Mutually exclusive with `tag_selector`; when both are empty the schedule applies to all VMs. */
+            vm_id?: string;
+            /** @description Normalised lowercase tag list selecting target VMs by tag. Mutually exclusive with `vm_id`. */
+            tag_selector?: string[];
+            /** @enum {string} */
+            action: "snapshot" | "start" | "stop" | "restart";
+            /**
+             * @description 6-field cron expression WITH seconds, e.g. "0 0 2 * * *".
+             * @example 0 0 2 * * *
+             */
+            cron_spec: string;
+            /** @description Optional IANA timezone name (e.g. "America/New_York"). */
+            timezone?: string;
+            enabled: boolean;
+            /**
+             * @description How missed fires after downtime are handled. Default `skip`.
+             * @enum {string}
+             */
+            catch_up_policy?: "skip" | "run_once" | "run_all";
+            /** @description Maximum simultaneous runs of this schedule across resolved VMs. */
+            max_concurrent?: number;
+            /** @description For snapshot schedules, how many snapshots to retain. */
+            retention_count?: number;
+            /** @description Optional action-specific parameters. */
+            params?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            last_fired_at?: string;
+            last_result?: string;
+            /** Format: date-time */
+            next_fire_at?: string;
+        };
+        ScheduleRun: {
+            id: string;
+            schedule_id: string;
+            vm_id: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at?: string;
+            /** @enum {string} */
+            status: "running" | "success" | "error" | "skipped";
+            error?: string;
+            skip_reason?: string;
+        };
+        CreateScheduleRequest: {
+            name: string;
+            /** @description Mutually exclusive with `tag_selector`. */
+            vm_id?: string;
+            /** @description Mutually exclusive with `vm_id`. */
+            tag_selector?: string[];
+            /** @enum {string} */
+            action: "snapshot" | "start" | "stop" | "restart";
+            /**
+             * @description 6-field cron expression WITH seconds.
+             * @example 0 0 2 * * *
+             */
+            cron_spec: string;
+            timezone?: string;
+            /** @default true */
+            enabled: boolean;
+            /**
+             * @default skip
+             * @enum {string}
+             */
+            catch_up_policy: "skip" | "run_once" | "run_all";
+            max_concurrent?: number;
+            retention_count?: number;
+            params?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description Partial-update payload for `PATCH /schedules/{id}`. All fields are optional; omit a key to leave the corresponding field unchanged. An empty body returns 400 `noop_update`. */
+        ScheduleUpdateSpec: {
+            name?: string;
+            vm_id?: string;
+            tag_selector?: string[];
+            /** @enum {string} */
+            action?: "snapshot" | "start" | "stop" | "restart";
+            cron_spec?: string;
+            timezone?: string;
+            enabled?: boolean;
+            /** @enum {string} */
+            catch_up_policy?: "skip" | "run_once" | "run_all";
+            max_concurrent?: number;
+            retention_count?: number;
+            params?: {
+                [key: string]: unknown;
+            };
         };
         LogField: {
             [key: string]: string;

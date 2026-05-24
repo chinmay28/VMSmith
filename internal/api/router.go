@@ -55,6 +55,8 @@ type Server struct {
 	webhookManager       WebhookRegistrar
 	webhookTester        WebhookTester
 	consoleStore         *console.Store
+	scheduleStore        ScheduleStore
+	scheduleController   ScheduleController
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -273,6 +275,17 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Patch("/{webhookID}", s.withRequestBodyLimit(s.UpdateWebhook))
 			r.Delete("/{webhookID}", s.DeleteWebhook)
 			r.Post("/{webhookID}/test", s.TestWebhook)
+		})
+
+		// Scheduled operations
+		r.Route("/schedules", func(r chi.Router) {
+			r.Get("/", s.ListSchedules)
+			r.Post("/", s.withRequestBodyLimit(s.CreateSchedule))
+			r.Get("/{scheduleID}", s.GetSchedule)
+			r.Patch("/{scheduleID}", s.withRequestBodyLimit(s.UpdateSchedule))
+			r.Delete("/{scheduleID}", s.DeleteSchedule)
+			r.Get("/{scheduleID}/runs", s.ListScheduleRuns)
+			r.Post("/{scheduleID}/run-now", s.RunNowSchedule)
 		})
 	})
 

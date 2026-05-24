@@ -2047,6 +2047,126 @@ test.describe("Templates", () => {
 // ============================================================
 // Navigation
 // ============================================================
+// ============================================================
+// Schedules (roadmap 5.2.9)
+// ============================================================
+test.describe("Schedules", () => {
+  test("navigates to the page and renders seeded schedules", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedules-page")).toBeVisible();
+    await expect(page.getByTestId("schedule-list")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-target-sch-1")).toHaveText("vm-1");
+    await expect(page.getByTestId("schedule-target-sch-2")).toContainText("tag:dev");
+  });
+
+  test("creates a schedule via the modal and a cron preset fills the cron input", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("add-schedule-btn").click();
+    await expect(page.getByTestId("add-schedule-form")).toBeVisible();
+
+    await page.getByTestId("schedule-name-input").fill("my-nightly-restart");
+    await page.getByTestId("schedule-action-select").selectOption("restart");
+
+    // Cron preset chip fills the cron input.
+    await page.getByTestId("cron-preset-weekly").click();
+    await expect(page.getByTestId("schedule-cron-input")).toHaveValue("0 0 3 * * 0");
+    // Switch to a different preset to confirm chips overwrite the field.
+    await page.getByTestId("cron-preset-hourly").click();
+    await expect(page.getByTestId("schedule-cron-input")).toHaveValue("0 0 * * * *");
+
+    await page.getByTestId("schedule-create-submit").click();
+    await expect(page.getByTestId("add-schedule-form")).not.toBeVisible();
+
+    const row = page.locator('[data-testid^="schedule-row-sch-new-"]').first();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("my-nightly-restart");
+  });
+
+  test("toggles enabled via the row checkbox", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    const toggle = page.getByTestId("schedule-enabled-toggle-sch-2");
+    await expect(toggle).not.toBeChecked();
+    await toggle.click();
+    await expect(toggle).toBeChecked();
+  });
+
+  test("search filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    await page.getByTestId("schedule-list-search").fill("weekend");
+    await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBe("weekend");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+
+    await page.getByTestId("schedule-list-search-clear").click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+  });
+
+  test("action filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-action-filter").selectOption("stop");
+    await expect.poll(() => new URL(page.url()).searchParams.get("action")).toBe("stop");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+  });
+
+  test("edits a schedule via the edit modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-edit-sch-1").click();
+    await expect(page.getByTestId("edit-schedule-form")).toBeVisible();
+    await expect(page.getByTestId("schedule-name-input")).toHaveValue("nightly-snapshot");
+
+    await page.getByTestId("schedule-name-input").fill("renamed-snapshot");
+    await page.getByTestId("schedule-edit-submit").click();
+    await expect(page.getByTestId("edit-schedule-form")).not.toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toContainText("renamed-snapshot");
+  });
+
+  test("expands a row to show recent runs", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+  });
+
+  test("run-now appends a run for the schedule", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-runnow-sch-2").click();
+    // Expand to confirm a fresh run was recorded.
+    await page.getByTestId("schedule-row-toggle-sch-2").click();
+    await expect(page.getByTestId("schedule-runs-sch-2")).toBeVisible();
+    await expect(page.locator('[data-testid^="schedule-run-run-now-"]').first()).toBeVisible();
+  });
+
+  test("deletes a schedule", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.getByTestId("schedule-delete-sch-2").click();
+    await expect(page.getByTestId("schedule-row-sch-2")).not.toBeVisible();
+  });
+});
+
 test.describe("Navigation", () => {
   test("all nav links work", async ({ page }) => {
     await page.goto(BASE_URL);
@@ -2065,6 +2185,10 @@ test.describe("Navigation", () => {
     // Templates
     await page.getByTestId("nav-templates").click();
     await expect(page.getByTestId("template-table")).toBeVisible();
+
+    // Schedules
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedules-page")).toBeVisible();
 
     // Logs
     await page.getByTestId("nav-logs").click();

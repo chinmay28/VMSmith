@@ -23,6 +23,7 @@ tags:
   - name: Quotas
   - name: Logs
   - name: Events
+  - name: Schedules
 paths:
   /vms:
     get:
@@ -1690,6 +1691,273 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /schedules:
+    get:
+      tags: [Schedules]
+      summary: List scheduled operations
+      parameters:
+        - in: query
+          name: vm_id
+          required: false
+          schema:
+            type: string
+          description: |
+            Exact-match filter on the schedule's target `vm_id`.
+            Whitespace-trimmed; empty disables the filter.
+        - in: query
+          name: action
+          required: false
+          schema:
+            type: string
+            enum: [snapshot, start, stop, restart]
+          description: |
+            Exact-match filter on the schedule's `action`.
+            Whitespace-trimmed; empty disables the filter.
+        - in: query
+          name: enabled
+          required: false
+          schema:
+            type: string
+            enum: ['true', 'false']
+          description: |
+            Tristate boolean filter on the schedule's `enabled` flag.
+            Case-insensitive `true` / `false`; whitespace-trimmed; empty
+            disables the filter; anything else returns 400 `invalid_enabled`.
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-insensitive substring filter applied across each schedule's
+            name, action, vm_id, and tag_selector. Whitespace is trimmed
+            before matching. ID is intentionally excluded from the haystack.
+        - in: query
+          name: sort
+          required: false
+          schema:
+            type: string
+            enum: [id, name, created_at, next_fire_at]
+            default: id
+          description: |
+            Field to sort by. `name` matches case-insensitively;
+            `next_fire_at` sorts schedules with no scheduled fire (disabled /
+            unscheduled) at the tail of the ascending list. All comparators
+            tiebreak on `id` so repeated requests return a deterministic order.
+        - in: query
+          name: order
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Sort direction. Default `asc`.
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: |
+            1-based page number when paginating the filtered + sorted
+            response. Has no effect when `per_page` is unset.
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+          description: |
+            Maximum number of schedules to return per page. When omitted the
+            full filtered set is returned. Pagination is applied after filter
+            + sort so the `X-Total-Count` response header reflects the
+            post-filter / pre-pagination population.
+      responses:
+        '200':
+          description: Schedule list
+          headers:
+            X-Total-Count:
+              description: |
+                Total number of schedules matching the active filters before
+                pagination is applied.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    post:
+      tags: [Schedules]
+      summary: Create a scheduled operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScheduleRequest'
+      responses:
+        '201':
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /schedules/{scheduleID}:
+    parameters:
+      - name: scheduleID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Schedules]
+      summary: Get a single schedule
+      responses:
+        '200':
+          description: Schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    patch:
+      tags: [Schedules]
+      summary: Update editable schedule fields
+      description: >
+        Mutates one or more editable fields on an existing schedule. Every
+        field in the request body is optional — omit a key to leave the
+        corresponding field unchanged. At least one editable field must be
+        present; an empty body returns 400 `noop_update`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleUpdateSpec'
+      responses:
+        '200':
+          description: Schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+    delete:
+      tags: [Schedules]
+      summary: Delete a schedule
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /schedules/{scheduleID}/runs:
+    parameters:
+      - name: scheduleID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Schedules]
+      summary: List recent runs for a schedule (newest first)
+      parameters:
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 1-based page number when paginating the run history.
+        - in: query
+          name: per_page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+          description: |
+            Maximum number of runs to return per page. When omitted the full
+            run history is returned. The `X-Total-Count` response header
+            reflects the pre-pagination population.
+      responses:
+        '200':
+          description: Schedule run list (newest first)
+          headers:
+            X-Total-Count:
+              description: Total number of runs for this schedule before pagination.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduleRun'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /schedules/{scheduleID}/run-now:
+    parameters:
+      - name: scheduleID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Schedules]
+      summary: Fire a schedule immediately, out of band
+      description: >
+        Triggers the schedule's action right now without waiting for the next
+        cron fire. Returns the (possibly updated) schedule.
+      responses:
+        '200':
+          description: Schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /logs:
     get:
       tags: [Logs]
@@ -3044,6 +3312,166 @@ components:
         event_id:
           type: string
           description: ID of the synthetic system.webhook_test event used for the probe.
+    Schedule:
+      type: object
+      required: [id, name, action, cron_spec, enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: "sch-1741234567890123"
+        name:
+          type: string
+          maxLength: 128
+        vm_id:
+          type: string
+          description: >
+            Target VM ID. Mutually exclusive with `tag_selector`; when both
+            are empty the schedule applies to all VMs.
+        tag_selector:
+          type: array
+          items:
+            type: string
+          description: >
+            Normalised lowercase tag list selecting target VMs by tag.
+            Mutually exclusive with `vm_id`.
+        action:
+          type: string
+          enum: [snapshot, start, stop, restart]
+        cron_spec:
+          type: string
+          description: 6-field cron expression WITH seconds, e.g. "0 0 2 * * *".
+          example: "0 0 2 * * *"
+        timezone:
+          type: string
+          description: Optional IANA timezone name (e.g. "America/New_York").
+        enabled:
+          type: boolean
+        catch_up_policy:
+          type: string
+          enum: [skip, run_once, run_all]
+          description: How missed fires after downtime are handled. Default `skip`.
+        max_concurrent:
+          type: integer
+          description: Maximum simultaneous runs of this schedule across resolved VMs.
+        retention_count:
+          type: integer
+          description: For snapshot schedules, how many snapshots to retain.
+        params:
+          type: object
+          additionalProperties: true
+          description: Optional action-specific parameters.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_fired_at:
+          type: string
+          format: date-time
+        last_result:
+          type: string
+        next_fire_at:
+          type: string
+          format: date-time
+    ScheduleRun:
+      type: object
+      required: [id, schedule_id, vm_id, started_at, status]
+      properties:
+        id:
+          type: string
+        schedule_id:
+          type: string
+        vm_id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [running, success, error, skipped]
+        error:
+          type: string
+        skip_reason:
+          type: string
+    CreateScheduleRequest:
+      type: object
+      required: [name, action, cron_spec]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        vm_id:
+          type: string
+          description: Mutually exclusive with `tag_selector`.
+        tag_selector:
+          type: array
+          items:
+            type: string
+          description: Mutually exclusive with `vm_id`.
+        action:
+          type: string
+          enum: [snapshot, start, stop, restart]
+        cron_spec:
+          type: string
+          description: 6-field cron expression WITH seconds.
+          example: "0 0 2 * * *"
+        timezone:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        catch_up_policy:
+          type: string
+          enum: [skip, run_once, run_all]
+          default: skip
+        max_concurrent:
+          type: integer
+        retention_count:
+          type: integer
+        params:
+          type: object
+          additionalProperties: true
+    ScheduleUpdateSpec:
+      type: object
+      description: >
+        Partial-update payload for `PATCH /schedules/{id}`. All fields are
+        optional; omit a key to leave the corresponding field unchanged. An
+        empty body returns 400 `noop_update`.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        vm_id:
+          type: string
+        tag_selector:
+          type: array
+          items:
+            type: string
+        action:
+          type: string
+          enum: [snapshot, start, stop, restart]
+        cron_spec:
+          type: string
+        timezone:
+          type: string
+        enabled:
+          type: boolean
+        catch_up_policy:
+          type: string
+          enum: [skip, run_once, run_all]
+        max_concurrent:
+          type: integer
+        retention_count:
+          type: integer
+        params:
+          type: object
+          additionalProperties: true
     LogField:
       type: object
       additionalProperties:
