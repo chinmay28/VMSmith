@@ -310,6 +310,20 @@ func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	if attrs["last_status"] != "500" {
 		t.Fatalf("delivery_failed last_status = %q, want 500", attrs["last_status"])
 	}
+
+	persisted, err := store.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != http.StatusInternalServerError {
+		t.Fatalf("LastStatus = %d, want 500 after final failure", persisted.LastStatus)
+	}
+	if persisted.LastError == "" {
+		t.Fatal("LastError was not recorded after final failure")
+	}
+	if persisted.LastDeliveryAt.IsZero() {
+		t.Fatal("LastDeliveryAt was not updated after final failure")
+	}
 }
 
 func TestManager_FiltersByEventType(t *testing.T) {
