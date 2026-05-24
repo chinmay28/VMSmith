@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/network"
@@ -298,6 +299,102 @@ func TestRunNowAndRuns(t *testing.T) {
 	resp, _ = schedDo(t, http.MethodPost, ts.URL+"/api/v1/schedules/missing/run-now", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("run-now unknown should 404, got %d", resp.StatusCode)
+	}
+}
+
+// testScheduleServerStore mirrors testScheduleServer but also returns the
+// backing store so a test can persist schedules with controlled CreatedAt
+// timestamps (the create endpoint always stamps CreatedAt = now).
+func testScheduleServerStore(t *testing.T) (*httptest.Server, *store.Store, func()) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := store.New(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Storage.DBPath = filepath.Join(dir, "test.db")
+	cfg.Storage.ImagesDir = dir
+
+	mockMgr := vm.NewMockManager()
+	apiServer := NewServer(mockMgr, storage.NewManager(cfg, s), network.NewPortForwarder(s), s)
+	engine := scheduler.New(s, mockMgr, nil, scheduler.Config{})
+	apiServer.SetScheduleSubsystem(s, engine)
+	ts := httptest.NewServer(apiServer)
+	return ts, s, func() {
+		ts.Close()
+		s.Close()
+	}
+}
+
+func TestListSchedules_FilterByTimeRange(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id, name, created string) {
+		t.Helper()
+		var ca time.Time
+		if created != "" {
+			parsed, err := time.Parse(time.RFC3339, created)
+			if err != nil {
+				t.Fatalf("parse %q: %v", created, err)
+			}
+			ca = parsed
+		}
+		if err := s.PutSchedule(&types.Schedule{
+			ID:        id,
+			Name:      name,
+			Action:    types.ScheduleActionSnapshot,
+			CronSpec:  "0 0 2 * * *",
+			Enabled:   true,
+			CreatedAt: ca,
+		}); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	mk("sched-1", "early", "2026-05-05T00:00:00Z")
+	mk("sched-2", "mid", "2026-05-10T00:00:00Z")
+	mk("sched-3", "late", "2026-05-15T00:00:00Z")
+	mk("sched-4", "zerotime", "") // zero created_at
+
+	list := func(q string) ([]*types.Schedule, int, int) {
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// No bounds: all four (including zero-time) returned.
+	if out, total, code := list(""); code != http.StatusOK || len(out) != 4 || total != 4 {
+		t.Fatalf("no-bounds: code=%d len=%d total=%d", code, len(out), total)
+	}
+	// since only — inclusive lower bound drops the early one; zero-time excluded.
+	if out, total, _ := list("?since=2026-05-10T00:00:00Z"); len(out) != 2 || total != 2 {
+		t.Fatalf("since inclusive lower bound wrong: %+v total=%d", out, total)
+	}
+	// until only — inclusive upper bound; zero-time excluded.
+	if out, total, _ := list("?until=2026-05-10T00:00:00Z"); len(out) != 2 || total != 2 {
+		t.Fatalf("until inclusive upper bound wrong: %+v total=%d", out, total)
+	}
+	// both bounds — only the mid schedule falls in the window.
+	if out, total, _ := list("?since=2026-05-08T00:00:00Z&until=2026-05-12T00:00:00Z"); len(out) != 1 || total != 1 || out[0].Name != "mid" {
+		t.Fatalf("since+until window wrong: %+v total=%d", out, total)
+	}
+	// zero-time schedule is filtered OUT whenever any bound is set.
+	if out, _, _ := list("?since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"); len(out) != 3 {
+		t.Fatalf("zero-time should be excluded under bounds, got %d", len(out))
+	}
+	// composes with action filter.
+	if out, total, _ := list("?action=snapshot&since=2026-05-12T00:00:00Z"); len(out) != 1 || total != 1 || out[0].Name != "late" {
+		t.Fatalf("action+since compose wrong: %+v total=%d", out, total)
+	}
+	// invalid since / until → 400.
+	if _, _, code := list("?since=nope"); code != http.StatusBadRequest {
+		t.Fatalf("invalid since should 400, got %d", code)
+	}
+	if _, _, code := list("?until=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid until should 400, got %d", code)
 	}
 }
 

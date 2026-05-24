@@ -2551,6 +2551,19 @@ export interface paths {
                      */
                     search?: string;
                     /**
+                     * @description Inclusive lower bound (RFC3339) on the schedule's `created_at`.
+                     *     Whitespace-trimmed; empty disables the bound; invalid values
+                     *     return 400 `invalid_since`. A schedule with a zero `created_at`
+                     *     is filtered OUT whenever any bound is set. Mirrors the
+                     *     snapshot / image / VM / template / webhook time-range filters.
+                     */
+                    since?: string;
+                    /**
+                     * @description Inclusive upper bound (RFC3339) on the schedule's `created_at`.
+                     *     Same shape as `since`; invalid values return 400 `invalid_until`.
+                     */
+                    until?: string;
+                    /**
                      * @description Field to sort by. `name` matches case-insensitively;
                      *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
                      *     unscheduled) at the tail of the ascending list. All comparators

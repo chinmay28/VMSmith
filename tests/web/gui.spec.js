@@ -2197,6 +2197,53 @@ test.describe("Schedules", () => {
     await page.getByTestId("schedule-delete-sch-2").click();
     await expect(page.getByTestId("schedule-row-sch-2")).not.toBeVisible();
   });
+
+  // --- 5.4.39: ?since= / ?until= time-range filter on schedule created_at ---
+  // Seed data: sch-1 (nightly-snapshot) created 2026-05-05, sch-2
+  // (weekend-shutdown) created 2026-05-10. The boundary at 2026-05-08 cleanly
+  // splits them so the assertions are robust against TZ drift.
+
+  test("created-since filter narrows the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+
+    // since=2026-05-08T00:00 — only sch-2 (created 2026-05-10) survives.
+    await page.getByTestId("schedule-list-since-filter").fill("2026-05-08T00:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toContain("2026-05-08");
+
+    // The Clear-range button drops both filters and the URL params.
+    await page.getByTestId("schedule-list-time-range-clear").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("since")).toBeNull();
+  });
+
+  test("created-until filter narrows the schedule list by upper bound", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    // until=2026-05-08T00:00 — only sch-1 (created 2026-05-05) remains.
+    await page.getByTestId("schedule-list-until-filter").fill("2026-05-08T00:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("until")).toContain("2026-05-08");
+  });
+
+  test("created-at range empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    // A window before both seeded schedules returns nothing.
+    await page.getByTestId("schedule-list-since-filter").fill("2024-01-01T00:00");
+    await page.getByTestId("schedule-list-until-filter").fill("2024-12-31T00:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByText("No schedules match your filters")).toBeVisible();
+  });
 });
 
 test.describe("Navigation", () => {

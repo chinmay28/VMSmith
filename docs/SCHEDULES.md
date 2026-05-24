@@ -194,7 +194,7 @@ schedules:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/schedules` | List (filters: `vm_id`, `action`, `enabled`, `search`; `sort`/`order`/pagination) |
+| `GET` | `/api/v1/schedules` | List (filters: `vm_id`, `action`, `enabled`, `since`/`until` (inclusive `created_at` bounds), `search`; `sort`/`order`/pagination) |
 | `POST` | `/api/v1/schedules` | Create |
 | `GET` | `/api/v1/schedules/{id}` | Get |
 | `PATCH` | `/api/v1/schedules/{id}` | Update (pointer semantics) |
