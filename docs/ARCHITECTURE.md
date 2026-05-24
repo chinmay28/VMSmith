@@ -752,25 +752,32 @@ goroutine, so stale URLs naturally die off.
 The remaining console work is designed around an authenticated websocket proxy,
 not a directly exposed VNC port:
 
-- browser opens `GET /api/v1/vms/{id}/console?ticket=...`
-- daemon validates and consumes the ticket
-- daemon resolves the VM's current loopback-only VNC endpoint
-- daemon bridges websocket frames to the local VNC TCP socket
-- daemon tracks active sessions so VM stop/delete or daemon shutdown can tear them down cleanly
+1. Browser requests `POST /api/v1/vms/{id}/console/ticket` using the normal API auth.
+2. Daemon verifies the VM is running and issues a short-lived single-use ticket.
+3. Browser opens `GET /api/v1/vms/{id}/console?ticket=...`.
+4. Daemon validates and consumes the ticket before any backend dial happens.
+5. Daemon resolves the VM's current loopback-only console endpoint:
+   - `intent=vnc` → libvirt `<graphics type='vnc'>`
+   - `intent=serial` → libvirt `<console type='pty'>`
+6. Daemon bridges websocket frames to the resolved local endpoint.
+7. Daemon registers the session in an active-session map so VM stop/delete and daemon shutdown can force-close it.
 
-That shape keeps two important invariants in place:
+That shape keeps three important invariants in place:
 
 1. the host's VNC socket stays private on `127.0.0.1`
 2. browser access remains time-limited, VM-scoped, and auditable through the daemon
+3. the browser never needs direct network reachability to libvirt-owned console sockets
 
 #### Security checklist
 
-- Keep libvirt's VNC listener bound to `127.0.0.1`; the browser should only reach it through the authenticated websocket proxy.
-- Query-param secrets like `ticket=` must be redacted from daemon request logs, reverse-proxy access logs, and any error-reporting pipeline that captures raw URLs.
-- Console tickets should stay intentionally short-lived and single-use. The websocket handler should consume the ticket exactly once during upgrade so a copied URL cannot be replayed after the legitimate session connects.
-- The ticket endpoint reuses the same API auth boundary as the rest of `/api/v1/*`, and the stored ticket carries the caller's API-key identity forward into the websocket session for audit and teardown decisions.
-- Track active console sessions centrally so VM stop, VM delete, daemon shutdown, or future API-key revocation can force-close them instead of leaving orphaned bridges to the local VNC socket.
-- Future websocket sessions should be counted alongside SSE clients in host-level stats, but session payloads themselves should not be logged.
+- Keep libvirt VNC listeners bound to loopback only; do not expose raw VNC ports through the host firewall or reverse proxy.
+- Treat `ticket=` as a secret: redact it from daemon logs, reverse-proxy access logs, metrics labels, crash reports, and any other pipeline that captures raw URLs.
+- Make tickets single-use and short-lived so copied URLs decay quickly.
+- Scope tickets to both the VM ID and the caller identity so a ticket for one VM cannot be replayed against another.
+- Reject websocket upgrades when the VM is no longer running or the console endpoint cannot be resolved.
+- Force-close active console sessions on VM stop/delete and daemon shutdown.
+- Keep console access behind the same API auth boundary as the rest of `/api/v1/*`; the ticket is an additional proof, not a replacement for auth.
+- Count websocket sessions in host-level connection stats so operators can spot leaks or stuck clients, but do not log session payloads.
 - When TLS is enabled or terminated by a trusted reverse proxy, browser console access should use `wss://`, not plaintext `ws://`.
 
 #### Reverse-proxy expectations
