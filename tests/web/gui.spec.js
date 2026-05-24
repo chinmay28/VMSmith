@@ -438,6 +438,45 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.36 — network filter on the VM list. Seed data: web-server is on
+  // "data-net", db-server on "storage-net". 250 ms-debounced input with URL
+  // round-trip via ?network=.
+  test("network filter narrows the VM list to a single network and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    await page.getByTestId("vm-list-network-filter").fill("data-net");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("network=data-net");
+
+    await page.getByTestId("vm-list-network-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("network=");
+  });
+
+  test("network filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-network-filter").fill("STORAGE-NET");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+  });
+
+  test("network filter matches no VMs when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-network-filter").fill("does-not-exist");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

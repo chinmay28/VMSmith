@@ -51,6 +51,20 @@ export interface paths {
                      */
                     default_user?: components["parameters"]["DefaultUserFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the name of any of the VM's
+                     *     additional network attachments (`spec.networks[].name`). A VM matches
+                     *     when any attachment name equals the value (any-of). Whitespace is
+                     *     trimmed before comparison; an empty value disables the filter. The
+                     *     implicit primary NAT network is NOT matched — it is not represented
+                     *     in `spec.networks`, so this filter only ever scopes to the
+                     *     explicitly-attached extra networks operators name and group by
+                     *     ("data-net", "storage-net"). Composes additively with `tag`,
+                     *     `status`, `search`, `image`, `default_user`, and the sort +
+                     *     pagination params; `X-Total-Count` reflects the post-filter /
+                     *     pre-pagination population.
+                     */
+                    network?: components["parameters"]["NetworkFilter"];
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is
@@ -2175,6 +2189,23 @@ export interface paths {
                      */
                     search?: string;
                     /**
+                     * @description Categorical filter on the webhook's most-recent delivery
+                     *     classification (5.4.35):
+                     *       - `never`: `last_delivery_at` is zero (no attempt yet).
+                     *       - `healthy`: most recent attempt returned 2xx and
+                     *         `last_error` is empty.
+                     *       - `failing`: an attempt was made but did not meet the
+                     *         healthy contract — transport error (`last_status == 0`
+                     *         with a non-empty `last_error`), 4xx, 5xx, 3xx, or 2xx
+                     *         with a stale `last_error`.
+                     *     Whitespace-trimmed; case-insensitive; empty disables the
+                     *     filter. Unknown values return 400 `invalid_delivery_status`.
+                     *     Applied before `search` so `X-Total-Count` reflects the
+                     *     post-filter population. The three values form a complete
+                     *     partition of every persisted webhook.
+                     */
+                    delivery_status?: "never" | "healthy" | "failing";
+                    /**
                      * @description Field to sort by. `url` matches case-insensitively.
                      *     `last_delivery_at` sorts never-delivered webhooks
                      *     (zero timestamp) at the tail of the ascending list and the
@@ -2472,8 +2503,22 @@ export interface paths {
                 query?: {
                     /** @description Minimum log level. */
                     level?: string;
-                    /** @description Return entries at or after this timestamp. */
+                    /**
+                     * @description Return entries strictly AFTER this RFC3339 timestamp. Whitespace
+                     *     is trimmed; empty disables the bound; invalid values return 400
+                     *     `invalid_since`. (Strict-after semantics are preserved from the
+                     *     legacy `logger.Entries` contract.)
+                     */
                     since?: string;
+                    /**
+                     * @description Return entries at-or-BEFORE this RFC3339 timestamp (inclusive
+                     *     upper bound — mirrors the snapshot/image/VM/template/webhook
+                     *     time-range filters). Whitespace is trimmed; empty disables the
+                     *     bound; invalid values return 400 `invalid_until`. Composes
+                     *     additively with `since` and the other filters so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    until?: string;
                     /** @description Filter by structured log source. */
                     source?: string;
                     /**
@@ -3289,6 +3334,20 @@ export interface components {
          *     pre-pagination population.
          */
         DefaultUserFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the name of any of the VM's
+         *     additional network attachments (`spec.networks[].name`). A VM matches
+         *     when any attachment name equals the value (any-of). Whitespace is
+         *     trimmed before comparison; an empty value disables the filter. The
+         *     implicit primary NAT network is NOT matched — it is not represented
+         *     in `spec.networks`, so this filter only ever scopes to the
+         *     explicitly-attached extra networks operators name and group by
+         *     ("data-net", "storage-net"). Composes additively with `tag`,
+         *     `status`, `search`, `image`, `default_user`, and the sort +
+         *     pagination params; `X-Total-Count` reflects the post-filter /
+         *     pre-pagination population.
+         */
+        NetworkFilter: string;
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

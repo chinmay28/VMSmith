@@ -49,6 +49,8 @@ const webhookList = new Map();
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
+  // Named network attachments power the 5.4.36 ?network= filter tests.
+  vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
   // Fixed timestamps so the 5.4.30 created-at time-range filter tests are
   // deterministic. vm-1 sits before 2026-05-10, vm-2 after — letting the GUI
   // boundary at 2026-05-10 split them cleanly.
@@ -57,6 +59,7 @@ function seed() {
   const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100 });
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
+  vm2.spec.networks = [{ name: "storage-net", mode: "bridge", bridge: "br-storage" }];
   vm2.created_at = "2026-05-15T00:00:00Z";
   vm2.updated_at = "2026-05-15T00:00:00Z";
   snapshots.set(vm1.id, [
@@ -183,6 +186,7 @@ const server = http.createServer(async (req, res) => {
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     const imageFilter = (url.searchParams.get("image") || "").trim().toLowerCase();
     const defaultUserFilter = (url.searchParams.get("default_user") || "").trim().toLowerCase();
+    const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -238,6 +242,12 @@ const server = http.createServer(async (req, res) => {
         const du = vm?.spec?.default_user || vm?.default_user || "";
         const effective = du === "" ? "root" : String(du).toLowerCase();
         return effective === defaultUserFilter;
+      });
+    }
+    if (networkFilter) {
+      list = list.filter(vm => {
+        const nets = Array.isArray(vm?.spec?.networks) ? vm.spec.networks : [];
+        return nets.some(n => String(n?.name || "").toLowerCase() === networkFilter);
       });
     }
     if (autoStart.set) {
