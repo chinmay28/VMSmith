@@ -165,6 +165,13 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     disables. Unknown values return 400 `invalid_delivery_status`.
 //     Applied before `?search=` so X-Total-Count reflects the post-filter
 //     population.
+//   - active=<true|false>  tristate boolean exact-match on the webhook's
+//     `active` flag. Case-insensitive `true`/`false` with `1`/`0` aliases;
+//     whitespace-trimmed; empty disables the filter; anything else returns
+//     400 `invalid_active`. Closes the "show me only disabled webhooks" /
+//     "show me only live webhooks" operator queries that `?delivery_status=`
+//     (runtime health) and `?event_type=` (subscription) can't answer.
+//     Mirrors the VM `?auto_start=` / `?locked=` tristate filters.
 //   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
 //     Default `id`. Unknown values return 400 `invalid_sort`.
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
@@ -203,6 +210,11 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			"delivery_status must be one of: never, healthy, failing")
 		return
 	}
+	activeFilter, activeSet, apiErr := parseTristateBoolParam(q.Get("active"), "active")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 	hooks, err := s.webhookStore.ListWebhooks()
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list webhooks")
@@ -228,6 +240,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if deliveryStatusFilter != "" && types.WebhookDeliveryStatus(h) != deliveryStatusFilter {
+			continue
+		}
+		if activeSet && h.Active != activeFilter {
 			continue
 		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {

@@ -1455,6 +1455,23 @@ paths:
             post-filter population. The three values form a complete
             partition of every persisted webhook.
         - in: query
+          name: active
+          required: false
+          schema:
+            type: string
+            enum: ['true', 'false']
+          description: |
+            Tristate boolean exact-match on the webhook's `active` flag
+            (5.4.37). Accepts `true` / `false` (case-insensitive) with
+            `1` / `0` aliases; whitespace-trimmed; empty disables the
+            filter; anything else returns 400 `invalid_active`. Closes the
+            "show me only disabled webhooks" / "show me only live webhooks"
+            operator queries that `delivery_status` (runtime health) and
+            `event_type` (subscription) can't answer. Mirrors the VM
+            `auto_start` / `locked` tristate filters. Composes additively
+            with every other webhook list filter so `X-Total-Count`
+            reflects the post-filter population.
+        - in: query
           name: sort
           required: false
           schema:
