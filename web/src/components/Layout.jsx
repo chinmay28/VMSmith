@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Server, HardDrive, Layers, LayoutDashboard, Monitor, ScrollText, Activity, Settings as SettingsIcon } from 'lucide-react';
+import { Server, HardDrive, Layers, LayoutDashboard, Monitor, ScrollText, Activity, Clock, Settings as SettingsIcon } from 'lucide-react';
 import mascot from '../assets/mascot.png';
 import { system } from '../api/client';
 
@@ -9,6 +9,7 @@ const navItems = [
   { to: '/vms',      icon: Server,          label: 'Machines',  testId: 'nav-vms' },
   { to: '/images',   icon: HardDrive,       label: 'Images',    testId: 'nav-images' },
   { to: '/templates',icon: Layers,          label: 'Templates', testId: 'nav-templates' },
+  { to: '/schedules',icon: Clock,           label: 'Schedules', testId: 'nav-schedules' },
   { to: '/activity', icon: Activity,        label: 'Activity',  testId: 'nav-activity' },
   { to: '/logs',     icon: ScrollText,      label: 'Logs',      testId: 'nav-logs' },
   { to: '/settings', icon: SettingsIcon,    label: 'Settings',  testId: 'nav-settings' },

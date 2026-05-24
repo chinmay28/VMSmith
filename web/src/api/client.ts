@@ -358,6 +358,27 @@ export const webhooks = {
     unwrap(apiClient.POST('/webhooks/{webhookID}/test', { params: { path: { webhookID: id } } })),
 };
 
+// --- Schedules ---
+// Filter params line up 1:1 with GET /api/v1/schedules query params.
+// `enabled` is a tristate string ('true'|'false'|''); empty omits the param.
+// `sort`/`order` whitelist mirrors the daemon: sort one of
+// id|name|created_at|next_fire_at (default id); order asc|desc (default asc).
+export const schedules = {
+  list: ({ page, perPage, vmId = '', action = '', enabled = '', search = '', sort = '', order = '' }: { page?: number; perPage?: number; vmId?: string; action?: 'snapshot' | 'start' | 'stop' | 'restart' | ''; enabled?: 'true' | 'false' | ''; search?: string; sort?: 'id' | 'name' | 'created_at' | 'next_fire_at' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
+    unwrap(apiClient.GET('/schedules', { params: { query: { vm_id: vmId || undefined, action: action || undefined, enabled: enabled || undefined, search: search || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  get: (id: string) => unwrap(apiClient.GET('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
+  create: (spec: paths['/schedules']['post']['requestBody']['content']['application/json']) =>
+    unwrap(apiClient.POST('/schedules', { body: spec as any })),
+  update: (id: string, patch: paths['/schedules/{scheduleID}']['patch']['requestBody']['content']['application/json']) =>
+    unwrap(apiClient.PATCH('/schedules/{scheduleID}', { params: { path: { scheduleID: id } }, body: patch as any })),
+  delete: (id: string) =>
+    unwrap(apiClient.DELETE('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
+  runs: (id: string, { page, perPage }: { page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { page, per_page: perPage } as any } }), { withMeta: true }),
+  runNow: (id: string) =>
+    unwrap(apiClient.POST('/schedules/{scheduleID}/run-now', { params: { path: { scheduleID: id } } })),
+};
+
 // --- Events ---
 // Filter params line up 1:1 with GET /api/v1/events query params.
 export const events = {
@@ -382,4 +403,4 @@ export const events = {
     }), { withMeta: true }),
 };
 
-export default { vms, snapshots, images, templates, ports, host, quotas, logs, events, system, webhooks };
+export default { vms, snapshots, images, templates, ports, host, quotas, logs, events, system, webhooks, schedules };

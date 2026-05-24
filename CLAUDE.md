@@ -45,6 +45,7 @@ vmsmith/
 │   │   ├── network.go           # vmsmith port add|edit|remove|list (`port remove` accepts a positional id for single-delete, or `--vm <id> [--protocol tcp|udp]` to bulk-delete every rule on a VM; `port add --tag <t>` and `port edit <id> --description "..." --tag <t> --clear-tags` mutate the description and tag set — pass `""` to clear description, `--clear-tags` to drop every tag; `port list --tag <t>` filters by tag and prints a TAGS column)
 │   │   ├── logs.go              # vmsmith logs list (HTTP client for the daemon's /api/v1/logs ring buffer; supports `--level --source --since --search --sort --order --limit --page --fields`)
 │   │   ├── host.go              # vmsmith host stats|quotas (thin HTTP clients for `GET /api/v1/host/stats` and `GET /api/v1/quotas/usage` — same data that powers the GUI Dashboard cards; `--json` for scripting)
+│   │   ├── schedule.go          # vmsmith schedule create|list|show|edit|delete|run-now (HTTP client for the daemon's /api/v1/schedules CRUD; `create --name --vm|--tag --action --cron --timezone --enabled --catch-up --retention --max-concurrent`; `list --vm --action --enabled --search --sort --order --limit --page`; `show <id>` prints the definition plus the last 20 runs)
 │   │   └── daemon.go            # vmsmith daemon start
 │   ├── config/config.go         # Config struct, DefaultConfig(), EnsureDirs()
 │   ├── console/
@@ -52,6 +53,10 @@ vmsmith/
 │   ├── daemon/daemon.go         # HTTP server startup, libvirt connect, graceful shutdown orchestration, logger init
 │   ├── logger/
 │   │   └── logger.go            # Structured logger: global singleton, ring buffer, file output
+│   ├── scheduler/
+│   │   ├── engine.go            # Scheduler engine: per-timezone cron instances, bounded worker pool, per-schedule concurrency, register/deregister on CRUD, startup catch-up, run-now, retry+backoff, event emission
+│   │   ├── actions.go           # Action registry (snapshot/start/stop/restart) + auto-snapshot retention trim + typed skip reasons
+│   │   └── catchup.go           # Pure missed-fire computation over a cron schedule (last_tick → now, capped)
 │   ├── network/
 │   │   ├── nat.go               # libvirt NAT network setup + stale-dnsmasq cleanup
 │   │   ├── portforward.go       # iptables DNAT rules — add, remove, restore
@@ -78,13 +83,15 @@ vmsmith/
 │   ├── network.go               # NetworkAttachment, PortForward, HostInterface
 │   ├── quota.go                 # Quota usage response types
 │   ├── console.go               # Console ticket + endpoint response types
+│   ├── schedule.go              # Schedule + CreateScheduleRequest + ScheduleUpdateSpec + action/catch-up constants + validation/sort helpers
+│   ├── schedule_run.go          # ScheduleRun + status/skip-reason constants
 │   └── errors.go                # Typed API errors
 ├── web/                         # React source (separate npm project)
-│   ├── src/api/client.ts        # OpenAPI-backed REST API client wrapper (vms, snapshots, images, ports, host, logs)
+│   ├── src/api/client.ts        # OpenAPI-backed REST API client wrapper (vms, snapshots, images, ports, host, logs, webhooks, schedules)
 │   ├── src/api/generated/       # Generated OpenAPI TypeScript schema (`npm run generate:api`)
 │   ├── src/components/          # Layout, Shared (StatusBadge, Modal, etc.)
 │   ├── src/hooks/useFetch.js    # Data fetching with polling + mutation helpers
-│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, TemplateList, LogViewer (VMList's bulk-action bar fans out start/stop/restart/force-stop/reboot/suspend/resume/delete over the existing per-VM endpoints, with eligibility filtered by VM state; ImageList includes upload progress UI for image imports; TemplateList is the dedicated admin page for the templates store with search / sort / per-row edit (description + tags via PATCH) / single-delete / select-all + Delete-selected wired to `/templates/bulk_delete`)
+│   ├── src/pages/               # Dashboard, VMList, VMDetail, ImageList, TemplateList, Schedules, LogViewer (Schedules is the dedicated page for recurring VM-action schedules: list with enabled toggle / next-fire / last-result chip / run-now, create+edit modal with cron preset chips, per-row recent-runs expander; VMList's bulk-action bar fans out start/stop/restart/force-stop/reboot/suspend/resume/delete over the existing per-VM endpoints, with eligibility filtered by VM state; ImageList includes upload progress UI for image imports; TemplateList is the dedicated admin page for the templates store with search / sort / per-row edit (description + tags via PATCH) / single-delete / select-all + Delete-selected wired to `/templates/bulk_delete`)
 │   └── vite.config.js           # Build outputs to ../internal/web/dist/
 ├── tests/web/
 │   ├── gui.spec.js              # Playwright E2E test specs (mock server)
@@ -210,6 +217,24 @@ Three buckets in `~/.vmsmith/vmsmith.db`:
 | `images` | image ID | JSON `types.Image` |
 | `port_forwards` | `{vmID}/{hostPort}` | JSON `types.PortForward` |
 | `snapshots` | `{vmID}/{name}` | JSON `{tags: [...]}` — snapshot tag list, persisted out-of-band because the libvirt domainsnapshot XML schema does not accept `<metadata>` for round-tripping tags alongside `<description>` |
+| `schedules` | schedule ID (`sched-<unix-nano>`) | JSON `types.Schedule` |
+| `schedule_runs` | `{scheduleID}/{ts_be}` (big-endian nanos suffix) | JSON `types.ScheduleRun` — per-fire history, trimmed to 200 newest per schedule |
+| `schedule_meta` | `last_tick` | RFC3339Nano timestamp — scheduler catch-up cursor |
+
+### Scheduled Operations
+
+The `internal/scheduler` package drives recurring VM actions. A single `Engine`
+runs one `robfig/cron/v3` instance per distinct timezone, fans fired schedules
+onto a bounded worker pool, resolves `tag_selector` targets at fire time, and
+records each attempt as a `ScheduleRun`. It is wired in `daemon.New()` (shares
+the store, VM manager, and event bus) and exposed to the API via the
+`ScheduleController` / `ScheduleStore` interfaces (mirroring the webhook
+subsystem decoupling so the `api` package never imports `scheduler`). On
+startup the engine replays missed fires per each schedule's catch-up policy
+(`skip` / `run_once` / `run_all`, capped at `max_catch_up`). Snapshot actions
+honor `retention_count`, trimming only `auto-<schedule-name>-*` snapshots so
+operator snapshots are never deleted. Fires emit `schedule.*` events with
+`actor: "scheduler"`. Full operator contract: `docs/SCHEDULES.md`.
 
 ### Networking
 
@@ -376,6 +401,10 @@ Key config fields:
 - `storage.base_dir` — VM disk overlays (must also be world-readable)
 - `storage.db_path` — bbolt database path
 - `network.*` — NAT network name and DHCP range
+- `schedules.enabled` — master switch for the scheduled-operations subsystem (default true); when false the `/api/v1/schedules` endpoints return 503 `schedules_disabled`
+- `schedules.worker_pool_size` / `schedules.queue_size` — bound concurrent fires (default 4) and the dispatch backlog (default 64; overflow records a `queue_full` skip)
+- `schedules.max_retries` / `schedules.action_timeout_seconds` — transient-error retry count (default 2) and per-attempt timeout (default 300)
+- `schedules.max_catch_up` / `schedules.tick_interval_seconds` — cap on replayed missed fires per schedule on startup (default 100) and the catch-up cursor advance interval (default 60)
 - `defaults.cpus/ram_mb/disk_gb` — default VM resource sizes
 - `defaults.ssh_user` — retained for config file compatibility but no longer used as a VM default. VMs use `root` by default; override per-VM with `VMSpec.DefaultUser` / `--default-user` CLI flag / `default_user` JSON field to create a named sudo user instead
 
@@ -471,6 +500,13 @@ PATCH  /webhooks/{id}                  Update editable fields on an existing web
 DELETE /webhooks/{id}                  Unregister webhook
 POST   /webhooks/bulk_delete           Delete multiple webhooks in a single request. Body: `{"ids": [...]}` or `{"event_type": "..."}` (exactly one). The `event_type` selector matches webhooks whose `event_types` filter list contains this exact value — catch-all webhooks (empty `event_types`) are NOT swept by the categorical selector. Returns `{"results": [{id, success, code?, message?}]}`. CLI: `vmsmith webhook delete --event-type <type>` (alongside the existing `webhook delete <id>`); GUI: Settings page multi-select checkboxes + "Delete selected" button.
 POST   /webhooks/{id}/test             Synthesise a `system.webhook_test` event and deliver it once; returns `WebhookTestResult` with success / status_code / duration / error and updates `last_delivery_at` / `last_status` / `last_error`. Used by the Settings page "Test" button. CLI mirrors via `vmsmith webhook test <id>` (thin HTTP client; `--json` for raw pass-through; exits non-zero when delivery failed so it composes with shell `||` pipelines).
+GET    /schedules                      List recurring VM-action schedules. Filters (applied before sort + pagination so `X-Total-Count` reflects the post-filter population): `?vm_id=<id>` (exact), `?action=<snapshot|start|stop|restart>` (case-insensitive exact), `?enabled=true|false` (tristate; invalid → 400 `invalid_enabled`), `?search=<q>` (case-insensitive substring across name/action/vm_id/tag_selector). Sorting: `?sort=<id|name|created_at|next_fire_at>` (default `id`) + `?order=<asc|desc>` (default `asc`); unknown → 400 `invalid_sort`/`invalid_order`; all comparators tiebreak on `id`. Pagination: `?page=&per_page=`. 503 `schedules_disabled` when the subsystem is off. CLI: `vmsmith schedule list --vm --action --enabled --search --sort --order --limit --page`.
+POST   /schedules                      Create a schedule. Body (`CreateScheduleRequest`): `name` (1-128), `vm_id?` / `tag_selector?[]` (mutually exclusive — both empty = all VMs), `action` (snapshot|start|stop|restart), `cron_spec` (6-field with seconds, e.g. `0 0 2 * * *`), `timezone?` (IANA), `enabled?` (default true), `catch_up_policy?` (skip|run_once|run_all, default skip), `max_concurrent?`, `retention_count?`, `params?`. 400 codes: `invalid_name`, `invalid_action`, `invalid_cron_spec`, `invalid_timezone`, `invalid_target`, `invalid_catch_up_policy`. Registers the schedule with the running engine and emits `schedule.created`. CLI: `vmsmith schedule create --name --vm|--tag --action --cron --timezone --enabled --catch-up --retention --max-concurrent`.
+GET    /schedules/{id}                 Get a schedule. 404 `resource_not_found`. CLI: `vmsmith schedule show <id>` (also prints the last 20 runs).
+PATCH  /schedules/{id}                 Update editable fields (`ScheduleUpdateSpec`, pointer semantics — omit = no change): `name`, `vm_id`, `tag_selector`, `action`, `cron_spec`, `timezone`, `enabled`, `catch_up_policy`, `max_concurrent`, `retention_count`, `params`. Empty body → 400 `noop_update`; cron/timezone re-validated; the engine is re-registered and `next_fire_at` recomputed. Emits `schedule.updated`. CLI: `vmsmith schedule edit <id> [--name --vm --tag --clear-tags --action --cron --timezone --enabled --catch-up --retention --max-concurrent]`.
+DELETE /schedules/{id}                 Delete a schedule (and its run history). De-registers from the engine; emits `schedule.deleted`. CLI: `vmsmith schedule delete <id>`.
+GET    /schedules/{id}/runs            List the schedule's run history (newest first; `?page=&per_page=`; `X-Total-Count`). Each run: `{id, schedule_id, vm_id, started_at, finished_at?, status (running|success|error|skipped), error?, skip_reason?}`. 404 if the schedule is unknown.
+POST   /schedules/{id}/run-now         Fire the schedule immediately (out of band of cron), attributing runs to `actor: "api"`. Returns the schedule. 404 if unknown. CLI: `vmsmith schedule run-now <id>`.
 ```
 
 ---

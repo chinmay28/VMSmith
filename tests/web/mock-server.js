@@ -39,12 +39,17 @@ function normalizeWebhookTags(input) {
 
 let vmCounter = 0;
 let webhookCounter = 0;
+let scheduleCounter = 0;
+let scheduleRunCounter = 0;
 const vms = new Map();
 const snapshots = new Map();
 const images = new Map();
 const templates = new Map();
 const portForwards = new Map();
 const webhookList = new Map();
+const scheduleList = new Map();
+// scheduleRuns: scheduleID -> [run, ...] (kept newest-first).
+const scheduleRuns = new Map();
 
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
@@ -120,17 +125,80 @@ function seed() {
     created_at: "2026-05-15T12:00:00Z",
     updated_at: "2026-05-15T12:00:00Z",
   });
+
+  // Seed a couple of schedules so the GUI has rows to render / filter / edit.
+  scheduleList.set("sch-1", {
+    id: "sch-1",
+    name: "nightly-snapshot",
+    vm_id: vm1.id,
+    tag_selector: null,
+    action: "snapshot",
+    cron_spec: "0 0 2 * * *",
+    timezone: "UTC",
+    enabled: true,
+    catch_up_policy: "skip",
+    max_concurrent: 1,
+    retention_count: 7,
+    params: {},
+    created_at: "2026-05-05T00:00:00Z",
+    updated_at: "2026-05-05T00:00:00Z",
+    last_fired_at: "2026-05-23T02:00:00Z",
+    last_result: "success",
+    next_fire_at: "2026-05-25T02:00:00Z",
+  });
+  scheduleList.set("sch-2", {
+    id: "sch-2",
+    name: "weekend-shutdown",
+    vm_id: "",
+    tag_selector: ["dev"],
+    action: "stop",
+    cron_spec: "0 0 3 * * 0",
+    timezone: "",
+    enabled: false,
+    catch_up_policy: "run_once",
+    max_concurrent: 0,
+    retention_count: 0,
+    params: {},
+    created_at: "2026-05-10T00:00:00Z",
+    updated_at: "2026-05-10T00:00:00Z",
+    last_fired_at: null,
+    last_result: "",
+    next_fire_at: null,
+  });
+  scheduleRuns.set("sch-1", [
+    {
+      id: "run-2",
+      schedule_id: "sch-1",
+      vm_id: vm1.id,
+      started_at: "2026-05-23T02:00:00Z",
+      finished_at: "2026-05-23T02:00:05Z",
+      status: "success",
+    },
+    {
+      id: "run-1",
+      schedule_id: "sch-1",
+      vm_id: vm1.id,
+      started_at: "2026-05-22T02:00:00Z",
+      finished_at: "2026-05-22T02:00:04Z",
+      status: "success",
+    },
+  ]);
+  scheduleRuns.set("sch-2", []);
 }
 
 function resetState() {
   vmCounter = 0;
   webhookCounter = 0;
+  scheduleCounter = 0;
+  scheduleRunCounter = 0;
   vms.clear();
   snapshots.clear();
   images.clear();
   templates.clear();
   portForwards.clear();
   webhookList.clear();
+  scheduleList.clear();
+  scheduleRuns.clear();
   seed();
 }
 
@@ -1661,6 +1729,273 @@ const server = http.createServer(async (req, res) => {
     webhookList.set(wh.id, wh);
     return json(res, 200, result);
   }
+  // --- Schedules (5.2.9) ---
+  if (p === "/api/v1/schedules" && method === "GET") {
+    const vmIdFilter = (url.searchParams.get("vm_id") || "").trim();
+    const actionFilter = (url.searchParams.get("action") || "").trim();
+    const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
+    const enabledRaw = (url.searchParams.get("enabled") || "").trim().toLowerCase();
+    let enabledFilter = null;
+    if (enabledRaw !== "") {
+      if (enabledRaw === "true" || enabledRaw === "1") enabledFilter = true;
+      else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
+      else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
+    }
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at"]);
+    const allowedOrder = new Set(["asc", "desc"]);
+    let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
+    let order = (url.searchParams.get("order") || "").trim().toLowerCase();
+    if (sortField === "") sortField = "id";
+    else if (!allowedSort.has(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at" });
+    }
+    if (order === "") order = "asc";
+    else if (!allowedOrder.has(order)) {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
+
+    let list = [...scheduleList.values()];
+    if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
+    if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
+    if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
+    if (needle) {
+      list = list.filter((s) => {
+        if (typeof s.name === "string" && s.name.toLowerCase().includes(needle)) return true;
+        if (typeof s.action === "string" && s.action.toLowerCase().includes(needle)) return true;
+        if (typeof s.vm_id === "string" && s.vm_id.toLowerCase().includes(needle)) return true;
+        if (Array.isArray(s.tag_selector)) {
+          for (const t of s.tag_selector) {
+            if (typeof t === "string" && t.toLowerCase().includes(needle)) return true;
+          }
+        }
+        return false;
+      });
+    }
+
+    const desc = order === "desc";
+    list.sort((a, b) => {
+      const aID = a.id || "";
+      const bID = b.id || "";
+      const cmpID = aID < bID ? -1 : aID > bID ? 1 : 0;
+      let cmp = 0;
+      switch (sortField) {
+        case "name": {
+          const an = (a.name || "").toLowerCase();
+          const bn = (b.name || "").toLowerCase();
+          cmp = an < bn ? -1 : an > bn ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "created_at": {
+          const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+          cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "next_fire_at": {
+          // null next_fire sorts last in asc, first in desc.
+          const az = !a.next_fire_at;
+          const bz = !b.next_fire_at;
+          if (az !== bz) { cmp = az ? 1 : -1; break; }
+          const at = a.next_fire_at ? new Date(a.next_fire_at).getTime() : 0;
+          const bt = b.next_fire_at ? new Date(b.next_fire_at).getTime() : 0;
+          cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        default:
+          cmp = cmpID;
+      }
+      return desc ? -cmp : cmp;
+    });
+
+    const total = list.length;
+    const pageRaw = parseInt(url.searchParams.get("page") || "1", 10);
+    const perPageRaw = parseInt(url.searchParams.get("per_page") || url.searchParams.get("limit") || "0", 10);
+    const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const perPage = isNaN(perPageRaw) || perPageRaw <= 0 ? 0 : perPageRaw;
+    if (perPage > 0) {
+      const start = (page - 1) * perPage;
+      list = list.slice(start, start + perPage);
+    }
+    return json(res, 200, list, { "X-Total-Count": String(total) });
+  }
+  if (p === "/api/v1/schedules" && method === "POST") {
+    const body = await parseBody(req);
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 128) {
+      return json(res, 400, { code: "invalid_name", message: "name must be 1-128 characters" });
+    }
+    const action = typeof body.action === "string" ? body.action.trim() : "";
+    if (!["snapshot", "start", "stop", "restart"].includes(action)) {
+      return json(res, 400, { code: "invalid_action", message: "action must be one of: snapshot, start, stop, restart" });
+    }
+    const cronSpec = typeof body.cron_spec === "string" ? body.cron_spec.trim() : "";
+    if (!cronSpec || cronSpec.split(/\s+/).length !== 6) {
+      return json(res, 400, { code: "invalid_cron_spec", message: "cron_spec must be a 6-field cron expression" });
+    }
+    const vmId = typeof body.vm_id === "string" ? body.vm_id.trim() : "";
+    const tagSelector = Array.isArray(body.tag_selector)
+      ? body.tag_selector.map((t) => (typeof t === "string" ? t.trim().toLowerCase() : "")).filter(Boolean)
+      : [];
+    if (vmId && tagSelector.length) {
+      return json(res, 400, { code: "invalid_target", message: "vm_id and tag_selector are mutually exclusive" });
+    }
+    const catchUp = typeof body.catch_up_policy === "string" && body.catch_up_policy !== "" ? body.catch_up_policy : "skip";
+    if (!["skip", "run_once", "run_all"].includes(catchUp)) {
+      return json(res, 400, { code: "invalid_catch_up_policy", message: "catch_up_policy must be one of: skip, run_once, run_all" });
+    }
+    scheduleCounter++;
+    const now = new Date().toISOString();
+    const schedule = {
+      id: `sch-new-${scheduleCounter}`,
+      name,
+      vm_id: vmId,
+      tag_selector: tagSelector.length ? tagSelector : null,
+      action,
+      cron_spec: cronSpec,
+      timezone: typeof body.timezone === "string" ? body.timezone.trim() : "",
+      enabled: body.enabled === undefined ? true : Boolean(body.enabled),
+      catch_up_policy: catchUp,
+      max_concurrent: Number.isFinite(body.max_concurrent) ? body.max_concurrent : 0,
+      retention_count: Number.isFinite(body.retention_count) ? body.retention_count : 0,
+      params: body.params && typeof body.params === "object" ? body.params : {},
+      created_at: now,
+      updated_at: now,
+      last_fired_at: null,
+      last_result: "",
+      next_fire_at: now,
+    };
+    scheduleList.set(schedule.id, schedule);
+    scheduleRuns.set(schedule.id, []);
+    return json(res, 201, schedule);
+  }
+  if ((m = p.match(/^\/api\/v1\/schedules\/([^/]+)\/runs$/)) && method === "GET") {
+    if (!scheduleList.has(m[1])) {
+      return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
+    }
+    const all = scheduleRuns.get(m[1]) || [];
+    const total = all.length;
+    const pageRaw = parseInt(url.searchParams.get("page") || "1", 10);
+    const perPageRaw = parseInt(url.searchParams.get("per_page") || url.searchParams.get("limit") || "0", 10);
+    const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
+    const perPage = isNaN(perPageRaw) || perPageRaw <= 0 ? 0 : perPageRaw;
+    let runs = all;
+    if (perPage > 0) {
+      const start = (page - 1) * perPage;
+      runs = all.slice(start, start + perPage);
+    }
+    return json(res, 200, runs, { "X-Total-Count": String(total) });
+  }
+  if ((m = p.match(/^\/api\/v1\/schedules\/([^/]+)\/run-now$/)) && method === "POST") {
+    const schedule = scheduleList.get(m[1]);
+    if (!schedule) {
+      return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
+    }
+    scheduleRunCounter++;
+    const now = new Date().toISOString();
+    const run = {
+      id: `run-now-${scheduleRunCounter}`,
+      schedule_id: schedule.id,
+      vm_id: schedule.vm_id || "",
+      started_at: now,
+      finished_at: now,
+      status: "success",
+    };
+    const existing = scheduleRuns.get(schedule.id) || [];
+    scheduleRuns.set(schedule.id, [run, ...existing]);
+    schedule.last_fired_at = now;
+    schedule.last_result = "success";
+    schedule.updated_at = now;
+    scheduleList.set(schedule.id, schedule);
+    return json(res, 200, schedule);
+  }
+  if ((m = p.match(/^\/api\/v1\/schedules\/([^/]+)$/)) && method === "GET") {
+    const schedule = scheduleList.get(m[1]);
+    if (!schedule) {
+      return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
+    }
+    return json(res, 200, schedule);
+  }
+  if ((m = p.match(/^\/api\/v1\/schedules\/([^/]+)$/)) && method === "PATCH") {
+    const schedule = scheduleList.get(m[1]);
+    if (!schedule) {
+      return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
+    }
+    const body = await parseBody(req);
+    const editable = ["name", "vm_id", "tag_selector", "action", "cron_spec", "timezone", "enabled", "catch_up_policy", "max_concurrent", "retention_count", "params"];
+    const present = editable.filter((k) => Object.prototype.hasOwnProperty.call(body, k));
+    if (present.length === 0) {
+      return json(res, 400, { code: "noop_update", message: "no fields to update" });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "name")) {
+      const next = typeof body.name === "string" ? body.name.trim() : "";
+      if (!next || next.length > 128) return json(res, 400, { code: "invalid_name", message: "name must be 1-128 characters" });
+      schedule.name = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "action")) {
+      const next = typeof body.action === "string" ? body.action.trim() : "";
+      if (!["snapshot", "start", "stop", "restart"].includes(next)) {
+        return json(res, 400, { code: "invalid_action", message: "invalid action" });
+      }
+      schedule.action = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "cron_spec")) {
+      const next = typeof body.cron_spec === "string" ? body.cron_spec.trim() : "";
+      if (!next || next.split(/\s+/).length !== 6) {
+        return json(res, 400, { code: "invalid_cron_spec", message: "cron_spec must be a 6-field cron expression" });
+      }
+      schedule.cron_spec = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "vm_id")) {
+      schedule.vm_id = typeof body.vm_id === "string" ? body.vm_id.trim() : "";
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "tag_selector")) {
+      const next = Array.isArray(body.tag_selector)
+        ? body.tag_selector.map((t) => (typeof t === "string" ? t.trim().toLowerCase() : "")).filter(Boolean)
+        : [];
+      schedule.tag_selector = next.length ? next : null;
+    }
+    if (schedule.vm_id && schedule.tag_selector && schedule.tag_selector.length) {
+      return json(res, 400, { code: "invalid_target", message: "vm_id and tag_selector are mutually exclusive" });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "timezone")) {
+      schedule.timezone = typeof body.timezone === "string" ? body.timezone.trim() : "";
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
+      schedule.enabled = Boolean(body.enabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "catch_up_policy")) {
+      const next = body.catch_up_policy;
+      if (!["skip", "run_once", "run_all"].includes(next)) {
+        return json(res, 400, { code: "invalid_catch_up_policy", message: "invalid catch_up_policy" });
+      }
+      schedule.catch_up_policy = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "max_concurrent")) {
+      schedule.max_concurrent = Number.isFinite(body.max_concurrent) ? body.max_concurrent : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "retention_count")) {
+      schedule.retention_count = Number.isFinite(body.retention_count) ? body.retention_count : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "params")) {
+      schedule.params = body.params && typeof body.params === "object" ? body.params : {};
+    }
+    schedule.updated_at = new Date().toISOString();
+    scheduleList.set(schedule.id, schedule);
+    return json(res, 200, schedule);
+  }
+  if ((m = p.match(/^\/api\/v1\/schedules\/([^/]+)$/)) && method === "DELETE") {
+    if (!scheduleList.has(m[1])) {
+      return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
+    }
+    scheduleList.delete(m[1]);
+    scheduleRuns.delete(m[1]);
+    res.writeHead(204);
+    return res.end();
+  }
+
   if (p === "/api/v1/host/interfaces" && method === "GET") {
     return json(res, 200, [
       { name: "eth0", ips: ["10.21.100.101/24"], mac: "52:54:00:00:00:01", is_up: true, is_physical: true },
