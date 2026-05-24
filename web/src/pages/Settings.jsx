@@ -63,6 +63,16 @@ export default function Settings() {
   })();
   const [deliveryStatusFilter, setDeliveryStatusFilter] = useState(initialDeliveryStatus);
 
+  // Active filter (5.4.37) — tristate boolean exact-match on the webhook's
+  // `active` flag. URL round-trip via `?active=true|false`. Unknown values
+  // fall back to '' (no filter) so a stale link cannot wedge the page.
+  const VALID_ACTIVE_FILTERS = ['', 'true', 'false'];
+  const initialActive = (() => {
+    const raw = (searchParams.get('active') || '').toLowerCase();
+    return VALID_ACTIVE_FILTERS.includes(raw) ? raw : '';
+  })();
+  const [activeFilter, setActiveFilter] = useState(initialActive);
+
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
   // snapshots, templates, port forwards). Empty == "use the daemon default".
@@ -106,13 +116,14 @@ export default function Settings() {
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceFilter, untilFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (eventTypeFilter) next.set('event_type', eventTypeFilter); else next.delete('event_type');
     if (deliveryStatusFilter) next.set('delivery_status', deliveryStatusFilter); else next.delete('delivery_status');
+    if (activeFilter) next.set('active', activeFilter); else next.delete('active');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
@@ -120,14 +131,14 @@ export default function Settings() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, eventTypeFilter, deliveryStatusFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, active: activeFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -285,6 +296,20 @@ export default function Settings() {
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Active
+          <select
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value)}
+            data-testid="webhook-list-active"
+            aria-label="Filter by active flag"
+            className="input py-1 text-xs"
+          >
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Sort
           <select
             value={sortField}
@@ -368,6 +393,16 @@ export default function Settings() {
                   : deliveryStatusFilter === 'healthy'
                     ? 'No webhooks have a healthy last delivery. Check the "Failing" bucket for receivers needing attention.'
                     : 'No webhooks are currently failing. Check the "Healthy" or "Never delivered" buckets instead.'
+              }
+            />
+          ) : activeFilter ? (
+            <EmptyState
+              icon={Search}
+              title="No webhooks in this state"
+              description={
+                activeFilter === 'true'
+                  ? 'No active webhooks. Every registered webhook is currently disabled — check the "Inactive" bucket.'
+                  : 'No inactive webhooks. Every registered webhook is currently active — check the "Active" bucket.'
               }
             />
           ) : searchFilter ? (

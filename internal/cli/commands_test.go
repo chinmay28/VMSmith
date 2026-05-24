@@ -5622,6 +5622,68 @@ func TestCLI_WebhookList_EmptyDeliveryStatusOmitsParam(t *testing.T) {
 	}
 }
 
+func TestCLI_WebhookList_ForwardsActiveTrue(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--active", "true"); err != nil {
+		t.Fatalf("webhook list --active true: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "active=true") {
+		t.Fatalf("query missing active=true: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsActiveFalse(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--active", "false"); err != nil {
+		t.Fatalf("webhook list --active false: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "active=false") {
+		t.Fatalf("query missing active=false: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_Active_NormalisesAliasesAndCase(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	// "1" alias + surrounding whitespace + mixed case all normalise to true.
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--active", "  1  "); err != nil {
+		t.Fatalf("webhook list --active '  1  ': %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "active=true") {
+		t.Fatalf("expected normalised 'active=true' in query: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidActive(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--active", "maybe")
+	if err == nil {
+		t.Fatalf("expected error for invalid --active, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --active") {
+		t.Fatalf("error = %q, want it to mention 'invalid --active'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_EmptyActiveOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--active", "  "); err != nil {
+		t.Fatalf("webhook list --active '  ': %v", err)
+	}
+	if strings.Contains(state.lastQuery, "active=") {
+		t.Fatalf("whitespace-only --active must not be forwarded: %q", state.lastQuery)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // vmsmith webhook test <id> — CLI parallel of POST /webhooks/{id}/test.
 //

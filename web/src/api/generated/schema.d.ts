@@ -2206,6 +2206,19 @@ export interface paths {
                      */
                     delivery_status?: "never" | "healthy" | "failing";
                     /**
+                     * @description Tristate boolean exact-match on the webhook's `active` flag
+                     *     (5.4.37). Accepts `true` / `false` (case-insensitive) with
+                     *     `1` / `0` aliases; whitespace-trimmed; empty disables the
+                     *     filter; anything else returns 400 `invalid_active`. Closes the
+                     *     "show me only disabled webhooks" / "show me only live webhooks"
+                     *     operator queries that `delivery_status` (runtime health) and
+                     *     `event_type` (subscription) can't answer. Mirrors the VM
+                     *     `auto_start` / `locked` tristate filters. Composes additively
+                     *     with every other webhook list filter so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    active?: "true" | "false";
+                    /**
                      * @description Field to sort by. `url` matches case-insensitively.
                      *     `last_delivery_at` sorts never-delivered webhooks
                      *     (zero timestamp) at the tail of the ascending list and the

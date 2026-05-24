@@ -2560,6 +2560,60 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("delivery_status")).toBeNull();
   });
 
+  // 5.4.37 — active filter (?active=true|false) on the webhook list. Seeds two
+  // webhooks via the UI, disables one via the edit modal's active toggle, then
+  // asserts each filter value narrows to the right row, that the URL round-trips
+  // through ?active=, and that "All" restores every row.
+  test("active dropdown filters the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    const seed = async (url) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://live.example.com/hook");     // stays active
+    await seed("https://disabled.example.com/hook");  // we'll disable this one
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(2);
+
+    // Disable the second webhook via the edit modal's active toggle.
+    const disabledRow = page.locator('[data-testid^="webhook-row-"]:has-text("disabled.example.com")');
+    const disabledID = (await disabledRow.getAttribute("data-testid")).replace("webhook-row-", "");
+    await page.getByTestId(`webhook-edit-${disabledID}`).click();
+    await expect(page.getByTestId("edit-webhook-form")).toBeVisible();
+    await page.getByTestId("edit-webhook-active-toggle").uncheck();
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+
+    const dropdown = page.getByTestId("webhook-list-active");
+
+    // active=false — only the disabled row remains.
+    await dropdown.selectOption("false");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("disabled.example.com");
+    await expect.poll(() => new URL(page.url()).searchParams.get("active")).toBe("false");
+
+    // active=true — only the live row remains.
+    await dropdown.selectOption("true");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("live.example.com");
+    await expect.poll(() => new URL(page.url()).searchParams.get("active")).toBe("true");
+
+    // Reset back to All — the URL param is dropped and every row reappears.
+    await dropdown.selectOption("");
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(2);
+    await expect.poll(() => new URL(page.url()).searchParams.get("active")).toBeNull();
+  });
+
   // 5.4.15 — sortable webhook list (sort + order dropdowns).
   test("sort dropdowns reorder the webhook list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);

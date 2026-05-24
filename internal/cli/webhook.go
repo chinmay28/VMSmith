@@ -147,6 +147,12 @@ Optional filters and ordering:
                         Whitespace-trimmed and lowercased before being
                         forwarded to the daemon.
 
+  --active <true|false> Tristate boolean exact-match on the webhook's active
+                        flag.  Accepts true/false (case-insensitive) with 1/0
+                        aliases; empty disables the filter; anything else is
+                        rejected client-side.  Mirrors the VM list
+                        --auto-start / --locked tristate filters.
+
   --since <rfc3339>     Keep webhooks with created_at >= <rfc3339> (inclusive).
                         Whitespace-trimmed; empty disables.  Invalid values
                         are rejected client-side before contacting the daemon.
@@ -179,6 +185,7 @@ Optional filters and ordering:
 		tag, _ := cmd.Flags().GetString("tag")
 		eventType, _ := cmd.Flags().GetString("event-type")
 		deliveryStatus, _ := cmd.Flags().GetString("delivery-status")
+		activeFlag, _ := cmd.Flags().GetString("active")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -195,6 +202,10 @@ Optional filters and ordering:
 		normalisedDeliveryStatus := strings.ToLower(strings.TrimSpace(deliveryStatus))
 		if normalisedDeliveryStatus != "" && !types.IsValidWebhookDeliveryStatus(normalisedDeliveryStatus) {
 			return fmt.Errorf("invalid --delivery-status: must be one of never, healthy, failing")
+		}
+		activeVal, activeSet, err := parseCLITristateBool(activeFlag, "--active")
+		if err != nil {
+			return err
 		}
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -231,6 +242,9 @@ Optional filters and ordering:
 		}
 		if normalisedDeliveryStatus != "" {
 			q.Set("delivery_status", normalisedDeliveryStatus)
+		}
+		if activeSet {
+			q.Set("active", strconv.FormatBool(activeVal))
 		}
 		if v := strings.TrimSpace(sinceFlag); v != "" {
 			q.Set("since", v)
@@ -699,6 +713,7 @@ func init() {
 	webhookListCmd.Flags().String("tag", "", "filter by exact tag match (case-insensitive)")
 	webhookListCmd.Flags().String("event-type", "", "filter by explicit event_types membership (case-insensitive exact match; catch-alls excluded)")
 	webhookListCmd.Flags().String("delivery-status", "", "filter by delivery classification: never|healthy|failing")
+	webhookListCmd.Flags().String("active", "", "filter by active flag: true|false (empty disables)")
 	webhookListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")

@@ -2252,3 +2252,135 @@ func TestListWebhooks_FilterByDeliveryStatus_ComposesWithTag(t *testing.T) {
 		t.Fatalf("expected only wh-prod-fail, got %+v", hooks)
 	}
 }
+
+// seedActiveWebhooks seeds two active + one inactive webhook for the 5.4.37
+// active-filter tests.
+func seedActiveWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-on-1", URL: "https://on1.example.com", Secret: "k", Active: true}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-on-2", URL: "https://on2.example.com", Secret: "k", Active: true}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-off", URL: "https://off.example.com", Secret: "k", Active: false}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+}
+
+func TestListWebhooks_FilterByActive_True(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=true")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 active webhooks, got %d: %+v", len(hooks), hooks)
+	}
+	for _, h := range hooks {
+		if !h.Active {
+			t.Fatalf("inactive webhook %s leaked into active=true result", h.ID)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByActive_False(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=false")
+	if len(hooks) != 1 || hooks[0].ID != "wh-off" {
+		t.Fatalf("expected only wh-off, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByActive_NumericAliases(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	if hooks := listWebhooksWithQuery(t, ts.URL, "active=1"); len(hooks) != 2 {
+		t.Fatalf("active=1 should match the 2 active webhooks, got %d", len(hooks))
+	}
+	if hooks := listWebhooksWithQuery(t, ts.URL, "active=0"); len(hooks) != 1 || hooks[0].ID != "wh-off" {
+		t.Fatalf("active=0 should match only wh-off, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByActive_CaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=FALSE")
+	if len(hooks) != 1 || hooks[0].ID != "wh-off" {
+		t.Fatalf("expected case-insensitive match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByActive_TrimsWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=%20true%20")
+	if len(hooks) != 2 {
+		t.Fatalf("expected whitespace-trimmed match (2 active), got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByActive_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=")
+	if len(hooks) != 3 {
+		t.Fatalf("expected all 3 webhooks (empty filter no-op), got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByActive_Invalid(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?active=maybe")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_active")
+}
+
+func TestListWebhooks_FilterByActive_ComposesWithTag(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-on", URL: "https://a", Secret: "k", Active: true, Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-prod-off", URL: "https://b", Secret: "k", Active: false, Tags: []string{"production"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-stg-on", URL: "https://c", Secret: "k", Active: true, Tags: []string{"staging"}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?active=true&tag=production")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 || hooks[0].ID != "wh-prod-on" {
+		t.Fatalf("expected only wh-prod-on, got %+v", hooks)
+	}
+}

@@ -1340,6 +1340,14 @@ const server = http.createServer(async (req, res) => {
     if (deliveryStatusFilter && !["never", "healthy", "failing"].includes(deliveryStatusFilter)) {
       return json(res, 400, { code: "invalid_delivery_status", message: "delivery_status must be one of: never, healthy, failing" });
     }
+    // Active filter (5.4.37) — tristate boolean, mirror parseTristateBoolParam.
+    const activeRaw = (url.searchParams.get("active") || "").trim().toLowerCase();
+    let activeFilter = null;
+    if (activeRaw === "true" || activeRaw === "1") activeFilter = true;
+    else if (activeRaw === "false" || activeRaw === "0") activeFilter = false;
+    else if (activeRaw !== "") {
+      return json(res, 400, { code: "invalid_active", message: "active must be 'true' or 'false'" });
+    }
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
     const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
@@ -1411,6 +1419,9 @@ const server = http.createServer(async (req, res) => {
         }
         return classification === deliveryStatusFilter;
       });
+    }
+    if (activeFilter !== null) {
+      hooks = hooks.filter((wh) => Boolean(wh.active) === activeFilter);
     }
     if (needle) {
       // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types
