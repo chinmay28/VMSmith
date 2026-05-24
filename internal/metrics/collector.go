@@ -268,6 +268,13 @@ func (m *LibvirtMetricsManager) resolveVMID(resolver NameToIDFunc, name string) 
 
 // recordSample applies one domain sample to the per-VM ring/state/prev maps.
 // Caller must hold m.mu.
+func counterDelta(cur, prev uint64) (uint64, bool) {
+	if cur < prev {
+		return 0, false
+	}
+	return cur - prev, true
+}
+
 func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now time.Time) {
 	state := ds.State
 	if state == "" {
@@ -291,8 +298,7 @@ func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now 
 		if prev != nil && prev.hasCPU {
 			dtNs := now.Sub(prev.sampleTime).Nanoseconds()
 			if dtNs > 0 {
-				deltaCPU := int64(ds.CPUTimeNs) - int64(prev.cpuTimeNs)
-				if deltaCPU >= 0 {
+				if deltaCPU, ok := counterDelta(ds.CPUTimeNs, prev.cpuTimeNs); ok {
 					cpuPct := (float64(deltaCPU) / float64(dtNs) / float64(numVcpus)) * 100.0
 					if cpuPct < 0 {
 						cpuPct = 0
@@ -302,7 +308,7 @@ func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now 
 					}
 					sample.CPUPercent = &cpuPct
 				}
-				// negative delta → counter reset → leave nil
+				// counter reset → leave nil
 			}
 		}
 		if prev == nil {
@@ -336,13 +342,11 @@ func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now 
 		if prev != nil && prev.hasDisk {
 			dtSec := now.Sub(prev.sampleTime).Seconds()
 			if dtSec > 0 {
-				deltaRd := int64(ds.DiskRdBytes) - int64(prev.diskRdBytes)
-				deltaWr := int64(ds.DiskWrBytes) - int64(prev.diskWrBytes)
-				if deltaRd >= 0 {
+				if deltaRd, ok := counterDelta(ds.DiskRdBytes, prev.diskRdBytes); ok {
 					bps := uint64(float64(deltaRd) / dtSec)
 					sample.DiskReadBps = &bps
 				}
-				if deltaWr >= 0 {
+				if deltaWr, ok := counterDelta(ds.DiskWrBytes, prev.diskWrBytes); ok {
 					bps := uint64(float64(deltaWr) / dtSec)
 					sample.DiskWriteBps = &bps
 				}
@@ -362,13 +366,11 @@ func (m *LibvirtMetricsManager) recordSample(vmID string, ds *domainSample, now 
 		if prev != nil && prev.hasNet {
 			dtSec := now.Sub(prev.sampleTime).Seconds()
 			if dtSec > 0 {
-				deltaRx := int64(ds.NetRxBytes) - int64(prev.netRxBytes)
-				deltaTx := int64(ds.NetTxBytes) - int64(prev.netTxBytes)
-				if deltaRx >= 0 {
+				if deltaRx, ok := counterDelta(ds.NetRxBytes, prev.netRxBytes); ok {
 					bps := uint64(float64(deltaRx) / dtSec)
 					sample.NetRxBps = &bps
 				}
-				if deltaTx >= 0 {
+				if deltaTx, ok := counterDelta(ds.NetTxBytes, prev.netTxBytes); ok {
 					bps := uint64(float64(deltaTx) / dtSec)
 					sample.NetTxBps = &bps
 				}
