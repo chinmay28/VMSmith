@@ -326,6 +326,42 @@ func TestEnqueue_QueueFull_RecordsSkip(t *testing.T) {
 	}
 }
 
+// TestEnqueue_ConcurrentWithStop_NoPanic exercises the shutdown race where a
+// cron goroutine is mid-enqueue while Stop() closes the jobs channel. The send
+// happens under e.mu (which Stop() also holds before closing), so enqueue
+// either wins before the close or observes a nil channel — never "send on
+// closed channel". Before the fix this test panics and crashes the process.
+func TestEnqueue_ConcurrentWithStop_NoPanic(t *testing.T) {
+	store := newFakeStore()
+	e := testEngine(store, vm.NewMockManager(), &fakeSink{})
+	if err := e.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	var producers sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		producers.Add(1)
+		go func() {
+			defer producers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					e.enqueue(job{scheduleID: "s", scheduledTime: e.now(), actor: "scheduler"})
+				}
+			}
+		}()
+	}
+
+	// Let producers saturate the queue, then stop concurrently with enqueues.
+	time.Sleep(5 * time.Millisecond)
+	e.Stop()
+	close(stop)
+	producers.Wait()
+}
+
 func TestRunOne_RetryThenSuccess(t *testing.T) {
 	store := newFakeStore()
 	mgr := vm.NewMockManager()

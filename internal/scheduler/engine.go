@@ -336,15 +336,23 @@ func (e *Engine) worker() {
 // enqueue pushes a job onto the worker pool. A full queue records a queue_full
 // skip instead of blocking the cron goroutine.
 func (e *Engine) enqueue(j job) {
+	// The send must happen under e.mu: Stop() also takes e.mu before it nils
+	// and closes e.jobs, so holding the lock here makes the two mutually
+	// exclusive — enqueue either wins before the close or observes a nil
+	// channel. recordQueueFull does blocking store/event I/O, so it runs
+	// after the lock is released.
 	e.mu.Lock()
 	ch := e.jobs
-	e.mu.Unlock()
-	if ch == nil {
-		return
+	full := false
+	if ch != nil {
+		select {
+		case ch <- j:
+		default:
+			full = true
+		}
 	}
-	select {
-	case ch <- j:
-	default:
+	e.mu.Unlock()
+	if ch != nil && full {
 		e.recordQueueFull(j)
 	}
 }
