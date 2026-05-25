@@ -1864,6 +1864,50 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
     await expect(page.getByText("No images were created in the selected time range.")).toBeVisible();
   });
+
+  // 5.4.40 — `?min_size=` / `?max_size=` byte-range filter on /api/v1/images.
+  // The mock seeds img-1 (ubuntu-base, 1 GiB = 1073741824) and img-2
+  // (rocky-experimental, 2 GiB = 2147483648) so a 2e9 boundary cleanly
+  // separates them.
+  test("size range narrows the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // min_size = 2,000,000,000 bytes keeps only the 2 GiB rocky image.
+    await page.getByTestId("image-list-min-size").fill("2000000000");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_size")).toBe("2000000000");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toHaveCount(0);
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // Clearing the size range restores both images and drops min_size from the URL.
+    await page.getByTestId("image-list-size-range-clear").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_size")).toBeNull();
+  });
+
+  test("max_size upper bound drops the larger image", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // max_size = 2,000,000,000 bytes drops the 2 GiB rocky image, keeps the 1 GiB ubuntu image.
+    await page.getByTestId("image-list-max-size").fill("2000000000");
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_size")).toBe("2000000000");
+  });
+
+  test("size-range filter empty-state surfaces a tailored message", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    // A floor larger than either seeded image.
+    await page.getByTestId("image-list-min-size").fill("9999999999");
+    await expect(page.getByTestId("image-row-ubuntu-base")).not.toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
+    await expect(page.getByText("No images fall within the selected size range.")).toBeVisible();
+  });
 });
 
 // ============================================================

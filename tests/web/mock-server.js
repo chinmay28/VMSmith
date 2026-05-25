@@ -949,6 +949,28 @@ const server = http.createServer(async (req, res) => {
         return true;
       });
     }
+    // min_size / max_size: inclusive non-negative byte-range filter on
+    // size_bytes; non-numeric/negative value → 400; whitespace-only disables.
+    const parseSize = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      if (!/^\d+$/.test(v)) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a non-negative integer number of bytes` };
+      }
+      return { set: true, value: Number(v) };
+    };
+    const minSizeP = parseSize(url.searchParams.get("min_size"), "min_size");
+    if (minSizeP.invalid) return json(res, 400, { code: minSizeP.code, message: minSizeP.msg });
+    const maxSizeP = parseSize(url.searchParams.get("max_size"), "max_size");
+    if (maxSizeP.invalid) return json(res, 400, { code: maxSizeP.code, message: maxSizeP.msg });
+    if (minSizeP.set || maxSizeP.set) {
+      list = list.filter(img => {
+        const size = img.size_bytes || 0;
+        if (minSizeP.set && size < minSizeP.value) return false;
+        if (maxSizeP.set && size > maxSizeP.value) return false;
+        return true;
+      });
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(img => {

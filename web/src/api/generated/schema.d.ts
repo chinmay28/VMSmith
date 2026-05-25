@@ -1497,6 +1497,26 @@ export interface paths {
                      *     additive-composition semantics as `since`.
                      */
                     until?: string;
+                    /**
+                     * @description Inclusive lower bound (in bytes) on the image's `size_bytes`.
+                     *     Images smaller than this value are filtered out. Whitespace is
+                     *     trimmed; empty disables the filter. Non-numeric or negative
+                     *     values return 400 `invalid_min_size`. Unlike the time-range
+                     *     filters there is no zero-value exclusion — a zero-byte size is a
+                     *     legitimate value that matches whenever it falls within the
+                     *     window. Composes additively with `tag`, `source_vm`, `search`,
+                     *     the time-range bounds, `sort`, and pagination so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    min_size?: number;
+                    /**
+                     * @description Inclusive upper bound (in bytes) on the image's `size_bytes`.
+                     *     Images larger than this value are filtered out. Whitespace is
+                     *     trimmed; empty disables the filter. Non-numeric or negative
+                     *     values return 400 `invalid_max_size`. Same byte-range semantics
+                     *     as `min_size`.
+                     */
+                    max_size?: number;
                 };
                 header?: never;
                 path?: never;
