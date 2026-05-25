@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !fn() {
+		t.Fatal("condition not met before timeout")
+	}
+}
+
 func TestIssueAndConsumeTicket(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
@@ -67,6 +81,25 @@ func TestConsumeTicketExpired(t *testing.T) {
 	}
 }
 
+func TestConsumeTicket_ExpiryBoundaryIsExpired(t *testing.T) {
+	s := NewStoreWithOptions(time.Minute, time.Hour)
+	defer s.Close()
+
+	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+
+	token, expiresAt, err := s.IssueTicket("vm-1", "api-key-1")
+	if err != nil {
+		t.Fatalf("IssueTicket returned error: %v", err)
+	}
+
+	s.now = func() time.Time { return expiresAt }
+
+	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketExpired) {
+		t.Fatalf("ConsumeTicket at exact expiry error = %v, want %v", err, ErrTicketExpired)
+	}
+}
+
 func TestConsumeTicketVMMismatch(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
@@ -100,6 +133,48 @@ func TestJanitorRemovesExpiredTickets(t *testing.T) {
 
 	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("ConsumeTicket error = %v, want %v", err, ErrTicketNotFound)
+	}
+}
+
+func TestJanitorRemovesExpiredTicketsAutomatically(t *testing.T) {
+	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	s := NewStoreWithOptions(20*time.Millisecond, 10*time.Millisecond)
+	defer s.Close()
+	s.now = func() time.Time { return now }
+
+	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	if err != nil {
+		t.Fatalf("IssueTicket returned error: %v", err)
+	}
+
+	now = now.Add(time.Minute)
+	waitForCondition(t, 250*time.Millisecond, func() bool {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		_, ok := s.tickets[token]
+		return !ok
+	})
+}
+
+func TestCloseStopsJanitor(t *testing.T) {
+	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
+	s := NewStoreWithOptions(20*time.Millisecond, 10*time.Millisecond)
+	s.now = func() time.Time { return now }
+
+	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	if err != nil {
+		t.Fatalf("IssueTicket returned error: %v", err)
+	}
+
+	s.Close()
+	now = now.Add(time.Minute)
+	time.Sleep(50 * time.Millisecond)
+
+	s.mu.RLock()
+	_, ok := s.tickets[token]
+	s.mu.RUnlock()
+	if !ok {
+		t.Fatal("ticket was removed even though the janitor was closed")
 	}
 }
 
