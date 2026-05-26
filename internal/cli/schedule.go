@@ -127,6 +127,7 @@ var scheduleListCmd = &cobra.Command{
 	Short: "List schedules",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmID, _ := cmd.Flags().GetString("vm")
+		tagSelector, _ := cmd.Flags().GetString("tag-selector")
 		action, _ := cmd.Flags().GetString("action")
 		enabled, _ := cmd.Flags().GetString("enabled")
 		search, _ := cmd.Flags().GetString("search")
@@ -159,6 +160,9 @@ var scheduleListCmd = &cobra.Command{
 		q := url.Values{}
 		if v := strings.TrimSpace(vmID); v != "" {
 			q.Set("vm_id", v)
+		}
+		if v := strings.ToLower(strings.TrimSpace(tagSelector)); v != "" {
+			q.Set("tag_selector", v)
 		}
 		if v := strings.ToLower(strings.TrimSpace(action)); v != "" {
 			q.Set("action", v)
@@ -451,6 +455,7 @@ func init() {
 	scheduleCreateCmd.Flags().Int("max-concurrent", 0, "max overlapping fires per schedule (0 = 1)")
 
 	scheduleListCmd.Flags().String("vm", "", "filter by exact VM id")
+	scheduleListCmd.Flags().String("tag-selector", "", "filter by exact tag-selector membership (case-insensitive)")
 	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart)")
 	scheduleListCmd.Flags().String("enabled", "", "filter by enabled flag: true|false")
 	scheduleListCmd.Flags().String("search", "", "case-insensitive substring filter (name, action, vm_id, tag selector)")

@@ -147,7 +147,11 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // ListSchedules handles GET /api/v1/schedules.
 //
 // Filters (applied before sort + pagination so X-Total-Count reflects the
-// post-filter population): vm_id (exact), action (exact), enabled
+// post-filter population): vm_id (exact), tag_selector (case-insensitive
+// exact-membership against the schedule's tag_selector list — a schedule
+// matches when any entry equals the value; schedules with an empty
+// tag_selector (vm_id-targeted or all-VMs) are NOT matched, mirroring the
+// webhook ?event_type= membership semantics), action (exact), enabled
 // (tristate true/false), since/until (inclusive RFC3339 bounds on created_at;
 // invalid values return 400 invalid_since/invalid_until; a schedule with a
 // zero created_at is filtered OUT when any bound is set), search
@@ -193,6 +197,7 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
+	tagSelectorFilter := strings.ToLower(strings.TrimSpace(q.Get("tag_selector")))
 	actionFilter := strings.ToLower(strings.TrimSpace(q.Get("action")))
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
@@ -208,6 +213,9 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if vmIDFilter != "" && sched.VMID != vmIDFilter {
+			continue
+		}
+		if tagSelectorFilter != "" && !scheduleHasTagSelector(sched, tagSelectorFilter) {
 			continue
 		}
 		if actionFilter != "" && string(sched.Action) != actionFilter {
@@ -234,6 +242,20 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	}
 	setTotalCountHeader(w, total)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// scheduleHasTagSelector reports whether the schedule's tag_selector list
+// contains the (already lowercased + trimmed) needle. Schedules with an empty
+// tag_selector (vm_id-targeted or all-VMs) return false — mirroring the
+// webhook ?event_type= selector semantics: the filter scopes to explicit
+// tag-selector membership, not catch-all schedules.
+func scheduleHasTagSelector(sched *types.Schedule, needle string) bool {
+	for _, t := range sched.TagSelector {
+		if strings.ToLower(t) == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func scheduleMatchesSearch(sched *types.Schedule, needle string) bool {

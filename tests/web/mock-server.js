@@ -1767,6 +1767,7 @@ const server = http.createServer(async (req, res) => {
   // --- Schedules (5.2.9) ---
   if (p === "/api/v1/schedules" && method === "GET") {
     const vmIdFilter = (url.searchParams.get("vm_id") || "").trim();
+    const tagSelectorFilter = (url.searchParams.get("tag_selector") || "").trim().toLowerCase();
     const actionFilter = (url.searchParams.get("action") || "").trim();
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const enabledRaw = (url.searchParams.get("enabled") || "").trim().toLowerCase();
@@ -1809,6 +1810,12 @@ const server = http.createServer(async (req, res) => {
 
     let list = [...scheduleList.values()];
     if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
+    if (tagSelectorFilter) {
+      list = list.filter((s) =>
+        Array.isArray(s.tag_selector) &&
+        s.tag_selector.some((t) => typeof t === "string" && t.toLowerCase() === tagSelectorFilter),
+      );
+    }
     if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
     if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
     if (since.set || until.set) {
