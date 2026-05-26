@@ -1972,7 +1972,39 @@ paths:
     get:
       tags: [Schedules]
       summary: List recent runs for a schedule (newest first)
+      description: |
+        Returns the schedule's run history, newest first. Filters are applied
+        before pagination so `X-Total-Count` reflects the post-filter
+        population, and compose additively with one another.
       parameters:
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [running, success, error, skipped]
+          description: |
+            Case-insensitive exact-match on the run status. Empty disables the
+            filter; unknown values return 400 `invalid_status`.
+        - in: query
+          name: since
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Inclusive RFC3339 lower bound on the run's `started_at`. Invalid
+            values return 400 `invalid_since`. A run with a zero `started_at`
+            is filtered out whenever `since` or `until` is set.
+        - in: query
+          name: until
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Inclusive RFC3339 upper bound on the run's `started_at`. Invalid
+            values return 400 `invalid_until`.
         - in: query
           name: page
           required: false

@@ -373,8 +373,8 @@ export const schedules = {
     unwrap(apiClient.PATCH('/schedules/{scheduleID}', { params: { path: { scheduleID: id } }, body: patch as any })),
   delete: (id: string) =>
     unwrap(apiClient.DELETE('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
-  runs: (id: string, { page, perPage }: { page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { page, per_page: perPage } as any } }), { withMeta: true }),
+  runs: (id: string, { page, perPage, status = '', since = '', until = '' }: { page?: number; perPage?: number; status?: 'running' | 'success' | 'error' | 'skipped' | ''; since?: string; until?: string } = {}) =>
+    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { status: status || undefined, since: since || undefined, until: until || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   runNow: (id: string) =>
     unwrap(apiClient.POST('/schedules/{scheduleID}/run-now', { params: { path: { scheduleID: id } } })),
 };

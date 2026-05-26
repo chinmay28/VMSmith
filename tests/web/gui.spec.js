@@ -2238,6 +2238,28 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
   });
 
+  test("runs status filter narrows the recent-runs expander", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+    // All three seeded runs (run-2/run-1 success, run-3 error) show by default.
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // Filter to error: only run-3 survives.
+    await page.getByTestId("schedule-runs-status-filter-sch-1").selectOption("error");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+
+    // Back to all statuses restores the successes.
+    await page.getByTestId("schedule-runs-status-filter-sch-1").selectOption("");
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

@@ -417,10 +417,11 @@ function RunStatusChip({ status }) {
 // fetches the last 5 runs when opened (mirrors the Activity page disclosure).
 function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNow }) {
   const [expanded, setExpanded] = useState(false);
+  const [runStatus, setRunStatus] = useState('');
 
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5 }) : Promise.resolve(null)),
-    [expanded, schedule.id],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -509,7 +510,22 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
         <tr className="bg-steel-900/40 border-b border-steel-800/30" data-testid={`schedule-runs-${schedule.id}`}>
           <td className="px-1 py-2"></td>
           <td colSpan={8} className="px-3 py-2">
-            <div className="text-[11px] font-mono text-steel-500 mb-1">Recent runs</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[11px] font-mono text-steel-500">Recent runs</div>
+              <select
+                className="input input-sm text-[11px] py-0.5"
+                value={runStatus}
+                onChange={(e) => setRunStatus(e.target.value)}
+                data-testid={`schedule-runs-status-filter-${schedule.id}`}
+                aria-label="Filter runs by status"
+              >
+                <option value="">All statuses</option>
+                <option value="running">Running</option>
+                <option value="success">Success</option>
+                <option value="error">Error</option>
+                <option value="skipped">Skipped</option>
+              </select>
+            </div>
             {runsLoading && !runsResponse ? (
               <Spinner size={14} />
             ) : runs.length === 0 ? (

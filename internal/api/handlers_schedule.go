@@ -431,6 +431,12 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListScheduleRuns handles GET /api/v1/schedules/{id}/runs (reverse-chrono).
+//
+// Filters (applied before pagination so X-Total-Count reflects the post-filter
+// population): status (exact, case-insensitive: running|success|error|skipped;
+// invalid values return 400 invalid_status), since/until (inclusive RFC3339
+// bounds on started_at; invalid values return 400 invalid_since/invalid_until;
+// a run with a zero started_at is filtered OUT when any bound is set).
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -440,14 +446,44 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusNotFound, "resource_not_found", "schedule not found")
 		return
 	}
-	runs, err := s.scheduleStore.ListRuns(id, 0)
+
+	q := r.URL.Query()
+	statusFilter := strings.ToLower(strings.TrimSpace(q.Get("status")))
+	if statusFilter != "" && !types.IsValidScheduleRunStatus(types.ScheduleRunStatus(statusFilter)) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_status", "status must be one of: running, success, error, skipped")
+		return
+	}
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+
+	all, err := s.scheduleStore.ListRuns(id, 0)
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list runs")
 		return
 	}
-	if runs == nil {
-		runs = []*types.ScheduleRun{}
+
+	runs := make([]*types.ScheduleRun, 0, len(all))
+	for _, run := range all {
+		if run == nil {
+			continue
+		}
+		if statusFilter != "" && string(run.Status) != statusFilter {
+			continue
+		}
+		if !snapshotInTimeRange(run.StartedAt, sinceTime, sinceSet, untilTime, untilSet) {
+			continue
+		}
+		runs = append(runs, run)
 	}
+
 	total := len(runs)
 	pagination := parsePagination(r)
 	runs = paginateSlice(runs, pagination.Page, pagination.PerPage)

@@ -182,6 +182,15 @@ function seed() {
       finished_at: "2026-05-22T02:00:04Z",
       status: "success",
     },
+    {
+      id: "run-3",
+      schedule_id: "sch-1",
+      vm_id: vm1.id,
+      started_at: "2026-05-21T02:00:00Z",
+      finished_at: "2026-05-21T02:00:03Z",
+      status: "error",
+      error: "libvirt: snapshot failed",
+    },
   ]);
   scheduleRuns.set("sch-2", []);
 }
@@ -1945,7 +1954,31 @@ const server = http.createServer(async (req, res) => {
     if (!scheduleList.has(m[1])) {
       return json(res, 404, { code: "resource_not_found", message: "schedule not found" });
     }
-    const all = scheduleRuns.get(m[1]) || [];
+    const statusFilter = (url.searchParams.get("status") || "").trim().toLowerCase();
+    const validStatuses = ["running", "success", "error", "skipped"];
+    if (statusFilter && !validStatuses.includes(statusFilter)) {
+      return json(res, 400, { code: "invalid_status", message: "status must be one of: running, success, error, skipped" });
+    }
+    const since = (url.searchParams.get("since") || "").trim();
+    const until = (url.searchParams.get("until") || "").trim();
+    const sinceMs = since ? Date.parse(since) : NaN;
+    const untilMs = until ? Date.parse(until) : NaN;
+    if (since && isNaN(sinceMs)) {
+      return json(res, 400, { code: "invalid_since", message: "since must be a valid RFC3339 timestamp" });
+    }
+    if (until && isNaN(untilMs)) {
+      return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
+    }
+    const all = (scheduleRuns.get(m[1]) || []).filter((run) => {
+      if (statusFilter && String(run.status).toLowerCase() !== statusFilter) return false;
+      if (since || until) {
+        const startMs = run.started_at ? Date.parse(run.started_at) : NaN;
+        if (isNaN(startMs)) return false;
+        if (!isNaN(sinceMs) && startMs < sinceMs) return false;
+        if (!isNaN(untilMs) && startMs > untilMs) return false;
+      }
+      return true;
+    });
     const total = all.length;
     const pageRaw = parseInt(url.searchParams.get("page") || "1", 10);
     const perPageRaw = parseInt(url.searchParams.get("per_page") || url.searchParams.get("limit") || "0", 10);

@@ -272,6 +272,86 @@ var scheduleShowCmd = &cobra.Command{
 	},
 }
 
+var scheduleRunsCmd = &cobra.Command{
+	Use:   "runs <id>",
+	Short: "List a schedule's run history",
+	Long: `List the run history for a schedule (newest first).  Filter with
+--status (running|success|error|skipped) and an inclusive RFC3339 --since /
+--until window on each run's started_at, and page with --limit / --page.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := strings.TrimSpace(args[0])
+		status, _ := cmd.Flags().GetString("status")
+		sinceFlag, _ := cmd.Flags().GetString("since")
+		untilFlag, _ := cmd.Flags().GetString("until")
+		limit, _ := cmd.Flags().GetInt("limit")
+		page, _ := cmd.Flags().GetInt("page")
+
+		status = strings.ToLower(strings.TrimSpace(status))
+		if status != "" && !types.IsValidScheduleRunStatus(types.ScheduleRunStatus(status)) {
+			return fmt.Errorf("invalid --status: must be one of running, success, error, skipped")
+		}
+		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
+
+		q := url.Values{}
+		if status != "" {
+			q.Set("status", status)
+		}
+		if v := strings.TrimSpace(sinceFlag); v != "" {
+			q.Set("since", v)
+		}
+		if v := strings.TrimSpace(untilFlag); v != "" {
+			q.Set("until", v)
+		}
+		if limit > 0 {
+			q.Set("per_page", strconv.Itoa(limit))
+			if page > 1 {
+				q.Set("page", strconv.Itoa(page))
+			}
+		}
+		path := "/api/v1/schedules/" + url.PathEscape(id) + "/runs"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+
+		data, statusCode, err := scheduleHTTP(cmd, http.MethodGet, path, nil)
+		if err != nil {
+			return err
+		}
+		if statusCode != http.StatusOK {
+			return fmt.Errorf("daemon returned HTTP %d: %s", statusCode, strings.TrimSpace(string(data)))
+		}
+		var runs []*types.ScheduleRun
+		if err := json.Unmarshal(data, &runs); err != nil {
+			return fmt.Errorf("decoding runs: %w", err)
+		}
+		if len(runs) == 0 {
+			fmt.Println("No runs found.")
+			return nil
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "STARTED\tFINISHED\tVM\tSTATUS\tDETAIL")
+		for _, r := range runs {
+			detail := string(r.SkipReason)
+			if r.Error != "" {
+				detail = r.Error
+			}
+			finished := "-"
+			if r.FinishedAt != nil {
+				finished = r.FinishedAt.Format(time.RFC3339)
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+				r.StartedAt.Format(time.RFC3339), finished, dashIfEmpty(r.VMID), r.Status, dashIfEmpty(detail))
+		}
+		return tw.Flush()
+	},
+}
+
 var scheduleEditCmd = &cobra.Command{
 	Use:   "edit <id>",
 	Short: "Update fields on an existing schedule",
@@ -466,6 +546,12 @@ func init() {
 	scheduleListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 
+	scheduleRunsCmd.Flags().String("status", "", "filter by run status: running|success|error|skipped")
+	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
+	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
+	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
+	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
+
 	scheduleEditCmd.Flags().String("name", "", "replace schedule name")
 	scheduleEditCmd.Flags().String("vm", "", "replace target VM id")
 	scheduleEditCmd.Flags().StringSlice("tag", nil, "replace tag selector (repeatable)")
@@ -478,13 +564,14 @@ func init() {
 	scheduleEditCmd.Flags().Int("retention", 0, "replace snapshot retention count")
 	scheduleEditCmd.Flags().Int("max-concurrent", 0, "replace max concurrent fires")
 
-	for _, c := range []*cobra.Command{scheduleCreateCmd, scheduleListCmd, scheduleShowCmd, scheduleEditCmd, scheduleDeleteCmd, scheduleRunNowCmd} {
+	for _, c := range []*cobra.Command{scheduleCreateCmd, scheduleListCmd, scheduleShowCmd, scheduleRunsCmd, scheduleEditCmd, scheduleDeleteCmd, scheduleRunNowCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 	}
 	scheduleCmd.AddCommand(scheduleCreateCmd)
 	scheduleCmd.AddCommand(scheduleListCmd)
 	scheduleCmd.AddCommand(scheduleShowCmd)
+	scheduleCmd.AddCommand(scheduleRunsCmd)
 	scheduleCmd.AddCommand(scheduleEditCmd)
 	scheduleCmd.AddCommand(scheduleDeleteCmd)
 	scheduleCmd.AddCommand(scheduleRunNowCmd)

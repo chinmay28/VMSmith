@@ -248,3 +248,59 @@ func TestCLI_ScheduleRunNow(t *testing.T) {
 		t.Fatalf("expected fired message: %s", out)
 	}
 }
+
+func TestCLI_ScheduleRuns_ForwardsFilters(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-1","started_at":"2026-05-22T02:00:00Z","status":"error","error":"boom"}]`)
+
+	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--status", "  ERROR  ", "--since", "2026-05-01T00:00:00Z", "--until", "2026-05-31T00:00:00Z", "--limit", "10", "--page", "2")
+	if err != nil {
+		t.Fatalf("runs: %v\nout=%s", err, out)
+	}
+	if d.lastMeth != http.MethodGet || d.lastPath != "/api/v1/schedules/sched-1/runs" {
+		t.Fatalf("unexpected request: %s %s", d.lastMeth, d.lastPath)
+	}
+	for _, want := range []string{"status=error", "since=2026-05-01", "until=2026-05-31", "per_page=10", "page=2"} {
+		if !strings.Contains(d.lastQuery, want) {
+			t.Fatalf("query missing %q: %s", want, d.lastQuery)
+		}
+	}
+	if !strings.Contains(out, "error") || !strings.Contains(out, "boom") {
+		t.Fatalf("output missing run detail: %s", out)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidStatus(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--status", "queued"); err == nil {
+		t.Fatal("expected invalid --status rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid status should not contact the daemon")
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidSince(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--since", "not-a-time"); err == nil {
+		t.Fatal("expected invalid --since rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid since should not contact the daemon")
+	}
+}
+
+func TestCLI_ScheduleRuns_Empty(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL)
+	if err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if d.lastQuery != "" {
+		t.Fatalf("no flags should send no query params, got %q", d.lastQuery)
+	}
+	if !strings.Contains(out, "No runs found") {
+		t.Fatalf("expected empty message: %s", out)
+	}
+}
