@@ -1033,6 +1033,10 @@ const server = http.createServer(async (req, res) => {
     if (image) {
       list = list.filter(t => String(t.image || "").toLowerCase() === image);
     }
+    const defaultUser = (url.searchParams.get("default_user") || "").trim().toLowerCase();
+    if (defaultUser) {
+      list = list.filter(t => String(t.default_user || "").toLowerCase() === defaultUser);
+    }
     // since / until: inclusive RFC3339 time-range filter on created_at;
     // invalid value → 400; whitespace-only disables; zero/missing
     // created_at filtered OUT whenever any bound is set (mirrors the API).

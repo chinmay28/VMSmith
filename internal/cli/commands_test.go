@@ -5098,6 +5098,95 @@ func TestCLI_TemplateList_FilterByImage_ComposesWithTag(t *testing.T) {
 	}
 }
 
+// --- template list --default-user (roadmap 5.4.38) ---
+
+func TestCLI_TemplateList_FilterByDefaultUser_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--default-user", "deploy")
+	if err != nil {
+		t.Fatalf("template list --default-user: %v", err)
+	}
+	if !strings.Contains(out, "deploy-rocky") {
+		t.Fatalf("expected deploy-rocky in output, got %q", out)
+	}
+	if strings.Contains(out, "ec2-ubuntu") {
+		t.Fatalf("did not expect ec2-ubuntu in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByDefaultUser_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "Deploy", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--default-user", "DEPLOY")
+	if err != nil {
+		t.Fatalf("template list --default-user: %v", err)
+	}
+	if !strings.Contains(out, "deploy-rocky") {
+		t.Fatalf("expected case-insensitive match for deploy-rocky, got %q", out)
+	}
+	if strings.Contains(out, "ec2-ubuntu") {
+		t.Fatalf("did not expect ec2-ubuntu in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByDefaultUser_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--default-user", "   ")
+	if err != nil {
+		t.Fatalf("template list --default-user: %v", err)
+	}
+	if !strings.Contains(out, "deploy-rocky") || !strings.Contains(out, "ec2-ubuntu") {
+		t.Fatalf("expected every template (whitespace --default-user is a no-op), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByDefaultUser_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--default-user", "admin")
+	if err != nil {
+		t.Fatalf("template list --default-user: %v", err)
+	}
+	if strings.Contains(out, "deploy-rocky") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
 // --- template list --since / --until (roadmap 5.4.31) ---
 
 func TestCLI_TemplateList_FilterBySince(t *testing.T) {

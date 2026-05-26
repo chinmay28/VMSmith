@@ -91,6 +91,13 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     template built from rocky9.qcow2" that `?search=` matches fuzzily
 //     across name/description/tags and that `?tag=` cannot answer without
 //     pre-tagging every template by its base image. Mirrors 5.4.22.
+//   - default_user=<value>   case-insensitive exact-match against the
+//     template's `default_user` field. Closes the operator query "show me
+//     every template that provisions the `deploy` SSH user". Mirrors the VM
+//     `?default_user=` filter (5.4.23), but without that filter's
+//     empty-means-root fallback: a template's empty default_user means "use
+//     the image's built-in user", so an empty stored value never matches a
+//     non-empty query.
 //   - since=<rfc3339>        keep templates with created_at >= since
 //     (inclusive). Whitespace trimmed; empty disables. Invalid values
 //     return 400 `invalid_since`.
@@ -143,6 +150,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if strings.EqualFold(tpl.Image, imageFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
+	}
+
+	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
+	if defaultUserFilter != "" {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if strings.EqualFold(tpl.DefaultUser, defaultUserFilter) {
 				filtered = append(filtered, tpl)
 			}
 		}

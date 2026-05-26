@@ -1817,6 +1817,20 @@ export interface paths {
                      */
                     image?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the template's
+                     *     `default_user` field. Whitespace is trimmed before comparison;
+                     *     empty value disables the filter. Closes the operator query
+                     *     "show me every template that provisions the `deploy` SSH user".
+                     *     Unlike the VMs `?default_user=` filter (5.4.23), there is no
+                     *     empty-means-root fallback: a template's empty `default_user`
+                     *     means "use the image's built-in user", so an empty stored value
+                     *     never matches a non-empty query. Composes additively with
+                     *     `?tag=`, `?image=`, `?search=`, `?since=`, `?until=`, `?sort=`,
+                     *     `?order=`, and pagination so `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    default_user?: string;
+                    /**
                      * @description RFC3339 timestamp lower bound (inclusive) on the template's
                      *     `created_at`. Templates created before this instant are
                      *     filtered out. Whitespace is trimmed; empty disables the

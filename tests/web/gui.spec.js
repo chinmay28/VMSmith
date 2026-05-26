@@ -1936,6 +1936,38 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
+  test("default-user filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-default-user-filter").fill("ubuntu");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("default_user")).toBe("ubuntu");
+
+    await page.getByTestId("template-list-default-user-filter-clear").click();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("default_user=");
+  });
+
+  test("default-user filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-default-user-filter").fill("UBUNTU");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+  });
+
+  test("default-user filter matches no templates when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-default-user-filter").fill("nobody");
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

@@ -9508,6 +9508,127 @@ func TestListTemplates_FilterByImage_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestListTemplates_FilterByDefaultUser_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?default_user=deploy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "deploy-rocky" {
+		t.Errorf("filter = %+v, want only deploy-rocky", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "Deploy"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=DEPLOY")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "deploy-rocky" {
+		t.Errorf("filter = %+v, want only deploy-rocky (case-insensitive)", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=%20%20deploy%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "deploy-rocky" {
+		t.Errorf("filter = %+v, want only deploy-rocky after trim", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ec2-ubuntu", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("filter = %+v, want every template when default_user is whitespace-only", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_EmptyStoredNeverMatches(t *testing.T) {
+	// Unlike the VM filter, a template with an empty default_user means "use
+	// the image's built-in user" — it must NOT match a non-empty query
+	// (there is no empty-means-root fallback).
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "no-user", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=root")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list (empty stored default_user must not fall back to root)", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-rocky", Image: "rocky9.qcow2", DefaultUser: "deploy"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=admin")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with empty list", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "deploy-prod", Image: "rocky9.qcow2", DefaultUser: "deploy", Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "deploy-qa", Image: "rocky9.qcow2", DefaultUser: "deploy", Tags: []string{"qa"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "ec2-prod", Image: "ubuntu.qcow2", DefaultUser: "ec2-user", Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=deploy&tag=prod")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "deploy-prod" {
+		t.Errorf("filter = %+v, want only deploy-prod (intersection of default_user+tag)", got)
+	}
+}
+
+func TestListTemplates_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 5; i++ {
+		seedStoredTemplate(t, s, &types.VMTemplate{ID: fmt.Sprintf("tmpl-%d", i), Name: fmt.Sprintf("deploy-%d", i), Image: "rocky9.qcow2", DefaultUser: "deploy"})
+	}
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-u", Name: "ec2", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=deploy&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "5" {
+		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
 func TestListTemplates_FilterBySince(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()
