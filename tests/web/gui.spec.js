@@ -2382,12 +2382,14 @@ test.describe("Schedules", () => {
     await expect(page.locator('[data-testid^="schedule-run-run-now-"]').first()).toBeVisible();
   });
 
-  test("vm detail shows matching schedules and can prefill a new VM schedule", async ({ page }) => {
+  test("vm detail shows direct, tag-targeted, and global schedules and can prefill a new VM schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
     await expect(page.getByTestId("vm-detail-schedules")).toBeVisible();
     await expect(page.getByTestId("vm-detail-schedule-sch-1")).toContainText("nightly-snapshot");
+    await expect(page.getByTestId("vm-detail-schedule-sch-2")).toContainText("weekend-shutdown");
+    await expect(page.getByTestId("vm-detail-schedule-sch-3")).toContainText("weekly-health-check");
 
     await page.getByTestId("btn-add-schedule-from-vm").click();
     await expect(page.getByTestId("vm-schedule-create-form")).toBeVisible();

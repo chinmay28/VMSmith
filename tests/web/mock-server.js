@@ -165,6 +165,25 @@ function seed() {
     last_result: "",
     next_fire_at: null,
   });
+  scheduleList.set("sch-3", {
+    id: "sch-3",
+    name: "weekly-health-check",
+    vm_id: "",
+    tag_selector: null,
+    action: "run_command",
+    cron_spec: "0 30 4 * * 1",
+    timezone: "UTC",
+    enabled: true,
+    catch_up_policy: "skip",
+    max_concurrent: 1,
+    retention_count: 0,
+    params: { command: "uname -a" },
+    created_at: "2026-05-12T00:00:00Z",
+    updated_at: "2026-05-12T00:00:00Z",
+    last_fired_at: null,
+    last_result: "",
+    next_fire_at: "2026-05-26T04:30:00Z",
+  });
   scheduleRuns.set("sch-1", [
     {
       id: "run-2",

@@ -180,12 +180,15 @@ export default function VMDetail() {
   const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
   const createdText = vm.created_at ? new Date(vm.created_at).toLocaleString() : '—';
   const sshUser = spec.default_user || 'root';
+  const vmTagSet = new Set(tags.map((tag) => String(tag).toLowerCase()));
   const vmScheduleList = (scheduleResponse?.data || []).filter((schedule) => {
     if (schedule.vm_id && schedule.vm_id === id) return true;
     if (schedule.vm_id) return false;
-    const selector = Array.isArray(schedule.tag_selector) ? schedule.tag_selector : [];
-    if (selector.length === 0 || tags.length === 0) return false;
-    return selector.some((tag) => tags.includes(tag));
+    const selector = Array.isArray(schedule.tag_selector)
+      ? schedule.tag_selector.map((tag) => String(tag).toLowerCase())
+      : [];
+    if (selector.length === 0) return true;
+    return selector.some((tag) => vmTagSet.has(tag));
   });
 
   const handleDelete = async () => {
