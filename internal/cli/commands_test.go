@@ -2616,6 +2616,93 @@ func TestCLI_ImageList_FilterByTag(t *testing.T) {
 	}
 }
 
+// --- Image list --min-size / --max-size (5.4.40) ---
+
+func seedSizedImages(t *testing.T, s interface {
+	PutImage(*types.Image) error
+}) {
+	t.Helper()
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	for _, spec := range []struct {
+		id, name string
+		size     int64
+	}{
+		{"img-small", "small", 1 << 20}, // 1 MiB
+		{"img-mid", "mid", 1 << 30},     // 1 GiB
+		{"img-big", "big", 2 << 30},     // 2 GiB
+	} {
+		if err := s.PutImage(&types.Image{ID: spec.id, Name: spec.name, Path: "/tmp/" + spec.name + ".qcow2", SizeBytes: spec.size, Format: "qcow2", CreatedAt: now}); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
+	}
+}
+
+func TestCLI_ImageList_FilterByMinSize(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedSizedImages(t, s)
+
+	out, err := runCLI("image", "list", "--min-size", "1073741824") // >= 1 GiB
+	if err != nil {
+		t.Fatalf("image list --min-size: %v", err)
+	}
+	if strings.Contains(out, " small ") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 1 GiB), got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterByMaxSize(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedSizedImages(t, s)
+
+	out, err := runCLI("image", "list", "--max-size", "1073741824") // <= 1 GiB
+	if err != nil {
+		t.Fatalf("image list --max-size: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 1 GiB), got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterBySizeRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedSizedImages(t, s)
+
+	out, err := runCLI("image", "list", "--min-size", "1048577", "--max-size", "1073741824")
+	if err != nil {
+		t.Fatalf("image list size range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_ImageList_RejectsInvalidMinSize(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--min-size", "ten-gigs")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-size") {
+		t.Fatalf("expected invalid --min-size error, got %v", err)
+	}
+}
+
+func TestCLI_ImageList_RejectsNegativeMaxSize(t *testing.T) {
+	_, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	_, err := runCLI("image", "list", "--max-size=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-size") {
+		t.Fatalf("expected invalid --max-size error, got %v", err)
+	}
+}
+
 // --- Image list --search (5.4.9) ---
 
 func TestCLI_ImageList_FilterBySearch_MatchesName(t *testing.T) {

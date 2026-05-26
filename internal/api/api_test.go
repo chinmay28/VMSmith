@@ -8313,6 +8313,175 @@ func TestListImages_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
 	}
 }
 
+func TestListImages_FilterByMinSize(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-small", "small", 1<<20, t0) // 1 MiB
+	seedStoredImageFull(t, s, "img-mid", "mid", 1<<30, t0)     // 1 GiB
+	seedStoredImageFull(t, s, "img-big", "big", 2<<30, t0)     // 2 GiB
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=1073741824") // >= 1 GiB
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, img := range listed {
+		names[img.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 1 GiB), got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByMaxSize(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-small", "small", 1<<20, t0)
+	seedStoredImageFull(t, s, "img-mid", "mid", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-big", "big", 2<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?max_size=1073741824") // <= 1 GiB
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, img := range listed {
+		names[img.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 1 GiB), got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByMinAndMaxSize(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-small", "small", 1<<20, t0)
+	seedStoredImageFull(t, s, "img-mid", "mid", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-big", "big", 2<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=1048577&max_size=1073741824")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "mid" {
+		t.Fatalf("expected only mid in [1 MiB+1, 1 GiB], got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByMinSize_Inclusive(t *testing.T) {
+	// Exact boundary size matches under "inclusive" semantics.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-edge", "edge", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=1073741824")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByInvalidMinSize(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=ten-gigs")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_size" {
+		t.Fatalf("code = %q, want invalid_min_size", apiErr.Code)
+	}
+}
+
+func TestListImages_FilterByInvalidMaxSize(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?max_size=3.5")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_size" {
+		t.Fatalf("code = %q, want invalid_max_size", apiErr.Code)
+	}
+}
+
+func TestListImages_FilterByMinSize_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_size" {
+		t.Fatalf("code = %q, want invalid_min_size", apiErr.Code)
+	}
+}
+
+func TestListImages_FilterByMinSize_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-a", "img-a", 1<<20, t0)
+	seedStoredImageFull(t, s, "img-b", "img-b", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=%20%20")
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("whitespace-only min_size should be a no-op; got %+v", listed)
+	}
+}
+
+func TestListImages_FilterBySize_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	put := func(id, name string, size int64, tags []string) {
+		img := &types.Image{ID: id, Name: name, Path: "/tmp/" + name + ".qcow2", SizeBytes: size, Format: "qcow2", Tags: tags, CreatedAt: t0, UpdatedAt: t0}
+		if err := s.PutImage(img); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
+	}
+	put("img-small-prod", "release-small", 1<<20, []string{"prod"}) // too small
+	put("img-big-prod", "release-big", 2<<30, []string{"prod"})     // matches
+	put("img-big-other", "rollback-big", 2<<30, []string{"prod"})   // search excludes
+	put("img-big-staging", "release-staging", 2<<30, []string{"staging"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?min_size=1073741824&tag=prod&search=release")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "release-big" {
+		t.Fatalf("expected only release-big, got %+v", listed)
+	}
+}
+
 func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

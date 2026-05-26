@@ -18,6 +18,10 @@ export default function ImageList() {
   const [sourceVMFilter, setSourceVMFilter] = useState(searchParams.get('source_vm') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
+  const [minSizeInput, setMinSizeInput] = useState(searchParams.get('min_size') || '');
+  const [minSizeFilter, setMinSizeFilter] = useState(searchParams.get('min_size') || '');
+  const [maxSizeInput, setMaxSizeInput] = useState(searchParams.get('max_size') || '');
+  const [maxSizeFilter, setMaxSizeFilter] = useState(searchParams.get('max_size') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -25,8 +29,8 @@ export default function ImageList() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, since, until, sort, order }),
-    [page, perPage, tagFilter, sourceVMFilter, searchFilter, since, until, sort, order],
+    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, since, until, minSize: minSizeFilter, maxSize: maxSizeFilter, sort, order }),
+    [page, perPage, tagFilter, sourceVMFilter, searchFilter, since, until, minSizeFilter, maxSizeFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
@@ -38,7 +42,7 @@ export default function ImageList() {
     [imageList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, since, until, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, since, until, minSizeFilter, maxSizeFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -58,6 +62,20 @@ export default function ImageList() {
     return () => clearTimeout(id);
   }, [sourceVMInput]);
 
+  // Debounce the byte-count size-range boxes the same way as the search box so
+  // typing a multi-digit value doesn't refetch on every keystroke.
+  useEffect(() => {
+    const trimmed = minSizeInput.trim();
+    const id = setTimeout(() => { setMinSizeFilter(trimmed); }, 250);
+    return () => clearTimeout(id);
+  }, [minSizeInput]);
+
+  useEffect(() => {
+    const trimmed = maxSizeInput.trim();
+    const id = setTimeout(() => { setMaxSizeFilter(trimmed); }, 250);
+    return () => clearTimeout(id);
+  }, [maxSizeInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -66,8 +84,10 @@ export default function ImageList() {
     if (sourceVMFilter) next.set('source_vm', sourceVMFilter); else next.delete('source_vm');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
+    if (minSizeFilter) next.set('min_size', minSizeFilter); else next.delete('min_size');
+    if (maxSizeFilter) next.set('max_size', maxSizeFilter); else next.delete('max_size');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, sourceVMFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, sourceVMFilter, since, until, minSizeFilter, maxSizeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -217,6 +237,45 @@ export default function ImageList() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Min bytes</span>
+            <input
+              type="number"
+              min="0"
+              value={minSizeInput}
+              onChange={(e) => setMinSizeInput(e.target.value)}
+              placeholder="0"
+              data-testid="image-list-min-size"
+              aria-label="Images at least this many bytes"
+              className="w-28 bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max bytes</span>
+            <input
+              type="number"
+              min="0"
+              value={maxSizeInput}
+              onChange={(e) => setMaxSizeInput(e.target.value)}
+              placeholder="∞"
+              data-testid="image-list-max-size"
+              aria-label="Images at most this many bytes"
+              className="w-28 bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
+            />
+          </label>
+          {(minSizeInput || maxSizeInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinSizeInput(''); setMaxSizeInput(''); }}
+              data-testid="image-list-size-range-clear"
+              aria-label="Clear image size range"
+            >
+              Clear sizes
+            </button>
+          )}
+        </div>
       </div>
 
       {allTags.length > 0 && (
@@ -279,6 +338,8 @@ export default function ImageList() {
                 ? `No images were exported from source VM "${sourceVMFilter}".`
                 : (since || until)
                 ? 'No images were created in the selected time range.'
+                : (minSizeFilter || maxSizeFilter)
+                ? 'No images fall within the selected size range.'
                 : tagFilter
                 ? `No images carry tag "${tagFilter}".`
                 : 'Export a VM to create a portable disk image.'

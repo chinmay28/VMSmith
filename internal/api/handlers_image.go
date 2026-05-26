@@ -98,6 +98,11 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 // post-filter / pre-pagination population):
 //   - tag=<tag>                       case-insensitive exact-match
 //   - source_vm=<vm-id>               case-insensitive exact-match
+//   - min_size=<bytes>                keep images with size_bytes >= min_size
+//     (inclusive). Whitespace trimmed; empty disables. Non-numeric or
+//     negative values return 400 `invalid_min_size`.
+//   - max_size=<bytes>                keep images with size_bytes <= max_size
+//     (inclusive). Same shape as min_size; 400 `invalid_max_size` on garbage.
 //   - since=<rfc3339>                 keep images with created_at >= since
 //     (inclusive). Whitespace trimmed; empty disables. Invalid values
 //     return 400 `invalid_since`.
@@ -127,6 +132,16 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	minSize, minSizeSet, apiErr := parseSizeRangeParam(q.Get("min_size"), "min_size")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxSize, maxSizeSet, apiErr := parseSizeRangeParam(q.Get("max_size"), "max_size")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 
 	imgs, err := s.storageMgr.ListImages()
 	if err != nil {
@@ -147,6 +162,17 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 			if strings.EqualFold(img.SourceVM, sourceVMFilter) {
 				filtered = append(filtered, img)
 			}
+		}
+		imgs = filtered
+	}
+
+	if minSizeSet || maxSizeSet {
+		filtered := imgs[:0]
+		for _, img := range imgs {
+			if !imageInSizeRange(img.SizeBytes, minSize, minSizeSet, maxSize, maxSizeSet) {
+				continue
+			}
+			filtered = append(filtered, img)
 		}
 		imgs = filtered
 	}

@@ -44,6 +44,16 @@ var imageListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		minSizeRaw, _ := cmd.Flags().GetString("min-size")
+		maxSizeRaw, _ := cmd.Flags().GetString("max-size")
+		minSize, minSizeSet, err := parseCLISizeRange(minSizeRaw, "--min-size")
+		if err != nil {
+			return err
+		}
+		maxSize, maxSizeSet, err := parseCLISizeRange(maxSizeRaw, "--max-size")
+		if err != nil {
+			return err
+		}
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -90,6 +100,16 @@ var imageListCmd = &cobra.Command{
 				if strings.EqualFold(img.SourceVM, sourceVMFilter) {
 					filtered = append(filtered, img)
 				}
+			}
+			imgs = filtered
+		}
+		if minSizeSet || maxSizeSet {
+			filtered := imgs[:0]
+			for _, img := range imgs {
+				if !imageInCLISizeRange(img.SizeBytes, minSize, minSizeSet, maxSize, maxSizeSet) {
+					continue
+				}
+				filtered = append(filtered, img)
 			}
 			imgs = filtered
 		}
@@ -386,6 +406,8 @@ func init() {
 	imageListCmd.Flags().String("search", "", "case-insensitive substring filter on name, description, and tags")
 	imageListCmd.Flags().String("since", "", "keep images created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	imageListCmd.Flags().String("until", "", "keep images created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
+	imageListCmd.Flags().String("min-size", "", "keep images whose size in bytes is at least this value (inclusive)")
+	imageListCmd.Flags().String("max-size", "", "keep images whose size in bytes is at most this value (inclusive)")
 	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at")
 	imageListCmd.Flags().String("order", "asc", "order: asc or desc")
 
