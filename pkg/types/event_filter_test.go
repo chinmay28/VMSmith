@@ -99,12 +99,27 @@ func TestEventStreamFilter_HasAny(t *testing.T) {
 		t.Fatalf("zero filter should report HasAny()=false")
 	}
 	cases := []EventStreamFilter{
-		{VMID: "x"}, {Type: "x"}, {Source: "x"}, {Severity: "x"},
+		{VMID: "x"}, {Type: "x"}, {Source: "x"}, {Severity: "x"}, {MinSeverity: "warn"},
 		{Actor: "x"}, {ResourceID: "x"}, {TypePrefix: "x"}, {Search: "x"},
 	}
 	for i, f := range cases {
 		if !f.HasAny() {
 			t.Fatalf("case %d: expected HasAny()=true for %+v", i, f)
 		}
+	}
+}
+
+func TestEventMatchesStreamFilter_MinSeverityFloor(t *testing.T) {
+	warn := &Event{Type: "vm.stopped", Severity: "warn"}
+	info := &Event{Type: "vm.started", Severity: "info"}
+	if !EventMatchesStreamFilter(warn, EventStreamFilter{MinSeverity: "warn"}) {
+		t.Errorf("warn event should pass warn floor")
+	}
+	if EventMatchesStreamFilter(info, EventStreamFilter{MinSeverity: "warn"}) {
+		t.Errorf("info event should be dropped by warn floor")
+	}
+	// Composes with exact-match severity: an event must satisfy both.
+	if EventMatchesStreamFilter(warn, EventStreamFilter{MinSeverity: "warn", Severity: "error"}) {
+		t.Errorf("warn event should fail when exact-match severity=error is also set")
 	}
 }

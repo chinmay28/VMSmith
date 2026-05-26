@@ -2195,7 +2195,22 @@ paths:
           schema:
             type: string
             enum: [info, warn, error]
-          description: Filter by severity.
+          description: Filter by severity (exact match).
+        - name: min_severity
+          in: query
+          schema:
+            type: string
+            enum: [info, warn, error]
+          description: |
+            Severity floor: return events ranked at-or-above this level
+            (info < warn < error). Closes the "show me everything that needs
+            attention (warn + error)" operator query that the exact-match
+            `severity` filter cannot answer. Whitespace-trimmed and
+            case-insensitive; empty disables the floor; unknown values return
+            400 `invalid_min_severity`. Composes additively with the
+            exact-match `severity` and every other event filter so
+            `X-Total-Count` reflects the post-filter population. Mirrors the
+            severity-floor semantics the logs `level` filter already ships.
         - name: actor
           in: query
           schema:

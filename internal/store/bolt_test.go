@@ -1087,6 +1087,84 @@ func TestListEventsFiltered_Actor_MatchesEmptyActor(t *testing.T) {
 	}
 }
 
+func seedEventsForMinSeverityFilter(t *testing.T, s *Store) {
+	t.Helper()
+	now := time.Now().Truncate(time.Millisecond)
+	for i, evt := range []*types.Event{
+		{Type: "vm.created", Source: "app", Severity: "info", Message: "created", OccurredAt: now},
+		{Type: "vm.stopped", Source: "libvirt", Severity: "warn", Message: "stopped", OccurredAt: now.Add(time.Second)},
+		{Type: "dhcp.exhausted", Source: "system", Severity: "error", Message: "no ips", OccurredAt: now.Add(2 * time.Second)},
+		{Type: "vm.started", Source: "libvirt", Severity: "info", Message: "started", OccurredAt: now.Add(3 * time.Second)},
+	} {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("seed evt %d: %v", i, err)
+		}
+	}
+}
+
+func TestListEventsFiltered_MinSeverity_Floor(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForMinSeverityFilter(t, s)
+
+	// warn floor → warn + error (2 of 4).
+	_, total, err := s.ListEventsFiltered(EventFilter{MinSeverity: "warn"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("min_severity=warn total=%d, want 2", total)
+	}
+
+	// error floor → only the error (1 of 4).
+	_, total, err = s.ListEventsFiltered(EventFilter{MinSeverity: "error"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("min_severity=error total=%d, want 1", total)
+	}
+
+	// info floor → everything (4 of 4).
+	_, total, err = s.ListEventsFiltered(EventFilter{MinSeverity: "info"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("min_severity=info total=%d, want 4", total)
+	}
+}
+
+func TestListEventsFiltered_MinSeverity_EmptyDisablesFilter(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForMinSeverityFilter(t, s)
+
+	_, total, err := s.ListEventsFiltered(EventFilter{MinSeverity: ""})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("empty min_severity should return all, got total=%d", total)
+	}
+}
+
+func TestListEventsFiltered_MinSeverity_ComposesWithSource(t *testing.T) {
+	s, cleanup := tempDB(t)
+	defer cleanup()
+	seedEventsForMinSeverityFilter(t, s)
+
+	// warn floor + libvirt source → only the libvirt warn event (the error
+	// is system-source, the info-started is below the floor).
+	_, total, err := s.ListEventsFiltered(EventFilter{MinSeverity: "warn", Source: "libvirt"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("min_severity=warn+source=libvirt total=%d, want 1", total)
+	}
+}
+
 // Two VMs with similar IDs (`vm-1` and `vm-10`) must not bleed into each
 // other when their tag rows share a bucket and key prefix.  The cursor walk
 // in ListSnapshotTagsByVM seeks on `vmID + "/"` so the trailing slash

@@ -3003,8 +3003,20 @@ export interface paths {
                     type_prefix?: string;
                     /** @description Filter by event source. */
                     source?: "libvirt" | "app" | "system";
-                    /** @description Filter by severity. */
+                    /** @description Filter by severity (exact match). */
                     severity?: "info" | "warn" | "error";
+                    /**
+                     * @description Severity floor: return events ranked at-or-above this level
+                     *     (info < warn < error). Closes the "show me everything that needs
+                     *     attention (warn + error)" operator query that the exact-match
+                     *     `severity` filter cannot answer. Whitespace-trimmed and
+                     *     case-insensitive; empty disables the floor; unknown values return
+                     *     400 `invalid_min_severity`. Composes additively with the
+                     *     exact-match `severity` and every other event filter so
+                     *     `X-Total-Count` reflects the post-filter population. Mirrors the
+                     *     severity-floor semantics the logs `level` filter already ships.
+                     */
+                    min_severity?: "info" | "warn" | "error";
                     /**
                      * @description Case-sensitive exact-match filter on the event's `actor` field
                      *     (e.g. `system`, `app`, or an API-key alias). Mirrors `?vm_id=`'s

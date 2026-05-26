@@ -212,6 +212,84 @@ func TestCLI_EventsList_FilterByActor_ComposesWithSource(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `events list --min-severity` (5.4.41)
+// ============================================================
+
+func seedMinSeverityCLIEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	now := time.Now()
+	s.PutEvent(&types.Event{ID: "evt-1", Type: "vm_created", Source: "app", Severity: "info", VMID: "vm-1", Message: "info row", CreatedAt: now})
+	s.PutEvent(&types.Event{ID: "evt-2", Type: "vm_stopped", Source: "libvirt", Severity: "warn", VMID: "vm-1", Message: "warn row", CreatedAt: now.Add(time.Second)})
+	s.PutEvent(&types.Event{ID: "evt-3", Type: "dhcp_exhausted", Source: "system", Severity: "error", Message: "error row", CreatedAt: now.Add(2 * time.Second)})
+}
+
+func TestCLI_EventsList_FilterByMinSeverity_Floor(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedMinSeverityCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--min-severity", "warn")
+	if err != nil {
+		t.Fatalf("events list --min-severity warn: %v", err)
+	}
+	if !strings.Contains(out, "warn row") || !strings.Contains(out, "error row") {
+		t.Errorf("warn floor should keep warn + error rows:\n%s", out)
+	}
+	if strings.Contains(out, "info row") {
+		t.Errorf("warn floor should drop the info row:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByMinSeverity_CaseInsensitive(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedMinSeverityCLIEvents(t, s)
+
+	out, err := runCLI("events", "list", "--min-severity", "ERROR")
+	if err != nil {
+		t.Fatalf("events list --min-severity ERROR: %v", err)
+	}
+	if !strings.Contains(out, "error row") {
+		t.Errorf("error floor should keep the error row:\n%s", out)
+	}
+	if strings.Contains(out, "warn row") || strings.Contains(out, "info row") {
+		t.Errorf("error floor should drop warn + info rows:\n%s", out)
+	}
+}
+
+func TestCLI_EventsList_FilterByMinSeverity_Invalid(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedMinSeverityCLIEvents(t, s)
+
+	_, err := runCLI("events", "list", "--min-severity", "critical")
+	if err == nil {
+		t.Fatal("expected error for invalid --min-severity, got nil")
+	}
+	if !strings.Contains(err.Error(), "min-severity") {
+		t.Errorf("error should mention min-severity, got: %v", err)
+	}
+}
+
+func TestCLI_EventsList_FilterByMinSeverity_ComposesWithSource(t *testing.T) {
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+	seedMinSeverityCLIEvents(t, s)
+
+	// warn floor + libvirt source → only the libvirt warn row.
+	out, err := runCLI("events", "list", "--min-severity", "warn", "--source", "libvirt")
+	if err != nil {
+		t.Fatalf("events list --min-severity --source: %v", err)
+	}
+	if !strings.Contains(out, "warn row") {
+		t.Errorf("expected warn row:\n%s", out)
+	}
+	if strings.Contains(out, "error row") || strings.Contains(out, "info row") {
+		t.Errorf("warn floor + libvirt should drop the system error and info rows:\n%s", out)
+	}
+}
+
 func TestCLI_EventsList_NewestFirst(t *testing.T) {
 	s, cleanup := withTestEventStore(t)
 	defer cleanup()
@@ -1269,6 +1347,34 @@ func TestCLI_EventsFollow_FiltersByActor(t *testing.T) {
 	}
 	if strings.Contains(out, "bob stop") {
 		t.Errorf("bob row should have been filtered out:\n%s", out)
+	}
+}
+
+// TestCLI_EventsFollow_FiltersByMinSeverity exercises the SSE path so the
+// `events follow --min-severity` floor stays in lockstep with `events list`.
+func TestCLI_EventsFollow_FiltersByMinSeverity(t *testing.T) {
+	now := time.Now()
+	srv := newSSETestServer(t, []*types.Event{
+		{ID: "1", Type: "vm.created", Source: "app", Severity: "info", VMID: "vm-1", Message: "info row", OccurredAt: now},
+		{ID: "2", Type: "vm.stopped", Source: "libvirt", Severity: "warn", VMID: "vm-1", Message: "warn row", OccurredAt: now.Add(time.Second)},
+		{ID: "3", Type: "dhcp.exhausted", Source: "system", Severity: "error", Message: "error row", OccurredAt: now.Add(2 * time.Second)},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := followEventsStream(ctx, srv.URL(), "",
+		eventFilter{minSeverity: "warn"},
+		eventRowOptions{}, &buf); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "warn row") || !strings.Contains(out, "error row") {
+		t.Errorf("warn floor should keep warn + error rows:\n%s", out)
+	}
+	if strings.Contains(out, "info row") {
+		t.Errorf("warn floor should drop info row:\n%s", out)
 	}
 }
 

@@ -52,10 +52,16 @@ which matches the long-standing CLI behaviour.`,
 		actorFilter, _ := cmd.Flags().GetString("actor")
 		resourceIDFilter, _ := cmd.Flags().GetString("resource-id")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		minSeverityFilter, _ := cmd.Flags().GetString("min-severity")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		sortFlag, _ := cmd.Flags().GetString("sort")
 		orderFlag, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
+
+		minSeverity, err := validateMinSeverityFlag(minSeverityFilter)
+		if err != nil {
+			return err
+		}
 
 		sortField, order, err := validateEventSort(sortFlag, orderFlag)
 		if err != nil {
@@ -80,15 +86,16 @@ which matches the long-standing CLI behaviour.`,
 		}
 
 		filtered := filterEvents(all, eventFilter{
-			vmID:       strings.TrimSpace(vmFilter),
-			typeStr:    strings.TrimSpace(typeFilter),
-			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
-			actor:      strings.TrimSpace(actorFilter),
-			resourceID: strings.TrimSpace(resourceIDFilter),
-			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
-			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
-			since:      sinceTime,
+			vmID:        strings.TrimSpace(vmFilter),
+			typeStr:     strings.TrimSpace(typeFilter),
+			source:      strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:    strings.ToLower(strings.TrimSpace(severityFilter)),
+			minSeverity: minSeverity,
+			actor:       strings.TrimSpace(actorFilter),
+			resourceID:  strings.TrimSpace(resourceIDFilter),
+			typePrefix:  strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			search:      strings.ToLower(strings.TrimSpace(searchFilter)),
+			since:       sinceTime,
 		})
 
 		if sortField == "" {
@@ -191,6 +198,10 @@ type eventFilter struct {
 	typeStr  string
 	source   string
 	severity string
+	// minSeverity is a lower-cased severity floor (info < warn < error).
+	// Empty disables it; the caller validates the value. Composes additively
+	// with the exact-match severity predicate.
+	minSeverity string
 	// actor is a case-sensitive exact-match against e.Actor (e.g.
 	// "system", "app", "<api-key-alias>"). Empty disables the filter.
 	actor string
@@ -226,6 +237,9 @@ func filterEvents(events []*types.Event, f eventFilter) []*types.Event {
 			continue
 		}
 		if f.severity != "" && !strings.EqualFold(e.Severity, f.severity) {
+			continue
+		}
+		if f.minSeverity != "" && !types.EventMeetsMinSeverity(e, f.minSeverity) {
 			continue
 		}
 		if f.actor != "" && e.Actor != f.actor {
@@ -275,6 +289,20 @@ func validateEventSort(sortFlag, orderFlag string) (sortField, order string, err
 		return "", "", fmt.Errorf("invalid --order value %q (want asc or desc)", orderFlag)
 	}
 	return sortField, order, nil
+}
+
+// validateMinSeverityFlag canonicalises and validates the --min-severity flag.
+// Empty means "no floor" and returns (""), nil. An explicit but unknown value
+// is a hard error so callers can't silently fall through to no filtering.
+func validateMinSeverityFlag(flag string) (string, error) {
+	v := strings.ToLower(strings.TrimSpace(flag))
+	if v == "" {
+		return "", nil
+	}
+	if _, ok := types.EventSeverityRank(v); !ok {
+		return "", fmt.Errorf("invalid --min-severity value %q (want one of: info, warn, error)", flag)
+	}
+	return v, nil
 }
 
 // eventTimestamp returns the best-available time for an event, falling back
@@ -393,6 +421,11 @@ Examples:
 		actorFilter, _ := cmd.Flags().GetString("actor")
 		resourceIDFilter, _ := cmd.Flags().GetString("resource-id")
 		searchFilter, _ := cmd.Flags().GetString("search")
+		minSeverityFilter, _ := cmd.Flags().GetString("min-severity")
+		minSeverity, err := validateMinSeverityFlag(minSeverityFilter)
+		if err != nil {
+			return err
+		}
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		if apiURL == "" {
 			cfg, err := config.Load(cfgFile)
@@ -404,14 +437,15 @@ Examples:
 		}
 
 		filter := eventFilter{
-			vmID:       strings.TrimSpace(vmFilter),
-			typeStr:    strings.TrimSpace(typeFilter),
-			source:     strings.ToLower(strings.TrimSpace(sourceFilter)),
-			severity:   strings.ToLower(strings.TrimSpace(severityFilter)),
-			actor:      strings.TrimSpace(actorFilter),
-			resourceID: strings.TrimSpace(resourceIDFilter),
-			typePrefix: strings.ToLower(strings.TrimSpace(typePrefixFilter)),
-			search:     strings.ToLower(strings.TrimSpace(searchFilter)),
+			vmID:        strings.TrimSpace(vmFilter),
+			typeStr:     strings.TrimSpace(typeFilter),
+			source:      strings.ToLower(strings.TrimSpace(sourceFilter)),
+			severity:    strings.ToLower(strings.TrimSpace(severityFilter)),
+			minSeverity: minSeverity,
+			actor:       strings.TrimSpace(actorFilter),
+			resourceID:  strings.TrimSpace(resourceIDFilter),
+			typePrefix:  strings.ToLower(strings.TrimSpace(typePrefixFilter)),
+			search:      strings.ToLower(strings.TrimSpace(searchFilter)),
 		}
 
 		showActor, _ := cmd.Flags().GetBool("show-actor")
@@ -517,6 +551,9 @@ func streamEventsOnce(ctx context.Context, apiURL, apiKey string, lastID *string
 	}
 	if filter.severity != "" {
 		q.Set("severity", filter.severity)
+	}
+	if filter.minSeverity != "" {
+		q.Set("min_severity", filter.minSeverity)
 	}
 	if filter.actor != "" {
 		q.Set("actor", filter.actor)
@@ -636,6 +673,9 @@ func matchesEventFilter(e *types.Event, f eventFilter) bool {
 	if f.severity != "" && !strings.EqualFold(e.Severity, f.severity) {
 		return false
 	}
+	if f.minSeverity != "" && !types.EventMeetsMinSeverity(e, f.minSeverity) {
+		return false
+	}
 	if f.actor != "" && e.Actor != f.actor {
 		return false
 	}
@@ -674,6 +714,7 @@ func init() {
 	eventsListCmd.Flags().String("type-prefix", "", "filter events by type prefix (e.g. 'snapshot.' matches every snapshot.* subtype)")
 	eventsListCmd.Flags().String("source", "", "filter events by source (libvirt|app|system)")
 	eventsListCmd.Flags().String("severity", "", "filter events by severity (info|warn|error)")
+	eventsListCmd.Flags().String("min-severity", "", "severity floor: show events at this level or above (info < warn < error)")
 	eventsListCmd.Flags().String("actor", "", "filter events by actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")
 	eventsListCmd.Flags().String("resource-id", "", "filter events by resource ID (exact match, case-sensitive)")
 	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
@@ -689,6 +730,7 @@ func init() {
 	eventsFollowCmd.Flags().String("type-prefix", "", "only print events whose type starts with this prefix (e.g. 'snapshot.')")
 	eventsFollowCmd.Flags().String("source", "", "only print events from this source (libvirt|app|system)")
 	eventsFollowCmd.Flags().String("severity", "", "only print events at this severity (info|warn|error)")
+	eventsFollowCmd.Flags().String("min-severity", "", "severity floor: only print events at this level or above (info < warn < error)")
 	eventsFollowCmd.Flags().String("actor", "", "only print events from this actor (case-sensitive exact match — e.g. 'system', 'app', or an API-key alias)")
 	eventsFollowCmd.Flags().String("resource-id", "", "only print events for this resource ID (exact match, case-sensitive)")
 	eventsFollowCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")

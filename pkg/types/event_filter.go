@@ -22,21 +22,26 @@ import "strings"
 // (separately from the list endpoint's RFC3339 ?since=) and ?until= is
 // meaningless on a live stream.
 type EventStreamFilter struct {
-	VMID       string
-	Type       string
-	Source     string
-	Severity   string
-	Actor      string
-	ResourceID string
-	TypePrefix string
-	Search     string
+	VMID     string
+	Type     string
+	Source   string
+	Severity string
+	// MinSeverity is a severity floor (info < warn < error). Empty disables
+	// it; the caller validates the value. Composes additively with the
+	// exact-match Severity predicate.
+	MinSeverity string
+	Actor       string
+	ResourceID  string
+	TypePrefix  string
+	Search      string
 }
 
 // HasAny reports whether at least one predicate is active. The SSE handler
 // uses this to short-circuit the no-filter fast path.
 func (f EventStreamFilter) HasAny() bool {
 	return f.VMID != "" || f.Type != "" || f.Source != "" || f.Severity != "" ||
-		f.Actor != "" || f.ResourceID != "" || f.TypePrefix != "" || f.Search != ""
+		f.MinSeverity != "" || f.Actor != "" || f.ResourceID != "" ||
+		f.TypePrefix != "" || f.Search != ""
 }
 
 // EventMatchesStreamFilter reports whether evt satisfies every active field of
@@ -55,6 +60,9 @@ func EventMatchesStreamFilter(evt *Event, f EventStreamFilter) bool {
 		return false
 	}
 	if f.Severity != "" && evt.Severity != f.Severity {
+		return false
+	}
+	if f.MinSeverity != "" && !EventMeetsMinSeverity(evt, f.MinSeverity) {
 		return false
 	}
 	if f.Actor != "" && evt.Actor != f.Actor {
