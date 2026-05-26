@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Clock, Plus, Pencil, Trash2, Play, Search, X,
@@ -26,6 +26,17 @@ function formatTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString();
+}
+
+// `<input type="datetime-local">` returns a naive local-time string
+// (`YYYY-MM-DDTHH:MM`). Convert to RFC3339 in UTC so the daemon's
+// `parseTimeRangeParam` accepts it. Empty / invalid input → empty string
+// so the API client drops the param.
+function datetimeLocalToISO(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString();
 }
 
 // targetLabel renders a schedule's resolved target: an explicit vm_id, a
@@ -74,6 +85,11 @@ export default function Schedules() {
   const [sortField, setSortField] = useState(initialSort);
   const [sortOrder, setSortOrder] = useState(initialOrder);
 
+  const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
+  const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
+  const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
+  const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
+
   const initialPage = (() => {
     const parsed = parseInt(searchParams.get('page') || '', 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -95,23 +111,25 @@ export default function Schedules() {
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, actionFilter, enabledFilter, sortField, sortOrder]);
+  }, [searchFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (actionFilter) next.set('action', actionFilter); else next.delete('action');
     if (enabledFilter) next.set('enabled', enabledFilter); else next.delete('enabled');
+    if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
+    if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, actionFilter, enabledFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, actionFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, action: actionFilter, enabled: enabledFilter, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, actionFilter, enabledFilter, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, action: actionFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -240,17 +258,50 @@ export default function Schedules() {
             <option value="desc">desc</option>
           </select>
         </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Created since
+          <input
+            type="datetime-local"
+            value={sinceFilter}
+            onChange={(e) => setSinceFilter(e.target.value)}
+            className="input py-1 text-xs"
+            data-testid="schedule-list-since-filter"
+            aria-label="Filter by created since"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          until
+          <input
+            type="datetime-local"
+            value={untilFilter}
+            onChange={(e) => setUntilFilter(e.target.value)}
+            className="input py-1 text-xs"
+            data-testid="schedule-list-until-filter"
+            aria-label="Filter by created until"
+          />
+        </label>
+        {(sinceFilter || untilFilter) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setSinceFilter(''); setUntilFilter(''); }}
+            data-testid="schedule-list-time-range-clear"
+            aria-label="Clear created-at range"
+          >
+            Clear range
+          </button>
+        )}
       </div>
 
       {loading && !response ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : items.length === 0 ? (
         <div className="card">
-          {searchFilter || actionFilter || enabledFilter ? (
+          {searchFilter || actionFilter || enabledFilter || sinceFilter || untilFilter ? (
             <EmptyState
               icon={Search}
               title="No schedules match your filters"
-              description="Try a different search term, action, or enabled state."
+              description="Try a different search term, action, enabled state, or created-at range."
             />
           ) : (
             <EmptyState

@@ -1757,11 +1757,39 @@ const server = http.createServer(async (req, res) => {
     else if (!allowedOrder.has(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
     }
+    // since / until: inclusive RFC3339 time-range filter on created_at;
+    // invalid → 400 invalid_since/invalid_until; a schedule with a zero
+    // created_at filtered OUT whenever any bound is set (mirrors the API).
+    const parseTime = (name) => {
+      const raw = (url.searchParams.get(name) || "").trim();
+      if (raw === "") return { set: false, value: null };
+      const ts = new Date(raw);
+      if (Number.isNaN(ts.getTime())) return { set: false, value: null, invalid: true };
+      return { set: true, value: ts };
+    };
+    const since = parseTime("since");
+    if (since.invalid) {
+      return json(res, 400, { code: "invalid_since", message: "since must be a valid RFC3339 timestamp" });
+    }
+    const until = parseTime("until");
+    if (until.invalid) {
+      return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
+    }
 
     let list = [...scheduleList.values()];
     if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
     if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
     if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
+    if (since.set || until.set) {
+      list = list.filter((s) => {
+        if (!s.created_at) return false;
+        const t = new Date(s.created_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (since.set && t < since.value) return false;
+        if (until.set && t > until.value) return false;
+        return true;
+      });
+    }
     if (needle) {
       list = list.filter((s) => {
         if (typeof s.name === "string" && s.name.toLowerCase().includes(needle)) return true;

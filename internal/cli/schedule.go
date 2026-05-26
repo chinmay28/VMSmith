@@ -130,6 +130,8 @@ var scheduleListCmd = &cobra.Command{
 		action, _ := cmd.Flags().GetString("action")
 		enabled, _ := cmd.Flags().GetString("enabled")
 		search, _ := cmd.Flags().GetString("search")
+		sinceFlag, _ := cmd.Flags().GetString("since")
+		untilFlag, _ := cmd.Flags().GetString("until")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -147,6 +149,12 @@ var scheduleListCmd = &cobra.Command{
 		if enabled != "" && enabled != "true" && enabled != "false" {
 			return fmt.Errorf("invalid --enabled: must be 'true' or 'false'")
 		}
+		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
 
 		q := url.Values{}
 		if v := strings.TrimSpace(vmID); v != "" {
@@ -160,6 +168,12 @@ var scheduleListCmd = &cobra.Command{
 		}
 		if v := strings.ToLower(strings.TrimSpace(search)); v != "" {
 			q.Set("search", v)
+		}
+		if v := strings.TrimSpace(sinceFlag); v != "" {
+			q.Set("since", v)
+		}
+		if v := strings.TrimSpace(untilFlag); v != "" {
+			q.Set("until", v)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -440,6 +454,8 @@ func init() {
 	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart)")
 	scheduleListCmd.Flags().String("enabled", "", "filter by enabled flag: true|false")
 	scheduleListCmd.Flags().String("search", "", "case-insensitive substring filter (name, action, vm_id, tag selector)")
+	scheduleListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
+	scheduleListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	scheduleListCmd.Flags().String("sort", "", "sort field: id|name|created_at|next_fire_at (default id)")
 	scheduleListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	scheduleListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")

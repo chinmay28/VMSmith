@@ -1750,6 +1750,27 @@ paths:
             name, action, vm_id, and tag_selector. Whitespace is trimmed
             before matching. ID is intentionally excluded from the haystack.
         - in: query
+          name: since
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Inclusive lower bound (RFC3339) on the schedule's `created_at`.
+            Whitespace-trimmed; empty disables the bound; invalid values
+            return 400 `invalid_since`. A schedule with a zero `created_at`
+            is filtered OUT whenever any bound is set. Mirrors the
+            snapshot / image / VM / template / webhook time-range filters.
+        - in: query
+          name: until
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Inclusive upper bound (RFC3339) on the schedule's `created_at`.
+            Same shape as `since`; invalid values return 400 `invalid_until`.
+        - in: query
           name: sort
           required: false
           schema:

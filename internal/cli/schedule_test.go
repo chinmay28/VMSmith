@@ -107,6 +107,39 @@ func TestCLI_ScheduleList_ForwardsFilters(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleList_ForwardsTimeRange(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--since", "2026-05-01T00:00:00Z", "--until", "2026-05-31T00:00:00Z"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, want := range []string{"since=2026-05-01", "until=2026-05-31"} {
+		if !strings.Contains(d.lastQuery, want) {
+			t.Fatalf("query missing %q: %s", want, d.lastQuery)
+		}
+	}
+}
+
+func TestCLI_ScheduleList_RejectsInvalidSince(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--since", "not-a-time"); err == nil {
+		t.Fatal("expected invalid --since rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid since should not contact daemon")
+	}
+}
+
+func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--until", "garbage"); err == nil {
+		t.Fatal("expected invalid --until rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid until should not contact daemon")
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidSort(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "bogus"); err == nil {

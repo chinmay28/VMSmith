@@ -148,10 +148,12 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 //
 // Filters (applied before sort + pagination so X-Total-Count reflects the
 // post-filter population): vm_id (exact), action (exact), enabled
-// (tristate true/false), search (case-insensitive substring across name,
-// action, vm_id, and tag_selector). Sorting: sort=id|name|created_at|
-// next_fire_at (default id), order=asc|desc (default asc). All comparators
-// tiebreak on id.
+// (tristate true/false), since/until (inclusive RFC3339 bounds on created_at;
+// invalid values return 400 invalid_since/invalid_until; a schedule with a
+// zero created_at is filtered OUT when any bound is set), search
+// (case-insensitive substring across name, action, vm_id, and tag_selector).
+// Sorting: sort=id|name|created_at|next_fire_at (default id), order=asc|desc
+// (default asc). All comparators tiebreak on id.
 func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -180,6 +182,16 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
 	actionFilter := strings.ToLower(strings.TrimSpace(q.Get("action")))
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
@@ -202,6 +214,9 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if enabledSet && sched.Enabled != enabledFilter {
+			continue
+		}
+		if !snapshotInTimeRange(sched.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
 			continue
 		}
 		if searchFilter != "" && !scheduleMatchesSearch(sched, searchFilter) {
