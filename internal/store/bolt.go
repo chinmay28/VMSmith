@@ -551,6 +551,11 @@ type EventFilter struct {
 	Type     string
 	Source   string
 	Severity string
+	// MinSeverity is a severity floor (info < warn < error): events ranked
+	// at-or-above it match. Empty disables the floor. The caller validates
+	// the value (the handler rejects unknown severities with 400). Composes
+	// additively with the exact-match Severity predicate above.
+	MinSeverity string
 	// Actor is a case-sensitive exact-match filter against evt.Actor —
 	// mirrors VMID's contract. Empty disables the filter; whitespace
 	// trimming is the caller's responsibility (the handler / CLI does
@@ -638,6 +643,9 @@ func (s *Store) ListEventsFiltered(filter EventFilter) ([]*types.Event, int, err
 				continue
 			}
 			if filter.Severity != "" && evt.Severity != filter.Severity {
+				continue
+			}
+			if filter.MinSeverity != "" && !types.EventMeetsMinSeverity(&evt, filter.MinSeverity) {
 				continue
 			}
 			if filter.Actor != "" && evt.Actor != filter.Actor {

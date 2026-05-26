@@ -293,6 +293,86 @@ func TestStreamEvents_FilterReplay_TypePrefix(t *testing.T) {
 	}
 }
 
+// TestStreamEvents_FilterReplay_MinSeverity verifies the ?min_severity= floor
+// drops below-floor events during SSE replay just like the paginated list.
+func TestStreamEvents_FilterReplay_MinSeverity(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	now := time.Now().Truncate(time.Millisecond)
+	for i, evt := range []*types.Event{
+		{Type: "vm.created", VMID: "vm-1", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, OccurredAt: now.Add(-4 * time.Minute)},
+		{Type: "vm.stopped", VMID: "vm-1", Source: types.EventSourceLibvirt, Severity: types.EventSeverityWarn, OccurredAt: now.Add(-3 * time.Minute)},
+		{Type: "vm.started", VMID: "vm-1", Source: types.EventSourceLibvirt, Severity: types.EventSeverityInfo, OccurredAt: now.Add(-2 * time.Minute)},
+		{Type: "dhcp.exhausted", Source: types.EventSourceSystem, Severity: types.EventSeverityError, OccurredAt: now.Add(-1 * time.Minute)},
+	} {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent %d: %v", i+1, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/events/stream?min_severity=warn", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Last-Event-ID", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	br := bufio.NewReader(resp.Body)
+	frames := []*sseFrame{}
+	deadline := time.After(2 * time.Second)
+	readDone := make(chan struct{})
+	go func() {
+		for {
+			f, err := readSSEFrame(br)
+			if err != nil {
+				close(readDone)
+				return
+			}
+			frames = append(frames, f)
+			if len(frames) >= 2 {
+				close(readDone)
+				return
+			}
+		}
+	}()
+	select {
+	case <-readDone:
+	case <-deadline:
+		t.Fatalf("timed out waiting for filtered replay frames; got %d", len(frames))
+	}
+	cancel()
+	io.Copy(io.Discard, resp.Body)
+	// Replay after seq 1 → seqs 2,3,4. min_severity=warn keeps the warn
+	// (vm.stopped) and the error (dhcp.exhausted), dropping the info started.
+	if len(frames) != 2 || frames[0].event != "vm.stopped" || frames[1].event != "dhcp.exhausted" {
+		t.Fatalf("min_severity=warn replay = %d frames; want vm.stopped + dhcp.exhausted", len(frames))
+	}
+}
+
+func TestStreamEvents_InvalidMinSeverityReturns400(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/events/stream?min_severity=bogus")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 // TestStreamEvents_FilterLive_VMID exercises the live SSE pipeline with a
 // server-side filter: non-matching events published to the bus must be
 // dropped before they cross the wire.

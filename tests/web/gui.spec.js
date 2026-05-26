@@ -3241,6 +3241,29 @@ test.describe("Activity", () => {
     await expect(page.getByTestId("vm-detail-activity")).toBeVisible();
   });
 
+  // 5.4.41 — severity-floor filter.
+  test("min-severity floor narrows results and round-trips through the URL", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    // Before filtering: the info event (evt-3) and the warn event (evt-1)
+    // are both visible.
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+
+    // warn floor → only the warn event (evt-1) survives; info events drop.
+    await page.getByTestId("activity-filter-min-severity").selectOption("warn");
+    await expect(page.getByTestId("activity-row-evt-1")).toBeVisible();
+    await expect(page.getByTestId("activity-row-evt-3")).toHaveCount(0);
+    await expect(page.getByTestId("activity-row-evt-2")).toHaveCount(0);
+
+    // The committed floor lands in the URL so the filtered view is shareable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_severity")).toBe("warn");
+
+    // Clearing the filters restores the full list and drops the param.
+    await page.getByTestId("btn-activity-clear-filters").click();
+    await expect(page.getByTestId("activity-row-evt-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_severity")).toBe(null);
+  });
+
   test("search input filters the activity timeline and round-trips through the URL", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);
     // All three seeded events visible before typing.

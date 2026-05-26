@@ -1340,6 +1340,14 @@ const server = http.createServer(async (req, res) => {
     const vmFilter = (url.searchParams.get("vm_id") || "").trim();
     const sourceFilter = (url.searchParams.get("source") || "").trim();
     const severityFilter = (url.searchParams.get("severity") || "").trim();
+    // Severity floor (info < warn < error): events ranked at-or-above the
+    // value match. Mirrors pkg/types.EventMeetsMinSeverity. Unknown values
+    // are a 400 — same contract as the daemon.
+    const severityRanks = { info: 0, warn: 1, error: 2 };
+    const minSeverityFilter = (url.searchParams.get("min_severity") || "").trim().toLowerCase();
+    if (minSeverityFilter && !(minSeverityFilter in severityRanks)) {
+      return json(res, 400, { code: "invalid_min_severity", message: "min_severity must be one of: info, warn, error" });
+    }
     const typeFilter = (url.searchParams.get("type") || "").trim();
     // Actor is case-sensitive exact-match (mirrors the API contract): the
     // raw value is trimmed but NOT lowercased; matching uses `===` not
@@ -1371,6 +1379,7 @@ const server = http.createServer(async (req, res) => {
       (!vmFilter || e.vm_id === vmFilter) &&
       (!sourceFilter || e.source === sourceFilter) &&
       (!severityFilter || e.severity === severityFilter) &&
+      (!minSeverityFilter || (severityRanks[(e.severity || "").toLowerCase()] ?? 0) >= severityRanks[minSeverityFilter]) &&
       (!typeFilter || e.type === typeFilter) &&
       (!actorFilter || e.actor === actorFilter) &&
       (!resourceIDFilter || e.resource_id === resourceIDFilter) &&

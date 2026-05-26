@@ -18,7 +18,10 @@ import (
 //   - vm_id        — filter by VM ID (exact match)
 //   - type         — filter by event type (exact match)
 //   - source       — "libvirt" | "app" | "system"
-//   - severity     — "info" | "warn" | "error"
+//   - severity     — "info" | "warn" | "error" (exact match)
+//   - min_severity — severity floor: "info" | "warn" | "error". Returns events
+//     ranked at-or-above it (info < warn < error). Unknown values return 400
+//     invalid_min_severity. Composes additively with the exact-match severity.
 //   - actor        — case-sensitive exact-match against evt.Actor (e.g.
 //     "system", "app", or an API-key alias). Lets operators slice the
 //     timeline to a single human/bot without the noisy substring matches
@@ -48,6 +51,13 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	typePrefix := strings.ToLower(strings.TrimSpace(q.Get("type_prefix")))
 	source := strings.TrimSpace(q.Get("source"))
 	severity := strings.TrimSpace(q.Get("severity"))
+	minSeverity := strings.ToLower(strings.TrimSpace(q.Get("min_severity")))
+	if minSeverity != "" {
+		if _, ok := types.EventSeverityRank(minSeverity); !ok {
+			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_min_severity", "min_severity must be one of: info, warn, error"))
+			return
+		}
+	}
 	actor := strings.TrimSpace(q.Get("actor"))
 	resourceID := strings.TrimSpace(q.Get("resource_id"))
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
@@ -84,15 +94,16 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 	pagination := parsePagination(r)
 
 	filter := store.EventFilter{
-		VMID:       vmID,
-		Type:       evtType,
-		Source:     source,
-		Severity:   severity,
-		Actor:      actor,
-		ResourceID: resourceID,
-		TypePrefix: typePrefix,
-		Search:     search,
-		UntilSeq:   untilSeq,
+		VMID:        vmID,
+		Type:        evtType,
+		Source:      source,
+		Severity:    severity,
+		MinSeverity: minSeverity,
+		Actor:       actor,
+		ResourceID:  resourceID,
+		TypePrefix:  typePrefix,
+		Search:      search,
+		UntilSeq:    untilSeq,
 	}
 	if !sinceTime.IsZero() {
 		filter.Since = sinceTime
@@ -151,7 +162,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request) {
 //
 // Server-side filters mirror the cross-cutting predicate set on
 // GET /api/v1/events: ?vm_id=, ?type=, ?type_prefix=, ?source=, ?severity=,
-// ?actor=, ?resource_id=, ?search=. Filters apply to both replayed and live
+// ?min_severity=, ?actor=, ?resource_id=, ?search=. Filters apply to both replayed and live
 // events so the client sees the same membership it would from /events. The
 // replay-overflow check counts pre-filter so a faraway client still gets the
 // 410 fail-fast even if their filter would have dropped the noise.
@@ -164,15 +175,23 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.eventStreamConns.Add(-1)
 
 	q := r.URL.Query()
+	minSeverity := strings.ToLower(strings.TrimSpace(q.Get("min_severity")))
+	if minSeverity != "" {
+		if _, ok := types.EventSeverityRank(minSeverity); !ok {
+			writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_min_severity", "min_severity must be one of: info, warn, error"))
+			return
+		}
+	}
 	filter := types.EventStreamFilter{
-		VMID:       strings.TrimSpace(q.Get("vm_id")),
-		Type:       strings.TrimSpace(q.Get("type")),
-		Source:     strings.TrimSpace(q.Get("source")),
-		Severity:   strings.TrimSpace(q.Get("severity")),
-		Actor:      strings.TrimSpace(q.Get("actor")),
-		ResourceID: strings.TrimSpace(q.Get("resource_id")),
-		TypePrefix: strings.ToLower(strings.TrimSpace(q.Get("type_prefix"))),
-		Search:     strings.ToLower(strings.TrimSpace(q.Get("search"))),
+		VMID:        strings.TrimSpace(q.Get("vm_id")),
+		Type:        strings.TrimSpace(q.Get("type")),
+		Source:      strings.TrimSpace(q.Get("source")),
+		Severity:    strings.TrimSpace(q.Get("severity")),
+		MinSeverity: minSeverity,
+		Actor:       strings.TrimSpace(q.Get("actor")),
+		ResourceID:  strings.TrimSpace(q.Get("resource_id")),
+		TypePrefix:  strings.ToLower(strings.TrimSpace(q.Get("type_prefix"))),
+		Search:      strings.ToLower(strings.TrimSpace(q.Get("search"))),
 	}
 
 	// Determine replay starting point from Last-Event-ID or ?since= (uint64).

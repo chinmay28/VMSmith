@@ -42,6 +42,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         type:       searchParams.get('type')        || '',
         source:     searchParams.get('source')      || '',
         severity:   searchParams.get('severity')    || '',
+        minSeverity: searchParams.get('min_severity') || '',
         actor:      searchParams.get('actor')       || '',
         resourceID: searchParams.get('resource_id') || '',
         typePrefix: searchParams.get('type_prefix') || '',
@@ -49,12 +50,13 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         sort:       searchParams.get('sort')        || '',
         order:      searchParams.get('order')       || '',
       }
-    : { vmId: vmIdProp, type: '', source: '', severity: '', actor: '', resourceID: '', typePrefix: '', search: '', sort: '', order: '' };
+    : { vmId: vmIdProp, type: '', source: '', severity: '', minSeverity: '', actor: '', resourceID: '', typePrefix: '', search: '', sort: '', order: '' };
 
   const [vmFilter, setVmFilter] = useState(initial.vmId);
   const [typeFilter, setTypeFilter] = useState(initial.type);
   const [sourceFilter, setSourceFilter] = useState(initial.source);
   const [severityFilter, setSeverityFilter] = useState(initial.severity);
+  const [minSeverityFilter, setMinSeverityFilter] = useState(initial.minSeverity);
   // actorInput is the live <input>; actorFilter is the debounced/committed
   // value that drives the fetch. Same split as searchInput/searchFilter so
   // typing the alias doesn't fan out one request per keystroke.
@@ -95,6 +97,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     if (typeFilter)       next.set('type', typeFilter);
     if (sourceFilter)     next.set('source', sourceFilter);
     if (severityFilter)   next.set('severity', severityFilter);
+    if (minSeverityFilter) next.set('min_severity', minSeverityFilter);
     if (actorFilter)      next.set('actor', actorFilter);
     if (resourceIdFilter) next.set('resource_id', resourceIdFilter);
     if (typePrefixFilter) next.set('type_prefix', typePrefixFilter);
@@ -102,7 +105,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     if (sortField)        next.set('sort', sortField);
     if (sortOrder)        next.set('order', sortOrder);
     setSearchParams(next, { replace: true });
-  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, setSearchParams]);
+  }, [useURL, vmFilter, typeFilter, sourceFilter, severityFilter, minSeverityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, setSearchParams]);
 
   // Debounce the search input: a fetch per keystroke would fan out one
   // request per character. 250 ms is the sweet spot between "feels live"
@@ -151,6 +154,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
         typePrefix: typePrefixFilter,
         source: sourceFilter,
         severity: severityFilter,
+        minSeverity: minSeverityFilter,
         actor: actorFilter,
         resourceId: resourceIdFilter,
         search: searchFilter,
@@ -168,7 +172,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     } finally {
       setLoading(false);
     }
-  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, page, perPage]);
+  }, [embedded, vmIdProp, vmFilter, typeFilter, sourceFilter, severityFilter, minSeverityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder, page, perPage]);
 
   useEffect(() => {
     setLoading(true);
@@ -180,7 +184,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
   // Reset to page 1 when filters change.
   useEffect(() => {
     setPage(1);
-  }, [vmFilter, typeFilter, sourceFilter, severityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder]);
+  }, [vmFilter, typeFilter, sourceFilter, severityFilter, minSeverityFilter, actorFilter, resourceIdFilter, typePrefixFilter, searchFilter, sortField, sortOrder]);
 
   // Lazily build a VM ID → name map so the timeline can render names.
   // Only top-level Activity needs this; the embedded tab already knows the VM.
@@ -342,6 +346,18 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="error">error</option>
           </select>
           <select
+            className="input py-1 text-xs w-36"
+            value={minSeverityFilter}
+            onChange={e => setMinSeverityFilter(e.target.value)}
+            data-testid="activity-filter-min-severity"
+            title="Minimum severity (this level and above)"
+          >
+            <option value="">Min severity: any</option>
+            <option value="info">Min: info+</option>
+            <option value="warn">Min: warn+</option>
+            <option value="error">Min: error</option>
+          </select>
+          <select
             className="input py-1 text-xs w-44"
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
@@ -376,10 +392,10 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="asc">Order: asc</option>
             <option value="desc">Order: desc</option>
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter || actorInput || resourceIdInput || typePrefixInput || searchInput || sortField || sortOrder) && (
+          {(vmFilter || typeFilter || sourceFilter || severityFilter || minSeverityFilter || actorInput || resourceIdInput || typePrefixInput || searchInput || sortField || sortOrder) && (
             <button
               className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setTypePrefixInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
+              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setMinSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setTypePrefixInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
               data-testid="btn-activity-clear-filters"
             >
               Clear

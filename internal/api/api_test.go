@@ -6857,6 +6857,140 @@ func TestListEvents_FilterByActor_TotalCountReflectsFiltered(t *testing.T) {
 }
 
 // ============================================================
+// min_severity severity-floor filter on GET /events (5.4.41)
+// ============================================================
+
+// seedMinSeverityEvents writes one event per severity (info / warn / error)
+// so the ?min_severity= floor can be asserted without depending on the
+// per-axis seeds in seedSearchableEvents (which carry no warn event).
+func seedMinSeverityEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Now().Truncate(time.Millisecond)
+	seeds := []*types.Event{
+		{Type: "vm.created", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "created", OccurredAt: base.Add(-30 * time.Minute)},
+		{Type: "vm.stopped", Source: types.EventSourceLibvirt, Severity: types.EventSeverityWarn, Message: "stopped unexpectedly", OccurredAt: base.Add(-20 * time.Minute)},
+		{Type: "dhcp.exhausted", Source: types.EventSourceSystem, Severity: types.EventSeverityError, Message: "DHCP pool exhausted", OccurredAt: base.Add(-10 * time.Minute)},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_Floor(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	cases := []struct {
+		floor string
+		want  int
+	}{
+		{"info", 3},  // info + warn + error
+		{"warn", 2},  // warn + error
+		{"error", 1}, // error only
+	}
+	for _, c := range cases {
+		resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=" + c.floor)
+		if err != nil {
+			t.Fatalf("GET min_severity=%s: %v", c.floor, err)
+		}
+		got := decodeEvents(t, resp)
+		if len(got) != c.want {
+			t.Errorf("min_severity=%s returned %d events, want %d", c.floor, len(got), c.want)
+		}
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_CaseInsensitiveAndTrimmed(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=%20WARN%20")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 2 {
+		t.Errorf("min_severity=' WARN ' returned %d, want 2 (warn+error)", len(got))
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 3 {
+		t.Errorf("empty min_severity should be no-op; got %d, want 3", len(got))
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_InvalidReturns400(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=critical")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if apiErr.Code != "invalid_min_severity" {
+		t.Errorf("code = %q, want invalid_min_severity", apiErr.Code)
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_ComposesWithSource(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	// warn floor + libvirt source → only the libvirt warn event (the error is
+	// system-source).
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=warn&source=libvirt")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	if len(got) != 1 {
+		t.Fatalf("min_severity=warn+source=libvirt returned %d, want 1", len(got))
+	}
+	if got[0].Severity != types.EventSeverityWarn {
+		t.Errorf("severity = %q, want warn", got[0].Severity)
+	}
+}
+
+func TestListEvents_FilterByMinSeverity_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedMinSeverityEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_severity=warn&per_page=10&page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if header := resp.Header.Get("X-Total-Count"); header != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (warn+error)", header)
+	}
+}
+
+// ============================================================
 // resource_id exact-match filter on GET /events (4.2.24)
 // ============================================================
 
