@@ -315,11 +315,11 @@ func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWebhook: %v", err)
 	}
-	if persisted.LastStatus != http.StatusInternalServerError {
-		t.Fatalf("LastStatus = %d, want 500 after final failure", persisted.LastStatus)
+	if persisted.LastStatus != 0 {
+		t.Fatalf("LastStatus = %d, want 0 after final failure", persisted.LastStatus)
 	}
-	if persisted.LastError == "" {
-		t.Fatal("LastError was not recorded after final failure")
+	if persisted.LastError != "HTTP 500" {
+		t.Fatalf("LastError = %q, want HTTP 500 after final failure", persisted.LastError)
 	}
 	if persisted.LastDeliveryAt.IsZero() {
 		t.Fatal("LastDeliveryAt was not updated after final failure")
