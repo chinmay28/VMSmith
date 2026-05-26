@@ -2233,6 +2233,28 @@ test.describe("Schedules", () => {
     await expect(page.locator('[data-testid^="schedule-run-run-now-"]').first()).toBeVisible();
   });
 
+  test("vm detail shows matching schedules and can prefill a new VM schedule", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await expect(page.getByTestId("vm-detail-schedules")).toBeVisible();
+    await expect(page.getByTestId("vm-detail-schedule-sch-1")).toContainText("nightly-snapshot");
+
+    await page.getByTestId("btn-add-schedule-from-vm").click();
+    await expect(page.getByTestId("vm-schedule-create-form")).toBeVisible();
+    await expect(page.getByTestId("schedule-vmid-input")).toHaveValue("vm-1");
+    await expect(page.getByTestId("schedule-name-input")).toHaveValue("web-server-schedule");
+
+    await page.getByTestId("schedule-name-input").fill("web-server-restart");
+    await page.getByTestId("schedule-action-select").selectOption("restart");
+    await page.getByTestId("vm-schedule-create-submit").click();
+
+    await expect(page.getByTestId("vm-schedule-create-form")).not.toBeVisible();
+    const row = page.locator('[data-testid^="vm-detail-schedule-sch-new-"]').first();
+    await expect(row).toContainText("web-server-restart");
+    await expect(row).toContainText("restart");
+  });
+
   test("deletes a schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();
