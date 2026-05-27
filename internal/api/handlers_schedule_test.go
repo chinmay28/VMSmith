@@ -478,3 +478,94 @@ func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestListScheduleRuns_Filters(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-runs", Name: "runs", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started string, status types.ScheduleRunStatus) {
+		t.Helper()
+		at, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		if err := s.AppendRun("sched-runs", &types.ScheduleRun{
+			VMID: "vm-1", StartedAt: at, Status: status,
+		}); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	mk("2026-05-20T02:00:00Z", types.ScheduleRunStatusError)
+	mk("2026-05-21T02:00:00Z", types.ScheduleRunStatusSkipped)
+	mk("2026-05-22T02:00:00Z", types.ScheduleRunStatusSuccess)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-runs/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// No filter: all three, newest first.
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 3 || total != 3 {
+		t.Fatalf("no filter: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	// status exact match.
+	if runs, total, _ := list("?status=error"); len(runs) != 1 || total != 1 || runs[0].Status != types.ScheduleRunStatusError {
+		t.Fatalf("status=error: %+v total=%d", runs, total)
+	}
+	// status is case-insensitive + trimmed.
+	if runs, _, _ := list("?status=%20SUCCESS%20"); len(runs) != 1 || runs[0].Status != types.ScheduleRunStatusSuccess {
+		t.Fatalf("status=SUCCESS (case/trim): %+v", runs)
+	}
+	// unknown status -> 400 invalid_status.
+	if _, _, code := list("?status=bogus"); code != http.StatusBadRequest {
+		t.Fatalf("status=bogus should 400, got %d", code)
+	}
+
+	// since is inclusive on started_at.
+	if runs, total, _ := list("?since=2026-05-21T02:00:00Z"); len(runs) != 2 || total != 2 {
+		t.Fatalf("since: len=%d total=%d", len(runs), total)
+	}
+	// until is inclusive on started_at.
+	if runs, total, _ := list("?until=2026-05-21T02:00:00Z"); len(runs) != 2 || total != 2 {
+		t.Fatalf("until: len=%d total=%d", len(runs), total)
+	}
+	// invalid since/until -> 400.
+	if _, _, code := list("?since=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid since should 400, got %d", code)
+	}
+	if _, _, code := list("?until=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid until should 400, got %d", code)
+	}
+
+	// Filters compose: status + since.
+	if runs, total, _ := list("?status=success&since=2026-05-21T02:00:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("status+since compose: len=%d total=%d", len(runs), total)
+	}
+	// status with no match yields an empty (non-null) array + total 0.
+	if runs, total, code := list("?status=running"); code != http.StatusOK || runs == nil || len(runs) != 0 || total != 0 {
+		t.Fatalf("status=running: code=%d runs=%v total=%d", code, runs, total)
+	}
+
+	// X-Total-Count reflects the post-filter population even when paginated.
+	if runs, total, _ := list("?since=2026-05-21T02:00:00Z&per_page=1"); len(runs) != 1 || total != 2 {
+		t.Fatalf("filtered pagination: len=%d total=%d", len(runs), total)
+	}
+
+	// Unknown schedule still 404s even with a filter present.
+	resp, _ := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/missing/runs?status=error", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown schedule should 404, got %d", resp.StatusCode)
+	}
+}

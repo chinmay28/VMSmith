@@ -2782,10 +2782,31 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List recent runs for a schedule (newest first) */
+        /**
+         * List recent runs for a schedule (newest first)
+         * @description Returns the schedule's run history, newest first. Filters are applied
+         *     before pagination so `X-Total-Count` reflects the post-filter
+         *     population, and compose additively with one another.
+         */
         get: {
             parameters: {
                 query?: {
+                    /**
+                     * @description Case-insensitive exact-match on the run status. Empty disables the
+                     *     filter; unknown values return 400 `invalid_status`.
+                     */
+                    status?: "running" | "success" | "error" | "skipped";
+                    /**
+                     * @description Inclusive RFC3339 lower bound on the run's `started_at`. Invalid
+                     *     values return 400 `invalid_since`. A run with a zero `started_at`
+                     *     is filtered out whenever `since` or `until` is set.
+                     */
+                    since?: string;
+                    /**
+                     * @description Inclusive RFC3339 upper bound on the run's `started_at`. Invalid
+                     *     values return 400 `invalid_until`.
+                     */
+                    until?: string;
                     /** @description 1-based page number when paginating the run history. */
                     page?: number;
                     /**
