@@ -46,6 +46,10 @@ export default function VMList() {
   const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
   const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
   const [maxCpusFilter, setMaxCpusFilter] = useState(searchParams.get('max_cpus') || '');
+  const [minRamInput, setMinRamInput] = useState(searchParams.get('min_ram_mb') || '');
+  const [minRamFilter, setMinRamFilter] = useState(searchParams.get('min_ram_mb') || '');
+  const [maxRamInput, setMaxRamInput] = useState(searchParams.get('max_ram_mb') || '');
+  const [maxRamFilter, setMaxRamFilter] = useState(searchParams.get('max_ram_mb') || '');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
@@ -55,8 +59,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -89,7 +93,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -141,6 +145,19 @@ export default function VMList() {
     return () => clearTimeout(handle);
   }, [maxCpusInput]);
 
+  // Debounce the RAM range inputs — the committed filters drive useFetch.
+  useEffect(() => {
+    const trimmed = minRamInput.trim();
+    const handle = setTimeout(() => setMinRamFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [minRamInput]);
+
+  useEffect(() => {
+    const trimmed = maxRamInput.trim();
+    const handle = setTimeout(() => setMaxRamFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [maxRamInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -155,8 +172,10 @@ export default function VMList() {
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
     if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
+    if (minRamFilter) next.set('min_ram_mb', minRamFilter); else next.delete('min_ram_mb');
+    if (maxRamFilter) next.set('max_ram_mb', maxRamFilter); else next.delete('max_ram_mb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -320,6 +339,43 @@ export default function VMList() {
             aria-label="Clear vCPU filter"
           >
             Clear vCPUs
+          </button>
+        )}
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Min RAM (MB)</span>
+          <input
+            type="number"
+            min="0"
+            value={minRamInput}
+            onChange={(e) => setMinRamInput(e.target.value)}
+            placeholder="0"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-min-ram"
+            aria-label="Minimum RAM in MB"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Max RAM (MB)</span>
+          <input
+            type="number"
+            min="0"
+            value={maxRamInput}
+            onChange={(e) => setMaxRamInput(e.target.value)}
+            placeholder="∞"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-max-ram"
+            aria-label="Maximum RAM in MB"
+          />
+        </label>
+        {(minRamInput || maxRamInput) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setMinRamInput(''); setMaxRamInput(''); }}
+            data-testid="vm-list-ram-filter-clear"
+            aria-label="Clear RAM filter"
+          >
+            Clear RAM
           </button>
         )}
       </div>

@@ -506,6 +506,35 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("max_cpus=2");
   });
 
+  // 5.4.48 — RAM range filter on the VM list. Seed data: web-server has 4096 MB,
+  // db-server has 8192 MB. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_ram_mb= / ?max_ram_mb=.
+  test("RAM range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_ram_mb=8000 -> only db-server (8192 MB).
+    await page.getByTestId("vm-list-min-ram").fill("8000");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_ram_mb=8000");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-ram-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_ram_mb=");
+
+    // max_ram_mb=5000 -> only web-server (4096 MB).
+    await page.getByTestId("vm-list-max-ram").fill("5000");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_ram_mb=5000");
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
