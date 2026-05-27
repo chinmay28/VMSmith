@@ -10790,6 +10790,167 @@ func TestListPorts_FilterByProtocol_TotalCountReflectsFiltered(t *testing.T) {
 }
 
 // ============================================================
+// Port-forward list host-port range filter tests (5.4.47)
+// ============================================================
+
+// seedHostPortRangePorts seeds four forwards spanning a spread of host ports
+// so the inclusive [min, max] range filter can be exercised at both endpoints.
+func seedHostPortRangePorts(t *testing.T, s *store.Store, vmID string) {
+	t.Helper()
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22", VMID: vmID, HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "ssh"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8080", VMID: vmID, HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "http"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8443", VMID: vmID, HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "https"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/9090", VMID: vmID, HostPort: 9090, GuestPort: 9090, GuestIP: "192.168.100.50", Protocol: types.ProtocolUDP, Description: "metrics"})
+}
+
+func TestListPorts_FilterByMinHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-min")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-min", "min_host_port=8443")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with host_port >= 8443, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.HostPort < 8443 {
+			t.Errorf("host_port %d below min 8443", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMaxHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-max")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-max", "max_host_port=8080")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with host_port <= 8080, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.HostPort > 8080 {
+			t.Errorf("host_port %d above max 8080", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByHostPortRange(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-range")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-range", "min_host_port=8000&max_host_port=9000")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules in [8000,9000], got %d", len(got))
+	}
+	for _, p := range got {
+		if p.HostPort < 8000 || p.HostPort > 9000 {
+			t.Errorf("host_port %d outside [8000,9000]", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMinHostPort_Inclusive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-incl")
+
+	// 8080 itself must be included by min_host_port=8080.
+	got := listPortsWithQuery(t, ts, "vm-hp-incl", "min_host_port=8080")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 rules with host_port >= 8080 (inclusive), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByMinHostPort_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-empty", "min_host_port=%20")
+	if len(got) != 4 {
+		t.Fatalf("whitespace min_host_port should be a no-op (4 rules), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByInvalidMinHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-bad")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-bad/ports?min_host_port=abc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_min_host_port" {
+		t.Errorf("error code = %q, want invalid_min_host_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByMaxHostPort_RejectsNegative(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-neg")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-neg/ports?max_host_port=-5")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_max_host_port" {
+		t.Errorf("error code = %q, want invalid_max_host_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByHostPort_ComposesWithProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-cmb")
+
+	// host_port >= 8000 → {8080(tcp), 8443(tcp), 9090(udp)}; protocol=tcp narrows to 2.
+	got := listPortsWithQuery(t, ts, "vm-hp-cmb", "min_host_port=8000&protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_host_port=8000 + protocol=tcp = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolTCP || p.HostPort < 8000 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByHostPort_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-cnt/ports?min_host_port=8000&max_host_port=9000")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
 // Port-forward list pagination tests (5.4.20)
 // ============================================================
 

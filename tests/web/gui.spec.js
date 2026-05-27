@@ -1252,6 +1252,33 @@ test.describe("VM Detail", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("port_protocol")).toBeNull();
   });
 
+  test("host-port range filter narrows the list and round-trips through the URL (5.4.47)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seeded host ports: pf-seed-ssh=2222, pf-seed-http=8080.
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+
+    // min host port 8000 keeps only the 8080 rule.
+    await page.getByTestId("port-min-host-port").fill("8000");
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_host")).toBe("8000");
+
+    // Clearing restores both rows and drops the URL param.
+    await page.getByTestId("port-host-port-clear").click();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_host")).toBeNull();
+
+    // max host port 5000 keeps only the 2222 rule.
+    await page.getByTestId("port-max-host-port").fill("5000");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_max_host")).toBe("5000");
+  });
+
   test("protocol filter composes with the existing search filter (5.4.25)", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

@@ -786,6 +786,28 @@ paths:
             Empty disables; anything other than tcp/udp returns 400
             `invalid_protocol`. Composes additively with `tag` and
             `search`.
+        - in: query
+          name: min_host_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive lower bound on the rule's `host_port`. Whitespace-trimmed;
+            empty disables the bound; non-numeric or negative values return 400
+            `invalid_min_host_port`. Applied after `protocol` and before
+            `search`; composes additively with every other filter so
+            `X-Total-Count` reflects the post-filter population.
+        - in: query
+          name: max_host_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive upper bound on the rule's `host_port`. Same shape as
+            `min_host_port`; non-numeric or negative values return 400
+            `invalid_max_host_port`.
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:

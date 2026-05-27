@@ -762,6 +762,22 @@ const server = http.createServer(async (req, res) => {
     if (protocolFilter && protocolFilter !== "tcp" && protocolFilter !== "udp") {
       return json(res, 400, { code: "invalid_protocol", message: "protocol must be 'tcp' or 'udp'" });
     }
+    // Host-port range filter (5.4.47): inclusive [min, max] on host_port.
+    const parsePortBound = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) return { err: name };
+      return { set: true, value: n };
+    };
+    const minHostPort = parsePortBound(url.searchParams.get("min_host_port"), "min_host_port");
+    if (minHostPort.err) {
+      return json(res, 400, { code: "invalid_min_host_port", message: "min_host_port must be a non-negative integer port number" });
+    }
+    const maxHostPort = parsePortBound(url.searchParams.get("max_host_port"), "max_host_port");
+    if (maxHostPort.err) {
+      return json(res, 400, { code: "invalid_max_host_port", message: "max_host_port must be a non-negative integer port number" });
+    }
     let list = (portForwards.get(m[1]) || []).slice();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     if (tagFilter) {
@@ -770,6 +786,8 @@ const server = http.createServer(async (req, res) => {
     if (protocolFilter) {
       list = list.filter(pf => (pf.protocol || "").toLowerCase() === protocolFilter);
     }
+    if (minHostPort.set) list = list.filter(pf => (pf.host_port || 0) >= minHostPort.value);
+    if (maxHostPort.set) list = list.filter(pf => (pf.host_port || 0) <= maxHostPort.value);
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(pf => {

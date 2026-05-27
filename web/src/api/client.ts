@@ -209,16 +209,18 @@ export const images = {
 export const ports = {
   list: (
     vmId: string,
-    opts: { sort?: string; order?: string; search?: string; tag?: string; protocol?: string; page?: number; perPage?: number } = {},
+    opts: { sort?: string; order?: string; search?: string; tag?: string; protocol?: string; minHostPort?: string; maxHostPort?: string; page?: number; perPage?: number } = {},
   ) => {
     const query: Record<string, string | number> = {};
-    if (opts.sort)     query.sort     = opts.sort;
-    if (opts.order)    query.order    = opts.order;
-    if (opts.search)   query.search   = opts.search;
-    if (opts.tag)      query.tag      = opts.tag;
-    if (opts.protocol) query.protocol = opts.protocol;
-    if (opts.page)     query.page     = opts.page;
-    if (opts.perPage)  query.per_page = opts.perPage;
+    if (opts.sort)        query.sort          = opts.sort;
+    if (opts.order)       query.order         = opts.order;
+    if (opts.search)      query.search        = opts.search;
+    if (opts.tag)         query.tag           = opts.tag;
+    if (opts.protocol)    query.protocol      = opts.protocol;
+    if (opts.minHostPort) query.min_host_port = opts.minHostPort;
+    if (opts.maxHostPort) query.max_host_port = opts.maxHostPort;
+    if (opts.page)        query.page          = opts.page;
+    if (opts.perPage)     query.per_page      = opts.perPage;
     return unwrap(apiClient.GET('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId }, query: query as any },
     } as any), { withMeta: true });
