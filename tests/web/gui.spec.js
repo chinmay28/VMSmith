@@ -2198,6 +2198,22 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
   });
 
+  test("tag-selector filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // sch-2 carries tag_selector ["dev"]; sch-1 is vm_id-targeted (no tags).
+    await page.getByTestId("schedule-tag-selector-filter").fill("dev");
+    await expect.poll(() => new URL(page.url()).searchParams.get("tag_selector")).toBe("dev");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+
+    await page.getByTestId("schedule-tag-selector-filter").fill("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("tag_selector")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+  });
+
   test("edits a schedule via the edit modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

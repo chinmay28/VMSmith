@@ -58,6 +58,12 @@ export default function Schedules() {
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
 
+  // Exact tag-selector membership filter (case-insensitive). Debounced like
+  // `search`; round-trips through `?tag_selector=`. The symmetric counterpart
+  // to filtering by a single `vm_id` for tag-selector-targeted schedules.
+  const [tagSelectorInput, setTagSelectorInput] = useState(searchParams.get('tag_selector') || '');
+  const [tagSelectorFilter, setTagSelectorFilter] = useState(searchParams.get('tag_selector') || '');
+
   const VALID_ACTIONS = ['', ...ACTIONS];
   const initialAction = (() => {
     const raw = (searchParams.get('action') || '').toLowerCase();
@@ -107,15 +113,22 @@ export default function Schedules() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  useEffect(() => {
+    const trimmed = tagSelectorInput.trim();
+    const id = setTimeout(() => setTagSelectorFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [tagSelectorInput]);
+
   // Reset to page 1 on any filter / sort change so the user doesn't land on
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
+  }, [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
+    if (tagSelectorFilter) next.set('tag_selector', tagSelectorFilter); else next.delete('tag_selector');
     if (actionFilter) next.set('action', actionFilter); else next.delete('action');
     if (enabledFilter) next.set('enabled', enabledFilter); else next.delete('enabled');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
@@ -125,11 +138,11 @@ export default function Schedules() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, actionFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, action: actionFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -201,6 +214,18 @@ export default function Schedules() {
             </button>
           )}
         </div>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Tag selector
+          <input
+            type="search"
+            value={tagSelectorInput}
+            onChange={(e) => setTagSelectorInput(e.target.value)}
+            placeholder="exact tag…"
+            className="input py-1 text-xs w-32"
+            data-testid="schedule-tag-selector-filter"
+            aria-label="Filter by tag selector"
+          />
+        </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Action
           <select

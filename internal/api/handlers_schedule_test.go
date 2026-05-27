@@ -398,6 +398,61 @@ func TestListSchedules_FilterByTimeRange(t *testing.T) {
 	}
 }
 
+func TestListSchedules_FilterByTagSelector(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+
+	// prod: tags [prod, web]; data: tag [data]; single: vm_id-targeted (no tags).
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "prod-snap", TagSelector: []string{"prod", "web"}, Action: types.ScheduleActionSnapshot, CronSpec: "0 0 2 * * *"})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "data-snap", TagSelector: []string{"data"}, Action: types.ScheduleActionSnapshot, CronSpec: "0 0 3 * * *"})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "single-start", VMID: "vm-9", Action: types.ScheduleActionStart, CronSpec: "0 0 4 * * *"})
+
+	list := func(q string) ([]*types.Schedule, int) {
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list%s: HTTP %d: %s", q, resp.StatusCode, data)
+		}
+		var out []*types.Schedule
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total
+	}
+
+	// exact membership: matches a schedule when any tag equals the value.
+	if out, total := list("?tag_selector=prod"); len(out) != 1 || total != 1 || out[0].Name != "prod-snap" {
+		t.Fatalf("tag_selector=prod wrong: %+v total=%d", out, total)
+	}
+	if out, total := list("?tag_selector=web"); len(out) != 1 || total != 1 || out[0].Name != "prod-snap" {
+		t.Fatalf("tag_selector=web wrong: %+v total=%d", out, total)
+	}
+	if out, total := list("?tag_selector=data"); len(out) != 1 || total != 1 || out[0].Name != "data-snap" {
+		t.Fatalf("tag_selector=data wrong: %+v total=%d", out, total)
+	}
+	// case-insensitive + whitespace-trimmed.
+	if out, total := list("?tag_selector=%20PROD%20"); len(out) != 1 || total != 1 || out[0].Name != "prod-snap" {
+		t.Fatalf("tag_selector case/trim wrong: %+v total=%d", out, total)
+	}
+	// substring is NOT a match — exact membership only (`pro` != `prod`).
+	if out, total := list("?tag_selector=pro"); len(out) != 0 || total != 0 {
+		t.Fatalf("tag_selector should be exact, not substring: %+v total=%d", out, total)
+	}
+	// empty disables the filter — all three returned.
+	if out, total := list("?tag_selector="); len(out) != 3 || total != 3 {
+		t.Fatalf("empty tag_selector should be no-op: %+v total=%d", out, total)
+	}
+	// vm_id-targeted schedule (empty tag_selector) is never matched.
+	if out, total := list("?tag_selector=vm-9"); len(out) != 0 || total != 0 {
+		t.Fatalf("vm_id-targeted schedule should not match tag_selector: %+v total=%d", out, total)
+	}
+	// composes additively with action; X-Total-Count reflects post-filter.
+	if out, total := list("?tag_selector=prod&action=snapshot"); len(out) != 1 || total != 1 || out[0].Name != "prod-snap" {
+		t.Fatalf("tag_selector+action compose wrong: %+v total=%d", out, total)
+	}
+	if out, total := list("?tag_selector=prod&action=start"); len(out) != 0 || total != 0 {
+		t.Fatalf("tag_selector+non-matching action should be empty: %+v total=%d", out, total)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

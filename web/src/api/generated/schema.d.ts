@@ -2554,6 +2554,15 @@ export interface paths {
                      */
                     vm_id?: string;
                     /**
+                     * @description Case-insensitive exact-membership filter on the schedule's
+                     *     `tag_selector` list: a schedule matches when any entry equals the
+                     *     value. Whitespace-trimmed; empty disables the filter. Schedules with
+                     *     an empty `tag_selector` (vm_id-targeted or all-VMs) are NOT matched,
+                     *     mirroring the webhook `event_type` membership semantics. The
+                     *     symmetric counterpart to `vm_id` for tag-selector-targeted schedules.
+                     */
+                    tag_selector?: string;
+                    /**
                      * @description Exact-match filter on the schedule's `action`.
                      *     Whitespace-trimmed; empty disables the filter.
                      */

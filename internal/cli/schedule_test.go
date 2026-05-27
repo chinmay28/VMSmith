@@ -107,6 +107,17 @@ func TestCLI_ScheduleList_ForwardsFilters(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleList_ForwardsTagSelector(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--tag-selector", "  PROD  "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "tag_selector=prod") {
+		t.Fatalf("query missing trimmed+lowercased tag_selector: %s", d.lastQuery)
+	}
+}
+
 func TestCLI_ScheduleList_ForwardsTimeRange(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
