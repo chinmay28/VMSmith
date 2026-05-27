@@ -2276,6 +2276,28 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
   });
 
+  test("catch-up filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // sch-1 catch_up_policy "skip"; sch-2 "run_once".
+    await page.getByTestId("schedule-catchup-filter").selectOption("run_once");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBe("run_once");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+
+    await page.getByTestId("schedule-catchup-filter").selectOption("skip");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBe("skip");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+
+    await page.getByTestId("schedule-catchup-filter").selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+  });
+
   test("edits a schedule via the edit modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

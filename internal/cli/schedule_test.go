@@ -118,6 +118,27 @@ func TestCLI_ScheduleList_ForwardsTagSelector(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleList_ForwardsCatchUpPolicy(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--catch-up", "  RUN_ONCE  "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "catch_up_policy=run_once") {
+		t.Fatalf("query missing trimmed+lowercased catch_up_policy: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleList_RejectsInvalidCatchUp(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--catch-up", "bogus"); err == nil {
+		t.Fatal("expected invalid --catch-up rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid catch-up should not contact daemon")
+	}
+}
+
 func TestCLI_ScheduleList_ForwardsTimeRange(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,

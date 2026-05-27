@@ -2601,6 +2601,16 @@ export interface paths {
                      */
                     action?: "snapshot" | "start" | "stop" | "restart";
                     /**
+                     * @description Case-insensitive exact-match filter on the schedule's
+                     *     `catch_up_policy`. Whitespace-trimmed; empty disables the filter;
+                     *     invalid values return 400 `invalid_catch_up_policy`. A schedule
+                     *     persisted with an empty policy is treated as `skip` (the engine's
+                     *     default) so `catch_up_policy=skip` matches it, mirroring the VM
+                     *     `default_user=root` empty-means-root filter semantics. Composes
+                     *     additively with every other schedule filter.
+                     */
+                    catch_up_policy?: "skip" | "run_once" | "run_all";
+                    /**
                      * @description Tristate boolean filter on the schedule's `enabled` flag.
                      *     Case-insensitive `true` / `false`; whitespace-trimmed; empty
                      *     disables the filter; anything else returns 400 `invalid_enabled`.
