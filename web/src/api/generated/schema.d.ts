@@ -1868,6 +1868,22 @@ export interface paths {
                      */
                     default_user?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the name of any of the
+                     *     template's additional network attachments (`networks[].name`). A
+                     *     template matches when any attachment name equals the value
+                     *     (any-of). Whitespace is trimmed before comparison; an empty value
+                     *     disables the filter. Closes the operator query "show me every
+                     *     template that attaches `data-net`". Mirrors the VMs `?network=`
+                     *     filter (5.4.36): the implicit primary NAT network is not
+                     *     represented in the template's networks list, so this only scopes
+                     *     to explicitly-attached extra networks operators name and group by
+                     *     ("data-net", "storage-net"). Composes additively with `?tag=`,
+                     *     `?image=`, `?default_user=`, `?search=`, `?since=`, `?until=`,
+                     *     `?sort=`, `?order=`, and pagination so `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    network?: string;
+                    /**
                      * @description RFC3339 timestamp lower bound (inclusive) on the template's
                      *     `created_at`. Templates created before this instant are
                      *     filtered out. Whitespace is trimmed; empty disables the

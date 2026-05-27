@@ -2041,6 +2041,39 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
+  test("network filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    // big-rocky attaches data-net; small-ubuntu has no extra networks.
+    await page.getByTestId("template-list-network-filter").fill("data-net");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("network")).toBe("data-net");
+
+    await page.getByTestId("template-list-network-filter-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("network=");
+  });
+
+  test("network filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-network-filter").fill("DATA-NET");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  test("network filter matches no templates when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-network-filter").fill("storage-net");
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

@@ -17,6 +17,8 @@ export default function TemplateList() {
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
   const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
+  const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
+  const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
   const [page, setPage] = useState(1);
@@ -27,8 +29,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, since, until, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, since, until, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -41,7 +43,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, since, until, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -64,6 +66,13 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [defaultUserInput]);
 
+  // Debounce the network filter input.
+  useEffect(() => {
+    const trimmed = networkInput.trim();
+    const id = setTimeout(() => setNetworkFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [networkInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -71,10 +80,11 @@ export default function TemplateList() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
+    if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -199,6 +209,28 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+        <div className="relative w-64">
+          <input
+            type="text"
+            value={networkInput}
+            onChange={(e) => setNetworkInput(e.target.value)}
+            placeholder="Filter by network…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="template-list-network-filter"
+            aria-label="Filter templates by network"
+          />
+          {networkInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setNetworkInput('')}
+              data-testid="template-list-network-filter-clear"
+              aria-label="Clear network filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
           <label className="flex items-center gap-1">
             <span>Since</span>
@@ -295,6 +327,8 @@ export default function TemplateList() {
                 ? `No templates use image "${imageFilter}".`
                 : defaultUserFilter
                 ? `No templates use default user "${defaultUserFilter}".`
+                : networkFilter
+                ? `No templates attach network "${networkFilter}".`
                 : (since || until)
                 ? 'No templates were created in the selected time range.'
                 : tagFilter

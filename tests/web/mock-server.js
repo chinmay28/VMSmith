@@ -121,7 +121,7 @@ function seed() {
     description: "Big Rocky template",
     tags: ["prod", "rocky"],
     default_user: "root",
-    networks: [],
+    networks: [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }],
     created_at: "2026-05-15T12:00:00Z",
     updated_at: "2026-05-15T12:00:00Z",
   });
@@ -1089,6 +1089,11 @@ const server = http.createServer(async (req, res) => {
     const defaultUser = (url.searchParams.get("default_user") || "").trim().toLowerCase();
     if (defaultUser) {
       list = list.filter(t => String(t.default_user || "").toLowerCase() === defaultUser);
+    }
+    // network: case-insensitive exact-match (any-of) against networks[].name.
+    const network = (url.searchParams.get("network") || "").trim().toLowerCase();
+    if (network) {
+      list = list.filter(t => Array.isArray(t.networks) && t.networks.some(n => String(n.name || "").toLowerCase() === network));
     }
     // since / until: inclusive RFC3339 time-range filter on created_at;
     // invalid value → 400; whitespace-only disables; zero/missing
