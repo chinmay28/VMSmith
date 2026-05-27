@@ -98,6 +98,13 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     empty-means-root fallback: a template's empty default_user means "use
 //     the image's built-in user", so an empty stored value never matches a
 //     non-empty query.
+//   - network=<name>         case-insensitive exact-match (any-of) against the
+//     name of any of the template's additional network attachments
+//     (networks[].name). Closes the operator query "show me every template
+//     that attaches `data-net`". Mirrors the VM `?network=` filter (5.4.36):
+//     the implicit primary NAT network is not represented in the template's
+//     networks list, so this only scopes to explicitly-attached extra
+//     networks. Whitespace trimmed; empty disables.
 //   - since=<rfc3339>        keep templates with created_at >= since
 //     (inclusive). Whitespace trimmed; empty disables. Invalid values
 //     return 400 `invalid_since`.
@@ -161,6 +168,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if strings.EqualFold(tpl.DefaultUser, defaultUserFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
+	}
+
+	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
+	if networkFilter != "" {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if types.TemplateMatchesNetwork(tpl, networkFilter) {
 				filtered = append(filtered, tpl)
 			}
 		}

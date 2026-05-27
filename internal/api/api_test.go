@@ -10084,6 +10084,150 @@ func TestListTemplates_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing
 	}
 }
 
+// --- template list ?network= (roadmap 5.4.45) ---
+
+func tmplWithNet(id, name string, networks ...string) *types.VMTemplate {
+	attachments := make([]types.NetworkAttachment, 0, len(networks))
+	for _, n := range networks {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return &types.VMTemplate{ID: id, Name: name, Image: "rocky9.qcow2", Networks: attachments}
+}
+
+func TestListTemplates_FilterByNetwork_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?network=data-net")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "Data-Net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=DATA-NET")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl (case-insensitive)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=%20%20data-net%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl after trim", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_AnyOf(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "multi-tpl", "data-net", "storage-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "single-tpl", "mgmt-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=storage-net")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "multi-tpl" {
+		t.Errorf("filter = %+v, want only multi-tpl (any-of attachment match)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "no-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("filter = %+v, want every template when network is whitespace-only", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_NoAttachmentsNeverMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "no-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "data-tpl", "data-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl (template with no networks must not match)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_PartialIsNotAMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=storage")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list (substring must not match exact filter)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	prod := tmplWithNet("tmpl-1", "data-prod", "data-net")
+	prod.Tags = []string{"prod"}
+	qa := tmplWithNet("tmpl-2", "data-qa", "data-net")
+	qa.Tags = []string{"qa"}
+	other := tmplWithNet("tmpl-3", "mgmt-prod", "mgmt-net")
+	other.Tags = []string{"prod"}
+	seedStoredTemplate(t, s, prod)
+	seedStoredTemplate(t, s, qa)
+	seedStoredTemplate(t, s, other)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net&tag=prod")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-prod" {
+		t.Errorf("filter = %+v, want only data-prod (intersection of network+tag)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 5; i++ {
+		seedStoredTemplate(t, s, tmplWithNet(fmt.Sprintf("tmpl-%d", i), fmt.Sprintf("data-%d", i), "data-net"))
+	}
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-x", "mgmt", "mgmt-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "5" {
+		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
 func TestListTemplates_FilterBySince(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()

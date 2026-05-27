@@ -5350,6 +5350,103 @@ func TestCLI_TemplateList_FilterByDefaultUser_NoMatch(t *testing.T) {
 	}
 }
 
+// --- template list --network (roadmap 5.4.45) ---
+
+func tmplNet(names ...string) []types.NetworkAttachment {
+	attachments := make([]types.NetworkAttachment, 0, len(names))
+	for _, n := range names {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return attachments
+}
+
+func TestCLI_TemplateList_FilterByNetwork_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "storage-tpl", Image: "rocky9.qcow2", Networks: tmplNet("storage-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "data-net")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected data-tpl in output, got %q", out)
+	}
+	if strings.Contains(out, "storage-tpl") {
+		t.Fatalf("did not expect storage-tpl in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("Data-Net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "storage-tpl", Image: "rocky9.qcow2", Networks: tmplNet("storage-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "DATA-NET")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected case-insensitive match for data-tpl, got %q", out)
+	}
+	if strings.Contains(out, "storage-tpl") {
+		t.Fatalf("did not expect storage-tpl in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "no-net", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "   ")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") || !strings.Contains(out, "no-net") {
+		t.Fatalf("expected every template (whitespace --network is a no-op), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "mgmt-net")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
 // --- template list --since / --until (roadmap 5.4.31) ---
 
 func TestCLI_TemplateList_FilterBySince(t *testing.T) {
