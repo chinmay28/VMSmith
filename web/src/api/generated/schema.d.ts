@@ -1201,6 +1201,20 @@ export interface paths {
                      *     `search`.
                      */
                     protocol?: "tcp" | "udp";
+                    /**
+                     * @description Inclusive lower bound on the rule's `host_port`. Whitespace-trimmed;
+                     *     empty disables the bound; non-numeric or negative values return 400
+                     *     `invalid_min_host_port`. Applied after `protocol` and before
+                     *     `search`; composes additively with every other filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    min_host_port?: number;
+                    /**
+                     * @description Inclusive upper bound on the rule's `host_port`. Same shape as
+                     *     `min_host_port`; non-numeric or negative values return 400
+                     *     `invalid_max_host_port`.
+                     */
+                    max_host_port?: number;
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };
