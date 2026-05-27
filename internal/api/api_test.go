@@ -1255,6 +1255,158 @@ func TestListVMs_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// --- VM list ?min_cpus= / ?max_cpus= range filter (5.4.44) ---
+
+func seedVMWithCPUs(id, name string, cpus int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{CPUs: cpus}, State: types.VMStateRunning}
+}
+
+func TestListVMs_FilterByMinCpus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxCpus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_cpus=4")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByCpuRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=3&max_cpus=6")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [3,6] vCPUs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinCpus_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "edge", 4))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinCpus_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_cpus should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinCpus(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_cpus" {
+		t.Fatalf("code = %q, want invalid_min_cpus", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxCpus_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_cpus=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_cpus" {
+		t.Fatalf("code = %q, want invalid_max_cpus", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByCpus_ComposesWithStatusAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "run-big", Spec: types.VMSpec{CPUs: 8}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "stop-big", Spec: types.VMSpec{CPUs: 8}, State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "run-small", Spec: types.VMSpec{CPUs: 2}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?status=running&min_cpus=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "run-big" {
+		t.Fatalf("expected only run-big, got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByAutoStart_True(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

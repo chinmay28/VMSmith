@@ -297,6 +297,20 @@ const server = http.createServer(async (req, res) => {
     if (until.invalid) {
       return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
     }
+    // min_cpus / max_cpus: inclusive non-negative integer range filter on
+    // spec.cpus; non-numeric/negative value -> 400; whitespace-only disables.
+    const parseCount = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      if (!/^\d+$/.test(v)) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a non-negative integer` };
+      }
+      return { set: true, value: Number(v) };
+    };
+    const minCpusP = parseCount(url.searchParams.get("min_cpus"), "min_cpus");
+    if (minCpusP.invalid) return json(res, 400, { code: minCpusP.code, message: minCpusP.msg });
+    const maxCpusP = parseCount(url.searchParams.get("max_cpus"), "max_cpus");
+    if (maxCpusP.invalid) return json(res, 400, { code: maxCpusP.code, message: maxCpusP.msg });
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -340,6 +354,14 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(t.getTime())) return false;
         if (since.set && t < since.value) return false;
         if (until.set && t > until.value) return false;
+        return true;
+      });
+    }
+    if (minCpusP.set || maxCpusP.set) {
+      list = list.filter(vm => {
+        const cpus = (vm.spec && vm.spec.cpus) || 0;
+        if (minCpusP.set && cpus < minCpusP.value) return false;
+        if (maxCpusP.set && cpus > maxCpusP.value) return false;
         return true;
       });
     }

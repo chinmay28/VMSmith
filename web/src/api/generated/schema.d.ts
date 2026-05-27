@@ -115,6 +115,23 @@ export interface paths {
                      *     unknown / additive-composition semantics as `since`.
                      */
                     until?: string;
+                    /**
+                     * @description Inclusive lower bound on the VM's `spec.cpus` (vCPU count).
+                     *     VMs with fewer vCPUs are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_min_cpus`. Composes additively with every
+                     *     other list filter so `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    min_cpus?: number;
+                    /**
+                     * @description Inclusive upper bound on the VM's `spec.cpus` (vCPU count).
+                     *     VMs with more vCPUs are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_max_cpus`. Same count-range semantics as
+                     *     `min_cpus`.
+                     */
+                    max_cpus?: number;
                 };
                 header?: never;
                 path?: never;

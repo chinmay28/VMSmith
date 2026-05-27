@@ -70,6 +70,31 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: min_cpus
+          in: query
+          required: false
+          description: |
+            Inclusive lower bound on the VM's `spec.cpus` (vCPU count).
+            VMs with fewer vCPUs are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_min_cpus`. Composes additively with every
+            other list filter so `X-Total-Count` reflects the post-filter
+            population.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_cpus
+          in: query
+          required: false
+          description: |
+            Inclusive upper bound on the VM's `spec.cpus` (vCPU count).
+            VMs with more vCPUs are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_max_cpus`. Same count-range semantics as
+            `min_cpus`.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: VM list
