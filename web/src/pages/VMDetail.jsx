@@ -368,7 +368,11 @@ export default function VMDetail() {
                     {!schedule.enabled && <span className="text-[10px] font-mono text-amber-300">disabled</span>}
                   </div>
                   <div className="mt-1 text-[11px] font-mono text-steel-500">
-                    {schedule.vm_id === id ? 'Direct VM schedule' : `Matches tags: ${(schedule.tag_selector || []).join(', ')}`}
+                    {schedule.vm_id === id
+                      ? 'Direct VM schedule'
+                      : Array.isArray(schedule.tag_selector) && schedule.tag_selector.length > 0
+                        ? `Matches tags: ${schedule.tag_selector.join(', ')}`
+                        : 'All VMs'}
                   </div>
                 </div>
                 <div className="text-right text-[11px] font-mono text-steel-400">
