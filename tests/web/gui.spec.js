@@ -477,6 +477,35 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.44 — vCPU range filter on the VM list. Seed data: web-server has 2
+  // vCPUs, db-server has 4. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_cpus= / ?max_cpus=.
+  test("vCPU range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_cpus=4 -> only db-server (4 vCPUs).
+    await page.getByTestId("vm-list-min-cpus").fill("4");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_cpus=4");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-cpus-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_cpus=");
+
+    // max_cpus=2 -> only web-server (2 vCPUs).
+    await page.getByTestId("vm-list-max-cpus").fill("2");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_cpus=2");
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

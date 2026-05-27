@@ -2703,6 +2703,82 @@ func TestCLI_ImageList_RejectsNegativeMaxSize(t *testing.T) {
 	}
 }
 
+// --- VM list --min-cpus / --max-cpus (5.4.44) ---
+
+func seedCPUVMs(mock interface {
+	SeedVM(*types.VM)
+}) {
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "mid", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "big", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 8, RAMMB: 8192}})
+}
+
+func TestCLI_VMList_FilterByMinCpus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-cpus", "4")
+	if err != nil {
+		t.Fatalf("vm list --min-cpus: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxCpus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-cpus", "4")
+	if err != nil {
+		t.Fatalf("vm list --max-cpus: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByCpuRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-cpus", "3", "--max-cpus", "6")
+	if err != nil {
+		t.Fatalf("vm list cpu range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinCpus(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-cpus", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-cpus") {
+		t.Fatalf("expected invalid --min-cpus error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxCpus(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-cpus=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-cpus") {
+		t.Fatalf("expected invalid --max-cpus error, got %v", err)
+	}
+}
+
 // --- Image list --search (5.4.9) ---
 
 func TestCLI_ImageList_FilterBySearch_MatchesName(t *testing.T) {
