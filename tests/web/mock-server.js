@@ -1805,6 +1805,10 @@ const server = http.createServer(async (req, res) => {
     const vmIdFilter = (url.searchParams.get("vm_id") || "").trim();
     const tagSelectorFilter = (url.searchParams.get("tag_selector") || "").trim().toLowerCase();
     const actionFilter = (url.searchParams.get("action") || "").trim();
+    const catchUpFilter = (url.searchParams.get("catch_up_policy") || "").trim().toLowerCase();
+    if (catchUpFilter !== "" && !["skip", "run_once", "run_all"].includes(catchUpFilter)) {
+      return json(res, 400, { code: "invalid_catch_up_policy", message: "catch_up_policy must be one of: skip, run_once, run_all" });
+    }
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const enabledRaw = (url.searchParams.get("enabled") || "").trim().toLowerCase();
     let enabledFilter = null;
@@ -1853,6 +1857,7 @@ const server = http.createServer(async (req, res) => {
       );
     }
     if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
+    if (catchUpFilter) list = list.filter((s) => ((s.catch_up_policy || "skip").toLowerCase()) === catchUpFilter);
     if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
     if (since.set || until.set) {
       list = list.filter((s) => {

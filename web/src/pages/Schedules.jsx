@@ -71,6 +71,13 @@ export default function Schedules() {
   })();
   const [actionFilter, setActionFilter] = useState(initialAction);
 
+  const VALID_CATCH_UP = ['', ...CATCH_UP_POLICIES];
+  const initialCatchUp = (() => {
+    const raw = (searchParams.get('catch_up_policy') || '').toLowerCase();
+    return VALID_CATCH_UP.includes(raw) ? raw : '';
+  })();
+  const [catchUpFilter, setCatchUpFilter] = useState(initialCatchUp);
+
   const VALID_ENABLED = ['', 'true', 'false'];
   const initialEnabled = (() => {
     const raw = (searchParams.get('enabled') || '').toLowerCase();
@@ -123,13 +130,14 @@ export default function Schedules() {
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (tagSelectorFilter) next.set('tag_selector', tagSelectorFilter); else next.delete('tag_selector');
     if (actionFilter) next.set('action', actionFilter); else next.delete('action');
+    if (catchUpFilter) next.set('catch_up_policy', catchUpFilter); else next.delete('catch_up_policy');
     if (enabledFilter) next.set('enabled', enabledFilter); else next.delete('enabled');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
@@ -138,11 +146,11 @@ export default function Schedules() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, tagSelectorFilter, actionFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -240,6 +248,19 @@ export default function Schedules() {
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Catch-up
+          <select
+            value={catchUpFilter}
+            onChange={(e) => setCatchUpFilter(e.target.value)}
+            data-testid="schedule-catchup-filter"
+            aria-label="Filter by catch-up policy"
+            className="input py-1 text-xs"
+          >
+            <option value="">All</option>
+            {CATCH_UP_POLICIES.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Enabled
           <select
             value={enabledFilter}
@@ -322,11 +343,11 @@ export default function Schedules() {
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : items.length === 0 ? (
         <div className="card">
-          {searchFilter || actionFilter || enabledFilter || sinceFilter || untilFilter ? (
+          {searchFilter || actionFilter || catchUpFilter || enabledFilter || sinceFilter || untilFilter ? (
             <EmptyState
               icon={Search}
               title="No schedules match your filters"
-              description="Try a different search term, action, enabled state, or created-at range."
+              description="Try a different search term, action, catch-up policy, enabled state, or created-at range."
             />
           ) : (
             <EmptyState

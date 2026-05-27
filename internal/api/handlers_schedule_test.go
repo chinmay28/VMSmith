@@ -453,6 +453,58 @@ func TestListSchedules_FilterByTagSelector(t *testing.T) {
 	}
 }
 
+func TestListSchedules_FilterByCatchUpPolicy(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+
+	// skip-default omits catch_up_policy, so the handler defaults it to "skip"
+	// — exercising the empty-stored-treated-as-skip path. once / all are
+	// explicit. once-snap is a snapshot action; all-start is a start action.
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "skip-default", VMID: "vm-1", Action: types.ScheduleActionStop, CronSpec: "0 0 2 * * *"})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "once-snap", VMID: "vm-2", Action: types.ScheduleActionSnapshot, CronSpec: "0 0 3 * * *", CatchUpPolicy: types.ScheduleCatchUpRunOnce})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "all-start", VMID: "vm-3", Action: types.ScheduleActionStart, CronSpec: "0 0 4 * * *", CatchUpPolicy: types.ScheduleCatchUpRunAll})
+
+	list := func(q string) ([]*types.Schedule, int, int) {
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		if resp.StatusCode == http.StatusOK {
+			json.Unmarshal(data, &out)
+		}
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// empty stored policy is treated as "skip".
+	if out, total, code := list("?catch_up_policy=skip"); code != http.StatusOK || len(out) != 1 || total != 1 || out[0].Name != "skip-default" {
+		t.Fatalf("catch_up_policy=skip wrong: %+v total=%d code=%d", out, total, code)
+	}
+	if out, total, _ := list("?catch_up_policy=run_once"); len(out) != 1 || total != 1 || out[0].Name != "once-snap" {
+		t.Fatalf("catch_up_policy=run_once wrong: %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?catch_up_policy=run_all"); len(out) != 1 || total != 1 || out[0].Name != "all-start" {
+		t.Fatalf("catch_up_policy=run_all wrong: %+v total=%d", out, total)
+	}
+	// case-insensitive + whitespace-trimmed.
+	if out, total, _ := list("?catch_up_policy=%20RUN_ONCE%20"); len(out) != 1 || total != 1 || out[0].Name != "once-snap" {
+		t.Fatalf("catch_up_policy case/trim wrong: %+v total=%d", out, total)
+	}
+	// empty disables the filter — all three returned.
+	if out, total, _ := list("?catch_up_policy="); len(out) != 3 || total != 3 {
+		t.Fatalf("empty catch_up_policy should be no-op: %+v total=%d", out, total)
+	}
+	// invalid value returns 400.
+	if _, _, code := list("?catch_up_policy=bogus"); code != http.StatusBadRequest {
+		t.Fatalf("invalid catch_up_policy should 400, got %d", code)
+	}
+	// composes additively with action; X-Total-Count reflects post-filter.
+	if out, total, _ := list("?catch_up_policy=run_once&action=snapshot"); len(out) != 1 || total != 1 || out[0].Name != "once-snap" {
+		t.Fatalf("catch_up_policy+action compose wrong: %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?catch_up_policy=run_all&action=snapshot"); len(out) != 0 || total != 0 {
+		t.Fatalf("catch_up_policy+non-matching action should be empty: %+v total=%d", out, total)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))
