@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
+	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -124,6 +126,54 @@ func webhookTestServer(t *testing.T) (*httptest.Server, *Server, *fakeWebhookSto
 		s.Close()
 	}
 	return ts, apiServer, fake, cleanup
+}
+
+func webhookRuntimeTestServer(t *testing.T) (*httptest.Server, *store.Store, *events.EventBus, *webhooks.Manager, func()) {
+	t.Helper()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	imagesDir := filepath.Join(dir, "images")
+	os.MkdirAll(imagesDir, 0755)
+
+	s, err := store.New(dbPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.ImagesDir = imagesDir
+	cfg.Storage.DBPath = dbPath
+
+	mockMgr := vm.NewMockManager()
+	storageMgr := storage.NewManager(cfg, s)
+	portFwd := network.NewPortForwarder(s)
+	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, nil)
+
+	bus := events.New(s)
+	bus.Start()
+	apiServer.SetEventBus(bus)
+
+	mgr := webhooks.NewManager(s, bus, webhooks.Config{AllowedHosts: []string{"127.0.0.1"}, HTTPTimeout: time.Second})
+	apiServer.SetWebhookSubsystem(s, mgr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := mgr.Start(ctx); err != nil {
+		cancel()
+		bus.Stop()
+		s.Close()
+		t.Fatalf("Start webhook manager: %v", err)
+	}
+
+	ts := httptest.NewServer(apiServer)
+	cleanup := func() {
+		ts.Close()
+		cancel()
+		mgr.Stop()
+		bus.Stop()
+		s.Close()
+	}
+	return ts, s, bus, mgr, cleanup
 }
 
 func TestCreateWebhook_Success(t *testing.T) {
@@ -432,6 +482,116 @@ func TestTestWebhook_NoTesterReturns503(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestTestWebhook_EndToEndSuccess(t *testing.T) {
+	ts, s, _, _, cleanup := webhookRuntimeTestServer(t)
+	defer cleanup()
+
+	var hits int32
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json", jsonBody(t, types.WebhookCreateRequest{
+		URL:    receiver.URL,
+		Secret: "topsecret",
+	}))
+	if err != nil {
+		t.Fatalf("POST /webhooks: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.Webhook
+	decodeJSON(t, resp, &created)
+
+	resp, err = http.Post(ts.URL+"/api/v1/webhooks/"+created.ID+"/test", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /webhooks/{id}/test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result types.WebhookTestResult
+	decodeJSON(t, resp, &result)
+	if !result.Success || result.StatusCode != http.StatusNoContent {
+		t.Fatalf("unexpected test result: %+v", result)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("receiver hits = %d, want 1", got)
+	}
+
+	persisted, err := s.GetWebhook(created.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != http.StatusNoContent {
+		t.Fatalf("LastStatus = %d, want 204", persisted.LastStatus)
+	}
+	if persisted.LastError != "" {
+		t.Fatalf("LastError = %q, want empty", persisted.LastError)
+	}
+	if persisted.LastDeliveryAt.IsZero() {
+		t.Fatal("LastDeliveryAt was not updated")
+	}
+}
+
+func TestTestWebhook_EndToEndFailure(t *testing.T) {
+	ts, s, _, _, cleanup := webhookRuntimeTestServer(t)
+	defer cleanup()
+
+	var hits int32
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "always fails", http.StatusInternalServerError)
+	}))
+	defer receiver.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json", jsonBody(t, types.WebhookCreateRequest{
+		URL:    receiver.URL,
+		Secret: "topsecret",
+	}))
+	if err != nil {
+		t.Fatalf("POST /webhooks: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.Webhook
+	decodeJSON(t, resp, &created)
+
+	resp, err = http.Post(ts.URL+"/api/v1/webhooks/"+created.ID+"/test", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /webhooks/{id}/test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result types.WebhookTestResult
+	decodeJSON(t, resp, &result)
+	if result.Success || result.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unexpected test result: %+v", result)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("receiver hits = %d, want 1", got)
+	}
+
+	persisted, err := s.GetWebhook(created.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != 0 {
+		t.Fatalf("LastStatus = %d, want 0", persisted.LastStatus)
+	}
+	if persisted.LastError != "HTTP 500" {
+		t.Fatalf("LastError = %q, want HTTP 500", persisted.LastError)
+	}
+	if persisted.LastDeliveryAt.IsZero() {
+		t.Fatal("LastDeliveryAt was not updated")
 	}
 }
 
