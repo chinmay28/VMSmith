@@ -535,6 +535,35 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("max_ram_mb=5000");
   });
 
+  // 5.4.50 — Disk size range filter on the VM list. Seed data: web-server has 40 GB,
+  // db-server has 100 GB. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_disk_gb= / ?max_disk_gb=.
+  test("disk range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_disk_gb=100 -> only db-server.
+    await page.getByTestId("vm-list-min-disk").fill("100");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_disk_gb=100");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-disk-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_disk_gb=");
+
+    // max_disk_gb=50 -> only web-server (40 GB).
+    await page.getByTestId("vm-list-max-disk").fill("50");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_disk_gb=50");
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

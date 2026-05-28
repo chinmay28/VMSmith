@@ -1265,6 +1265,10 @@ func seedVMWithRAM(id, name string, ramMB int) *types.VM {
 	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{RAMMB: ramMB}, State: types.VMStateRunning}
 }
 
+func seedVMWithDisk(id, name string, diskGB int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{DiskGB: diskGB}, State: types.VMStateRunning}
+}
+
 func TestListVMs_FilterByMinCpus(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -1544,6 +1548,152 @@ func TestListVMs_FilterByRAM_ComposesWithCpusAndCount(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-big", Spec: types.VMSpec{CPUs: 2, RAMMB: 8192}, State: types.VMStateRunning})
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4&min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "big-big" {
+		t.Fatalf("expected only big-big, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=80")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 80 GB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxDisk(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_disk_gb=80")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 80 GB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=50&max_disk_gb=100")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [50,100] GB, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "edge", 80))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=80")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_disk_gb should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinDisk(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_disk_gb" {
+		t.Fatalf("code = %q, want invalid_min_disk_gb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxDisk_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_disk_gb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_disk_gb" {
+		t.Fatalf("code = %q, want invalid_max_disk_gb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByDisk_ComposesWithRAMAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-big", Spec: types.VMSpec{RAMMB: 8192, DiskGB: 500}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "big-ram-small-disk", Spec: types.VMSpec{RAMMB: 8192, DiskGB: 20}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-ram-big-disk", Spec: types.VMSpec{RAMMB: 2048, DiskGB: 500}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096&min_disk_gb=100")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}

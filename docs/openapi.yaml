@@ -120,6 +120,31 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - name: min_disk_gb
+          in: query
+          required: false
+          description: |
+            Inclusive lower bound on the VM's `spec.disk_gb` (disk in GB).
+            VMs with less disk are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_min_disk_gb`. Composes additively with every
+            other list filter so `X-Total-Count` reflects the post-filter
+            population.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_disk_gb
+          in: query
+          required: false
+          description: |
+            Inclusive upper bound on the VM's `spec.disk_gb` (disk in GB).
+            VMs with more disk are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_max_disk_gb`. Same count-range semantics as
+            `min_disk_gb`.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: VM list
