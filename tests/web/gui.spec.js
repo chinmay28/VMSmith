@@ -2684,6 +2684,13 @@ test.describe("Settings — Webhooks", () => {
     const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
     await page.getByTestId(`webhook-test-${rowID}`).click();
     await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500|failed|500/i);
+
+    // Reload to discard the local probe result and verify the persisted
+    // last_status + last_error contract still renders as a failure.
+    await page.reload();
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId(`webhook-row-${rowID}`)).toBeVisible();
+    await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500/i);
   });
 
   // 2.2.14 — editable webhook config (URL / secret / event types / active).

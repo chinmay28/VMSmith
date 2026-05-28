@@ -302,7 +302,7 @@ func (w *worker) deliver(ctx context.Context, evt *types.Event) {
 
 	target, verifiedIPs, err := validateTarget(w.hook.URL, w.mgr.allowedHosts, w.mgr.resolveIPs)
 	if err != nil {
-		w.recordFailure(evt, err.Error(), -1)
+		w.recordFailure(evt, err.Error(), 0)
 		return
 	}
 

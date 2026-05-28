@@ -584,6 +584,17 @@ func TestManager_TestDeliver_SSRFBlocked(t *testing.T) {
 	if res.Error == "" {
 		t.Fatalf("expected error to describe SSRF block")
 	}
+
+	persisted, err := store.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != 0 {
+		t.Fatalf("LastStatus = %d, want 0 when no HTTP response exists", persisted.LastStatus)
+	}
+	if persisted.LastError == "" {
+		t.Fatal("LastError was not persisted for SSRF block")
+	}
 }
 
 func TestManager_QueueOverflowPublishesSystemEvent(t *testing.T) {

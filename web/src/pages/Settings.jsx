@@ -612,19 +612,19 @@ function DeliveryStatus({ webhook, testResult }) {
       </span>
     );
   }
+  if (webhook.last_error) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-mono text-red-300" data-testid="webhook-status">
+        <AlertCircle size={13} />
+        {webhook.last_status ? `HTTP ${webhook.last_status} — ${webhook.last_error}` : webhook.last_error}
+      </span>
+    );
+  }
   if (webhook.last_status) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-300" data-testid="webhook-status">
         <CheckCircle2 size={13} />
         HTTP {webhook.last_status}
-      </span>
-    );
-  }
-  if (webhook.last_error) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-mono text-red-300" data-testid="webhook-status">
-        <AlertCircle size={13} />
-        {webhook.last_error}
       </span>
     );
   }

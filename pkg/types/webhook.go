@@ -21,9 +21,10 @@ type Webhook struct {
 	// LastDeliveryAt is the time of the most recent attempted delivery
 	// (success or final failure).  Zero if never attempted.
 	LastDeliveryAt time.Time `json:"last_delivery_at,omitempty"`
-	// LastStatus is the HTTP status of the most recent successful delivery,
-	// or 0 if the most recent attempt failed all retries (in which case
-	// LastError describes the failure).
+	// LastStatus is the HTTP status from the most recent delivery attempt that
+	// reached a receiver, whether it ultimately succeeded or failed. It remains 0
+	// when the latest failure happened before any HTTP response existed (for
+	// example URL validation / SSRF rejection or transport errors).
 	LastStatus int `json:"last_status,omitempty"`
 	// LastError is the error message from the most recent delivery failure,
 	// cleared on the next successful delivery.
