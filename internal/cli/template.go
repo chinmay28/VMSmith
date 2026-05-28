@@ -414,9 +414,7 @@ func init() {
 	templateCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to template-created VMs (repeatable)")
 	templateCreateCmd.Flags().String("default-user", "", "default login user for VMs created from this template")
 	templateCreateCmd.Flags().StringSlice("network", nil, "attach template VMs to host network (repeatable); same format as vm create --network")
-	if err := templateCreateCmd.MarkFlagRequired("image"); err != nil {
-		panic(err)
-	}
+	_ = templateCreateCmd.MarkFlagRequired("image")
 
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
