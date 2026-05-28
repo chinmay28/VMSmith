@@ -54,6 +54,7 @@ const scheduleRuns = new Map();
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
+  vm1.tags = ["dev"];
   // Named network attachments power the 5.4.36 ?network= filter tests.
   vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
   // Fixed timestamps so the 5.4.30 created-at time-range filter tests are
@@ -164,6 +165,25 @@ function seed() {
     last_fired_at: null,
     last_result: "",
     next_fire_at: null,
+  });
+  scheduleList.set("sch-3", {
+    id: "sch-3",
+    name: "weekly-health-check",
+    vm_id: "",
+    tag_selector: null,
+    action: "snapshot",
+    cron_spec: "0 30 4 * * 1",
+    timezone: "UTC",
+    enabled: true,
+    catch_up_policy: "skip",
+    max_concurrent: 1,
+    retention_count: 0,
+    params: {},
+    created_at: "2026-05-12T00:00:00Z",
+    updated_at: "2026-05-12T00:00:00Z",
+    last_fired_at: null,
+    last_result: "",
+    next_fire_at: "2026-05-26T04:30:00Z",
   });
   scheduleRuns.set("sch-1", [
     {
