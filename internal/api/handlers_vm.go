@@ -156,7 +156,7 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 
 	vm, err := s.vmManager.Create(r.Context(), spec)
 	if err != nil {
-		err = sanitizeManagerError(err)
+		err = logAndSanitizeManagerError("create vm", err)
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
@@ -238,7 +238,7 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 
 	vm, err := s.vmManager.Update(r.Context(), id, patch)
 	if err != nil {
-		err = sanitizeManagerError(err)
+		err = logAndSanitizeManagerError("update vm", err)
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
@@ -437,7 +437,7 @@ func (s *Server) CloneVM(w http.ResponseWriter, r *http.Request) {
 
 	cloned, err := s.vmManager.Clone(r.Context(), id, req.Name)
 	if err != nil {
-		err = sanitizeManagerError(err)
+		err = logAndSanitizeManagerError("clone vm", err)
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}

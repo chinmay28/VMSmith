@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -311,6 +313,44 @@ func TestSanitizeManagerError(t *testing.T) {
 			err := sanitizeManagerError(tt.err)
 			assertAPIError(t, err, tt.wantCode, tt.wantMessage)
 		})
+	}
+}
+
+func TestLogAndSanitizeManagerError(t *testing.T) {
+	if err := logger.Init("", logger.LevelDebug); err != nil {
+		t.Fatalf("logger init: %v", err)
+	}
+
+	// A raw libvirt error is sanitized for the client but its full detail is
+	// preserved in the structured log so operators can diagnose the failure.
+	raw := errors.New("defining domain: internal error: process exited while connecting to monitor: qemu-kvm: unsupported machine type")
+	start := time.Now().Add(-time.Second)
+
+	got := logAndSanitizeManagerError("create vm", raw)
+	assertAPIError(t, got, "vm_definition_failed", "vm definition failed")
+
+	entries := logger.Get().Entries("error", start, 100)
+	var found bool
+	for _, e := range entries {
+		if e.Source == "api" && e.Fields["op"] == "create vm" && strings.Contains(e.Fields["error"], "unsupported machine type") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected raw error logged at error level with op=create vm; entries=%+v", entries)
+	}
+
+	// nil passes through without logging.
+	if err := logAndSanitizeManagerError("create vm", nil); err != nil {
+		t.Fatalf("expected nil for nil input, got %v", err)
+	}
+
+	// Already-typed API errors are returned verbatim (full message already
+	// reaches the client, so no re-logging is needed).
+	apiErr := types.NewAPIError("invalid_name", "vm name is required")
+	if got := logAndSanitizeManagerError("create vm", apiErr); got != apiErr {
+		t.Fatalf("expected typed API error returned unchanged, got %v", got)
 	}
 }
 

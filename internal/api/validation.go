@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vmsmith/vmsmith/internal/logger"
 	validatepkg "github.com/vmsmith/vmsmith/internal/validate"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -301,6 +302,25 @@ func statusForAPIError(err error, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+// logAndSanitizeManagerError records the raw (unsanitized) manager error to the
+// structured log before stripping it down for the HTTP response. The
+// client-facing messages produced by sanitizeManagerError are intentionally
+// generic (e.g. "vm definition failed"), which leaves operators with no way to
+// diagnose the underlying libvirt/qemu failure. Logging the full error here —
+// keyed by the operation that produced it — preserves that detail in the ring
+// buffer and log file (surfaced via `vmsmith logs list` and the GUI Log Viewer)
+// while still returning the sanitized error to the caller. Already-typed API
+// errors carry their full message to the client, so they are not re-logged.
+func logAndSanitizeManagerError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !types.IsAPIError(err) {
+		logger.Error("api", "manager operation failed", "op", op, "error", err.Error())
+	}
+	return sanitizeManagerError(err)
 }
 
 func sanitizeManagerError(err error) error {
