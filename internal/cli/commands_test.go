@@ -4431,6 +4431,88 @@ func TestCLI_PortList_RejectsNegativeMaxHostPort(t *testing.T) {
 	}
 }
 
+func TestCLI_PortList_FilterByMinGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-guest-port", "80")
+	if err != nil {
+		t.Fatalf("port list --min-guest-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 80 + 9090
+		t.Fatalf("expected header + 2 rows (guest_port >= 80), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "22001") {
+		t.Errorf("guest 22 (host 22001) should be excluded by --min-guest-port 80, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByMaxGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--max-guest-port", "80")
+	if err != nil {
+		t.Fatalf("port list --max-guest-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 22 + 80
+		t.Fatalf("expected header + 2 rows (guest_port <= 80), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "9090") {
+		t.Errorf("guest 9090 should be excluded by --max-guest-port 80, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestPortRange(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-guest-port", "50", "--max-guest-port", "100")
+	if err != nil {
+		t.Fatalf("port list guest range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + guest 80 only
+		t.Fatalf("expected header + 1 row (guest 80 in [50,100]), got %d from %q", len(rows), out)
+	}
+	if !strings.Contains(out, "8081") {
+		t.Errorf("expected the host 8081 / guest 80 rule in range output, got %q", out)
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidMinGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--min-guest-port", "abc")
+	if err == nil {
+		t.Fatal("expected error for non-numeric --min-guest-port")
+	}
+	if !strings.Contains(err.Error(), "--min-guest-port") {
+		t.Errorf("error %q should name --min-guest-port", err.Error())
+	}
+}
+
+func TestCLI_PortList_RejectsNegativeMaxGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--max-guest-port", "-1")
+	if err == nil {
+		t.Fatal("expected error for negative --max-guest-port")
+	}
+	if !strings.Contains(err.Error(), "--max-guest-port") {
+		t.Errorf("error %q should name --max-guest-port", err.Error())
+	}
+}
+
 func TestCLI_PortList_ShowsTagsColumn(t *testing.T) {
 	s, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()

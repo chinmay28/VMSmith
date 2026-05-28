@@ -84,6 +84,22 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_max_host') || '';
   });
+  const [portMinGuestPortInput, setPortMinGuestPortInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_min_guest') || '';
+  });
+  const [portMinGuestPort, setPortMinGuestPort] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_min_guest') || '';
+  });
+  const [portMaxGuestPortInput, setPortMaxGuestPortInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_max_guest') || '';
+  });
+  const [portMaxGuestPort, setPortMaxGuestPort] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_max_guest') || '';
+  });
   const [portPage, setPortPage] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     const raw = Number.parseInt(sp.get('port_page') || '', 10);
@@ -95,15 +111,15 @@ export default function VMDetail() {
     return Number.isFinite(raw) && raw > 0 ? raw : 25;
   });
   const { data: portResponse, refresh: refreshPorts } = useFetch(
-    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, protocol: portProtocol, minHostPort: portMinHostPort, maxHostPort: portMaxHostPort, page: portPage, perPage: portPerPage }),
-    [id, portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portPage, portPerPage],
+    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, protocol: portProtocol, minHostPort: portMinHostPort, maxHostPort: portMaxHostPort, minGuestPort: portMinGuestPort, maxGuestPort: portMaxGuestPort, page: portPage, perPage: portPerPage }),
+    [id, portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPage, portPerPage],
     10000,
   );
   const portList = portResponse?.data || [];
   const portTotal = portResponse?.meta?.totalCount ?? portList.length;
   // Whenever filter / sort / search changes, snap back to page 1 so the user
   // never lands beyond the post-filter page count.
-  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portPerPage]);
+  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPerPage]);
 
   // Debounce the port-forward search box. `portSearchInput` is what the user
   // types; `portSearch` is the committed query that drives the API call.
@@ -126,6 +142,16 @@ export default function VMDetail() {
     const t = setTimeout(() => setPortMaxHostPort(trimmed), 250);
     return () => clearTimeout(t);
   }, [portMaxHostPortInput]);
+  useEffect(() => {
+    const trimmed = portMinGuestPortInput.trim();
+    const t = setTimeout(() => setPortMinGuestPort(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [portMinGuestPortInput]);
+  useEffect(() => {
+    const trimmed = portMaxGuestPortInput.trim();
+    const t = setTimeout(() => setPortMaxGuestPort(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [portMaxGuestPortInput]);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -135,6 +161,8 @@ export default function VMDetail() {
     if (portProtocol) sp.set('port_protocol', portProtocol); else sp.delete('port_protocol');
     if (portMinHostPort) sp.set('port_min_host', portMinHostPort); else sp.delete('port_min_host');
     if (portMaxHostPort) sp.set('port_max_host', portMaxHostPort); else sp.delete('port_max_host');
+    if (portMinGuestPort) sp.set('port_min_guest', portMinGuestPort); else sp.delete('port_min_guest');
+    if (portMaxGuestPort) sp.set('port_max_guest', portMaxGuestPort); else sp.delete('port_max_guest');
     if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
     if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
@@ -143,7 +171,7 @@ export default function VMDetail() {
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
+  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -586,6 +614,40 @@ export default function VMDetail() {
                   aria-label="Clear host port range"
                 >
                   <X size={12} /> Clear ports
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                value={portMinGuestPortInput}
+                onChange={(e) => setPortMinGuestPortInput(e.target.value)}
+                placeholder="Min guest port"
+                className="input w-36 py-1.5 text-xs"
+                data-testid="port-min-guest-port"
+                aria-label="Minimum guest port"
+              />
+              <span className="text-xs text-steel-500">–</span>
+              <input
+                type="number"
+                min="0"
+                value={portMaxGuestPortInput}
+                onChange={(e) => setPortMaxGuestPortInput(e.target.value)}
+                placeholder="Max guest port"
+                className="input w-36 py-1.5 text-xs"
+                data-testid="port-max-guest-port"
+                aria-label="Maximum guest port"
+              />
+              {(portMinGuestPortInput || portMaxGuestPortInput) && (
+                <button
+                  type="button"
+                  className="btn-ghost text-xs"
+                  onClick={() => { setPortMinGuestPortInput(''); setPortMaxGuestPortInput(''); }}
+                  data-testid="port-guest-port-clear"
+                  aria-label="Clear guest port range"
+                >
+                  <X size={12} /> Clear guest ports
                 </button>
               )}
             </div>

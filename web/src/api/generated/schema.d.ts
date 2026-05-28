@@ -1232,6 +1232,21 @@ export interface paths {
                      *     `invalid_max_host_port`.
                      */
                     max_host_port?: number;
+                    /**
+                     * @description Inclusive lower bound on the rule's `guest_port`. Whitespace-trimmed;
+                     *     empty disables the bound; non-numeric or negative values return 400
+                     *     `invalid_min_guest_port`. The symmetric counterpart to
+                     *     `min_host_port`; applied right after the host-port range and before
+                     *     `search`; composes additively with every other filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    min_guest_port?: number;
+                    /**
+                     * @description Inclusive upper bound on the rule's `guest_port`. Same shape as
+                     *     `min_guest_port`; non-numeric or negative values return 400
+                     *     `invalid_max_guest_port`.
+                     */
+                    max_guest_port?: number;
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };

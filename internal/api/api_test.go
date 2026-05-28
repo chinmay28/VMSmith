@@ -11101,6 +11101,174 @@ func TestListPorts_FilterByHostPort_TotalCountReflectsFiltered(t *testing.T) {
 }
 
 // ============================================================
+// Port-forward list guest-port range filter tests (5.4.49)
+// ============================================================
+
+func TestListPorts_FilterByMinGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-min") // guest ports: 22, 80, 443, 9090
+
+	got := listPortsWithQuery(t, ts, "vm-gp-min", "min_guest_port=443")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with guest_port >= 443, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.GuestPort < 443 {
+			t.Errorf("guest_port %d below min 443", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMaxGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-max")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-max", "max_guest_port=80")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with guest_port <= 80, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.GuestPort > 80 {
+			t.Errorf("guest_port %d above max 80", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPortRange(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-range")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-range", "min_guest_port=80&max_guest_port=500")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules in guest [80,500], got %d", len(got))
+	}
+	for _, p := range got {
+		if p.GuestPort < 80 || p.GuestPort > 500 {
+			t.Errorf("guest_port %d outside [80,500]", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMinGuestPort_Inclusive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-incl")
+
+	// 80 itself must be included by min_guest_port=80.
+	got := listPortsWithQuery(t, ts, "vm-gp-incl", "min_guest_port=80")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 rules with guest_port >= 80 (inclusive), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByMinGuestPort_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-empty", "min_guest_port=%20")
+	if len(got) != 4 {
+		t.Fatalf("whitespace min_guest_port should be a no-op (4 rules), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByInvalidMinGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-bad")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-bad/ports?min_guest_port=abc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_min_guest_port" {
+		t.Errorf("error code = %q, want invalid_min_guest_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByMaxGuestPort_RejectsNegative(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-neg")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-neg/ports?max_guest_port=-5")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_max_guest_port" {
+		t.Errorf("error code = %q, want invalid_max_guest_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByGuestPort_ComposesWithProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-cmb")
+
+	// guest_port >= 80 → {80(tcp), 443(tcp), 9090(udp)}; protocol=tcp narrows to 2.
+	got := listPortsWithQuery(t, ts, "vm-gp-cmb", "min_guest_port=80&protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_guest_port=80 + protocol=tcp = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolTCP || p.GuestPort < 80 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPort_ComposesWithHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-hp") // host→guest: 22→22, 8080→80, 8443→443, 9090→9090
+
+	// host_port >= 8000 → {8080/80, 8443/443, 9090/9090}; guest_port <= 500 drops 9090.
+	got := listPortsWithQuery(t, ts, "vm-gp-hp", "min_host_port=8000&max_guest_port=500")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_host_port=8000 + max_guest_port=500 = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.HostPort < 8000 || p.GuestPort > 500 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPort_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-cnt/ports?min_guest_port=80&max_guest_port=500")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
 // Port-forward list pagination tests (5.4.20)
 // ============================================================
 
