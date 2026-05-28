@@ -216,6 +216,20 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, err
 	}
 
+	// Reap any orphaned libvirt domain that still carries this name. The API
+	// layer already rejects a create whose name still exists in the store, so a
+	// libvirt domain surviving here is never a live, tracked VM — it is leftover
+	// state from an earlier VM whose bbolt record was removed but whose libvirt
+	// definition was not fully torn down (e.g. an undefine that failed during
+	// Delete). Without this, recreating a previously-deleted VM name fails at
+	// DomainDefineXML with "domain already exists".
+	if orphan, lookupErr := m.conn.LookupDomainByName(spec.Name); lookupErr == nil {
+		logger.Warn("daemon", "reaping orphaned libvirt domain before recreate",
+			"vm", spec.Name)
+		_ = forceUndefineDomain(orphan)
+		orphan.Free()
+	}
+
 	dom, err := m.conn.DomainDefineXML(xmlDoc)
 	if err != nil {
 		return nil, fmt.Errorf("defining domain: %w", err)
@@ -633,12 +647,15 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	dom, err := m.conn.LookupDomainByName(vm.Name)
 	if err == nil {
 		defer dom.Free()
-		// Try to destroy if running
-		state, _, _ := dom.GetState()
-		if state == libvirt.DOMAIN_RUNNING {
-			dom.Destroy()
+		if undefErr := forceUndefineDomain(dom); undefErr != nil {
+			// A leftover libvirt definition keeps the domain name registered.
+			// Because the domain is named after vm.Name (not the unique VM id),
+			// a future create that reuses this name would then fail at
+			// DomainDefineXML with "domain already exists". Surface it so the
+			// failure is diagnosable rather than silent.
+			logger.Warn("daemon", "failed to fully undefine domain on delete; recreating a VM with the same name may fail",
+				"vm", vm.Name, "error", undefErr.Error())
 		}
-		dom.UndefineFlags(libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA)
 	}
 
 	// Remove any DHCP host reservation we may have added for this VM.
@@ -655,6 +672,32 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	os.RemoveAll(vmDir)
 
 	return m.store.DeleteVM(id)
+}
+
+// forceUndefineDomain tears a libvirt domain down completely so its name is
+// released. It destroys the domain first when it is still active — a merely
+// undefined active domain becomes *transient* and keeps its name registered,
+// which would later collide with a create that reuses the name — then removes
+// the persistent definition together with any managed-save image, NVRAM, and
+// snapshot metadata that can otherwise block undefine. The combined-flags
+// UndefineFlags is attempted first and falls back to a plain Undefine on older
+// libvirt that rejects the flag set. Returns the final undefine error (nil on
+// success) so callers can detect a domain that survived teardown.
+func forceUndefineDomain(dom *libvirt.Domain) error {
+	if state, _, err := dom.GetState(); err == nil && state != libvirt.DOMAIN_SHUTOFF {
+		// Active (running/paused/...): destroy so the name is actually freed
+		// rather than demoted to a transient domain. Destroy also removes a
+		// transient domain outright, in which case the undefine below is a
+		// harmless no-op error we ignore via the fallback.
+		_ = dom.Destroy()
+	}
+	const flags = libvirt.DOMAIN_UNDEFINE_MANAGED_SAVE |
+		libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA |
+		libvirt.DOMAIN_UNDEFINE_NVRAM
+	if err := dom.UndefineFlags(flags); err != nil {
+		return dom.Undefine()
+	}
+	return nil
 }
 
 // Update modifies the CPU count, RAM, or disk size of a VM.
