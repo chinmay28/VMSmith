@@ -113,6 +113,14 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     A template with a zero / unknown created_at is filtered OUT whenever
 //     any bound is set — operators querying a time window don't want
 //     unbounded entries silently included.
+//   - min_cpus=<n>           inclusive lower bound on `cpus`. Whitespace
+//     trimmed; empty disables; non-numeric or negative values return 400
+//     `invalid_min_cpus`. Mirrors the VM `?min_cpus=` filter (5.4.44);
+//     opens the same capacity-audit query against the template cohort —
+//     "show me every template that provisions >= 8 vCPU VMs" — that
+//     `?search=` / `?tag=` cannot answer.
+//   - max_cpus=<n>           inclusive upper bound on `cpus`. Same shape
+//     as min_cpus; 400 `invalid_max_cpus` on garbage.
 //   - search=<value>         case-insensitive substring filter applied to
 //     `name`, `description`, and `tags`. ID, image, default_user, and
 //     network attachments are intentionally excluded from the haystack.
@@ -136,6 +144,16 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	minCPUs, minCPUsSet, apiErr := parseCountRangeParam(q.Get("min_cpus"), "min_cpus")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxCPUs, maxCPUsSet, apiErr := parseCountRangeParam(q.Get("max_cpus"), "max_cpus")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -189,6 +207,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if !snapshotInTimeRange(tpl.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+				continue
+			}
+			filtered = append(filtered, tpl)
+		}
+		templates = filtered
+	}
+
+	if minCPUsSet || maxCPUsSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if !countInRange(tpl.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
 				continue
 			}
 			filtered = append(filtered, tpl)

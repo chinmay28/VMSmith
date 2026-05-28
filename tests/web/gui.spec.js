@@ -2292,6 +2292,33 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
     await expect(page.getByText("No templates were created in the selected time range.")).toBeVisible();
   });
+
+  // --- roadmap 5.4.51: ?min_cpus= / ?max_cpus= range filter on template list ---
+  // Seed templates: small-ubuntu has cpus=1, big-rocky has cpus=8, so a
+  // min_cpus=4 boundary cleanly separates them.
+  test("vCPU range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_cpus=4 keeps only big-rocky (cpus=8).
+    await page.getByTestId("template-list-min-cpus").fill("4");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_cpus")).toBe("4");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear CPUs" button restores both templates and drops the params.
+    await page.getByTestId("template-list-cpu-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_cpus")).toBeNull();
+
+    // max_cpus=4 keeps only small-ubuntu (cpus=1).
+    await page.getByTestId("template-list-max-cpus").fill("4");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_cpus")).toBe("4");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
 });
 
 // ============================================================

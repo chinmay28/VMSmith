@@ -124,11 +124,21 @@ var templateListCmd = &cobra.Command{
 		networkFilter, _ := cmd.Flags().GetString("network")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
+		minCPUsRaw, _ := cmd.Flags().GetString("min-cpus")
+		maxCPUsRaw, _ := cmd.Flags().GetString("max-cpus")
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
 		if err != nil {
 			return err
 		}
 		untilTime, untilSet, err := parseCLITimeRange(untilRaw, "--until")
+		if err != nil {
+			return err
+		}
+		minCPUs, minCPUsSet, err := parseCLICountRange(minCPUsRaw, "--min-cpus")
+		if err != nil {
+			return err
+		}
+		maxCPUs, maxCPUsSet, err := parseCLICountRange(maxCPUsRaw, "--max-cpus")
 		if err != nil {
 			return err
 		}
@@ -203,6 +213,16 @@ var templateListCmd = &cobra.Command{
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if !snapshotInCLITimeRange(tpl.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+					continue
+				}
+				filtered = append(filtered, tpl)
+			}
+			templates = filtered
+		}
+		if minCPUsSet || maxCPUsSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if !countInCLIRange(tpl.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
 					continue
 				}
 				filtered = append(filtered, tpl)
@@ -425,6 +445,8 @@ func init() {
 	templateListCmd.Flags().String("network", "", "filter templates attached to a named network (case-insensitive exact match against networks names)")
 	templateListCmd.Flags().String("since", "", "keep templates created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	templateListCmd.Flags().String("until", "", "keep templates created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
+	templateListCmd.Flags().String("min-cpus", "", "keep templates with at least this many vCPUs (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("max-cpus", "", "keep templates with at most this many vCPUs (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
