@@ -331,6 +331,10 @@ const server = http.createServer(async (req, res) => {
     if (minCpusP.invalid) return json(res, 400, { code: minCpusP.code, message: minCpusP.msg });
     const maxCpusP = parseCount(url.searchParams.get("max_cpus"), "max_cpus");
     if (maxCpusP.invalid) return json(res, 400, { code: maxCpusP.code, message: maxCpusP.msg });
+    const minRamP = parseCount(url.searchParams.get("min_ram_mb"), "min_ram_mb");
+    if (minRamP.invalid) return json(res, 400, { code: minRamP.code, message: minRamP.msg });
+    const maxRamP = parseCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
+    if (maxRamP.invalid) return json(res, 400, { code: maxRamP.code, message: maxRamP.msg });
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -382,6 +386,14 @@ const server = http.createServer(async (req, res) => {
         const cpus = (vm.spec && vm.spec.cpus) || 0;
         if (minCpusP.set && cpus < minCpusP.value) return false;
         if (maxCpusP.set && cpus > maxCpusP.value) return false;
+        return true;
+      });
+    }
+    if (minRamP.set || maxRamP.set) {
+      list = list.filter(vm => {
+        const ram = (vm.spec && vm.spec.ram_mb) || 0;
+        if (minRamP.set && ram < minRamP.value) return false;
+        if (maxRamP.set && ram > maxRamP.value) return false;
         return true;
       });
     }

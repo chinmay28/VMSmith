@@ -1261,6 +1261,10 @@ func seedVMWithCPUs(id, name string, cpus int) *types.VM {
 	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{CPUs: cpus}, State: types.VMStateRunning}
 }
 
+func seedVMWithRAM(id, name string, ramMB int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{RAMMB: ramMB}, State: types.VMStateRunning}
+}
+
 func TestListVMs_FilterByMinCpus(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -1404,6 +1408,152 @@ func TestListVMs_FilterByCpus_ComposesWithStatusAndCount(t *testing.T) {
 	decodeJSON(t, resp, &vms)
 	if len(vms) != 1 || vms[0].Name != "run-big" {
 		t.Fatalf("expected only run-big, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4096 MB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxRAM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_ram_mb=4096")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4096 MB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByRAMRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=3000&max_ram_mb=5000")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [3000,5000] MB, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "edge", 4096))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_ram_mb should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinRAM(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_ram_mb" {
+		t.Fatalf("code = %q, want invalid_min_ram_mb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxRAM_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_ram_mb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_ram_mb" {
+		t.Fatalf("code = %q, want invalid_max_ram_mb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByRAM_ComposesWithCpusAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-big", Spec: types.VMSpec{CPUs: 8, RAMMB: 8192}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "big-small", Spec: types.VMSpec{CPUs: 8, RAMMB: 2048}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-big", Spec: types.VMSpec{CPUs: 2, RAMMB: 8192}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4&min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "big-big" {
+		t.Fatalf("expected only big-big, got %+v", vms)
 	}
 }
 

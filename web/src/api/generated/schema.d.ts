@@ -132,6 +132,23 @@ export interface paths {
                      *     `min_cpus`.
                      */
                     max_cpus?: number;
+                    /**
+                     * @description Inclusive lower bound on the VM's `spec.ram_mb` (RAM in MB).
+                     *     VMs with less RAM are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_min_ram_mb`. Composes additively with every
+                     *     other list filter so `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    min_ram_mb?: number;
+                    /**
+                     * @description Inclusive upper bound on the VM's `spec.ram_mb` (RAM in MB).
+                     *     VMs with more RAM are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_max_ram_mb`. Same count-range semantics as
+                     *     `min_ram_mb`.
+                     */
+                    max_ram_mb?: number;
                 };
                 header?: never;
                 path?: never;

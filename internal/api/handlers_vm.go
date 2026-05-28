@@ -287,6 +287,16 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	minRAM, minRAMSet, apiErr := parseCountRangeParam(q.Get("min_ram_mb"), "min_ram_mb")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxRAM, maxRAMSet, apiErr := parseCountRangeParam(q.Get("max_ram_mb"), "max_ram_mb")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 
 	vms, err := s.vmManager.List(r.Context())
 	if err != nil {
@@ -301,13 +311,16 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
 	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
 				continue
 			}
 			if !countInRange(vm.Spec.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
+				continue
+			}
+			if !countInRange(vm.Spec.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
 				continue
 			}
 			if imageFilter != "" && !strings.EqualFold(vm.Spec.Image, imageFilter) {

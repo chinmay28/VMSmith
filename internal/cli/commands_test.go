@@ -2779,6 +2779,74 @@ func TestCLI_VMList_RejectsNegativeMaxCpus(t *testing.T) {
 	}
 }
 
+// --- VM list --min-ram-mb / --max-ram-mb (5.4.48) ---
+
+func TestCLI_VMList_FilterByMinRAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock) // small=2048, mid=4096, big=8192 MB
+
+	out, err := runCLI("vm", "list", "--min-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("vm list --min-ram-mb: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 4096 MB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxRAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("vm list --max-ram-mb: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 4096 MB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByRAMRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-ram-mb", "3000", "--max-ram-mb", "5000")
+	if err != nil {
+		t.Fatalf("vm list ram range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinRAM(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-ram-mb", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-ram-mb") {
+		t.Fatalf("expected invalid --min-ram-mb error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxRAM(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-ram-mb=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-ram-mb") {
+		t.Fatalf("expected invalid --max-ram-mb error, got %v", err)
+	}
+}
+
 // --- Image list --search (5.4.9) ---
 
 func TestCLI_ImageList_FilterBySearch_MatchesName(t *testing.T) {
