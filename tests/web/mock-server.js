@@ -335,6 +335,10 @@ const server = http.createServer(async (req, res) => {
     if (minRamP.invalid) return json(res, 400, { code: minRamP.code, message: minRamP.msg });
     const maxRamP = parseCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
     if (maxRamP.invalid) return json(res, 400, { code: maxRamP.code, message: maxRamP.msg });
+    const minDiskP = parseCount(url.searchParams.get("min_disk_gb"), "min_disk_gb");
+    if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
+    const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
+    if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -394,6 +398,14 @@ const server = http.createServer(async (req, res) => {
         const ram = (vm.spec && vm.spec.ram_mb) || 0;
         if (minRamP.set && ram < minRamP.value) return false;
         if (maxRamP.set && ram > maxRamP.value) return false;
+        return true;
+      });
+    }
+    if (minDiskP.set || maxDiskP.set) {
+      list = list.filter(vm => {
+        const disk = (vm.spec && vm.spec.disk_gb) || 0;
+        if (minDiskP.set && disk < minDiskP.value) return false;
+        if (maxDiskP.set && disk > maxDiskP.value) return false;
         return true;
       });
     }

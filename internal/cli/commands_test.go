@@ -2708,9 +2708,9 @@ func TestCLI_ImageList_RejectsNegativeMaxSize(t *testing.T) {
 func seedCPUVMs(mock interface {
 	SeedVM(*types.VM)
 }) {
-	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048}})
-	mock.SeedVM(&types.VM{ID: "vm-2", Name: "mid", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096}})
-	mock.SeedVM(&types.VM{ID: "vm-3", Name: "big", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 8, RAMMB: 8192}})
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "mid", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 80}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "big", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 8, RAMMB: 8192, DiskGB: 500}})
 }
 
 func TestCLI_VMList_FilterByMinCpus(t *testing.T) {
@@ -2844,6 +2844,74 @@ func TestCLI_VMList_RejectsNegativeMaxRAM(t *testing.T) {
 	_, err := runCLI("vm", "list", "--max-ram-mb=-1")
 	if err == nil || !strings.Contains(err.Error(), "invalid --max-ram-mb") {
 		t.Fatalf("expected invalid --max-ram-mb error, got %v", err)
+	}
+}
+
+// --- VM list --min-disk-gb / --max-disk-gb (5.4.50) ---
+
+func TestCLI_VMList_FilterByMinDisk(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock) // small=20, mid=80, big=500 GB
+
+	out, err := runCLI("vm", "list", "--min-disk-gb", "80")
+	if err != nil {
+		t.Fatalf("vm list --min-disk-gb: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 80 GB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxDisk(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-disk-gb", "80")
+	if err != nil {
+		t.Fatalf("vm list --max-disk-gb: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 80 GB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-disk-gb", "50", "--max-disk-gb", "100")
+	if err != nil {
+		t.Fatalf("vm list disk range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinDisk(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-disk-gb", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-disk-gb") {
+		t.Fatalf("expected invalid --min-disk-gb error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxDisk(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-disk-gb=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-disk-gb") {
+		t.Fatalf("expected invalid --max-disk-gb error, got %v", err)
 	}
 }
 
