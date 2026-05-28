@@ -810,6 +810,15 @@ const server = http.createServer(async (req, res) => {
     if (maxHostPort.err) {
       return json(res, 400, { code: "invalid_max_host_port", message: "max_host_port must be a non-negative integer port number" });
     }
+    // Guest-port range filter (5.4.49): inclusive [min, max] on guest_port.
+    const minGuestPort = parsePortBound(url.searchParams.get("min_guest_port"), "min_guest_port");
+    if (minGuestPort.err) {
+      return json(res, 400, { code: "invalid_min_guest_port", message: "min_guest_port must be a non-negative integer port number" });
+    }
+    const maxGuestPort = parsePortBound(url.searchParams.get("max_guest_port"), "max_guest_port");
+    if (maxGuestPort.err) {
+      return json(res, 400, { code: "invalid_max_guest_port", message: "max_guest_port must be a non-negative integer port number" });
+    }
     let list = (portForwards.get(m[1]) || []).slice();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     if (tagFilter) {
@@ -820,6 +829,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (minHostPort.set) list = list.filter(pf => (pf.host_port || 0) >= minHostPort.value);
     if (maxHostPort.set) list = list.filter(pf => (pf.host_port || 0) <= maxHostPort.value);
+    if (minGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) >= minGuestPort.value);
+    if (maxGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) <= maxGuestPort.value);
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(pf => {

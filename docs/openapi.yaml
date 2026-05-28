@@ -833,6 +833,29 @@ paths:
             Inclusive upper bound on the rule's `host_port`. Same shape as
             `min_host_port`; non-numeric or negative values return 400
             `invalid_max_host_port`.
+        - in: query
+          name: min_guest_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive lower bound on the rule's `guest_port`. Whitespace-trimmed;
+            empty disables the bound; non-numeric or negative values return 400
+            `invalid_min_guest_port`. The symmetric counterpart to
+            `min_host_port`; applied right after the host-port range and before
+            `search`; composes additively with every other filter so
+            `X-Total-Count` reflects the post-filter population.
+        - in: query
+          name: max_guest_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive upper bound on the rule's `guest_port`. Same shape as
+            `min_guest_port`; non-numeric or negative values return 400
+            `invalid_max_guest_port`.
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
