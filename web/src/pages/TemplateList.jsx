@@ -25,6 +25,10 @@ export default function TemplateList() {
   const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
   const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
   const [maxCpusFilter, setMaxCpusFilter] = useState(searchParams.get('max_cpus') || '');
+  const [minRamInput, setMinRamInput] = useState(searchParams.get('min_ram_mb') || '');
+  const [minRamFilter, setMinRamFilter] = useState(searchParams.get('min_ram_mb') || '');
+  const [maxRamInput, setMaxRamInput] = useState(searchParams.get('max_ram_mb') || '');
+  const [maxRamFilter, setMaxRamFilter] = useState(searchParams.get('max_ram_mb') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -33,8 +37,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -47,7 +51,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -89,6 +93,18 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [maxCpusInput]);
 
+  // Debounce the min-ram / max-ram inputs (5.4.52).
+  useEffect(() => {
+    const trimmed = minRamInput.trim();
+    const id = setTimeout(() => setMinRamFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minRamInput]);
+  useEffect(() => {
+    const trimmed = maxRamInput.trim();
+    const id = setTimeout(() => setMaxRamFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxRamInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -101,8 +117,10 @@ export default function TemplateList() {
     if (until) next.set('until', until); else next.delete('until');
     if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
     if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
+    if (minRamFilter) next.set('min_ram_mb', minRamFilter); else next.delete('min_ram_mb');
+    if (maxRamFilter) next.set('max_ram_mb', maxRamFilter); else next.delete('max_ram_mb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -320,6 +338,41 @@ export default function TemplateList() {
               Clear CPUs
             </button>
           )}
+          <label className="flex items-center gap-1">
+            <span>Min RAM (MB)</span>
+            <input
+              type="number"
+              min="0"
+              value={minRamInput}
+              onChange={(e) => setMinRamInput(e.target.value)}
+              data-testid="template-list-min-ram-mb"
+              aria-label="Minimum RAM in MB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-24"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max RAM (MB)</span>
+            <input
+              type="number"
+              min="0"
+              value={maxRamInput}
+              onChange={(e) => setMaxRamInput(e.target.value)}
+              data-testid="template-list-max-ram-mb"
+              aria-label="Maximum RAM in MB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-24"
+            />
+          </label>
+          {(minRamInput || maxRamInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinRamInput(''); setMaxRamInput(''); }}
+              data-testid="template-list-ram-range-clear"
+              aria-label="Clear template RAM range"
+            >
+              Clear RAM
+            </button>
+          )}
         </div>
       </div>
 
@@ -388,6 +441,8 @@ export default function TemplateList() {
                 ? 'No templates were created in the selected time range.'
                 : (minCpusFilter || maxCpusFilter)
                 ? 'No templates match the selected CPU range.'
+                : (minRamFilter || maxRamFilter)
+                ? 'No templates match the selected RAM range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'

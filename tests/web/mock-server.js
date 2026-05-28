@@ -1150,9 +1150,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/templates" && method === "GET") {
     let list = [...templates.values()];
-    // min_cpus / max_cpus: inclusive non-negative integer range filter on
-    // the template's `cpus` field; non-numeric/negative value -> 400;
-    // whitespace-only disables (mirrors the VM list filter, 5.4.44).
+    // min_cpus / max_cpus and min_ram_mb / max_ram_mb: inclusive non-negative
+    // integer range filters on the template's `cpus` / `ram_mb` fields;
+    // non-numeric/negative value -> 400; whitespace-only disables
+    // (mirrors the VM list filters, 5.4.44 / 5.4.48).
     const parseTplCount = (raw, name) => {
       const v = (raw || "").trim();
       if (v === "") return { set: false };
@@ -1165,6 +1166,10 @@ const server = http.createServer(async (req, res) => {
     if (tplMinCpus.invalid) return json(res, 400, { code: tplMinCpus.code, message: tplMinCpus.msg });
     const tplMaxCpus = parseTplCount(url.searchParams.get("max_cpus"), "max_cpus");
     if (tplMaxCpus.invalid) return json(res, 400, { code: tplMaxCpus.code, message: tplMaxCpus.msg });
+    const tplMinRam = parseTplCount(url.searchParams.get("min_ram_mb"), "min_ram_mb");
+    if (tplMinRam.invalid) return json(res, 400, { code: tplMinRam.code, message: tplMinRam.msg });
+    const tplMaxRam = parseTplCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
+    if (tplMaxRam.invalid) return json(res, 400, { code: tplMaxRam.code, message: tplMaxRam.msg });
     const tag = (url.searchParams.get("tag") || "").trim();
     if (tag) {
       const lc = tag.toLowerCase();
@@ -1214,6 +1219,14 @@ const server = http.createServer(async (req, res) => {
         const cpus = Number(t.cpus) || 0;
         if (tplMinCpus.set && cpus < tplMinCpus.value) return false;
         if (tplMaxCpus.set && cpus > tplMaxCpus.value) return false;
+        return true;
+      });
+    }
+    if (tplMinRam.set || tplMaxRam.set) {
+      list = list.filter(t => {
+        const ram = Number(t.ram_mb) || 0;
+        if (tplMinRam.set && ram < tplMinRam.value) return false;
+        if (tplMaxRam.set && ram > tplMaxRam.value) return false;
         return true;
       });
     }

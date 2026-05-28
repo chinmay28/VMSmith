@@ -121,6 +121,14 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     `?search=` / `?tag=` cannot answer.
 //   - max_cpus=<n>           inclusive upper bound on `cpus`. Same shape
 //     as min_cpus; 400 `invalid_max_cpus` on garbage.
+//   - min_ram_mb=<n>         inclusive lower bound on `ram_mb`. Whitespace
+//     trimmed; empty disables; non-numeric or negative values return 400
+//     `invalid_min_ram_mb`. Mirrors the VM `?min_ram_mb=` filter (5.4.48);
+//     opens the same capacity-audit query against the template cohort —
+//     "show me every template that provisions >= 8 GB RAM VMs" — that
+//     `?search=` / `?tag=` cannot answer.
+//   - max_ram_mb=<n>         inclusive upper bound on `ram_mb`. Same shape
+//     as min_ram_mb; 400 `invalid_max_ram_mb` on garbage.
 //   - search=<value>         case-insensitive substring filter applied to
 //     `name`, `description`, and `tags`. ID, image, default_user, and
 //     network attachments are intentionally excluded from the haystack.
@@ -154,6 +162,16 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxCPUs, maxCPUsSet, apiErr := parseCountRangeParam(q.Get("max_cpus"), "max_cpus")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	minRAM, minRAMSet, apiErr := parseCountRangeParam(q.Get("min_ram_mb"), "min_ram_mb")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxRAM, maxRAMSet, apiErr := parseCountRangeParam(q.Get("max_ram_mb"), "max_ram_mb")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -218,6 +236,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if !countInRange(tpl.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
+				continue
+			}
+			filtered = append(filtered, tpl)
+		}
+		templates = filtered
+	}
+
+	if minRAMSet || maxRAMSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if !countInRange(tpl.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
 				continue
 			}
 			filtered = append(filtered, tpl)

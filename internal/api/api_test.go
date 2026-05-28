@@ -10788,6 +10788,131 @@ func TestListTemplates_FilterByCpus_ComposesWithTagAndSearch(t *testing.T) {
 	}
 }
 
+// --- Template list ?min_ram_mb= / ?max_ram_mb= (5.4.52) ---
+
+func TestListTemplates_FilterByMinRAM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4096 MB RAM), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMaxRAM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_ram_mb=4096")
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4096 MB RAM), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByRAMRange(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=2048&max_ram_mb=8192")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "mid" {
+		t.Fatalf("expected only mid in [2048,8192] MB RAM, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinRAM_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", RAMMB: 4096})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=4096")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinRAM_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only min_ram_mb should disable the filter, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidMinRAM(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_min_ram_mb")
+}
+
+func TestListTemplates_FilterByMaxRAM_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_ram_mb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_max_ram_mb")
+}
+
+func TestListTemplates_FilterByRAM_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-big-prod", Image: "rocky9.qcow2", RAMMB: 16384, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky-big-stg", Image: "rocky9.qcow2", RAMMB: 16384, Tags: []string{"staging"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "rocky-small-prod", Image: "rocky9.qcow2", RAMMB: 1024, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=8192&tag=prod&search=rocky")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-big-prod" {
+		t.Fatalf("expected only rocky-big-prod, got %+v", got)
+	}
+}
+
 // listPortsWithQuery is a small helper that GETs /vms/{vmID}/ports?<query>
 // and decodes the JSON body into a slice. Tests for sort ordering use it.
 func listPortsWithQuery(t *testing.T, ts *httptest.Server, vmID, query string) []types.PortForward {
