@@ -2664,6 +2664,14 @@ test.describe("Settings — Webhooks", () => {
     const status = page.getByTestId("webhook-status").first();
     await expect(status).toContainText(/204|test ok/i);
 
+    // Reload to discard the local probe result and verify the persisted
+    // last_status contract still renders as healthy even when last_error is
+    // omitted from the API payload.
+    await page.reload();
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId(`webhook-row-${rowID}`)).toBeVisible();
+    await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 204/i);
+
     // Delete.
     page.on("dialog", (dialog) => dialog.accept());
     await page.getByTestId(`webhook-delete-${rowID}`).click();

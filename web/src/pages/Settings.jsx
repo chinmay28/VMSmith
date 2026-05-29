@@ -614,7 +614,7 @@ function DeliveryStatus({ webhook, testResult }) {
   }
 
   const hasPersistedAttempt = Boolean(webhook.last_delivery_at);
-  const isHealthy = webhook.last_error === '' && webhook.last_status >= 200 && webhook.last_status < 300;
+  const isHealthy = !webhook.last_error && webhook.last_status >= 200 && webhook.last_status < 300;
 
   if (hasPersistedAttempt && isHealthy) {
     return (
