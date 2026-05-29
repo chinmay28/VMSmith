@@ -1968,6 +1968,25 @@ export interface paths {
                      *     / unknown / additive-composition semantics as `since`.
                      */
                     until?: string;
+                    /**
+                     * @description Inclusive lower bound on the template's `cpus` field.
+                     *     Templates with fewer vCPUs are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_min_cpus`. Composes additively with
+                     *     every other list filter so `X-Total-Count` reflects the
+                     *     post-filter population. Mirrors the VM `?min_cpus=` filter
+                     *     (5.4.44) — opens the same capacity-audit query against the
+                     *     template cohort.
+                     */
+                    min_cpus?: number;
+                    /**
+                     * @description Inclusive upper bound on the template's `cpus` field.
+                     *     Templates with more vCPUs are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_max_cpus`. Same count-range
+                     *     semantics as `min_cpus`.
+                     */
+                    max_cpus?: number;
                 };
                 header?: never;
                 path?: never;

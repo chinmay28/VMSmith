@@ -1150,6 +1150,21 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/templates" && method === "GET") {
     let list = [...templates.values()];
+    // min_cpus / max_cpus: inclusive non-negative integer range filter on
+    // the template's `cpus` field; non-numeric/negative value -> 400;
+    // whitespace-only disables (mirrors the VM list filter, 5.4.44).
+    const parseTplCount = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      if (!/^\d+$/.test(v)) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a non-negative integer` };
+      }
+      return { set: true, value: Number(v) };
+    };
+    const tplMinCpus = parseTplCount(url.searchParams.get("min_cpus"), "min_cpus");
+    if (tplMinCpus.invalid) return json(res, 400, { code: tplMinCpus.code, message: tplMinCpus.msg });
+    const tplMaxCpus = parseTplCount(url.searchParams.get("max_cpus"), "max_cpus");
+    if (tplMaxCpus.invalid) return json(res, 400, { code: tplMaxCpus.code, message: tplMaxCpus.msg });
     const tag = (url.searchParams.get("tag") || "").trim();
     if (tag) {
       const lc = tag.toLowerCase();
@@ -1191,6 +1206,14 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(ts.getTime())) return false;
         if (tplSince.set && ts < tplSince.value) return false;
         if (tplUntil.set && ts > tplUntil.value) return false;
+        return true;
+      });
+    }
+    if (tplMinCpus.set || tplMaxCpus.set) {
+      list = list.filter(t => {
+        const cpus = Number(t.cpus) || 0;
+        if (tplMinCpus.set && cpus < tplMinCpus.value) return false;
+        if (tplMaxCpus.set && cpus > tplMaxCpus.value) return false;
         return true;
       });
     }

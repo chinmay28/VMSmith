@@ -21,6 +21,10 @@ export default function TemplateList() {
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
+  const [minCpusInput, setMinCpusInput] = useState(searchParams.get('min_cpus') || '');
+  const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
+  const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
+  const [maxCpusFilter, setMaxCpusFilter] = useState(searchParams.get('max_cpus') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -29,8 +33,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -43,7 +47,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -73,6 +77,18 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [networkInput]);
 
+  // Debounce the min-cpus / max-cpus inputs (5.4.51).
+  useEffect(() => {
+    const trimmed = minCpusInput.trim();
+    const id = setTimeout(() => setMinCpusFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minCpusInput]);
+  useEffect(() => {
+    const trimmed = maxCpusInput.trim();
+    const id = setTimeout(() => setMaxCpusFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxCpusInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -83,8 +99,10 @@ export default function TemplateList() {
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
+    if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
+    if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -266,6 +284,43 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Min CPUs</span>
+            <input
+              type="number"
+              min="0"
+              value={minCpusInput}
+              onChange={(e) => setMinCpusInput(e.target.value)}
+              data-testid="template-list-min-cpus"
+              aria-label="Minimum vCPUs"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max CPUs</span>
+            <input
+              type="number"
+              min="0"
+              value={maxCpusInput}
+              onChange={(e) => setMaxCpusInput(e.target.value)}
+              data-testid="template-list-max-cpus"
+              aria-label="Maximum vCPUs"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          {(minCpusInput || maxCpusInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinCpusInput(''); setMaxCpusInput(''); }}
+              data-testid="template-list-cpu-range-clear"
+              aria-label="Clear template CPU range"
+            >
+              Clear CPUs
+            </button>
+          )}
+        </div>
       </div>
 
       {allTags.length > 0 && (
@@ -331,6 +386,8 @@ export default function TemplateList() {
                 ? `No templates attach network "${networkFilter}".`
                 : (since || until)
                 ? 'No templates were created in the selected time range.'
+                : (minCpusFilter || maxCpusFilter)
+                ? 'No templates match the selected CPU range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'

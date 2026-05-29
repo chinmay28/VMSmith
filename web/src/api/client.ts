@@ -271,8 +271,8 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage, tag, search, image, defaultUser, network, since, until, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; network?: string; since?: string; until?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, network: network || undefined, since: since || undefined, until: until || undefined, sort, order } } }), { withMeta: true }),
+  list: ({ page, perPage, tag, search, image, defaultUser, network, since, until, minCpus, maxCpus, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; network?: string; since?: string; until?: string; minCpus?: string; maxCpus?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, network: network || undefined, since: since || undefined, until: until || undefined, min_cpus: minCpus || undefined, max_cpus: maxCpus || undefined, sort, order } as any } } as any), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>

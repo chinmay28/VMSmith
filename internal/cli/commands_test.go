@@ -5853,6 +5853,94 @@ func TestCLI_TemplateList_EmptySinceOmitsFilter(t *testing.T) {
 	}
 }
 
+// --- template list --min-cpus / --max-cpus (roadmap 5.4.51) ---
+
+func seedCPUTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-small", Name: "small-tpl", Image: "rocky9.qcow2", CPUs: 2, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-mid", Name: "mid-tpl", Image: "rocky9.qcow2", CPUs: 4, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-big", Name: "big-tpl", Image: "rocky9.qcow2", CPUs: 16, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-cpus", "4")
+	if err != nil {
+		t.Fatalf("template list --min-cpus: %v", err)
+	}
+	if strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || !strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-cpus", "4")
+	if err != nil {
+		t.Fatalf("template list --max-cpus: %v", err)
+	}
+	if !strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByCpusRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-cpus", "3", "--max-cpus", "8")
+	if err != nil {
+		t.Fatalf("template list cpu range: %v", err)
+	}
+	if strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected only mid-tpl in [3,8] vCPUs, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-cpus", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-cpus")
+	}
+	if !strings.Contains(err.Error(), "--min-cpus") {
+		t.Fatalf("expected error to mention --min-cpus, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-cpus", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-cpus")
+	}
+	if !strings.Contains(err.Error(), "--max-cpus") {
+		t.Fatalf("expected error to mention --max-cpus, got %v", err)
+	}
+}
+
 // =====================================================
 // webhook list --search tests
 // =====================================================
