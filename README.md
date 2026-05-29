@@ -532,6 +532,8 @@ vmsmith net interfaces [--all]
 vmsmith daemon start [--port 8080] [--config ~/.vmsmith/config.yaml]
 vmsmith daemon stop
 vmsmith daemon status
+vmsmith host stats   [--api-url http://host:8080] [--json]
+vmsmith host quotas  [--api-url http://host:8080] [--json]
 ```
 
 ---
