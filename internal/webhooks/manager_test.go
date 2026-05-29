@@ -348,11 +348,12 @@ func TestManager_BoltStore_PersistsFailedDeliveryArtifacts(t *testing.T) {
 	mgr := newTestManager(t, db, bus, []string{host, "127.0.0.1"})
 
 	wh := &types.Webhook{
-		ID:        "wh-bolt-fail",
-		URL:       srv.URL,
-		Secret:    "bolt-secret",
-		Active:    true,
-		CreatedAt: time.Now(),
+		ID:         "wh-bolt-fail",
+		URL:        srv.URL,
+		Secret:     "bolt-secret",
+		EventTypes: []string{"vm.deleted"},
+		Active:     true,
+		CreatedAt:  time.Now(),
 	}
 	if err := db.PutWebhook(wh); err != nil {
 		t.Fatalf("PutWebhook: %v", err)
