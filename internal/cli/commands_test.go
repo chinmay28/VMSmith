@@ -5941,6 +5941,94 @@ func TestCLI_TemplateList_RejectsNegativeMaxCpus(t *testing.T) {
 	}
 }
 
+// --- template list --min-ram-mb / --max-ram-mb (roadmap 5.4.52) ---
+
+func seedRAMTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-rsmall", Name: "small-ram-tpl", Image: "rocky9.qcow2", RAMMB: 1024, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-rmid", Name: "mid-ram-tpl", Image: "rocky9.qcow2", RAMMB: 4096, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-rbig", Name: "big-ram-tpl", Image: "rocky9.qcow2", RAMMB: 16384, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("template list --min-ram-mb: %v", err)
+	}
+	if strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || !strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected mid+big (>= 4096 MB RAM), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("template list --max-ram-mb: %v", err)
+	}
+	if !strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected small+mid (<= 4096 MB RAM), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByRAMRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-ram-mb", "2048", "--max-ram-mb", "8192")
+	if err != nil {
+		t.Fatalf("template list ram range: %v", err)
+	}
+	if strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected only mid-ram-tpl in [2048,8192] MB RAM, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-ram-mb", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-ram-mb")
+	}
+	if !strings.Contains(err.Error(), "--min-ram-mb") {
+		t.Fatalf("expected error to mention --min-ram-mb, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-ram-mb", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-ram-mb")
+	}
+	if !strings.Contains(err.Error(), "--max-ram-mb") {
+		t.Fatalf("expected error to mention --max-ram-mb, got %v", err)
+	}
+}
+
 // =====================================================
 // webhook list --search tests
 // =====================================================

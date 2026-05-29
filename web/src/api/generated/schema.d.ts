@@ -1987,6 +1987,25 @@ export interface paths {
                      *     semantics as `min_cpus`.
                      */
                     max_cpus?: number;
+                    /**
+                     * @description Inclusive lower bound on the template's `ram_mb` field.
+                     *     Templates with less RAM are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_min_ram_mb`. Composes additively with
+                     *     every other list filter so `X-Total-Count` reflects the
+                     *     post-filter population. Mirrors the VM `?min_ram_mb=` filter
+                     *     (5.4.48) — opens the same capacity-audit query against the
+                     *     template cohort.
+                     */
+                    min_ram_mb?: number;
+                    /**
+                     * @description Inclusive upper bound on the template's `ram_mb` field.
+                     *     Templates with more RAM are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_max_ram_mb`. Same count-range
+                     *     semantics as `min_ram_mb`.
+                     */
+                    max_ram_mb?: number;
                 };
                 header?: never;
                 path?: never;

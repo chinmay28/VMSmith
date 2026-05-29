@@ -2319,6 +2319,33 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
   });
+
+  // --- roadmap 5.4.52: ?min_ram_mb= / ?max_ram_mb= range filter on template list ---
+  // Seed templates: small-ubuntu has ram_mb=1024, big-rocky has ram_mb=16384,
+  // so a min_ram_mb=4096 boundary cleanly separates them.
+  test("RAM range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_ram_mb=4096 keeps only big-rocky (ram_mb=16384).
+    await page.getByTestId("template-list-min-ram-mb").fill("4096");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_ram_mb")).toBe("4096");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear RAM" button restores both templates and drops the params.
+    await page.getByTestId("template-list-ram-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_ram_mb")).toBeNull();
+
+    // max_ram_mb=4096 keeps only small-ubuntu (ram_mb=1024).
+    await page.getByTestId("template-list-max-ram-mb").fill("4096");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_ram_mb")).toBe("4096");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
 });
 
 // ============================================================
