@@ -103,7 +103,7 @@ func allowAllResolver(host string) ([]net.IP, error) {
 	return []net.IP{net.ParseIP("93.184.216.34")}, nil
 }
 
-func newTestManager(t *testing.T, store *memStore, bus *events.EventBus, allowed []string) *Manager {
+func newTestManager(t *testing.T, store Store, bus *events.EventBus, allowed []string) *Manager {
 	t.Helper()
 	m := NewManager(store, bus, Config{
 		AllowedHosts: allowed,
@@ -377,7 +377,7 @@ func TestManager_BoltStore_PersistsFailedDeliveryArtifacts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListEventsFiltered: %v", err)
 		}
-		if persisted.LastStatus == 0 && persisted.LastError == "HTTP 502" && len(events) == 1 {
+		if persisted.LastStatus == http.StatusBadGateway && persisted.LastError == "HTTP 502" && len(events) == 1 {
 			if events[0].Attributes["webhook_id"] != wh.ID {
 				t.Fatalf("delivery_failed webhook_id = %q, want %q", events[0].Attributes["webhook_id"], wh.ID)
 			}
