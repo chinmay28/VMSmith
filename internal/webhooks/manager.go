@@ -302,7 +302,7 @@ func (w *worker) deliver(ctx context.Context, evt *types.Event) {
 
 	target, verifiedIPs, err := validateTarget(w.hook.URL, w.mgr.allowedHosts, w.mgr.resolveIPs)
 	if err != nil {
-		w.recordFailure(evt, err.Error(), -1)
+		w.recordFailure(evt, err.Error(), 0)
 		return
 	}
 
@@ -426,7 +426,7 @@ func (w *worker) recordSuccess(status int) {
 
 func (w *worker) recordFailure(evt *types.Event, errMsg string, lastStatus int) {
 	w.hook.LastDeliveryAt = time.Now().UTC()
-	w.hook.LastStatus = 0
+	w.hook.LastStatus = lastStatus
 	w.hook.LastError = errMsg
 	if err := w.mgr.store.PutWebhook(&w.hook); err != nil {
 		logger.Warn("webhooks", "persist last-delivery state failed", "webhook_id", w.hook.ID, "error", err.Error())
@@ -567,7 +567,7 @@ func (m *Manager) recordExternalDeliveryResult(hook *types.Webhook, result *type
 		hook.LastStatus = result.StatusCode
 		hook.LastError = ""
 	} else {
-		hook.LastStatus = 0
+		hook.LastStatus = result.StatusCode
 		hook.LastError = result.Error
 	}
 	if err := m.store.PutWebhook(hook); err != nil {

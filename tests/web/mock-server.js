@@ -1901,9 +1901,9 @@ const server = http.createServer(async (req, res) => {
     wh.last_delivery_at = now;
     if (result.success) {
       wh.last_status = result.status_code;
-      wh.last_error = "";
+      delete wh.last_error;
     } else {
-      wh.last_status = 0;
+      wh.last_status = result.status_code || 0;
       wh.last_error = result.error;
     }
     webhookList.set(wh.id, wh);

@@ -893,6 +893,42 @@ async function main() {
       await assert(!(await deletedRow.isVisible()), "deleted webhook row should disappear");
     }, page);
 
+    page = await context.newPage();
+    await page.route("**/api/v1/webhooks*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "X-Total-Count": "1",
+        },
+        body: JSON.stringify([
+          {
+            id: "wh-failing",
+            url: "https://example.com/failing",
+            secret: "",
+            event_types: ["vm.started"],
+            active: true,
+            created_at: "2026-05-20T00:00:00Z",
+            last_delivery_at: "2026-05-21T00:00:00Z",
+            last_status: 500,
+            last_error: "HTTP 500",
+          },
+        ]),
+      });
+    });
+    await page.goto(`${BASE}/settings`);
+    await page.waitForTimeout(1000);
+
+    await runTest("persisted non-2xx status with last_error renders as failure", async (p) => {
+      await assertVisible(p, "settings-page");
+      await assertVisible(p, "webhook-status");
+      const statusText = (await p.locator('[data-testid="webhook-status"]').first().textContent()) || "";
+      await assert(/HTTP 500|failed|500/i.test(statusText), `expected persisted failing status, got "${statusText.trim()}"`);
+      await assert(!/test ok/i.test(statusText), `expected persisted failure, got "${statusText.trim()}"`);
+    }, page);
+
+    await page.close();
+
     await page.close();
 
     // 2.2.14 — editable webhook config: round-trip the edit modal through

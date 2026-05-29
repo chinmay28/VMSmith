@@ -315,8 +315,8 @@ func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWebhook: %v", err)
 	}
-	if persisted.LastStatus != 0 {
-		t.Fatalf("LastStatus = %d, want 0 after final failure", persisted.LastStatus)
+	if persisted.LastStatus != http.StatusInternalServerError {
+		t.Fatalf("LastStatus = %d, want 500 after final failure", persisted.LastStatus)
 	}
 	if persisted.LastError != "HTTP 500" {
 		t.Fatalf("LastError = %q, want HTTP 500 after final failure", persisted.LastError)
@@ -542,11 +542,11 @@ func TestManager_TestDeliver_Failure(t *testing.T) {
 	}
 
 	persisted, _ := store.GetWebhook(wh.ID)
-	if persisted.LastStatus != 0 {
-		t.Fatalf("LastStatus = %d, want 0 after failure", persisted.LastStatus)
+	if persisted.LastStatus != http.StatusInternalServerError {
+		t.Fatalf("LastStatus = %d, want 500 after failure", persisted.LastStatus)
 	}
-	if persisted.LastError == "" {
-		t.Fatalf("LastError was not recorded")
+	if persisted.LastError != "HTTP 500" {
+		t.Fatalf("LastError = %q, want HTTP 500 after failure", persisted.LastError)
 	}
 }
 
@@ -583,6 +583,17 @@ func TestManager_TestDeliver_SSRFBlocked(t *testing.T) {
 	}
 	if res.Error == "" {
 		t.Fatalf("expected error to describe SSRF block")
+	}
+
+	persisted, err := store.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if persisted.LastStatus != 0 {
+		t.Fatalf("LastStatus = %d, want 0 when no HTTP response exists", persisted.LastStatus)
+	}
+	if persisted.LastError == "" {
+		t.Fatal("LastError was not persisted for SSRF block")
 	}
 }
 
