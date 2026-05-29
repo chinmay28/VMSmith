@@ -312,6 +312,35 @@ func TestCLI_ScheduleRuns_RejectsInvalidSince(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleRuns_ForwardsVMFilter(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-42","started_at":"2026-05-22T02:00:00Z","status":"success"}]`)
+
+	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--vm", "  vm-42  ")
+	if err != nil {
+		t.Fatalf("runs: %v\nout=%s", err, out)
+	}
+	if d.lastMeth != http.MethodGet || d.lastPath != "/api/v1/schedules/sched-1/runs" {
+		t.Fatalf("unexpected request: %s %s", d.lastMeth, d.lastPath)
+	}
+	if !strings.Contains(d.lastQuery, "vm_id=vm-42") {
+		t.Fatalf("query missing vm_id=vm-42: %s", d.lastQuery)
+	}
+	if !strings.Contains(out, "vm-42") {
+		t.Fatalf("output missing run detail: %s", out)
+	}
+}
+
+func TestCLI_ScheduleRuns_EmptyVMFlagSendsNothing(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--vm", "   "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "vm_id=") {
+		t.Fatalf("empty --vm should not send vm_id query param, got %q", d.lastQuery)
+	}
+}
+
 func TestCLI_ScheduleRuns_Empty(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL)

@@ -439,10 +439,17 @@ function RunStatusChip({ status }) {
 function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNow }) {
   const [expanded, setExpanded] = useState(false);
   const [runStatus, setRunStatus] = useState('');
+  const [runVMID, setRunVMID] = useState('');
+  const [runVMIDDebounced, setRunVMIDDebounced] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setRunVMIDDebounced(runVMID.trim()), 250);
+    return () => clearTimeout(t);
+  }, [runVMID]);
 
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runVMIDDebounced],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -531,21 +538,32 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
         <tr className="bg-steel-900/40 border-b border-steel-800/30" data-testid={`schedule-runs-${schedule.id}`}>
           <td className="px-1 py-2"></td>
           <td colSpan={8} className="px-3 py-2">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 gap-2">
               <div className="text-[11px] font-mono text-steel-500">Recent runs</div>
-              <select
-                className="input input-sm text-[11px] py-0.5"
-                value={runStatus}
-                onChange={(e) => setRunStatus(e.target.value)}
-                data-testid={`schedule-runs-status-filter-${schedule.id}`}
-                aria-label="Filter runs by status"
-              >
-                <option value="">All statuses</option>
-                <option value="running">Running</option>
-                <option value="success">Success</option>
-                <option value="error">Error</option>
-                <option value="skipped">Skipped</option>
-              </select>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="input input-sm text-[11px] py-0.5 w-40"
+                  placeholder="Filter runs by VM id"
+                  value={runVMID}
+                  onChange={(e) => setRunVMID(e.target.value)}
+                  data-testid={`schedule-runs-vm-filter-${schedule.id}`}
+                  aria-label="Filter runs by VM id"
+                />
+                <select
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runStatus}
+                  onChange={(e) => setRunStatus(e.target.value)}
+                  data-testid={`schedule-runs-status-filter-${schedule.id}`}
+                  aria-label="Filter runs by status"
+                >
+                  <option value="">All statuses</option>
+                  <option value="running">Running</option>
+                  <option value="success">Success</option>
+                  <option value="error">Error</option>
+                  <option value="skipped">Skipped</option>
+                </select>
+              </div>
             </div>
             {runsLoading && !runsResponse ? (
               <Spinner size={14} />
