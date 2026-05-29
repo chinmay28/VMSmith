@@ -2491,6 +2491,42 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
   });
 
+  test("timezone filter narrows the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+
+    // Mock seeds: sch-1 UTC, sch-2 America/New_York, sch-3 UTC.
+    await page.getByTestId("schedule-timezone-filter").fill("America/New_York");
+    await expect.poll(() => new URL(page.url()).searchParams.get("timezone")).toBe("America/New_York");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+
+    // Case-sensitive: lowercase variant matches nothing.
+    await page.getByTestId("schedule-timezone-filter").fill("america/new_york");
+    await expect.poll(() => new URL(page.url()).searchParams.get("timezone")).toBe("america/new_york");
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+
+    // UTC matches the two UTC-scheduled rows.
+    await page.getByTestId("schedule-timezone-filter").fill("UTC");
+    await expect.poll(() => new URL(page.url()).searchParams.get("timezone")).toBe("UTC");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+
+    // Clearing the filter restores the unfiltered view.
+    await page.getByTestId("schedule-timezone-filter").fill("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("timezone")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+  });
+
   test("edits a schedule via the edit modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

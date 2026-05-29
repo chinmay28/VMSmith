@@ -130,6 +130,7 @@ var scheduleListCmd = &cobra.Command{
 		tagSelector, _ := cmd.Flags().GetString("tag-selector")
 		action, _ := cmd.Flags().GetString("action")
 		catchUp, _ := cmd.Flags().GetString("catch-up")
+		timezone, _ := cmd.Flags().GetString("timezone")
 		enabled, _ := cmd.Flags().GetString("enabled")
 		search, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
@@ -174,6 +175,9 @@ var scheduleListCmd = &cobra.Command{
 		}
 		if catchUp != "" {
 			q.Set("catch_up_policy", catchUp)
+		}
+		if v := strings.TrimSpace(timezone); v != "" {
+			q.Set("timezone", v)
 		}
 		if enabled != "" {
 			q.Set("enabled", enabled)
@@ -553,6 +557,7 @@ func init() {
 	scheduleListCmd.Flags().String("tag-selector", "", "filter by exact tag-selector membership (case-insensitive)")
 	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart)")
 	scheduleListCmd.Flags().String("catch-up", "", "filter by catch-up policy (skip|run_once|run_all)")
+	scheduleListCmd.Flags().String("timezone", "", "filter by exact IANA timezone (case-sensitive, e.g. UTC, America/New_York)")
 	scheduleListCmd.Flags().String("enabled", "", "filter by enabled flag: true|false")
 	scheduleListCmd.Flags().String("search", "", "case-insensitive substring filter (name, action, vm_id, tag selector)")
 	scheduleListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")

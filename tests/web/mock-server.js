@@ -154,7 +154,7 @@ function seed() {
     tag_selector: ["dev"],
     action: "stop",
     cron_spec: "0 0 3 * * 0",
-    timezone: "",
+    timezone: "America/New_York",
     enabled: false,
     catch_up_policy: "run_once",
     max_concurrent: 0,
@@ -1938,6 +1938,9 @@ const server = http.createServer(async (req, res) => {
     if (catchUpFilter !== "" && !["skip", "run_once", "run_all"].includes(catchUpFilter)) {
       return json(res, 400, { code: "invalid_catch_up_policy", message: "catch_up_policy must be one of: skip, run_once, run_all" });
     }
+    // Case-sensitive exact-match against stored Timezone (mirrors the API).
+    // Whitespace-trimmed; empty disables the filter; no default-fallback.
+    const timezoneFilter = (url.searchParams.get("timezone") || "").trim();
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const enabledRaw = (url.searchParams.get("enabled") || "").trim().toLowerCase();
     let enabledFilter = null;
@@ -1987,6 +1990,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
     if (catchUpFilter) list = list.filter((s) => ((s.catch_up_policy || "skip").toLowerCase()) === catchUpFilter);
+    if (timezoneFilter) list = list.filter((s) => (s.timezone || "") === timezoneFilter);
     if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
     if (since.set || until.set) {
       list = list.filter((s) => {

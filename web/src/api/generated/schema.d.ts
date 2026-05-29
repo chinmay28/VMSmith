@@ -2732,6 +2732,20 @@ export interface paths {
                      */
                     catch_up_policy?: "skip" | "run_once" | "run_all";
                     /**
+                     * @description Case-sensitive exact-match filter against the schedule's stored
+                     *     `timezone` field. IANA timezone names are case-sensitive
+                     *     (`America/New_York` not `america/new_york`), mirroring the
+                     *     `vm_id` / `actor` / `resource_id` exact-match filter contracts.
+                     *     Whitespace-trimmed; empty disables the filter. No default-fallback
+                     *     for empty stored values — the engine's effective default is
+                     *     host-dependent (`time.Local`), so operators querying by timezone
+                     *     must supply the literal value they stored. Applied after
+                     *     `catch_up_policy` and before `enabled` so it composes additively
+                     *     with every other schedule filter; `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    timezone?: string;
+                    /**
                      * @description Tristate boolean filter on the schedule's `enabled` flag.
                      *     Case-insensitive `true` / `false`; whitespace-trimmed; empty
                      *     disables the filter; anything else returns 400 `invalid_enabled`.

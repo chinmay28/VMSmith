@@ -584,8 +584,8 @@ func TestTestWebhook_EndToEndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWebhook: %v", err)
 	}
-	if persisted.LastStatus != 0 {
-		t.Fatalf("LastStatus = %d, want 0", persisted.LastStatus)
+	if persisted.LastStatus != http.StatusInternalServerError {
+		t.Fatalf("LastStatus = %d, want 500", persisted.LastStatus)
 	}
 	if persisted.LastError != "HTTP 500" {
 		t.Fatalf("LastError = %q, want HTTP 500", persisted.LastError)

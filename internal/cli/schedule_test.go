@@ -129,6 +129,29 @@ func TestCLI_ScheduleList_ForwardsCatchUpPolicy(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleList_ForwardsTimezone(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--timezone", "  America/New_York  "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	// IANA timezone names are case-sensitive — forwarded verbatim (only trim).
+	if !strings.Contains(d.lastQuery, "timezone=America%2FNew_York") {
+		t.Fatalf("query missing trimmed timezone: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleList_EmptyTimezoneOmitsParam(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--timezone", "   "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "timezone=") {
+		t.Fatalf("whitespace-only timezone should not send the param: %s", d.lastQuery)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidCatchUp(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--catch-up", "bogus"); err == nil {
