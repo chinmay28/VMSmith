@@ -128,6 +128,8 @@ var templateListCmd = &cobra.Command{
 		maxCPUsRaw, _ := cmd.Flags().GetString("max-cpus")
 		minRAMRaw, _ := cmd.Flags().GetString("min-ram-mb")
 		maxRAMRaw, _ := cmd.Flags().GetString("max-ram-mb")
+		minDiskRaw, _ := cmd.Flags().GetString("min-disk-gb")
+		maxDiskRaw, _ := cmd.Flags().GetString("max-disk-gb")
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
 		if err != nil {
 			return err
@@ -149,6 +151,14 @@ var templateListCmd = &cobra.Command{
 			return err
 		}
 		maxRAM, maxRAMSet, err := parseCLICountRange(maxRAMRaw, "--max-ram-mb")
+		if err != nil {
+			return err
+		}
+		minDisk, minDiskSet, err := parseCLICountRange(minDiskRaw, "--min-disk-gb")
+		if err != nil {
+			return err
+		}
+		maxDisk, maxDiskSet, err := parseCLICountRange(maxDiskRaw, "--max-disk-gb")
 		if err != nil {
 			return err
 		}
@@ -243,6 +253,16 @@ var templateListCmd = &cobra.Command{
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if !countInCLIRange(tpl.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
+					continue
+				}
+				filtered = append(filtered, tpl)
+			}
+			templates = filtered
+		}
+		if minDiskSet || maxDiskSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if !countInCLIRange(tpl.DiskGB, minDisk, minDiskSet, maxDisk, maxDiskSet) {
 					continue
 				}
 				filtered = append(filtered, tpl)
@@ -469,6 +489,8 @@ func init() {
 	templateListCmd.Flags().String("max-cpus", "", "keep templates with at most this many vCPUs (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("min-ram-mb", "", "keep templates with at least this much RAM in MB (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("max-ram-mb", "", "keep templates with at most this much RAM in MB (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("min-disk-gb", "", "keep templates with at least this many GB of disk (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("max-disk-gb", "", "keep templates with at most this many GB of disk (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 

@@ -10913,6 +10913,131 @@ func TestListTemplates_FilterByRAM_ComposesWithTagAndSearch(t *testing.T) {
 	}
 }
 
+// --- Template list ?min_disk_gb= / ?max_disk_gb= (5.4.53) ---
+
+func TestListTemplates_FilterByMinDisk(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=50")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 50 GB disk), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMaxDisk(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_disk_gb=50")
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 50 GB disk), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByDiskRange(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=40&max_disk_gb=100")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "mid" {
+		t.Fatalf("expected only mid in [40,100] GB disk, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinDisk_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", DiskGB: 50})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=50")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinDisk_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only min_disk_gb should disable the filter, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidMinDisk(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_min_disk_gb")
+}
+
+func TestListTemplates_FilterByMaxDisk_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_disk_gb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_max_disk_gb")
+}
+
+func TestListTemplates_FilterByDisk_ComposesWithCpusAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-big-prod", Image: "rocky9.qcow2", CPUs: 16, DiskGB: 200, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky-big-small-disk", Image: "rocky9.qcow2", CPUs: 16, DiskGB: 10, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "rocky-small-prod", Image: "rocky9.qcow2", CPUs: 2, DiskGB: 200, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=100&min_cpus=8&search=rocky")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-big-prod" {
+		t.Fatalf("expected only rocky-big-prod, got %+v", got)
+	}
+}
+
 // listPortsWithQuery is a small helper that GETs /vms/{vmID}/ports?<query>
 // and decodes the JSON body into a slice. Tests for sort ordering use it.
 func listPortsWithQuery(t *testing.T, ts *httptest.Server, vmID, query string) []types.PortForward {

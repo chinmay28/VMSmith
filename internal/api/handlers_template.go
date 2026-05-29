@@ -129,6 +129,16 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     `?search=` / `?tag=` cannot answer.
 //   - max_ram_mb=<n>         inclusive upper bound on `ram_mb`. Same shape
 //     as min_ram_mb; 400 `invalid_max_ram_mb` on garbage.
+//   - min_disk_gb=<n>        inclusive lower bound on `disk_gb`. Whitespace
+//     trimmed; empty disables; non-numeric or negative values return 400
+//     `invalid_min_disk_gb`. Mirrors the VM `?min_disk_gb=` filter (5.4.50);
+//     opens the same capacity-audit query against the template cohort —
+//     "show me every template that provisions >= 100 GB disk VMs" — and
+//     completes the cpus/ram/disk capacity-audit trio on the template list
+//     alongside `?min_cpus=`/`?max_cpus=` (5.4.51) and `?min_ram_mb=` /
+//     `?max_ram_mb=` (5.4.52).
+//   - max_disk_gb=<n>        inclusive upper bound on `disk_gb`. Same shape
+//     as min_disk_gb; 400 `invalid_max_disk_gb` on garbage.
 //   - search=<value>         case-insensitive substring filter applied to
 //     `name`, `description`, and `tags`. ID, image, default_user, and
 //     network attachments are intentionally excluded from the haystack.
@@ -172,6 +182,16 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxRAM, maxRAMSet, apiErr := parseCountRangeParam(q.Get("max_ram_mb"), "max_ram_mb")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	minDisk, minDiskSet, apiErr := parseCountRangeParam(q.Get("min_disk_gb"), "min_disk_gb")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxDisk, maxDiskSet, apiErr := parseCountRangeParam(q.Get("max_disk_gb"), "max_disk_gb")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -247,6 +267,17 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if !countInRange(tpl.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
+				continue
+			}
+			filtered = append(filtered, tpl)
+		}
+		templates = filtered
+	}
+
+	if minDiskSet || maxDiskSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if !countInRange(tpl.DiskGB, minDisk, minDiskSet, maxDisk, maxDiskSet) {
 				continue
 			}
 			filtered = append(filtered, tpl)

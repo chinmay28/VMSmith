@@ -29,6 +29,10 @@ export default function TemplateList() {
   const [minRamFilter, setMinRamFilter] = useState(searchParams.get('min_ram_mb') || '');
   const [maxRamInput, setMaxRamInput] = useState(searchParams.get('max_ram_mb') || '');
   const [maxRamFilter, setMaxRamFilter] = useState(searchParams.get('max_ram_mb') || '');
+  const [minDiskGbInput, setMinDiskGbInput] = useState(searchParams.get('min_disk_gb') || '');
+  const [minDiskGbFilter, setMinDiskGbFilter] = useState(searchParams.get('min_disk_gb') || '');
+  const [maxDiskGbInput, setMaxDiskGbInput] = useState(searchParams.get('max_disk_gb') || '');
+  const [maxDiskGbFilter, setMaxDiskGbFilter] = useState(searchParams.get('max_disk_gb') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -37,8 +41,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -51,7 +55,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -105,6 +109,18 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [maxRamInput]);
 
+  // Debounce the min-disk-gb / max-disk-gb inputs (5.4.53).
+  useEffect(() => {
+    const trimmed = minDiskGbInput.trim();
+    const id = setTimeout(() => setMinDiskGbFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minDiskGbInput]);
+  useEffect(() => {
+    const trimmed = maxDiskGbInput.trim();
+    const id = setTimeout(() => setMaxDiskGbFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxDiskGbInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -119,8 +135,10 @@ export default function TemplateList() {
     if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
     if (minRamFilter) next.set('min_ram_mb', minRamFilter); else next.delete('min_ram_mb');
     if (maxRamFilter) next.set('max_ram_mb', maxRamFilter); else next.delete('max_ram_mb');
+    if (minDiskGbFilter) next.set('min_disk_gb', minDiskGbFilter); else next.delete('min_disk_gb');
+    if (maxDiskGbFilter) next.set('max_disk_gb', maxDiskGbFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -374,6 +392,43 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Min disk (GB)</span>
+            <input
+              type="number"
+              min="0"
+              value={minDiskGbInput}
+              onChange={(e) => setMinDiskGbInput(e.target.value)}
+              data-testid="template-list-min-disk-gb"
+              aria-label="Minimum disk GB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max disk (GB)</span>
+            <input
+              type="number"
+              min="0"
+              value={maxDiskGbInput}
+              onChange={(e) => setMaxDiskGbInput(e.target.value)}
+              data-testid="template-list-max-disk-gb"
+              aria-label="Maximum disk GB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          {(minDiskGbInput || maxDiskGbInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinDiskGbInput(''); setMaxDiskGbInput(''); }}
+              data-testid="template-list-disk-range-clear"
+              aria-label="Clear template disk range"
+            >
+              Clear disk
+            </button>
+          )}
+        </div>
       </div>
 
       {allTags.length > 0 && (
@@ -443,6 +498,8 @@ export default function TemplateList() {
                 ? 'No templates match the selected CPU range.'
                 : (minRamFilter || maxRamFilter)
                 ? 'No templates match the selected RAM range.'
+                : (minDiskGbFilter || maxDiskGbFilter)
+                ? 'No templates match the selected disk range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'

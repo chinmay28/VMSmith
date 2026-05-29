@@ -104,7 +104,7 @@ function seed() {
     image: "/images/ubuntu-base.qcow2",
     cpus: 1,
     ram_mb: 1024,
-    disk_gb: 12,
+    disk_gb: 10,
     description: "Small Ubuntu template",
     tags: ["starter", "ubuntu"],
     default_user: "ubuntu",
@@ -118,7 +118,7 @@ function seed() {
     image: "/images/rocky9.qcow2",
     cpus: 8,
     ram_mb: 16384,
-    disk_gb: 80,
+    disk_gb: 200,
     description: "Big Rocky template",
     tags: ["prod", "rocky"],
     default_user: "root",
@@ -1170,6 +1170,10 @@ const server = http.createServer(async (req, res) => {
     if (tplMinRam.invalid) return json(res, 400, { code: tplMinRam.code, message: tplMinRam.msg });
     const tplMaxRam = parseTplCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
     if (tplMaxRam.invalid) return json(res, 400, { code: tplMaxRam.code, message: tplMaxRam.msg });
+    const tplMinDisk = parseTplCount(url.searchParams.get("min_disk_gb"), "min_disk_gb");
+    if (tplMinDisk.invalid) return json(res, 400, { code: tplMinDisk.code, message: tplMinDisk.msg });
+    const tplMaxDisk = parseTplCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
+    if (tplMaxDisk.invalid) return json(res, 400, { code: tplMaxDisk.code, message: tplMaxDisk.msg });
     const tag = (url.searchParams.get("tag") || "").trim();
     if (tag) {
       const lc = tag.toLowerCase();
@@ -1227,6 +1231,14 @@ const server = http.createServer(async (req, res) => {
         const ram = Number(t.ram_mb) || 0;
         if (tplMinRam.set && ram < tplMinRam.value) return false;
         if (tplMaxRam.set && ram > tplMaxRam.value) return false;
+        return true;
+      });
+    }
+    if (tplMinDisk.set || tplMaxDisk.set) {
+      list = list.filter(t => {
+        const disk = Number(t.disk_gb) || 0;
+        if (tplMinDisk.set && disk < tplMinDisk.value) return false;
+        if (tplMaxDisk.set && disk > tplMaxDisk.value) return false;
         return true;
       });
     }
