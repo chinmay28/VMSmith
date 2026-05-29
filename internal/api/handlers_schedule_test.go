@@ -621,3 +621,103 @@ func TestListScheduleRuns_Filters(t *testing.T) {
 		t.Fatalf("unknown schedule should 404, got %d", resp.StatusCode)
 	}
 }
+
+func TestListScheduleRuns_FilterByVMID(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-multi", Name: "multi", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+		TagSelector: []string{"prod"},
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started, vmID string, status types.ScheduleRunStatus) {
+		t.Helper()
+		at, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		if err := s.AppendRun("sched-multi", &types.ScheduleRun{
+			VMID: vmID, StartedAt: at, Status: status,
+		}); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	mk("2026-05-20T02:00:00Z", "vm-1", types.ScheduleRunStatusSuccess)
+	mk("2026-05-21T02:00:00Z", "vm-2", types.ScheduleRunStatusError)
+	mk("2026-05-22T02:00:00Z", "vm-1", types.ScheduleRunStatusSuccess)
+	mk("2026-05-23T02:00:00Z", "vm-3", types.ScheduleRunStatusSkipped)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-multi/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: 4 runs, no filter.
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	// Exact match: vm_id=vm-1 returns 2 runs, post-filter X-Total-Count=2.
+	runs, total, _ := list("?vm_id=vm-1")
+	if len(runs) != 2 || total != 2 {
+		t.Fatalf("vm_id=vm-1: len=%d total=%d", len(runs), total)
+	}
+	for _, r := range runs {
+		if r.VMID != "vm-1" {
+			t.Fatalf("vm_id=vm-1 leaked %q", r.VMID)
+		}
+	}
+
+	// Exact match: vm_id=vm-3 returns the single skipped run.
+	if runs, total, _ := list("?vm_id=vm-3"); len(runs) != 1 || total != 1 || runs[0].VMID != "vm-3" {
+		t.Fatalf("vm_id=vm-3: %+v total=%d", runs, total)
+	}
+
+	// No match yields an empty (non-null) array + total 0.
+	runs, total, code := list("?vm_id=vm-missing")
+	if code != http.StatusOK || runs == nil || len(runs) != 0 || total != 0 {
+		t.Fatalf("vm_id=vm-missing: code=%d runs=%v total=%d", code, runs, total)
+	}
+
+	// vm_id is whitespace-trimmed.
+	if runs, _, _ := list("?vm_id=%20vm-2%20"); len(runs) != 1 || runs[0].VMID != "vm-2" {
+		t.Fatalf("vm_id trim: %+v", runs)
+	}
+
+	// vm_id matching is case-sensitive: VM IDs are opaque vm-<unix-nano> strings.
+	if runs, total, _ := list("?vm_id=VM-1"); len(runs) != 0 || total != 0 {
+		t.Fatalf("vm_id case-sensitive: %+v total=%d", runs, total)
+	}
+
+	// Empty vm_id is treated as no filter (mirrors event handler vm_id contract).
+	if runs, total, _ := list("?vm_id="); len(runs) != 4 || total != 4 {
+		t.Fatalf("empty vm_id: len=%d total=%d", len(runs), total)
+	}
+
+	// Composes with status: vm-1 + success → 2 runs.
+	if runs, total, _ := list("?vm_id=vm-1&status=success"); len(runs) != 2 || total != 2 {
+		t.Fatalf("vm-1+success: len=%d total=%d", len(runs), total)
+	}
+	// vm-1 + status=error → 0 (only vm-2 errored).
+	if runs, total, _ := list("?vm_id=vm-1&status=error"); len(runs) != 0 || total != 0 {
+		t.Fatalf("vm-1+error: len=%d total=%d", len(runs), total)
+	}
+
+	// Composes with since/until: vm-1 + since 2026-05-22 → 1 run.
+	if runs, total, _ := list("?vm_id=vm-1&since=2026-05-22T02:00:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("vm-1+since: len=%d total=%d", len(runs), total)
+	}
+
+	// X-Total-Count reflects post-filter population under pagination.
+	if runs, total, _ := list("?vm_id=vm-1&per_page=1"); len(runs) != 1 || total != 2 {
+		t.Fatalf("vm-1 paginated: len=%d total=%d", len(runs), total)
+	}
+}

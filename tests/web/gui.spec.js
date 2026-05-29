@@ -2537,6 +2537,37 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
   });
 
+  test("runs vm_id filter narrows the recent-runs expander", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+    // All four seeded runs are visible by default (run-4 vm-2, run-2 vm-1, run-1 vm-1, run-3 vm-1).
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // Filter to vm-2: only run-4 survives.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("vm-2");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Switch to vm-1: the three vm-1 runs come back, run-4 (vm-2) drops out.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("vm-1");
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+
+    // Clearing the filter restores the full population.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

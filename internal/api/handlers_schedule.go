@@ -457,9 +457,11 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 //
 // Filters (applied before pagination so X-Total-Count reflects the post-filter
 // population): status (exact, case-insensitive: running|success|error|skipped;
-// invalid values return 400 invalid_status), since/until (inclusive RFC3339
-// bounds on started_at; invalid values return 400 invalid_since/invalid_until;
-// a run with a zero started_at is filtered OUT when any bound is set).
+// invalid values return 400 invalid_status), vm_id (exact, case-sensitive — VM
+// IDs are opaque vm-<unix-nano> strings; whitespace-trimmed; empty disables
+// the filter), since/until (inclusive RFC3339 bounds on started_at; invalid
+// values return 400 invalid_since/invalid_until; a run with a zero started_at
+// is filtered OUT when any bound is set).
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -476,6 +478,7 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_status", "status must be one of: running, success, error, skipped")
 		return
 	}
+	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
 	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -499,6 +502,9 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if statusFilter != "" && string(run.Status) != statusFilter {
+			continue
+		}
+		if vmIDFilter != "" && run.VMID != vmIDFilter {
 			continue
 		}
 		if !snapshotInTimeRange(run.StartedAt, sinceTime, sinceSet, untilTime, untilSet) {

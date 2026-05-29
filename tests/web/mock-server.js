@@ -187,6 +187,14 @@ function seed() {
   });
   scheduleRuns.set("sch-1", [
     {
+      id: "run-4",
+      schedule_id: "sch-1",
+      vm_id: vm2.id,
+      started_at: "2026-05-24T02:00:00Z",
+      finished_at: "2026-05-24T02:00:06Z",
+      status: "success",
+    },
+    {
       id: "run-2",
       schedule_id: "sch-1",
       vm_id: vm1.id,
@@ -2112,6 +2120,7 @@ const server = http.createServer(async (req, res) => {
     if (statusFilter && !validStatuses.includes(statusFilter)) {
       return json(res, 400, { code: "invalid_status", message: "status must be one of: running, success, error, skipped" });
     }
+    const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
     const since = (url.searchParams.get("since") || "").trim();
     const until = (url.searchParams.get("until") || "").trim();
     const sinceMs = since ? Date.parse(since) : NaN;
@@ -2124,6 +2133,7 @@ const server = http.createServer(async (req, res) => {
     }
     const all = (scheduleRuns.get(m[1]) || []).filter((run) => {
       if (statusFilter && String(run.status).toLowerCase() !== statusFilter) return false;
+      if (vmIDFilter && String(run.vm_id || "") !== vmIDFilter) return false;
       if (since || until) {
         const startMs = run.started_at ? Date.parse(run.started_at) : NaN;
         if (isNaN(startMs)) return false;

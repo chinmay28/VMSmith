@@ -2222,6 +2222,19 @@ paths:
             Case-insensitive exact-match on the run status. Empty disables the
             filter; unknown values return 400 `invalid_status`.
         - in: query
+          name: vm_id
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-sensitive exact-match against the run's `vm_id`. Whitespace
+            is trimmed; empty disables the filter. Useful for tag-selector
+            schedules that target many VMs — narrows the run history to a
+            single VM (e.g. "which runs of `nightly-snapshot` targeted
+            `vm-1700000000000`"). Composes additively with `status` and
+            `since`/`until`; applied before pagination so `X-Total-Count`
+            reflects the post-filter population.
+        - in: query
           name: since
           required: false
           schema:

@@ -2961,6 +2961,16 @@ export interface paths {
                      */
                     status?: "running" | "success" | "error" | "skipped";
                     /**
+                     * @description Case-sensitive exact-match against the run's `vm_id`. Whitespace
+                     *     is trimmed; empty disables the filter. Useful for tag-selector
+                     *     schedules that target many VMs — narrows the run history to a
+                     *     single VM (e.g. "which runs of `nightly-snapshot` targeted
+                     *     `vm-1700000000000`"). Composes additively with `status` and
+                     *     `since`/`until`; applied before pagination so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    vm_id?: string;
+                    /**
                      * @description Inclusive RFC3339 lower bound on the run's `started_at`. Invalid
                      *     values return 400 `invalid_since`. A run with a zero `started_at`
                      *     is filtered out whenever `since` or `until` is set.
