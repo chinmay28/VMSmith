@@ -2346,6 +2346,33 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
   });
+
+  // --- roadmap 5.4.53: ?min_disk_gb= / ?max_disk_gb= range filter on template list ---
+  // Seed templates: small-ubuntu has disk_gb=10, big-rocky has disk_gb=200, so a
+  // min_disk_gb=50 boundary cleanly separates them.
+  test("disk range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_disk_gb=50 keeps only big-rocky (disk_gb=200).
+    await page.getByTestId("template-list-min-disk-gb").fill("50");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_disk_gb")).toBe("50");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear disk" button restores both templates and drops the params.
+    await page.getByTestId("template-list-disk-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_disk_gb")).toBeNull();
+
+    // max_disk_gb=50 keeps only small-ubuntu (disk_gb=10).
+    await page.getByTestId("template-list-max-disk-gb").fill("50");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_disk_gb")).toBe("50");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
 });
 
 // ============================================================

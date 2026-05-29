@@ -271,8 +271,8 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage, tag, search, image, defaultUser, network, since, until, minCpus, maxCpus, minRamMb, maxRamMb, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; network?: string; since?: string; until?: string; minCpus?: string; maxCpus?: string; minRamMb?: string; maxRamMb?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, network: network || undefined, since: since || undefined, until: until || undefined, min_cpus: minCpus || undefined, max_cpus: maxCpus || undefined, min_ram_mb: minRamMb || undefined, max_ram_mb: maxRamMb || undefined, sort, order } as any } } as any), { withMeta: true }),
+  list: ({ page, perPage, tag, search, image, defaultUser, network, since, until, minCpus, maxCpus, minRamMb, maxRamMb, minDiskGb, maxDiskGb, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; network?: string; since?: string; until?: string; minCpus?: string; maxCpus?: string; minRamMb?: string; maxRamMb?: string; minDiskGb?: string; maxDiskGb?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, network: network || undefined, since: since || undefined, until: until || undefined, min_cpus: minCpus || undefined, max_cpus: maxCpus || undefined, min_ram_mb: minRamMb || undefined, max_ram_mb: maxRamMb || undefined, min_disk_gb: minDiskGb || undefined, max_disk_gb: maxDiskGb || undefined, sort, order } as any } } as any), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>

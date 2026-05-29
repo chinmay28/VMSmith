@@ -6029,6 +6029,94 @@ func TestCLI_TemplateList_RejectsNegativeMaxRAM(t *testing.T) {
 	}
 }
 
+// --- template list --min-disk-gb / --max-disk-gb (roadmap 5.4.53) ---
+
+func seedDiskTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-dsmall", Name: "small-dtpl", Image: "rocky9.qcow2", DiskGB: 10, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-dmid", Name: "mid-dtpl", Image: "rocky9.qcow2", DiskGB: 50, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-dbig", Name: "big-dtpl", Image: "rocky9.qcow2", DiskGB: 200, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-disk-gb", "50")
+	if err != nil {
+		t.Fatalf("template list --min-disk-gb: %v", err)
+	}
+	if strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || !strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected mid+big (>= 50 GB), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-disk-gb", "50")
+	if err != nil {
+		t.Fatalf("template list --max-disk-gb: %v", err)
+	}
+	if !strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected small+mid (<= 50 GB), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByDiskRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-disk-gb", "40", "--max-disk-gb", "100")
+	if err != nil {
+		t.Fatalf("template list disk range: %v", err)
+	}
+	if strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected only mid-dtpl in [40,100] GB, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-disk-gb", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-disk-gb")
+	}
+	if !strings.Contains(err.Error(), "--min-disk-gb") {
+		t.Fatalf("expected error to mention --min-disk-gb, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-disk-gb", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-disk-gb")
+	}
+	if !strings.Contains(err.Error(), "--max-disk-gb") {
+		t.Fatalf("expected error to mention --max-disk-gb, got %v", err)
+	}
+}
+
 // =====================================================
 // webhook list --search tests
 // =====================================================
