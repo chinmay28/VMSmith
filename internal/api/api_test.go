@@ -218,6 +218,36 @@ func TestCreateVM_Windows(t *testing.T) {
 	}
 }
 
+func TestCreateVM_MixedCaseOSTypeAndVariant(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Raw JSON with mixed-case os_type / os_variant must behave the same as
+	// the CLI (which lowercases). Regression for the case-sensitivity nit on
+	// #327.
+	spec := types.VMSpec{
+		Name:      "win-mixedcase",
+		Image:     "win2022.qcow2",
+		CPUs:      4,
+		RAMMB:     4096,
+		DiskGB:    64,
+		OSType:    types.OSType("Windows"),
+		OSVariant: "Windows-Server-2022",
+	}
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if !created.Spec.IsWindows() {
+		t.Errorf("mixed-case Windows os_type should resolve to windows; got %q", created.Spec.OSType)
+	}
+}
+
 func TestCreateVM_InvalidOSType(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

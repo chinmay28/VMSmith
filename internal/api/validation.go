@@ -93,8 +93,12 @@ const (
 // the known list and enforces minimum RAM/disk so the guest can actually boot.
 // Resource minimums are only checked when the value is explicitly set (>0);
 // zero means "use the server default", which is validated at create time.
+//
+// Both os_type and os_variant are matched case-insensitively here so a raw
+// JSON POST with `"os_type": "Windows"` or `"os_variant": "Windows-Server-2022"`
+// behaves the same as the CLI, which lowercases before sending.
 func validateOSType(spec types.VMSpec) error {
-	switch spec.OSType {
+	switch types.OSType(strings.ToLower(strings.TrimSpace(string(spec.OSType)))) {
 	case "", types.OSTypeLinux:
 		return nil
 	case types.OSTypeWindows:
@@ -103,7 +107,7 @@ func validateOSType(spec types.VMSpec) error {
 		return types.NewAPIError("invalid_os_type", fmt.Sprintf("os_type must be %q or %q", types.OSTypeLinux, types.OSTypeWindows))
 	}
 
-	if v := strings.TrimSpace(spec.OSVariant); v != "" && !types.IsKnownWindowsVariant(v) {
+	if v := strings.ToLower(strings.TrimSpace(spec.OSVariant)); v != "" && !types.IsKnownWindowsVariant(v) {
 		return types.NewAPIError("invalid_os_variant",
 			fmt.Sprintf("os_variant must be one of %s", strings.Join(types.KnownWindowsVariants, ", ")))
 	}

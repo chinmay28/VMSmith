@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // VMState represents the current state of a virtual machine.
 type VMState string
@@ -40,9 +43,12 @@ var KnownWindowsVariants = []string{
 }
 
 // IsKnownWindowsVariant reports whether v is one of KnownWindowsVariants.
+// Matching is case-insensitive and whitespace is trimmed so a raw JSON POST
+// with "Windows-Server-2022" behaves the same as the CLI (which lowercases).
 func IsKnownWindowsVariant(v string) bool {
+	needle := strings.ToLower(strings.TrimSpace(v))
 	for _, known := range KnownWindowsVariants {
-		if known == v {
+		if known == needle {
 			return true
 		}
 	}
@@ -140,8 +146,10 @@ type VMUpdateSpec struct {
 
 // ResolvedOSType returns the guest OS family, defaulting an empty value to
 // OSTypeLinux so VMs created before the field existed behave as before.
+// Matching is case-insensitive and whitespace is trimmed so a raw JSON POST
+// with "Windows" (initial cap) resolves to OSTypeWindows just like "windows".
 func (s VMSpec) ResolvedOSType() OSType {
-	if s.OSType == OSTypeWindows {
+	if OSType(strings.ToLower(strings.TrimSpace(string(s.OSType)))) == OSTypeWindows {
 		return OSTypeWindows
 	}
 	return OSTypeLinux

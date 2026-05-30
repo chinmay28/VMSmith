@@ -12,6 +12,9 @@ func TestVMSpecResolvedOSType(t *testing.T) {
 		{"explicit linux", OSTypeLinux, OSTypeLinux},
 		{"windows", OSTypeWindows, OSTypeWindows},
 		{"unknown defaults to linux", OSType("bsd"), OSTypeLinux},
+		{"mixed-case Windows resolves to windows", OSType("Windows"), OSTypeWindows},
+		{"upper-case LINUX resolves to linux", OSType("LINUX"), OSTypeLinux},
+		{"surrounding whitespace is trimmed", OSType("  windows  "), OSTypeWindows},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -45,6 +48,13 @@ func TestIsKnownWindowsVariant(t *testing.T) {
 	for _, v := range []string{"", "windows-vista", "win10", "linux"} {
 		if IsKnownWindowsVariant(v) {
 			t.Errorf("%q should NOT be a known windows variant", v)
+		}
+	}
+	// Case-insensitivity + whitespace-trim mirrors the API normalisation so a
+	// raw JSON POST with mixed-case variant behaves the same as the CLI.
+	for _, v := range []string{"Windows-11", "WINDOWS-SERVER-2022", "  windows-10  "} {
+		if !IsKnownWindowsVariant(v) {
+			t.Errorf("%q should be a known windows variant (case-insensitive)", v)
 		}
 	}
 }
