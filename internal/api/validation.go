@@ -245,6 +245,19 @@ func validateTemplateRequest(req createTemplateRequest) error {
 	if err := validateTemplateDescription(req.Description); err != nil {
 		return err
 	}
+	// Mirror the VM create-path's `invalid_os_type` / `invalid_os_variant`
+	// contract on the template create-path. Without this, a typo like
+	// `{"os_type": "plan9"}` silently lowercases + persists, then
+	// ResolvedOSType collapses it back to "linux" at read time, masking the
+	// operator error.
+	if err := validateOSType(types.VMSpec{
+		OSType:    req.OSType,
+		OSVariant: req.OSVariant,
+		RAMMB:     req.RAMMB,
+		DiskGB:    req.DiskGB,
+	}); err != nil {
+		return err
+	}
 	return validatepkg.ValidateTemplateRequest(req.Name, req.Image, req.CPUs, req.RAMMB, req.DiskGB)
 }
 
