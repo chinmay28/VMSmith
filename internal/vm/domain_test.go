@@ -74,6 +74,121 @@ func TestGenerateDomainXML_WithCloudInit(t *testing.T) {
 	}
 }
 
+func TestDomainParamsFromSpec_WindowsTuning(t *testing.T) {
+	spec := types.VMSpec{
+		Name:   "win-vm",
+		CPUs:   4,
+		RAMMB:  4096,
+		OSType: types.OSTypeWindows,
+	}
+
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "/tmp/cidata.iso", "vmsmith-net", "52:54:00:11:22:33")
+
+	if params.DiskBus != "sata" {
+		t.Errorf("Windows disk bus = %q, want sata", params.DiskBus)
+	}
+	if params.DiskTarget != "sda" {
+		t.Errorf("Windows disk target = %q, want sda", params.DiskTarget)
+	}
+	if params.CloudInitTarget != "sdb" {
+		t.Errorf("Windows cloud-init cdrom target = %q, want sdb", params.CloudInitTarget)
+	}
+	if params.ClockOffset != "localtime" {
+		t.Errorf("Windows clock offset = %q, want localtime", params.ClockOffset)
+	}
+	if !params.Hyperv {
+		t.Error("Windows should enable Hyper-V enlightenments")
+	}
+	if !params.Tablet {
+		t.Error("Windows should attach a USB tablet")
+	}
+	if params.VideoModel != "qxl" {
+		t.Errorf("Windows video model = %q, want qxl", params.VideoModel)
+	}
+	// NAT interface should use the e1000e NIC model (native Windows driver).
+	if !strings.Contains(params.Interfaces[0].XML, "type='e1000e'") {
+		t.Errorf("Windows NAT NIC should be e1000e, got:\n%s", params.Interfaces[0].XML)
+	}
+}
+
+func TestDomainParamsFromSpec_LinuxDefaultsUnchanged(t *testing.T) {
+	spec := types.VMSpec{Name: "linux-vm", CPUs: 2, RAMMB: 2048}
+	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")
+
+	if params.Hyperv {
+		t.Error("Linux should not enable Hyper-V enlightenments")
+	}
+	if params.DiskBus != "" && params.DiskBus != "virtio" {
+		t.Errorf("Linux disk bus = %q, want empty/virtio", params.DiskBus)
+	}
+	if !strings.Contains(params.Interfaces[0].XML, "type='virtio'") {
+		t.Errorf("Linux NAT NIC should be virtio, got:\n%s", params.Interfaces[0].XML)
+	}
+}
+
+func TestGenerateDomainXML_Windows(t *testing.T) {
+	params := DomainParams{
+		Name:            "win-vm",
+		CPUs:            4,
+		RAMMB:           4096,
+		DiskPath:        "/tmp/disk.qcow2",
+		DiskBus:         "sata",
+		DiskTarget:      "sda",
+		CloudInitISO:    "/tmp/cidata.iso",
+		CloudInitTarget: "sdb",
+		VirtioWinISO:    "/usr/share/virtio-win/virtio-win.iso",
+		VirtioWinTarget: "sdc",
+		ClockOffset:     "localtime",
+		Hyperv:          true,
+		Tablet:          true,
+		VideoModel:      "qxl",
+		Emulator:        "/usr/bin/qemu-system-x86_64",
+		Interfaces:      []InterfaceEntry{{XML: "<interface type='network'/>"}},
+	}
+
+	xml, err := GenerateDomainXML(params)
+	if err != nil {
+		t.Fatalf("GenerateDomainXML: %v", err)
+	}
+
+	checks := []struct{ desc, needle string }{
+		{"sata system disk", "<target dev='sda' bus='sata'/>"},
+		{"clock localtime", "<clock offset='localtime'>"},
+		{"hyperv block", "<hyperv>"},
+		{"hyperv synic", "<synic state='on'/>"},
+		{"hypervclock timer", "name='hypervclock'"},
+		{"cloud-init cdrom on sdb", "<target dev='sdb' bus='sata'/>"},
+		{"virtio-win ISO", "virtio-win.iso"},
+		{"virtio-win cdrom on sdc", "<target dev='sdc' bus='sata'/>"},
+		{"usb tablet", "<input type='tablet' bus='usb'/>"},
+		{"qxl video", "<model type='qxl'/>"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(xml, c.needle) {
+			t.Errorf("%s: expected %q in XML:\n%s", c.desc, c.needle, xml)
+		}
+	}
+}
+
+func TestGenerateDomainXML_NoVirtioWinWhenUnset(t *testing.T) {
+	params := DomainParams{
+		Name:     "win-vm",
+		CPUs:     2,
+		RAMMB:    4096,
+		DiskPath: "/tmp/disk.qcow2",
+		DiskBus:  "sata",
+		Hyperv:   true,
+		Emulator: "/usr/bin/qemu-system-x86_64",
+	}
+	xml, err := GenerateDomainXML(params)
+	if err != nil {
+		t.Fatalf("GenerateDomainXML: %v", err)
+	}
+	if strings.Contains(xml, "virtio-win") {
+		t.Error("should not emit a virtio-win cdrom when VirtioWinISO is empty")
+	}
+}
+
 func TestDomainParamsFromSpec_NATOnly(t *testing.T) {
 	spec := types.VMSpec{
 		Name:  "simple-vm",

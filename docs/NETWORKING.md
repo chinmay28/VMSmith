@@ -74,6 +74,19 @@ sudo ./bin/vmsmith port add web01 --host 2222 --guest 22
 ssh -p 2222 root@<host-ip>
 ```
 
+Windows guests behave identically — they get a NAT IP from the same DHCP
+reservation. Expose Remote Desktop (and SSH, if enabled) with port forwards:
+
+```bash
+sudo ./bin/vmsmith vm create win01 --image win2022.qcow2 --os windows \
+  --admin-password 'S3cret!Pass'
+sudo ./bin/vmsmith port add win01 --host 13389 --guest 3389   # RDP
+sudo ./bin/vmsmith port add win01 --host 2223  --guest 22      # OpenSSH (if --ssh-key was set)
+# then: mstsc /v:<host-ip>:13389   (or any RDP client)
+```
+
+See `docs/WINDOWS_GUESTS.md` for the full Windows guest guide.
+
 ## macvtap networking
 
 ### What it is

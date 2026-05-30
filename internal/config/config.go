@@ -95,7 +95,19 @@ type StorageConfig struct {
 	ImagesDir string `yaml:"images_dir"`
 	BaseDir   string `yaml:"base_dir"`
 	DBPath    string `yaml:"db_path"`
+
+	// VirtioWinISO is an optional path to the virtio-win driver ISO. When set
+	// (or when the well-known location /usr/share/virtio-win/virtio-win.iso
+	// exists) it is attached as an extra cdrom to Windows guests so the
+	// in-guest installer can load the paravirtual storage/network/balloon
+	// drivers. Empty disables the attachment.
+	VirtioWinISO string `yaml:"virtio_win_iso"`
 }
+
+// DefaultVirtioWinISOPath is the conventional install location for the
+// virtio-win driver ISO on RHEL/Fedora (package: virtio-win). It is probed as
+// a fallback when StorageConfig.VirtioWinISO is empty.
+const DefaultVirtioWinISOPath = "/usr/share/virtio-win/virtio-win.iso"
 
 type NetworkConfig struct {
 	Name      string `yaml:"name"`

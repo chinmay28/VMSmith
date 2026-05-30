@@ -772,6 +772,53 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | 5.5.3 | Add host selection to VM create (`--host <name>`) | L | |
 | 5.5.4 | Add host overview dashboard showing per-host resource usage | L | |
 
+### 5.6 Windows Guest Support
+
+Run Windows guests (workstation and server, "2020 version and up": Windows 10/11
+and Windows Server 2019/2022/2025) alongside Linux, sharing the same overlay /
+NAT / DHCP / snapshot / lifecycle machinery. The only divergence is the guest
+OS family, which drives the libvirt domain tuning and the first-boot
+provisioning datasource.
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 5.6.1 | Add an `os_type` (`linux`\|`windows`) guest-family selector to `VMSpec`, plus optional `os_variant` (windows-10/11, windows-server-2019/2022/2025) and write-only `admin_password` | S | ✅ Done — `pkg/types/vm.go` adds `OSType`/`OSVariant`/`AdminPassword` with `ResolvedOSType()` (empty ⇒ linux) + `IsWindows()` helpers and `KnownWindowsVariants`. `validateVMSpec` adds `invalid_os_type` / `invalid_os_variant` (both 400) and a Windows resource floor (≥2048 MB RAM, ≥32 GB disk, checked only when set). CLI: `vmsmith vm create --os --os-variant --admin-password`. Coverage: `pkg/types` (`ResolvedOSType`/`IsWindows`/`IsKnownWindowsVariant`), API (`TestCreateVM_Windows`, `_InvalidOSType`, `_WindowsResourceFloor`, `TestValidateVMSpec` windows cases), CLI (`TestCLI_VMCreate_Windows`) |
+| 5.6.2 | Windows-tuned libvirt domain XML: SATA system disk (boots without virtio storage drivers), e1000e NIC (native Windows driver), `localtime` clock, Hyper-V enlightenments + `hypervclock`, USB tablet, QXL video; Linux path unchanged | M | ✅ Done — `internal/vm/domain.go` `DomainParamsFromSpec` sets the Windows device profile from `spec.IsWindows()`; `GenerateDomainXML` normalises empty device fields to the historical Linux defaults so direct callers/tests are unaffected. Coverage: `TestDomainParamsFromSpec_WindowsTuning`, `_LinuxDefaultsUnchanged`, `TestGenerateDomainXML_Windows`, `_NoVirtioWinWhenUnset` |
+| 5.6.3 | Provision Windows via a cloudbase-init NoCloud datasource (instead of cloud-init): `cidata`-labelled ISO with `meta-data` (instance-id/hostname/admin_pass) + a `#ps1_sysnative` PowerShell `user-data` that sets the Administrator password, enables RDP, and installs/enables OpenSSH with the injected key; `admin_password` redacted from the stored record after the ISO is written | M | ✅ Done — `internal/vm/lifecycle.go` `createProvisioningISO` dispatches on OS family; `createWindowsProvisioningISO` + `buildWindowsUserData` generate the datasource; Create/Clone/Update reuse it. DHCP reservation / IP monitor are OS-agnostic. Coverage: `TestBuildWindowsUserData_*`, `TestPSSingleQuote` |
+| 5.6.4 | Attach the virtio-win driver ISO as an extra cdrom for Windows guests, via `storage.virtio_win_iso` (auto-probes `/usr/share/virtio-win/virtio-win.iso`) | S | ✅ Done — `config.StorageConfig.VirtioWinISO` + `DefaultVirtioWinISOPath`; `LibvirtManager.virtioWinISOPath`/`applyVirtioWin` attach it on the `sdc` cdrom when present. Documented in `docs/WINDOWS_GUESTS.md` and `vmsmith.yaml.example` |
+| 5.6.5 | Operator guide: preparing Windows base images (sysprep + cloudbase-init + virtio), driver injection, RDP/WinRM access | S | ✅ Done — `docs/WINDOWS_GUESTS.md` |
+
+**Status:** the core create/provision/boot path (5.6.1–5.6.5) is shipped; the
+items below are the follow-up backlog to make Windows a fully first-class
+citizen across the surface area (GUI, templates, filtering, console, metrics)
+and to support the harder guest scenarios (Windows 11's UEFI+TPM requirement,
+unattended installs from a raw ISO, and a fully paravirtual guest).
+
+#### Follow-up tasks
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 5.6.6 | **GUI surface** — OS-family selector + Windows variant / Administrator-password fields in the Create Machine modal (with the Windows RAM/disk floors enforced client-side), an OS badge (Linux/Windows) on VM rows and VMDetail, and a "Connect via RDP" hint when a 3389 port-forward exists | M | The create form and list currently surface only Linux fields; OpenAPI types already carry `os_type`/`os_variant`/`admin_password` so the client wiring is mechanical |
+| 5.6.7 | **Templates carry OS family** — add `os_type` / `os_variant` to `VMTemplate` + `CreateTemplateRequest`, merge them in `mergeVMSpecWithTemplate`, and expose them in the template CLI/GUI so a "Windows Server 2022" template provisions Windows VMs directly | S | Today `VMTemplate` only has image/cpu/ram/disk/networks/default_user — a template cannot pin a guest to Windows |
+| 5.6.8 | **`?os_type=` list filter** — add a case-insensitive exact-match `os_type` filter to `GET /vms` (empty `spec.os_type` treated as `linux`, mirroring the `?default_user=root` empty-means-root semantics) and `GET /templates`, plus the `--os-type` CLI flag and GUI facet | S | Mirrors the existing capacity/identity filter family on the VM + template list endpoints |
+| 5.6.9 | **UEFI + Secure Boot + virtual TPM 2.0** — required to boot Windows 11. Add an OVMF firmware path (`<os firmware='efi'>` / explicit `<loader>`+`<nvram>`) and a `swtpm` `<tpm model='tpm-crd'>` device, gated on `os_variant` (windows-11 ⇒ on by default) or an explicit `secure_boot` / `tpm` VMSpec flag. Probe for `swtpm` + OVMF and surface a clear error when missing | L | Without this Windows 11 Setup refuses to install; Windows 10 / Server are fine on SeaBIOS |
+| 5.6.10 | **QEMU guest agent (qemu-ga) for Windows** — document/automate installing `qemu-ga` from the virtio-win ISO so VMSmith can report the real in-guest IP, do guest-initiated graceful shutdown, and surface memory-balloon metrics (the metrics sampler already depends on the agent for RAM pressure). Today Windows reports IP only via the DHCP-lease ping path | M | The `<channel ...org.qemu.guest_agent.0>` is already in the domain XML; this is guest-side enablement + docs |
+| 5.6.11 | **Unattended install from a raw Windows ISO** — for operators without a prepared cloudbase-init image: boot the install ISO + generate an `Autounattend.xml` provisioning ISO (disk partitioning, edition select, locale, admin password, enable RDP/WinRM, optional cloudbase-init bootstrap). Needs an `--install-iso` create path and a boot-order/empty-disk flow distinct from the overlay-from-base-image model | XL | Complements 5.6.3 (which assumes a prepared base image); this is the "bring your own ISO" path |
+| 5.6.12 | **Switch-to-virtio helper** — once virtio-win drivers are installed in-guest, flip the system disk bus to virtio and the NIC to virtio-net for throughput. Add a `vmsmith vm set-virtio <id>` (or a `disk_bus`/`nic_model` override in VMUpdateSpec) that rewrites the domain XML and validates the guest can still boot | M | SATA+e1000e are the safe default (5.6.2); this unlocks performance after first boot |
+| 5.6.13 | **RDP console in the GUI** — extend the console-ticket/proxy subsystem with an RDP path (e.g. an embedded HTML5 RDP client or a guacd bridge) so Windows guests get a browser console comparable to the VNC serial/graphics path | L | The VNC graphical console already works (QXL+tablet); this adds native RDP |
+| 5.6.14 | **Windows image catalog / prep helper** — a `vmsmith image prepare-windows` helper (or docs + script) that downloads a Windows eval ISO/qcow2, injects virtio drivers, installs cloudbase-init, syspreps, and registers the result as a base image | M | Mirrors the Linux GenericCloud download guidance; reduces the "prepare a base image" barrier |
+| 5.6.15 | **Per-VM device overrides** — optional `virtio_win_iso`, `disk_bus`, `nic_model`, `machine`, and `firmware` overrides on `VMSpec` so advanced operators can tune individual Windows VMs without changing global config | S | Builds on the OS-family defaults; pairs naturally with 5.6.12 |
+| 5.6.16 | **Windows E2E test tier** — add a `tests/e2e` scenario that provisions a prepared Windows eval image, waits for the DHCP IP, and verifies RDP (3389) reachability and optional SSH login; gate it behind a `--windows-image` opt-in like the existing `--rocky-image` flag | M | Unit coverage is in place (domain XML, user-data); this validates a real boot |
+| 5.6.17 | **`admin_password` lifecycle hardening** — optionally generate a strong random Administrator password when none is supplied and surface it exactly once in the create response/CLI output (never re-readable), and document a rotation path via cloudbase-init re-run on update | S | Currently `admin_password` is write-only + redacted; this closes the "no password supplied" UX gap |
+| 5.6.18 | **`os_type` immutability + clock/timezone controls** — reject changing `os_type` on `PATCH /vms/{id}` (device profile is baked at create), and add an optional per-VM clock/timezone control so Windows `localtime` guests dual-booting or syncing with Linux peers don't drift | S | Small correctness + ergonomics follow-ups surfaced by the localtime clock |
+
+**Open questions / design notes:**
+
+1. **Windows 11 gating (5.6.9).** Should `os_variant: windows-11` *imply* UEFI+SecureBoot+TPM automatically (and hard-fail if `swtpm`/OVMF are absent), or stay opt-in via explicit flags? Recommendation: imply-on for `windows-11` with a clear preflight error, opt-in for everything else.
+2. **Provisioning model (5.6.3 vs 5.6.11).** The shipped path assumes a *prepared* cloudbase-init base image (the Windows analogue of a Linux cloud image). The raw-ISO unattended path is a fundamentally different create flow (empty disk + install ISO + boot order) and should be a sibling code path, not a branch inside the overlay flow.
+3. **Licensing.** VMSmith does not inject product keys or manage activation/KMS. Document that the base image's licensing/activation is the operator's responsibility; optionally allow a `product_key` passthrough into the cloudbase-init datasource (5.6.15-adjacent).
+4. **Guest-agent dependency (5.6.10).** Windows IP discovery currently relies on the DHCP-lease ping path (works, but slower and can't see additional NICs). qemu-ga would make IP/shutdown/metrics first-class — same trade-off the Linux side documents in §4.1.
+
 ---
 
 ## Phase 6: Developer & Community (Ongoing)

@@ -183,6 +183,104 @@ func TestCreateVM(t *testing.T) {
 	}
 }
 
+func TestCreateVM_Windows(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	spec := types.VMSpec{
+		Name:      "win-create",
+		Image:     "win2022.qcow2",
+		CPUs:      4,
+		RAMMB:     4096,
+		DiskGB:    64,
+		OSType:    types.OSTypeWindows,
+		OSVariant: "windows-server-2022",
+	}
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Spec.OSType != types.OSTypeWindows {
+		t.Errorf("OSType = %q, want windows", created.Spec.OSType)
+	}
+	if !created.Spec.IsWindows() {
+		t.Error("created VM should report IsWindows()")
+	}
+	if created.Spec.OSVariant != "windows-server-2022" {
+		t.Errorf("OSVariant = %q, want windows-server-2022", created.Spec.OSVariant)
+	}
+}
+
+func TestCreateVM_MixedCaseOSTypeAndVariant(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Raw JSON with mixed-case os_type / os_variant must behave the same as
+	// the CLI (which lowercases). Regression for the case-sensitivity nit on
+	// #327.
+	spec := types.VMSpec{
+		Name:      "win-mixedcase",
+		Image:     "win2022.qcow2",
+		CPUs:      4,
+		RAMMB:     4096,
+		DiskGB:    64,
+		OSType:    types.OSType("Windows"),
+		OSVariant: "Windows-Server-2022",
+	}
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if !created.Spec.IsWindows() {
+		t.Errorf("mixed-case Windows os_type should resolve to windows; got %q", created.Spec.OSType)
+	}
+}
+
+func TestCreateVM_InvalidOSType(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "bad-os",
+		Image:  "ubuntu",
+		CPUs:   2,
+		RAMMB:  2048,
+		OSType: types.OSType("bsd"),
+	}))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_type")
+}
+
+func TestCreateVM_WindowsResourceFloor(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:   "small-win",
+		Image:  "win.qcow2",
+		OSType: types.OSTypeWindows,
+		RAMMB:  1024, // below the 2048 MB Windows floor
+	}))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_spec")
+}
+
 func TestCreateVM_BadJSON(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

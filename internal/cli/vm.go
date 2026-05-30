@@ -38,6 +38,9 @@ var vmCreateCmd = &cobra.Command{
 		disk, _ := cmd.Flags().GetInt("disk")
 		sshKey, _ := cmd.Flags().GetString("ssh-key")
 		defaultUser, _ := cmd.Flags().GetString("default-user")
+		osType, _ := cmd.Flags().GetString("os")
+		osVariant, _ := cmd.Flags().GetString("os-variant")
+		adminPassword, _ := cmd.Flags().GetString("admin-password")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		description, _ := cmd.Flags().GetString("description")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
@@ -75,6 +78,9 @@ var vmCreateCmd = &cobra.Command{
 			Tags:          normalizeTagsForCLI(tags),
 			SSHPubKey:     sshKey,
 			DefaultUser:   defaultUser,
+			OSType:        types.OSType(strings.TrimSpace(strings.ToLower(osType))),
+			OSVariant:     strings.TrimSpace(strings.ToLower(osVariant)),
+			AdminPassword: adminPassword,
 			CloudInitFile: cloudInit,
 			Networks:      networks,
 			NatStaticIP:   natIP,
@@ -95,6 +101,13 @@ var vmCreateCmd = &cobra.Command{
 		fmt.Printf("  ID:    %s\n", result.ID)
 		fmt.Printf("  Name:  %s\n", result.Name)
 		fmt.Printf("  State: %s\n", result.State)
+		if result.Spec.IsWindows() {
+			osLabel := "windows"
+			if result.Spec.OSVariant != "" {
+				osLabel = result.Spec.OSVariant
+			}
+			fmt.Printf("  OS:    %s\n", osLabel)
+		}
 		// Show the IP immediately.  When a static IP was pre-assigned the VM
 		// record carries it in Spec.NatStaticIP before the interface is up.
 		displayIP := result.IP
@@ -1028,7 +1041,10 @@ func init() {
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")
 	vmCreateCmd.Flags().String("ssh-key", "", "SSH public key to inject")
 	vmCreateCmd.Flags().String("default-user", "", "create a named sudo user and disable root (omit to use root by default)")
-	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init user-data file")
+	vmCreateCmd.Flags().String("os", "", "guest OS family: linux (default) or windows")
+	vmCreateCmd.Flags().String("os-variant", "", "Windows variant: windows-10|windows-11|windows-server-2019|windows-server-2022|windows-server-2025")
+	vmCreateCmd.Flags().String("admin-password", "", "Windows local Administrator password (injected at first boot, not persisted)")
+	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init / cloudbase-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
 	vmCreateCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")

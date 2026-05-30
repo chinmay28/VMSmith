@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // VMState represents the current state of a virtual machine.
 type VMState string
@@ -13,6 +16,44 @@ const (
 	VMStateDeleted  VMState = "deleted"
 	VMStateUnknown  VMState = "unknown"
 )
+
+// OSType identifies the guest operating-system family. It drives the libvirt
+// domain XML (disk bus, NIC model, clock offset, Hyper-V enlightenments) and
+// the first-boot provisioning mechanism (cloud-init for Linux, cloudbase-init
+// for Windows). An empty value is treated as OSTypeLinux for backwards
+// compatibility with VMs created before this field existed.
+type OSType string
+
+const (
+	OSTypeLinux   OSType = "linux"
+	OSTypeWindows OSType = "windows"
+)
+
+// KnownWindowsVariants enumerates the Windows guest variants vmsmith
+// recognises ("2020 version and up": Windows 10/11 workstation and Windows
+// Server 2019/2022/2025). The variant is advisory metadata — it does not
+// change the domain XML beyond the common Windows tuning — but validating it
+// keeps the field honest and gives the GUI a fixed pick-list.
+var KnownWindowsVariants = []string{
+	"windows-10",
+	"windows-11",
+	"windows-server-2019",
+	"windows-server-2022",
+	"windows-server-2025",
+}
+
+// IsKnownWindowsVariant reports whether v is one of KnownWindowsVariants.
+// Matching is case-insensitive and whitespace is trimmed so a raw JSON POST
+// with "Windows-Server-2022" behaves the same as the CLI (which lowercases).
+func IsKnownWindowsVariant(v string) bool {
+	needle := strings.ToLower(strings.TrimSpace(v))
+	for _, known := range KnownWindowsVariants {
+		if known == needle {
+			return true
+		}
+	}
+	return false
+}
 
 // VMSpec defines the desired configuration for a new VM.
 type VMSpec struct {
@@ -27,6 +68,25 @@ type VMSpec struct {
 	CloudInitFile string   `json:"cloud_init_file,omitempty" yaml:"cloud_init_file,omitempty"`
 	SSHPubKey     string   `json:"ssh_pub_key,omitempty" yaml:"ssh_pub_key,omitempty"`
 	DefaultUser   string   `json:"default_user,omitempty" yaml:"default_user,omitempty"`
+
+	// OSType selects the guest OS family ("linux" or "windows"). Empty means
+	// "linux". Windows guests get a Windows-tuned domain XML (SATA system disk,
+	// e1000e NIC, localtime clock, Hyper-V enlightenments, USB tablet, QXL
+	// video, and an attached virtio-win driver ISO when configured) and are
+	// provisioned via a cloudbase-init NoCloud datasource instead of cloud-init.
+	OSType OSType `json:"os_type,omitempty" yaml:"os_type,omitempty"`
+
+	// OSVariant is the specific Windows edition (e.g. "windows-server-2022",
+	// "windows-11"). Optional, advisory metadata; only meaningful when
+	// OSType is "windows". See types.KnownWindowsVariants.
+	OSVariant string `json:"os_variant,omitempty" yaml:"os_variant,omitempty"`
+
+	// AdminPassword is the Windows local Administrator password injected into
+	// the cloudbase-init datasource at first boot. It is write-only: the
+	// LibvirtManager redacts it from the stored/returned VM record once the
+	// provisioning ISO has been written, so it never lingers in bbolt or the
+	// API response. Ignored for Linux guests.
+	AdminPassword string `json:"admin_password,omitempty" yaml:"admin_password,omitempty"`
 
 	// Networks defines additional network attachments beyond the default NAT.
 	// The vmsmith NAT network is always attached as the first interface.
@@ -82,6 +142,22 @@ type VMUpdateSpec struct {
 	// Locked toggles delete-protection on the VM. Use a pointer so we can
 	// distinguish "not provided" (no change) from "explicitly false" (unlock).
 	Locked *bool `json:"locked,omitempty"`
+}
+
+// ResolvedOSType returns the guest OS family, defaulting an empty value to
+// OSTypeLinux so VMs created before the field existed behave as before.
+// Matching is case-insensitive and whitespace is trimmed so a raw JSON POST
+// with "Windows" (initial cap) resolves to OSTypeWindows just like "windows".
+func (s VMSpec) ResolvedOSType() OSType {
+	if OSType(strings.ToLower(strings.TrimSpace(string(s.OSType)))) == OSTypeWindows {
+		return OSTypeWindows
+	}
+	return OSTypeLinux
+}
+
+// IsWindows reports whether this spec targets a Windows guest.
+func (s VMSpec) IsWindows() bool {
+	return s.ResolvedOSType() == OSTypeWindows
 }
 
 // VM represents a virtual machine and its current state.

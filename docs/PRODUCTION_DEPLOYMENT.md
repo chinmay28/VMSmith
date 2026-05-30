@@ -44,7 +44,9 @@ Use a host that already satisfies the normal VMSmith runtime requirements:
 - KVM available (`/dev/kvm` exists)
 - libvirt installed and running
 - qemu-kvm installed
+- `genisoimage` (or `mkisofs`) for building the cloud-init / cloudbase-init datasource ISO
 - VMSmith binary built or installed
+- *(Windows guests only)* the virtio-win driver ISO — install the `virtio-win` package or download it, then set `storage.virtio_win_iso` (see `docs/WINDOWS_GUESTS.md`)
 
 If you are building from source:
 
@@ -112,6 +114,9 @@ storage:
   images_dir: "/var/lib/vmsmith/images"
   base_dir: "/var/lib/vmsmith/vms"
   db_path: "/var/lib/vmsmith/state/vmsmith.db"
+  # Optional: virtio-win driver ISO for Windows guests. Leave empty to
+  # auto-probe /usr/share/virtio-win/virtio-win.iso. See docs/WINDOWS_GUESTS.md.
+  virtio_win_iso: ""
 
 network:
   name: "vmsmith-net"

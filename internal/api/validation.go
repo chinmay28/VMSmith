@@ -38,6 +38,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if err := validateOptionalVMResourceValue(spec.DiskGB, 1, 1024*10, "disk_gb"); err != nil {
 		return err
 	}
+	if err := validateOSType(spec); err != nil {
+		return err
+	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
 			return err
@@ -72,6 +75,47 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	}
 	if _, err := normalizeTags(patch.Tags); err != nil {
 		return err
+	}
+	return nil
+}
+
+// windowsMinRAMMB and windowsMinDiskGB are the floor resource sizes vmsmith
+// enforces for Windows guests ("2020 version and up": Server 2019/2022/2025 and
+// Windows 10/11). They are guardrails against obviously-unbootable allocations,
+// not Microsoft's exact minimums.
+const (
+	windowsMinRAMMB  = 2048
+	windowsMinDiskGB = 32
+)
+
+// validateOSType validates the guest OS-family fields. An empty os_type means
+// Linux. For Windows it additionally validates the optional os_variant against
+// the known list and enforces minimum RAM/disk so the guest can actually boot.
+// Resource minimums are only checked when the value is explicitly set (>0);
+// zero means "use the server default", which is validated at create time.
+//
+// Both os_type and os_variant are matched case-insensitively here so a raw
+// JSON POST with `"os_type": "Windows"` or `"os_variant": "Windows-Server-2022"`
+// behaves the same as the CLI, which lowercases before sending.
+func validateOSType(spec types.VMSpec) error {
+	switch types.OSType(strings.ToLower(strings.TrimSpace(string(spec.OSType)))) {
+	case "", types.OSTypeLinux:
+		return nil
+	case types.OSTypeWindows:
+		// ok — fall through to Windows-specific checks
+	default:
+		return types.NewAPIError("invalid_os_type", fmt.Sprintf("os_type must be %q or %q", types.OSTypeLinux, types.OSTypeWindows))
+	}
+
+	if v := strings.ToLower(strings.TrimSpace(spec.OSVariant)); v != "" && !types.IsKnownWindowsVariant(v) {
+		return types.NewAPIError("invalid_os_variant",
+			fmt.Sprintf("os_variant must be one of %s", strings.Join(types.KnownWindowsVariants, ", ")))
+	}
+	if spec.RAMMB != 0 && spec.RAMMB < windowsMinRAMMB {
+		return types.NewAPIError("invalid_spec", fmt.Sprintf("windows guests require at least %d MB ram_mb", windowsMinRAMMB))
+	}
+	if spec.DiskGB != 0 && spec.DiskGB < windowsMinDiskGB {
+		return types.NewAPIError("invalid_spec", fmt.Sprintf("windows guests require at least %d GB disk_gb", windowsMinDiskGB))
 	}
 	return nil
 }
@@ -291,7 +335,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503

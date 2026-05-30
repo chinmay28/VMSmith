@@ -191,6 +191,76 @@ func TestBuildCloudConfig_ContainsNMKeyfile(t *testing.T) {
 	}
 }
 
+// --- Windows provisioning (cloudbase-init user-data) tests ---
+
+func TestBuildWindowsUserData_PowerShellHeader(t *testing.T) {
+	spec := types.VMSpec{Name: "win-vm", OSType: types.OSTypeWindows}
+	ud := buildWindowsUserData(spec)
+	if !strings.HasPrefix(ud, "#ps1_sysnative") {
+		t.Errorf("Windows user-data must start with the cloudbase-init PowerShell header, got:\n%s", ud)
+	}
+	// RDP is always enabled.
+	if !strings.Contains(ud, "fDenyTSConnections") {
+		t.Error("Windows user-data should enable Remote Desktop")
+	}
+}
+
+func TestBuildWindowsUserData_AdminPassword(t *testing.T) {
+	spec := types.VMSpec{Name: "win-vm", OSType: types.OSTypeWindows, AdminPassword: "P@ssw0rd!"}
+	ud := buildWindowsUserData(spec)
+	if !strings.Contains(ud, "P@ssw0rd!") {
+		t.Error("Windows user-data should set the Administrator password")
+	}
+	if !strings.Contains(ud, "Set-LocalUser") {
+		t.Error("Windows user-data should use Set-LocalUser for the password")
+	}
+}
+
+func TestBuildWindowsUserData_PasswordQuoteEscaping(t *testing.T) {
+	spec := types.VMSpec{Name: "win-vm", OSType: types.OSTypeWindows, AdminPassword: "a'b"}
+	ud := buildWindowsUserData(spec)
+	// A single quote inside a PowerShell single-quoted literal must be doubled.
+	if !strings.Contains(ud, "a''b") {
+		t.Errorf("single quote should be doubled for PowerShell, got:\n%s", ud)
+	}
+}
+
+func TestBuildWindowsUserData_SSHKey(t *testing.T) {
+	spec := types.VMSpec{Name: "win-vm", OSType: types.OSTypeWindows, SSHPubKey: "ssh-ed25519 AAAAkey user@host"}
+	ud := buildWindowsUserData(spec)
+	if !strings.Contains(ud, "OpenSSH.Server") {
+		t.Error("Windows user-data should install the OpenSSH server when a key is provided")
+	}
+	if !strings.Contains(ud, "administrators_authorized_keys") {
+		t.Error("Windows user-data should authorise the SSH key")
+	}
+	if !strings.Contains(ud, "ssh-ed25519 AAAAkey user@host") {
+		t.Error("Windows user-data should embed the SSH public key")
+	}
+}
+
+func TestBuildWindowsUserData_NoSSHWithoutKey(t *testing.T) {
+	spec := types.VMSpec{Name: "win-vm", OSType: types.OSTypeWindows}
+	ud := buildWindowsUserData(spec)
+	if strings.Contains(ud, "OpenSSH.Server") {
+		t.Error("Windows user-data should not install OpenSSH when no key is provided")
+	}
+}
+
+func TestPSSingleQuote(t *testing.T) {
+	cases := map[string]string{
+		"plain":     "plain",
+		"a'b":       "a''b",
+		"'":         "''",
+		"no'quotes": "no''quotes",
+	}
+	for in, want := range cases {
+		if got := psSingleQuote(in); got != want {
+			t.Errorf("psSingleQuote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // --- gatewayFromSubnet tests ---
 
 func TestGatewayFromSubnet(t *testing.T) {
