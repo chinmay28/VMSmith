@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/events"
+	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -101,7 +103,7 @@ func allowAllResolver(host string) ([]net.IP, error) {
 	return []net.IP{net.ParseIP("93.184.216.34")}, nil
 }
 
-func newTestManager(t *testing.T, store *memStore, bus *events.EventBus, allowed []string) *Manager {
+func newTestManager(t *testing.T, store Store, bus *events.EventBus, allowed []string) *Manager {
 	t.Helper()
 	m := NewManager(store, bus, Config{
 		AllowedHosts: allowed,
@@ -324,6 +326,82 @@ func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	if persisted.LastDeliveryAt.IsZero() {
 		t.Fatal("LastDeliveryAt was not updated after final failure")
 	}
+}
+
+func TestManager_BoltStore_PersistsFailedDeliveryArtifacts(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer db.Close()
+
+	bus := events.New(db)
+	bus.Start()
+	defer bus.Stop()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "always fails", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	mgr := newTestManager(t, db, bus, []string{host, "127.0.0.1"})
+
+	wh := &types.Webhook{
+		ID:         "wh-bolt-fail",
+		URL:        srv.URL,
+		Secret:     "bolt-secret",
+		EventTypes: []string{"vm.deleted"},
+		Active:     true,
+		CreatedAt:  time.Now(),
+	}
+	if err := db.PutWebhook(wh); err != nil {
+		t.Fatalf("PutWebhook: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer mgr.Stop()
+
+	bus.Publish(&types.Event{Type: "vm.deleted", Source: types.EventSourceApp, VMID: "vm-bolt"})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		persisted, err := db.GetWebhook(wh.ID)
+		if err != nil {
+			t.Fatalf("GetWebhook: %v", err)
+		}
+		events, _, err := db.ListEventsFiltered(store.EventFilter{Type: "webhook.delivery_failed"})
+		if err != nil {
+			t.Fatalf("ListEventsFiltered: %v", err)
+		}
+		if persisted.LastStatus == http.StatusBadGateway && persisted.LastError == "HTTP 502" && len(events) == 1 {
+			if events[0].Attributes["webhook_id"] != wh.ID {
+				t.Fatalf("delivery_failed webhook_id = %q, want %q", events[0].Attributes["webhook_id"], wh.ID)
+			}
+			if events[0].Attributes["last_status"] != "502" {
+				t.Fatalf("delivery_failed last_status = %q, want 502", events[0].Attributes["last_status"])
+			}
+			if events[0].Attributes["event_type"] != "vm.deleted" {
+				t.Fatalf("delivery_failed event_type = %q, want vm.deleted", events[0].Attributes["event_type"])
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	persisted, err := db.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	events, _, err := db.ListEventsFiltered(store.EventFilter{Type: "webhook.delivery_failed"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	t.Fatalf("timed out waiting for persisted failure artifacts: LastStatus=%d LastError=%q events=%d", persisted.LastStatus, persisted.LastError, len(events))
 }
 
 func TestManager_FiltersByEventType(t *testing.T) {
