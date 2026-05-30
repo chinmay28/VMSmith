@@ -76,6 +76,65 @@ func TestSortVMs_ByState_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+func TestSortVMs_ByCPUs_AscTiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-2", Name: "b", Spec: VMSpec{CPUs: 4}},
+		{ID: "vm-1", Name: "a", Spec: VMSpec{CPUs: 4}}, // tie with vm-2
+		{ID: "vm-3", Name: "c", Spec: VMSpec{CPUs: 1}},
+		{ID: "vm-4", Name: "d", Spec: VMSpec{CPUs: 8}},
+	}
+	SortVMs(vms, VMSortCPUs, SortOrderAsc)
+	got := []string{vms[0].ID, vms[1].ID, vms[2].ID, vms[3].ID}
+	want := []string{"vm-3", "vm-1", "vm-2", "vm-4"} // 1 < 4(vm-1<vm-2) < 8
+	for i, id := range got {
+		if id != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, id, want[i], got)
+		}
+	}
+}
+
+func TestSortVMs_ByCPUs_Desc(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Name: "a", Spec: VMSpec{CPUs: 1}},
+		{ID: "vm-2", Name: "b", Spec: VMSpec{CPUs: 4}},
+		{ID: "vm-3", Name: "c", Spec: VMSpec{CPUs: 8}},
+	}
+	SortVMs(vms, VMSortCPUs, SortOrderDesc)
+	got := []string{vms[0].ID, vms[1].ID, vms[2].ID}
+	want := []string{"vm-3", "vm-2", "vm-1"}
+	for i, id := range got {
+		if id != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, id, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByRAMMB_AscTiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-2", Name: "b", Spec: VMSpec{RAMMB: 2048}},
+		{ID: "vm-1", Name: "a", Spec: VMSpec{RAMMB: 2048}}, // tie with vm-2
+		{ID: "vm-3", Name: "c", Spec: VMSpec{RAMMB: 1024}},
+	}
+	SortVMs(vms, VMSortRAMMB, SortOrderAsc)
+	if vms[0].ID != "vm-3" || vms[1].ID != "vm-1" || vms[2].ID != "vm-2" {
+		t.Errorf("ram_mb asc with tie wrong: got %q,%q,%q want vm-3,vm-1,vm-2", vms[0].ID, vms[1].ID, vms[2].ID)
+	}
+}
+
+func TestSortVMs_ByDiskGB_DescTiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Name: "a", Spec: VMSpec{DiskGB: 100}},
+		{ID: "vm-2", Name: "b", Spec: VMSpec{DiskGB: 100}}, // tie with vm-1
+		{ID: "vm-3", Name: "c", Spec: VMSpec{DiskGB: 20}},
+	}
+	SortVMs(vms, VMSortDiskGB, SortOrderDesc)
+	// Largest disk first; equal-disk pair should reverse on tiebreak too
+	// because the descending wrapper inverts the entire compare result.
+	if vms[0].ID != "vm-2" || vms[1].ID != "vm-1" || vms[2].ID != "vm-3" {
+		t.Errorf("disk_gb desc with tie wrong: got %q,%q,%q want vm-2,vm-1,vm-3", vms[0].ID, vms[1].ID, vms[2].ID)
+	}
+}
+
 func TestSortVMs_UnknownFieldFallsBackToID(t *testing.T) {
 	vms := []*VM{
 		{ID: "vm-3"},

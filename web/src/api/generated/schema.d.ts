@@ -84,8 +84,13 @@ export interface paths {
                     locked?: components["parameters"]["LockedFilter"];
                     /**
                      * @description Field to sort the VM list by. Defaults to `id`. Unknown values
-                     *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
-                     *     pagination is deterministic across backends.
+                     *     return 400 `invalid_sort`. `cpus`, `ram_mb`, and `disk_gb` are
+                     *     numeric capacity axes on the VM's `spec` (asc = smallest first,
+                     *     desc = largest first); they complement the matching `?min_cpus=` /
+                     *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
+                     *     `?max_disk_gb=` range filters so the same capacity-audit query can
+                     *     be sorted as well as filtered. All comparators tiebreak on `id`
+                     *     so pagination is deterministic across backends.
                      */
                     sort?: components["parameters"]["VMSort"];
                     /**
@@ -4071,10 +4076,15 @@ export interface components {
         LockedFilter: "true" | "false";
         /**
          * @description Field to sort the VM list by. Defaults to `id`. Unknown values
-         *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
-         *     pagination is deterministic across backends.
+         *     return 400 `invalid_sort`. `cpus`, `ram_mb`, and `disk_gb` are
+         *     numeric capacity axes on the VM's `spec` (asc = smallest first,
+         *     desc = largest first); they complement the matching `?min_cpus=` /
+         *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
+         *     `?max_disk_gb=` range filters so the same capacity-audit query can
+         *     be sorted as well as filtered. All comparators tiebreak on `id`
+         *     so pagination is deterministic across backends.
          */
-        VMSort: "id" | "name" | "created_at" | "state";
+        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb";
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
