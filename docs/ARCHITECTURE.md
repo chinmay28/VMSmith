@@ -72,7 +72,7 @@ vmsmith/
 │   ├── vm/
 │   │   ├── manager.go               # VMManager interface
 │   │   ├── lifecycle.go             # LibvirtManager: Create/Start/Stop/Delete/Get/List + snapshots
-│   │   ├── domain.go                # libvirt domain XML generation, multi-network, cloud-init
+│   │   ├── domain.go                # libvirt domain XML generation, multi-network, cloud-init, OS-family device tuning (Linux/Windows)
 │   │   └── mock_manager.go          # In-memory mock for tests
 │   └── web/
 │       ├── embed.go                 # go:embed dist/*
@@ -146,8 +146,8 @@ vmsmith/
 6. Generate a unique VM ID (`vm-<unix-nano>`)
 7. **Image path resolution** — if the image name is relative, it is looked up under `storage.images_dir`. If the exact path does not exist, `.qcow2` is appended (e.g. `rocky9` → `rocky9.qcow2`). Images **must** have a `.qcow2` extension so libvirt's AppArmor driver follows the backing-file chain and allows QEMU to open them.
 8. `qemu-img create -f qcow2 -b <base> <overlay>` — thin CoW disk
-9. `createCloudInitISO()` — always created; generates `meta-data`, `user-data`, and `network-config` (Netplan v2) with MAC-based interface matching so it works on any distro
-10. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML; `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
+9. `createProvisioningISO()` — always created. For Linux guests it generates a cloud-init NoCloud datasource (`meta-data`, `user-data`, `network-config`) with MAC-based interface matching so it works on any distro. For Windows guests (`os_type: windows`) it generates a cloudbase-init NoCloud datasource instead (see "Windows guests" below)
+10. `DomainParamsFromSpec()` + `GenerateDomainXML()` — build libvirt XML. The device profile is OS-family-aware: Linux guests get virtio disk/NIC + `utc` clock; Windows guests get a SATA disk, e1000e NIC, `localtime` clock, Hyper-V enlightenments, USB tablet, QXL video, and the virtio-win driver ISO (when configured). `detectQEMUBinary()` probes `/usr/libexec/qemu-kvm` (RHEL/Rocky) then `/usr/bin/qemu-system-x86_64` (Debian/Ubuntu) to set the `<emulator>` path automatically
 11. `conn.DomainDefineXML()` + `dom.Create()` — register and boot; on failure, the DHCP reservation and VM directory are cleaned up
 12. Persist VM record in bbolt; launch `startIPMonitor` goroutine (120 s timeout)
 
@@ -247,6 +247,37 @@ wget -O /var/lib/vmsmith/images/rocky9.qcow2 \
 **`network-config` — Netplan v2 (belt-and-suspenders):**
 
 A Netplan v2 `network-config` is also written. It uses `match: macaddress:` for every interface (primary NAT + any extra attachments). Ubuntu/Debian apply this directly; Rocky/RHEL ignore it in favour of the NM keyfile above.
+
+**Windows guests (`os_type: windows`):**
+
+Windows guests (Windows 10/11 workstation and Windows Server 2019/2022/2025 — "2020 version and up") reuse the entire Linux flow above — overlay disk, NAT, DHCP reservation, IP monitor, snapshots, clone, lifecycle — and diverge only in two places:
+
+1. **Domain XML device profile** (`DomainParamsFromSpec`, driven by `spec.IsWindows()`):
+
+   | Device | Linux | Windows | Why |
+   |---|---|---|---|
+   | System disk bus | virtio (`vda`) | SATA (`sda`) | Windows boots without a paravirtual storage driver |
+   | NIC model | virtio | `e1000e` | Native Windows driver — networked out of the box |
+   | RTC clock | `utc` | `localtime` | Windows expects the RTC in local time |
+   | CPU enlightenments | none | Hyper-V (`relaxed`/`vapic`/`spinlocks`/`vpindex`/`synic`/`stimer`/`frequencies`) + `hypervclock` timer | Performance + stable timekeeping |
+   | Input | — | USB tablet | Usable VNC mouse tracking |
+   | Video | libvirt default | QXL | Usable graphical console |
+   | Extra cdrom | — | virtio-win ISO (when `storage.virtio_win_iso` is set/probed, on `sdc`) | In-guest paravirtual driver install |
+
+   `GenerateDomainXML` normalises empty device fields to the historical Linux defaults, so callers that build `DomainParams` directly are unaffected. The cloudbase cdrom moves to `sdb` so it does not collide with the SATA system disk on `sda`.
+
+2. **Provisioning datasource** (`createProvisioningISO` → `createWindowsProvisioningISO`): a NoCloud datasource (volume label `cidata`, the same label cloud-init uses) consumed by [cloudbase-init](https://cloudbase.it/cloudbase-init/) inside a prepared Windows image. It carries:
+
+   | File | Purpose |
+   |---|---|
+   | `meta-data` | `instance-id`, `local-hostname` (the VM name), and `admin_pass` (when set) |
+   | `user-data` | A `#ps1_sysnative` PowerShell script (`buildWindowsUserData`) that sets the Administrator password, enables Remote Desktop + the firewall group, and — when an SSH key is supplied — installs/enables the Windows OpenSSH server and authorises the key for administrators |
+
+   `admin_password` is **write-only**: it is baked into the ISO at create time, then redacted from the stored bbolt record and every API response so it never lingers in the metadata store. A custom `cloud_init_file` overrides the generated `user-data` verbatim, letting operators ship any cloudbase-init payload.
+
+   Because Windows gets its IP via DHCP (the `e1000e` NIC), the MAC-based DHCP host reservation still pins a stable address — no Windows-side static config is written.
+
+See `docs/WINDOWS_GUESTS.md` for the operator guide (preparing base images, virtio-win, RDP/SSH access).
 
 ---
 
@@ -806,6 +837,7 @@ storage:
   images_dir: "/var/lib/vmsmith/images"
   base_dir:   "/var/lib/vmsmith/vms"
   db_path:    "~/.vmsmith/vmsmith.db"
+  virtio_win_iso: ""          # optional virtio-win driver ISO for Windows guests; empty auto-probes /usr/share/virtio-win/virtio-win.iso
 
 network:
   name:       "vmsmith-net"
