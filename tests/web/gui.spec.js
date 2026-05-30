@@ -2373,6 +2373,49 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
   });
+
+  test("creates a new template via the New Template modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-table")).toBeVisible();
+
+    await page.getByTestId("btn-new-template").click();
+    await expect(page.getByTestId("create-template-modal")).toBeVisible();
+
+    await page.getByTestId("create-template-name").fill("web-tier");
+    // The image control is a <select> when images are seeded; pick the first
+    // real option (index 0 is the "Select an image…" placeholder).
+    await page.getByTestId("create-template-image").selectOption({ index: 1 });
+    await page.getByTestId("create-template-cpus").fill("4");
+    await page.getByTestId("create-template-ram").fill("4096");
+    await page.getByTestId("create-template-disk").fill("40");
+    await page.getByTestId("create-template-default-user").fill("deploy");
+    await page.getByTestId("create-template-description").fill("Web tier base");
+    await page.getByTestId("create-template-tags").fill("web, prod");
+
+    await page.getByTestId("btn-submit-create-template").click();
+
+    // Modal closes and the new row appears in the table.
+    await expect(page.getByTestId("create-template-modal")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-web-tier")).toBeVisible();
+    await expect(page.getByTestId("template-description-web-tier")).toContainText("Web tier base");
+    await expect(page.getByTestId("template-tags-web-tier")).toBeVisible();
+  });
+
+  test("New Template submit stays disabled until name and image are set", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await page.getByTestId("btn-new-template").click();
+
+    const submit = page.getByTestId("btn-submit-create-template");
+    await expect(submit).toBeDisabled();
+
+    await page.getByTestId("create-template-name").fill("partial");
+    await expect(submit).toBeDisabled();
+
+    await page.getByTestId("create-template-image").selectOption({ index: 1 });
+    await expect(submit).toBeEnabled();
+  });
 });
 
 // ============================================================

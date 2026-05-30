@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Layers, Trash2, Pencil, Search, X } from 'lucide-react';
-import { templates as templatesApi } from '../api/client';
+import { Layers, Trash2, Pencil, Search, X, Plus } from 'lucide-react';
+import { templates as templatesApi, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+import { safeArray } from '../utils/normalize';
 
 const DEFAULT_PER_PAGE = 25;
 
 export default function TemplateList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
@@ -189,11 +191,17 @@ export default function TemplateList() {
       <PageHeader
         title="Templates"
         subtitle={`${totalTemplates} reusable VM template${totalTemplates === 1 ? '' : 's'}`}
+        actions={
+          <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-template">
+            <Plus size={15} /> New Template
+          </button>
+        }
       />
 
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
 
       <EditTemplateModal template={editing} onClose={() => setEditing(null)} onSaved={refresh} />
+      <CreateTemplateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={refresh} />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 max-w-md">
@@ -502,7 +510,15 @@ export default function TemplateList() {
                 ? 'No templates match the selected disk range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
-                : 'Create a template from the Create-VM modal to save reusable defaults.'
+                : 'Create a template to save reusable VM defaults.'
+            }
+            action={
+              !searchFilter && !imageFilter && !defaultUserFilter && !networkFilter && !since && !until &&
+              !minCpusFilter && !maxCpusFilter && !minRamFilter && !maxRamFilter && !minDiskGbFilter && !maxDiskGbFilter && !tagFilter ? (
+                <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-template-empty">
+                  <Plus size={15} /> New Template
+                </button>
+              ) : null
             }
           />
         </div>
@@ -727,6 +743,148 @@ function EditTemplateModal({ template, onClose, onSaved }) {
           <button className="btn-primary" onClick={handleSave} disabled={saving} data-testid="btn-save-template">
             {saving ? <Spinner size={14} /> : null}
             Save
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// CreateTemplateModal collects the full template spec — name, image, resource
+// sizing, default user, description, and tags — and POSTs it to /templates.
+// Unlike EditTemplateModal (which only PATCHes description + tags), every field
+// here is settable because image / resources / name are immutable post-create.
+function CreateTemplateModal({ open, onClose, onCreated }) {
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, default_user: '', description: '', tags: '' };
+  const [form, setForm] = useState(emptyForm);
+  const [error, setError] = useState('');
+  const createMut = useMutation(templatesApi.create);
+  const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
+  const imageList = safeArray(imageResponse?.data || imageResponse);
+
+  // Reset the form each time the modal is (re)opened so a prior aborted draft
+  // never leaks into the next create.
+  useEffect(() => {
+    if (open) {
+      setForm(emptyForm);
+      setError('');
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
+
+  const humanSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes >= 1073741824) return ` · ${(bytes / 1073741824).toFixed(1)} GB`;
+    if (bytes >= 1048576) return ` · ${(bytes / 1048576).toFixed(1)} MB`;
+    return ` · ${bytes} B`;
+  };
+
+  const handleSubmit = async () => {
+    setError('');
+    const spec = {
+      name: form.name.trim(),
+      image: form.image.trim(),
+      cpus: form.cpus,
+      ram_mb: form.ram_mb,
+      disk_gb: form.disk_gb,
+    };
+    const defaultUser = form.default_user.trim();
+    if (defaultUser) spec.default_user = defaultUser;
+    const description = form.description.trim();
+    if (description) spec.description = description;
+    const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
+    if (tags.length) spec.tags = tags;
+    try {
+      await createMut.execute(spec);
+      onCreated();
+      onClose();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const noImages = imageList.length === 0;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Create Template">
+      <div className="space-y-4" data-testid="create-template-modal">
+        <div>
+          <label className="label">Name</label>
+          <input
+            className="input"
+            placeholder="rocky9-base"
+            value={form.name}
+            onChange={update('name')}
+            autoFocus
+            data-testid="create-template-name"
+          />
+        </div>
+        <div>
+          <label className="label">Base Image</label>
+          {noImages ? (
+            <input
+              className="input"
+              placeholder="/images/rocky9.qcow2"
+              value={form.image}
+              onChange={update('image')}
+              data-testid="create-template-image"
+            />
+          ) : (
+            <select className="input" value={form.image} onChange={update('image')} data-testid="create-template-image">
+              <option value="">Select an image…</option>
+              {imageList.map(img => (
+                <option key={img.id} value={img.path}>
+                  {img.name}{humanSize(img.size_bytes)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="label">vCPUs</label>
+            <input type="number" min="1" className="input" value={form.cpus} onChange={updateNum('cpus')} data-testid="create-template-cpus" />
+          </div>
+          <div>
+            <label className="label">RAM (MB)</label>
+            <input type="number" min="128" className="input" value={form.ram_mb} onChange={updateNum('ram_mb')} data-testid="create-template-ram" />
+          </div>
+          <div>
+            <label className="label">Disk (GB)</label>
+            <input type="number" min="1" className="input" value={form.disk_gb} onChange={updateNum('disk_gb')} data-testid="create-template-disk" />
+          </div>
+        </div>
+        <div>
+          <label className="label">Default User <span className="text-steel-500 font-normal">(optional)</span></label>
+          <input
+            className="input"
+            placeholder="leave blank for root / image default"
+            value={form.default_user}
+            onChange={update('default_user')}
+            data-testid="create-template-default-user"
+          />
+        </div>
+        <div>
+          <label className="label">Description <span className="text-steel-500 font-normal">(optional)</span></label>
+          <input className="input" value={form.description} onChange={update('description')} data-testid="create-template-description" />
+        </div>
+        <div>
+          <label className="label">Tags <span className="text-steel-500 font-normal">(optional)</span></label>
+          <input className="input" placeholder="comma,separated,tags" value={form.tags} onChange={update('tags')} data-testid="create-template-tags" />
+        </div>
+        {(error || createMut.error) && <p className="text-sm text-red-400">Error: {error || createMut.error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn-secondary" onClick={onClose} disabled={createMut.loading}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={createMut.loading || !form.name.trim() || !form.image.trim()}
+            data-testid="btn-submit-create-template"
+          >
+            {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
+            Create
           </button>
         </div>
       </div>

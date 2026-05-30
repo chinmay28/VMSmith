@@ -1156,6 +1156,33 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, img);
     }
   }
+  if (p === "/api/v1/templates" && method === "POST") {
+    const spec = await parseBody(req);
+    const name = typeof spec.name === "string" ? spec.name.trim() : "";
+    const image = typeof spec.image === "string" ? spec.image.trim() : "";
+    if (!name) return json(res, 400, { code: "invalid_name", message: "template name is required" });
+    if (!image) return json(res, 400, { code: "invalid_image", message: "image is required" });
+    const dup = [...templates.values()].some(t => String(t.name).toLowerCase() === name.toLowerCase());
+    if (dup) return json(res, 400, { code: "invalid_name", message: `template name "${name}" already exists` });
+    const id = `tmpl-${Date.now()}`;
+    const now = new Date().toISOString();
+    const tpl = {
+      id,
+      name,
+      image,
+      cpus: spec.cpus || 0,
+      ram_mb: spec.ram_mb || 0,
+      disk_gb: spec.disk_gb || 0,
+      description: typeof spec.description === "string" ? spec.description.trim() : "",
+      tags: Array.isArray(spec.tags) ? spec.tags.slice() : [],
+      default_user: typeof spec.default_user === "string" ? spec.default_user.trim() : "",
+      networks: Array.isArray(spec.networks) ? spec.networks.slice() : [],
+      created_at: now,
+      updated_at: now,
+    };
+    templates.set(id, tpl);
+    return json(res, 201, tpl);
+  }
   if (p === "/api/v1/templates" && method === "GET") {
     let list = [...templates.values()];
     // min_cpus / max_cpus and min_ram_mb / max_ram_mb: inclusive non-negative
