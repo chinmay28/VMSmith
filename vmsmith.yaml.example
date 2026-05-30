@@ -31,6 +31,11 @@ storage:
   images_dir: "/var/lib/vmsmith/images"   # world-accessible; libvirt-qemu can read here
   base_dir: "/var/lib/vmsmith/vms"        # world-accessible; libvirt-qemu can read here
   db_path: "~/.vmsmith/vmsmith.db"        # user-only metadata DB
+  # Optional path to the virtio-win driver ISO. Attached as an extra cdrom to
+  # Windows guests so the in-guest installer can load paravirtual drivers.
+  # Leave empty to auto-probe /usr/share/virtio-win/virtio-win.iso (RHEL/Fedora
+  # virtio-win package) or to skip the attachment entirely.
+  virtio_win_iso: ""
 
 network:
   name: "vmsmith-net"

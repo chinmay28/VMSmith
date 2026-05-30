@@ -176,9 +176,24 @@ sudo ./bin/vmsmith vm create rocky01 \
   --default-user alice \
   --ssh-key "$(cat ~/.ssh/id_rsa.pub)"
 
+# Windows guest (workstation or server, "2020 version and up")
+sudo ./bin/vmsmith vm create win01 \
+  --image win2022.qcow2 \
+  --os windows \
+  --os-variant windows-server-2022 \
+  --cpus 4 --ram 4096 --disk 64 \
+  --admin-password 'S3cret!Pass'
+
 # List VMs
 sudo ./bin/vmsmith vm list
 ```
+
+> **Windows guests** (Windows 10/11 and Windows Server 2019/2022/2025) reuse the
+> same NAT/DHCP/snapshot/lifecycle machinery as Linux. They get a Windows-tuned
+> libvirt domain (SATA disk, e1000e NIC, localtime clock, Hyper-V
+> enlightenments, virtio-win driver ISO) and are provisioned via cloudbase-init.
+> See **[docs/WINDOWS_GUESTS.md](docs/WINDOWS_GUESTS.md)** for preparing base
+> images, RDP/SSH access, and the virtio-win configuration.
 
 Output:
 ```

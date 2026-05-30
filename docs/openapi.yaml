@@ -2886,6 +2886,29 @@ components:
           type: string
         default_user:
           type: string
+        os_type:
+          type: string
+          enum: [linux, windows]
+          description: >-
+            Guest OS family. Empty/omitted means "linux". Windows guests get a
+            Windows-tuned domain XML (SATA system disk, e1000e NIC, localtime
+            clock, Hyper-V enlightenments, USB tablet, QXL video, and an
+            attached virtio-win driver ISO when configured) and are provisioned
+            via a cloudbase-init NoCloud datasource instead of cloud-init.
+            Windows guests require at least 2048 MB RAM and 32 GB disk.
+        os_variant:
+          type: string
+          enum: [windows-10, windows-11, windows-server-2019, windows-server-2022, windows-server-2025]
+          description: >-
+            Specific Windows edition (advisory metadata). Only meaningful when
+            os_type is "windows".
+        admin_password:
+          type: string
+          description: >-
+            Windows local Administrator password injected into the
+            cloudbase-init datasource at first boot. Write-only: it is redacted
+            from the stored/returned VM record once the provisioning ISO is
+            written. Ignored for Linux guests.
         networks:
           type: array
           items:

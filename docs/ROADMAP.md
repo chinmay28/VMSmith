@@ -772,6 +772,23 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 | 5.5.3 | Add host selection to VM create (`--host <name>`) | L | |
 | 5.5.4 | Add host overview dashboard showing per-host resource usage | L | |
 
+### 5.6 Windows Guest Support
+
+Run Windows guests (workstation and server, "2020 version and up": Windows 10/11
+and Windows Server 2019/2022/2025) alongside Linux, sharing the same overlay /
+NAT / DHCP / snapshot / lifecycle machinery. The only divergence is the guest
+OS family, which drives the libvirt domain tuning and the first-boot
+provisioning datasource.
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 5.6.1 | Add an `os_type` (`linux`\|`windows`) guest-family selector to `VMSpec`, plus optional `os_variant` (windows-10/11, windows-server-2019/2022/2025) and write-only `admin_password` | S | ✅ Done — `pkg/types/vm.go` adds `OSType`/`OSVariant`/`AdminPassword` with `ResolvedOSType()` (empty ⇒ linux) + `IsWindows()` helpers and `KnownWindowsVariants`. `validateVMSpec` adds `invalid_os_type` / `invalid_os_variant` (both 400) and a Windows resource floor (≥2048 MB RAM, ≥32 GB disk, checked only when set). CLI: `vmsmith vm create --os --os-variant --admin-password`. Coverage: `pkg/types` (`ResolvedOSType`/`IsWindows`/`IsKnownWindowsVariant`), API (`TestCreateVM_Windows`, `_InvalidOSType`, `_WindowsResourceFloor`, `TestValidateVMSpec` windows cases), CLI (`TestCLI_VMCreate_Windows`) |
+| 5.6.2 | Windows-tuned libvirt domain XML: SATA system disk (boots without virtio storage drivers), e1000e NIC (native Windows driver), `localtime` clock, Hyper-V enlightenments + `hypervclock`, USB tablet, QXL video; Linux path unchanged | M | ✅ Done — `internal/vm/domain.go` `DomainParamsFromSpec` sets the Windows device profile from `spec.IsWindows()`; `GenerateDomainXML` normalises empty device fields to the historical Linux defaults so direct callers/tests are unaffected. Coverage: `TestDomainParamsFromSpec_WindowsTuning`, `_LinuxDefaultsUnchanged`, `TestGenerateDomainXML_Windows`, `_NoVirtioWinWhenUnset` |
+| 5.6.3 | Provision Windows via a cloudbase-init NoCloud datasource (instead of cloud-init): `cidata`-labelled ISO with `meta-data` (instance-id/hostname/admin_pass) + a `#ps1_sysnative` PowerShell `user-data` that sets the Administrator password, enables RDP, and installs/enables OpenSSH with the injected key; `admin_password` redacted from the stored record after the ISO is written | M | ✅ Done — `internal/vm/lifecycle.go` `createProvisioningISO` dispatches on OS family; `createWindowsProvisioningISO` + `buildWindowsUserData` generate the datasource; Create/Clone/Update reuse it. DHCP reservation / IP monitor are OS-agnostic. Coverage: `TestBuildWindowsUserData_*`, `TestPSSingleQuote` |
+| 5.6.4 | Attach the virtio-win driver ISO as an extra cdrom for Windows guests, via `storage.virtio_win_iso` (auto-probes `/usr/share/virtio-win/virtio-win.iso`) | S | ✅ Done — `config.StorageConfig.VirtioWinISO` + `DefaultVirtioWinISOPath`; `LibvirtManager.virtioWinISOPath`/`applyVirtioWin` attach it on the `sdc` cdrom when present. Documented in `docs/WINDOWS_GUESTS.md` and `vmsmith.yaml.example` |
+| 5.6.5 | GUI: OS-family selector + Windows variant / Administrator password fields in the VM create form; OS badge on VM rows | M | Pending — backend + CLI complete; the create form and list badge still surface only Linux fields |
+| 5.6.6 | Operator guide: preparing Windows base images (sysprep + cloudbase-init + virtio), driver injection, RDP/WinRM access | S | ✅ Done — `docs/WINDOWS_GUESTS.md` |
+
 ---
 
 ## Phase 6: Developer & Community (Ongoing)

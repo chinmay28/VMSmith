@@ -123,6 +123,42 @@ func TestValidateVMSpec(t *testing.T) {
 			wantCode:    "invalid_spec",
 			wantMessage: "tags cannot contain empty values",
 		},
+		{
+			name: "explicit linux os_type is valid",
+			spec: types.VMSpec{Name: "valid-name", Image: "ubuntu", OSType: types.OSTypeLinux},
+		},
+		{
+			name: "valid windows spec",
+			spec: types.VMSpec{Name: "win-01", Image: "win2022.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022", RAMMB: 4096, DiskGB: 64},
+		},
+		{
+			name:        "unknown os_type",
+			spec:        types.VMSpec{Name: "valid-name", Image: "ubuntu", OSType: types.OSType("bsd")},
+			wantCode:    "invalid_os_type",
+			wantMessage: `os_type must be "linux" or "windows"`,
+		},
+		{
+			name:        "unknown windows variant",
+			spec:        types.VMSpec{Name: "valid-name", Image: "win.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-vista"},
+			wantCode:    "invalid_os_variant",
+			wantMessage: "os_variant must be one of windows-10, windows-11, windows-server-2019, windows-server-2022, windows-server-2025",
+		},
+		{
+			name:        "windows ram below floor",
+			spec:        types.VMSpec{Name: "valid-name", Image: "win.qcow2", OSType: types.OSTypeWindows, RAMMB: 1024},
+			wantCode:    "invalid_spec",
+			wantMessage: "windows guests require at least 2048 MB ram_mb",
+		},
+		{
+			name:        "windows disk below floor",
+			spec:        types.VMSpec{Name: "valid-name", Image: "win.qcow2", OSType: types.OSTypeWindows, RAMMB: 4096, DiskGB: 20},
+			wantCode:    "invalid_spec",
+			wantMessage: "windows guests require at least 32 GB disk_gb",
+		},
+		{
+			name: "windows with default resources (zero) is allowed",
+			spec: types.VMSpec{Name: "valid-name", Image: "win.qcow2", OSType: types.OSTypeWindows},
+		},
 	}
 
 	for _, tt := range tests {

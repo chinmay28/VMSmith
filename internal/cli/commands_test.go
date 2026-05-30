@@ -242,6 +242,37 @@ func TestCLI_VMCreate_WithAllFlags(t *testing.T) {
 	}
 }
 
+func TestCLI_VMCreate_Windows(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	out, err := runCLI("vm", "create", "win-vm",
+		"--image", "win2022.qcow2",
+		"--os", "windows",
+		"--os-variant", "windows-server-2022",
+		"--admin-password", "P@ssw0rd!",
+		"--ram", "4096",
+		"--disk", "64",
+	)
+	if err != nil {
+		t.Fatalf("vm create (windows): %v", err)
+	}
+	if !strings.Contains(out, "windows-server-2022") {
+		t.Errorf("expected OS variant in output, got: %q", out)
+	}
+
+	vms, _ := mock.List(nil)
+	if len(vms) != 1 {
+		t.Fatalf("expected 1 VM, got %d", len(vms))
+	}
+	if !vms[0].Spec.IsWindows() {
+		t.Errorf("OSType = %q, want windows", vms[0].Spec.OSType)
+	}
+	if vms[0].Spec.OSVariant != "windows-server-2022" {
+		t.Errorf("OSVariant = %q, want windows-server-2022", vms[0].Spec.OSVariant)
+	}
+}
+
 func TestCLI_VMCreate_MissingImage(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()

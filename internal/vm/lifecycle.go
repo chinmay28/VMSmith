@@ -204,13 +204,18 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// If NatStaticIP is set the NAT interface is configured with a static
 	// address instead of DHCP, which avoids Rocky/RHEL DHCP timing issues.
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
-	if err := createCloudInitISO(cloudInitISO, spec, natMAC, ""); err != nil {
-		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
+	if err := createProvisioningISO(cloudInitISO, spec, natMAC, ""); err != nil {
+		return nil, fmt.Errorf("creating provisioning ISO: %w", err)
 	}
+	// The Windows Administrator password has now been baked into the
+	// provisioning ISO; redact it so it never lands in bbolt or the API
+	// response (the VMSpec is persisted and returned verbatim).
+	spec.AdminPassword = ""
 
 	// Generate and define domain XML
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = detectMachineType(m.conn)
+	m.applyVirtioWin(&params, spec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		return nil, err
@@ -340,14 +345,15 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	}
 
 	cloudInitISO := filepath.Join(vmDir, "cidata.iso")
-	if err := createCloudInitISO(cloudInitISO, clonedSpec, natMAC, ""); err != nil {
+	if err := createProvisioningISO(cloudInitISO, clonedSpec, natMAC, ""); err != nil {
 		cleanupCloneReservation()
 		os.RemoveAll(vmDir)
-		return nil, fmt.Errorf("creating cloud-init ISO: %w", err)
+		return nil, fmt.Errorf("creating provisioning ISO: %w", err)
 	}
 
 	params := DomainParamsFromSpec(clonedSpec, clonedDiskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = detectMachineType(m.conn)
+	m.applyVirtioWin(&params, clonedSpec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		cleanupCloneReservation()
@@ -843,8 +849,8 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		updatedSpec.NatGateway = newNatGateway
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		newInstanceID := fmt.Sprintf("%s-ip-%d", storedVM.Name, time.Now().UnixNano())
-		if err := createCloudInitISO(cloudInitISO, updatedSpec, storedVM.NatMAC, newInstanceID); err != nil {
-			return nil, fmt.Errorf("regenerating cloud-init ISO: %w", err)
+		if err := createProvisioningISO(cloudInitISO, updatedSpec, storedVM.NatMAC, newInstanceID); err != nil {
+			return nil, fmt.Errorf("regenerating provisioning ISO: %w", err)
 		}
 	}
 
@@ -860,6 +866,7 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
 		params.UUID = existingUUID
 		params.Machine = detectMachineType(m.conn)
+		m.applyVirtioWin(&params, updatedSpec)
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
 			return nil, fmt.Errorf("generating domain XML: %w", err)
@@ -1461,6 +1468,143 @@ func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 	return nil
 }
 
+// virtioWinISOPath resolves the virtio-win driver ISO to attach to Windows
+// guests. It prefers the explicitly-configured storage.virtio_win_iso path and
+// falls back to the conventional package install location. Returns "" when no
+// usable ISO is found, in which case the guest boots without it (SATA disk +
+// e1000e NIC still work natively).
+func (m *LibvirtManager) virtioWinISOPath() string {
+	if p := strings.TrimSpace(m.cfg.Storage.VirtioWinISO); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		logger.Warn("daemon", "configured virtio_win_iso not found; skipping attachment",
+			"path", p)
+		return ""
+	}
+	if _, err := os.Stat(config.DefaultVirtioWinISOPath); err == nil {
+		return config.DefaultVirtioWinISOPath
+	}
+	return ""
+}
+
+// applyVirtioWin attaches the virtio-win driver ISO to the domain params when
+// the spec targets Windows and an ISO is available. No-op for Linux guests.
+func (m *LibvirtManager) applyVirtioWin(params *DomainParams, spec types.VMSpec) {
+	if !spec.IsWindows() {
+		return
+	}
+	if iso := m.virtioWinISOPath(); iso != "" {
+		params.VirtioWinISO = iso
+	}
+}
+
+// createProvisioningISO writes the first-boot datasource ISO for a VM. Linux
+// guests get a cloud-init NoCloud ISO; Windows guests get a cloudbase-init
+// NoCloud ISO. A custom CloudInitFile, when set, overrides the generated
+// user-data for either family.
+func createProvisioningISO(isoPath string, spec types.VMSpec, natMAC, instanceID string) error {
+	if spec.IsWindows() {
+		return createWindowsProvisioningISO(isoPath, spec, instanceID)
+	}
+	return createCloudInitISO(isoPath, spec, natMAC, instanceID)
+}
+
+// createWindowsProvisioningISO writes a NoCloud datasource ISO consumed by
+// cloudbase-init inside a prepared Windows guest image. It carries meta-data
+// (instance-id + hostname, plus the Administrator password) and user-data (a
+// #ps1_sysnative PowerShell script that sets the Administrator password,
+// enables Remote Desktop, and installs/enables the OpenSSH server with the
+// injected public key). The ISO volume label is "cidata", which
+// cloudbase-init's NoCloud service matches by default.
+func createWindowsProvisioningISO(isoPath string, spec types.VMSpec, instanceID string) error {
+	if instanceID == "" {
+		instanceID = spec.Name
+	}
+
+	tmpDir, err := os.MkdirTemp("", "vmsmith-win-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// meta-data: cloudbase-init reads instance-id (re-runs when it changes),
+	// local-hostname (renames the computer), and admin_pass (sets the
+	// Administrator password via the SetUserPasswordPlugin).
+	var meta strings.Builder
+	meta.WriteString(fmt.Sprintf("instance-id: %s\n", instanceID))
+	meta.WriteString(fmt.Sprintf("local-hostname: %s\n", spec.Name))
+	if spec.AdminPassword != "" {
+		meta.WriteString(fmt.Sprintf("admin_pass: %s\n", spec.AdminPassword))
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "meta-data"), []byte(meta.String()), 0644); err != nil {
+		return err
+	}
+
+	var userData string
+	if spec.CloudInitFile != "" {
+		custom, err := os.ReadFile(spec.CloudInitFile)
+		if err != nil {
+			return fmt.Errorf("reading cloud-init file: %w", err)
+		}
+		userData = string(custom)
+	} else {
+		userData = buildWindowsUserData(spec)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "user-data"), []byte(userData), 0644); err != nil {
+		return err
+	}
+
+	return writeNoCloudISO(isoPath, []string{
+		filepath.Join(tmpDir, "meta-data"),
+		filepath.Join(tmpDir, "user-data"),
+	})
+}
+
+// buildWindowsUserData returns a cloudbase-init #ps1_sysnative PowerShell
+// user-data script. cloudbase-init's UserDataPlugin executes user-data that
+// begins with the #ps1_sysnative header as a PowerShell script. The script is
+// idempotent and self-contained so it works even on images whose
+// cloudbase-init only wires up the UserDataPlugin: it sets the Administrator
+// password, enables Remote Desktop (plus the firewall rule), and — when an SSH
+// public key is supplied — installs and enables the Windows OpenSSH server and
+// authorises the key for administrators.
+func buildWindowsUserData(spec types.VMSpec) string {
+	var sb strings.Builder
+	sb.WriteString("#ps1_sysnative\n")
+	sb.WriteString("$ErrorActionPreference = 'Continue'\n")
+
+	if spec.AdminPassword != "" {
+		sb.WriteString("# Set the local Administrator password.\n")
+		sb.WriteString(fmt.Sprintf("$pw = ConvertTo-SecureString '%s' -AsPlainText -Force\n", psSingleQuote(spec.AdminPassword)))
+		sb.WriteString("try { Get-LocalUser -Name 'Administrator' | Set-LocalUser -Password $pw } catch { net user Administrator '" + psSingleQuote(spec.AdminPassword) + "' }\n")
+		sb.WriteString("try { Get-LocalUser -Name 'Administrator' | Enable-LocalUser } catch {}\n")
+	}
+
+	sb.WriteString("# Enable Remote Desktop and open the firewall.\n")
+	sb.WriteString("Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -ErrorAction SilentlyContinue\n")
+	sb.WriteString("Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue\n")
+
+	if spec.SSHPubKey != "" {
+		sb.WriteString("# Install and enable the OpenSSH server, then authorise the injected key.\n")
+		sb.WriteString("try { Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0' -ErrorAction SilentlyContinue } catch {}\n")
+		sb.WriteString("Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue\n")
+		sb.WriteString("Start-Service sshd -ErrorAction SilentlyContinue\n")
+		sb.WriteString("$keyPath = \"$env:ProgramData\\ssh\\administrators_authorized_keys\"\n")
+		sb.WriteString(fmt.Sprintf("Set-Content -Path $keyPath -Value '%s' -Encoding ascii\n", psSingleQuote(spec.SSHPubKey)))
+		sb.WriteString("icacls $keyPath /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null\n")
+	}
+
+	return sb.String()
+}
+
+// psSingleQuote escapes a value for inclusion inside a PowerShell single-quoted
+// string literal: the only metacharacter is the single quote itself, which is
+// doubled.
+func psSingleQuote(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // createCloudInitISO writes a NoCloud cloud-init ISO to isoPath.
 // instanceID overrides the cloud-init instance identifier; empty defaults to
 // spec.Name.  Pass a unique value (e.g. "name-ip-<nano>") to force cloud-init
@@ -1603,11 +1747,18 @@ func buildCloudConfig(spec types.VMSpec, natMAC string) string {
 // writeCloudInitISO creates the cidata ISO from files in tmpDir.
 // Tries genisoimage first, then falls back to mkisofs (available on Rocky/RHEL).
 func writeCloudInitISO(isoPath, tmpDir string) error {
-	files := []string{
+	return writeNoCloudISO(isoPath, []string{
 		filepath.Join(tmpDir, "meta-data"),
 		filepath.Join(tmpDir, "user-data"),
 		filepath.Join(tmpDir, "network-config"),
-	}
+	})
+}
+
+// writeNoCloudISO builds a NoCloud datasource ISO (volume label "cidata")
+// containing the given files. The "cidata" label is what both cloud-init
+// (Linux) and cloudbase-init (Windows) match by default.
+// Tries genisoimage first, then falls back to mkisofs (available on Rocky/RHEL).
+func writeNoCloudISO(isoPath string, files []string) error {
 	baseArgs := []string{"-output", isoPath, "-volid", "cidata", "-joliet", "-rock"}
 	args := append(baseArgs, files...)
 
