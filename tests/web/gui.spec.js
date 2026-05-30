@@ -15,9 +15,10 @@ test.describe("Dashboard", () => {
   test("shows stats and VM table on load", async ({ page }) => {
     await page.goto(BASE_URL);
 
-    // Stats should show seeded data (2 VMs, 2 images)
-    await expect(page.getByTestId("stat-total")).toHaveText("2");
-    await expect(page.getByTestId("stat-running")).toHaveText("1");
+    // Stats should show seeded data: 3 VMs (web-server running, db-server
+    // stopped, win-app running — see 5.6.8), 2 images.
+    await expect(page.getByTestId("stat-total")).toHaveText("3");
+    await expect(page.getByTestId("stat-running")).toHaveText("2");
     await expect(page.getByTestId("stat-images")).toHaveText("2");
   });
 

@@ -103,8 +103,11 @@ async function main() {
     await page.waitForTimeout(1000);
 
     await runTest("shows stats on load", async (p) => {
-      await assertText(p, "stat-total", "2");
-      await assertText(p, "stat-running", "1");
+      // 5.6.8: seed now carries 3 VMs (web-server running, db-server stopped,
+      // win-app running) and 2 images. The Windows VM lets the os-type
+      // filter narrow meaningfully on every list endpoint.
+      await assertText(p, "stat-total", "3");
+      await assertText(p, "stat-running", "2");
       await assertText(p, "stat-images", "2");
     }, page);
 
