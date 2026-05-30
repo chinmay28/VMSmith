@@ -8,7 +8,7 @@ This guide keeps contributions predictable and reviewable without adding a lot o
 
 For local development on Linux, install:
 
-- Go 1.22+
+- Go 1.22.5 (matches the pinned toolchain in `go.mod` and CI)
 - Node.js 22+
 - libvirt development packages (`libvirt-dev` / `libvirt-devel`)
 - QEMU/KVM + libvirt daemon for integration work
@@ -67,6 +67,8 @@ Run the smallest useful set for the code you touched.
 make fmt
 make test
 ```
+
+Use the pinned Go toolchain from `go.mod` (`toolchain go1.22.5`) when running `make fmt` / `gofmt`; newer `gofmt` releases can produce different alignment-only diffs.
 
 If `golangci-lint` is installed locally, also run:
 

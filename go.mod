@@ -2,6 +2,8 @@ module github.com/vmsmith/vmsmith
 
 go 1.22.0
 
+toolchain go1.22.5
+
 require (
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/robfig/cron/v3 v3.0.1
