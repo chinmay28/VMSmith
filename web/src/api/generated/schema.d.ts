@@ -51,6 +51,20 @@ export interface paths {
                      */
                     default_user?: components["parameters"]["DefaultUserFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the guest OS family. Accepts
+                     *     `linux` or `windows` (case-insensitive; surrounding whitespace
+                     *     trimmed); empty value disables the filter. An empty stored
+                     *     `spec.os_type` resolves to `linux` — mirrors `ResolvedOSType` and
+                     *     the `?default_user=root` empty-means-root semantics — so
+                     *     `?os_type=linux` matches both explicit-linux VMs and those left
+                     *     unset. Any value other than `linux` / `windows` returns
+                     *     `400 invalid_os_type` (matching the create-time validation contract
+                     *     on `POST /vms`). Composes additively with every other filter; the
+                     *     same parameter applies to `GET /templates` and uses
+                     *     `VMTemplate.ResolvedOSType` for the empty-means-linux fallback.
+                     */
+                    os_type?: components["parameters"]["OSTypeFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -1936,6 +1950,20 @@ export interface paths {
                      */
                     default_user?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the guest OS family. Accepts
+                     *     `linux` or `windows` (case-insensitive; surrounding whitespace
+                     *     trimmed); empty value disables the filter. An empty stored
+                     *     `spec.os_type` resolves to `linux` — mirrors `ResolvedOSType` and
+                     *     the `?default_user=root` empty-means-root semantics — so
+                     *     `?os_type=linux` matches both explicit-linux VMs and those left
+                     *     unset. Any value other than `linux` / `windows` returns
+                     *     `400 invalid_os_type` (matching the create-time validation contract
+                     *     on `POST /vms`). Composes additively with every other filter; the
+                     *     same parameter applies to `GET /templates` and uses
+                     *     `VMTemplate.ResolvedOSType` for the empty-means-linux fallback.
+                     */
+                    os_type?: components["parameters"]["OSTypeFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the
                      *     template's additional network attachments (`networks[].name`). A
                      *     template matches when any attachment name equals the value
@@ -3355,6 +3383,18 @@ export interface components {
             cloud_init_file?: string;
             ssh_pub_key?: string;
             default_user?: string;
+            /**
+             * @description Guest OS family. Empty/omitted means "linux". Windows guests get a Windows-tuned domain XML (SATA system disk, e1000e NIC, localtime clock, Hyper-V enlightenments, USB tablet, QXL video, and an attached virtio-win driver ISO when configured) and are provisioned via a cloudbase-init NoCloud datasource instead of cloud-init. Windows guests require at least 2048 MB RAM and 32 GB disk.
+             * @enum {string}
+             */
+            os_type?: "linux" | "windows";
+            /**
+             * @description Specific Windows edition (advisory metadata). Only meaningful when os_type is "windows".
+             * @enum {string}
+             */
+            os_variant?: "windows-10" | "windows-11" | "windows-server-2019" | "windows-server-2022" | "windows-server-2025";
+            /** @description Windows local Administrator password injected into the cloudbase-init datasource at first boot. Write-only: it is redacted from the stored/returned VM record once the provisioning ISO is written. Ignored for Linux guests. */
+            admin_password?: string;
             networks?: components["schemas"]["NetworkAttachment"][];
             nat_static_ip?: string;
             nat_gateway?: string;
@@ -3678,6 +3718,20 @@ export interface components {
             description?: string;
             tags?: string[];
             default_user?: string;
+            /**
+             * @description Guest OS family pinned by this template. Empty / unset resolves
+             *     to `linux` via `VMTemplate.ResolvedOSType` and is inherited by
+             *     VMs created from the template when their own `os_type` is
+             *     empty. Mirrors `VMSpec.os_type` semantics.
+             * @enum {string}
+             */
+            os_type?: "linux" | "windows";
+            /**
+             * @description Optional Windows variant carried alongside `os_type=windows`
+             *     (`windows-10`, `windows-11`, `windows-server-2019/2022/2025`).
+             *     Advisory metadata; inherited by derived VMs when empty.
+             */
+            os_variant?: string;
             networks?: components["schemas"]["NetworkAttachment"][];
             /** Format: date-time */
             created_at: string;
@@ -3693,6 +3747,17 @@ export interface components {
             description?: string;
             tags?: string[];
             default_user?: string;
+            /**
+             * @description Optional guest OS family (`linux` default, or `windows`).
+             *     Case-insensitive; lowercased on store. Inherited by derived VMs.
+             * @enum {string}
+             */
+            os_type?: "linux" | "windows";
+            /**
+             * @description Optional Windows variant; case-insensitive, lowercased on
+             *     store. Inherited by derived VMs when not overridden.
+             */
+            os_variant?: string;
             networks?: components["schemas"]["NetworkAttachment"][];
         };
         /**
@@ -4056,6 +4121,20 @@ export interface components {
          *     pre-pagination population.
          */
         NetworkFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the guest OS family. Accepts
+         *     `linux` or `windows` (case-insensitive; surrounding whitespace
+         *     trimmed); empty value disables the filter. An empty stored
+         *     `spec.os_type` resolves to `linux` — mirrors `ResolvedOSType` and
+         *     the `?default_user=root` empty-means-root semantics — so
+         *     `?os_type=linux` matches both explicit-linux VMs and those left
+         *     unset. Any value other than `linux` / `windows` returns
+         *     `400 invalid_os_type` (matching the create-time validation contract
+         *     on `POST /vms`). Composes additively with every other filter; the
+         *     same parameter applies to `GET /templates` and uses
+         *     `VMTemplate.ResolvedOSType` for the empty-means-linux fallback.
+         */
+        OSTypeFilter: "linux" | "windows";
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

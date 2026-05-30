@@ -571,6 +571,107 @@ func TestCLI_VMList_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
 	}
 }
 
+// 5.6.8 — per-os-family filter on `vmsmith vm list`.
+
+func TestCLI_VMList_FilterByOSType_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "winbox", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows")
+	if err != nil {
+		t.Fatalf("vm list --os-type: %v", err)
+	}
+	if strings.Contains(out, "alpha") || !strings.Contains(out, "winbox") {
+		t.Fatalf("expected only winbox, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSType_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "winbox", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-type", "WINDOWS")
+	if err != nil {
+		t.Fatalf("vm list --os-type: %v", err)
+	}
+	if !strings.Contains(out, "winbox") {
+		t.Fatalf("expected case-insensitive match for winbox, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSType_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "winbox", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-type", "")
+	if err != nil {
+		t.Fatalf("vm list --os-type empty: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "winbox") {
+		t.Fatalf("expected empty filter to return all, got %q", out)
+	}
+}
+
+// TestCLI_VMList_FilterByOSType_LinuxMatchesEmpty: mirrors the
+// `--default-user root` empty-means-root contract: empty OSType resolves
+// to linux (`pkg/types/vm.go::VMSpec.ResolvedOSType`), so the filter must
+// match both explicit-linux and unset entries.
+func TestCLI_VMList_FilterByOSType_LinuxMatchesEmpty(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: ""}})               // implicit linux
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}}) // explicit linux
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "winbox", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-type", "linux")
+	if err != nil {
+		t.Fatalf("vm list --os-type linux: %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") || strings.Contains(out, "winbox") {
+		t.Fatalf("expected alpha + beta (linux), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSType_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	_, err := runCLI("vm", "list", "--os-type", "plan9")
+	if err == nil {
+		t.Fatal("expected error for invalid --os-type, got nil")
+	}
+	if !strings.Contains(err.Error(), "--os-type") {
+		t.Fatalf("error should reference --os-type, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByOSType_ComposesWithStatus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "a-win-run", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "b-win-stop", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "c-lin-run", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--status", "running")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "a-win-run") || strings.Contains(out, "b-win-stop") || strings.Contains(out, "c-lin-run") {
+		t.Fatalf("expected only a-win-run, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))
@@ -5753,6 +5854,110 @@ func TestCLI_TemplateList_FilterByDefaultUser_NoMatch(t *testing.T) {
 	}
 	if strings.Contains(out, "deploy-rocky") {
 		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
+// --- template list --os-type (5.6.8) ---
+
+func TestCLI_TemplateList_FilterByOSType_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky-tpl", Image: "rocky9.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "win22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-type", "windows")
+	if err != nil {
+		t.Fatalf("template list --os-type: %v", err)
+	}
+	if !strings.Contains(out, "win22-tpl") || strings.Contains(out, "rocky-tpl") {
+		t.Fatalf("expected only win22-tpl, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSType_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "win22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-type", "WINDOWS")
+	if err != nil {
+		t.Fatalf("template list --os-type: %v", err)
+	}
+	if !strings.Contains(out, "win22-tpl") {
+		t.Fatalf("expected case-insensitive match for win22-tpl, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSType_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky-tpl", Image: "r.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "win22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-type", "   ")
+	if err != nil {
+		t.Fatalf("template list --os-type: %v", err)
+	}
+	if !strings.Contains(out, "rocky-tpl") || !strings.Contains(out, "win22-tpl") {
+		t.Fatalf("expected every template (whitespace --os-type is a no-op), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSType_LinuxMatchesEmpty(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "implicit-linux", Image: "r.qcow2", OSType: "", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "explicit-linux", Image: "r.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "win22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-type", "linux")
+	if err != nil {
+		t.Fatalf("template list --os-type linux: %v", err)
+	}
+	if !strings.Contains(out, "implicit-linux") || !strings.Contains(out, "explicit-linux") || strings.Contains(out, "win22-tpl") {
+		t.Fatalf("expected implicit-linux + explicit-linux only, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSType_RejectsInvalidValue(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky-tpl", Image: "r.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := runCLI("template", "list", "--os-type", "plan9")
+	if err == nil {
+		t.Fatal("expected error for invalid --os-type, got nil")
+	}
+	if !strings.Contains(err.Error(), "--os-type") {
+		t.Fatalf("error should reference --os-type, got %v", err)
 	}
 }
 

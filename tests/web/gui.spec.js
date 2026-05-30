@@ -468,6 +468,43 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
   });
 
+  // 5.6.8 — os_type filter on the VM list. Seed data: web-server +
+  // db-server are Linux (implicit + implicit), win-app is windows. The
+  // dropdown is a <select> with values "" / "linux" / "windows" that
+  // round-trips through ?os_type=.
+  test("os-type filter narrows the VM list to a single OS family and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    await page.getByTestId("vm-list-os-type-filter").selectOption("windows");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_type")).toBe("windows");
+
+    await page.getByTestId("vm-list-os-type-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("os_type=");
+  });
+
+  // Linux selection matches both explicit-linux AND implicit (empty
+  // os_type) VMs — mirrors the API contract documented in
+  // pkg/types/vm.go::VMSpec.ResolvedOSType.
+  test("os-type filter linux selection matches VMs with an empty os_type", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-os-type-filter").selectOption("linux");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
@@ -2181,6 +2218,42 @@ test.describe("Templates", () => {
     await page.getByTestId("template-list-default-user-filter").fill("nobody");
     await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  // 5.6.8 — os_type filter on the template list. Seed data: small-ubuntu
+  // and big-rocky are linux (implicit empty + implicit empty), windows-2022
+  // is os_type:"windows". The dropdown is a <select> with values
+  // "" / "linux" / "windows" that round-trips through ?os_type=.
+  test("os-type filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+
+    await page.getByTestId("template-list-os-type-filter").selectOption("windows");
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_type")).toBe("windows");
+
+    await page.getByTestId("template-list-os-type-filter").selectOption("");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("os_type=");
+  });
+
+  // Linux selection matches both explicit-linux AND implicit (empty
+  // os_type) templates — mirrors the API contract documented in
+  // pkg/types/template.go::VMTemplate.ResolvedOSType.
+  test("os-type filter linux selection matches templates with an empty os_type", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-os-type-filter").selectOption("linux");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
   });
 
   test("network filter narrows the template list and round-trips through the URL", async ({ page }) => {

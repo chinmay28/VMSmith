@@ -121,6 +121,7 @@ var templateListCmd = &cobra.Command{
 		searchFlag, _ := cmd.Flags().GetString("search")
 		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
+		osTypeFilterRaw, _ := cmd.Flags().GetString("os-type")
 		networkFilter, _ := cmd.Flags().GetString("network")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
@@ -159,6 +160,10 @@ var templateListCmd = &cobra.Command{
 			return err
 		}
 		maxDisk, maxDiskSet, err := parseCLICountRange(maxDiskRaw, "--max-disk-gb")
+		if err != nil {
+			return err
+		}
+		osTypeFilter, osTypeSet, err := parseCLIOSType(osTypeFilterRaw, "--os-type")
 		if err != nil {
 			return err
 		}
@@ -215,6 +220,15 @@ var templateListCmd = &cobra.Command{
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if strings.EqualFold(tpl.DefaultUser, userQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
+		}
+		if osTypeSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if tpl.ResolvedOSType() == osTypeFilter {
 					filtered = append(filtered, tpl)
 				}
 			}
@@ -482,6 +496,7 @@ func init() {
 	templateListCmd.Flags().String("search", "", "case-insensitive substring filter applied to name, description, and tags")
 	templateListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the template's base image")
 	templateListCmd.Flags().String("default-user", "", "case-insensitive exact-match filter on the template's default login user")
+	templateListCmd.Flags().String("os-type", "", "filter templates by guest OS family: 'linux' or 'windows' (case-insensitive; empty stored os_type is treated as 'linux')")
 	templateListCmd.Flags().String("network", "", "filter templates attached to a named network (case-insensitive exact match against networks names)")
 	templateListCmd.Flags().String("since", "", "keep templates created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	templateListCmd.Flags().String("until", "", "keep templates created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")

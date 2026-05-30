@@ -590,6 +590,87 @@ func TestCreateVM_WithTemplateOverrides(t *testing.T) {
 	}
 }
 
+// TestCreateVM_TemplateInheritsOSType verifies 5.6.7: a Windows-pinned
+// template propagates `os_type` (and `os_variant`) to the derived VMSpec
+// when the create request leaves them empty. Mirrors the existing
+// `default_user` inheritance check; explicit per-VM `os_type` overrides
+// the template (see TestCreateVM_TemplateOSTypeOverride below).
+func TestCreateVM_TemplateInheritsOSType(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	templateResp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":       "win2022-base",
+		"image":      "win-server-2022.qcow2",
+		"cpus":       4,
+		"ram_mb":     4096,
+		"disk_gb":    64,
+		"os_type":    "windows",
+		"os_variant": "windows-server-2022",
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if templateResp.StatusCode != http.StatusCreated {
+		t.Fatalf("template status = %d, want 201", templateResp.StatusCode)
+	}
+	var tpl types.VMTemplate
+	decodeJSON(t, templateResp, &tpl)
+	if tpl.OSType != types.OSTypeWindows || tpl.OSVariant != "windows-server-2022" {
+		t.Fatalf("template stored = %+v, want windows / windows-server-2022", tpl)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, map[string]any{
+		"name":        "from-tpl",
+		"template_id": tpl.ID,
+	}))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if !created.Spec.IsWindows() {
+		t.Fatalf("expected VM to inherit windows os_type from template, got %q", created.Spec.OSType)
+	}
+	if created.Spec.OSVariant != "windows-server-2022" {
+		t.Fatalf("expected VM to inherit os_variant, got %q", created.Spec.OSVariant)
+	}
+}
+
+func TestCreateVM_TemplateOSTypeOverride(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	templateResp, _ := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":    "win2022-base",
+		"image":   "win-server-2022.qcow2",
+		"cpus":    4,
+		"ram_mb":  4096,
+		"disk_gb": 64,
+		"os_type": "windows",
+	}))
+	var tpl types.VMTemplate
+	decodeJSON(t, templateResp, &tpl)
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, map[string]any{
+		"name":        "override-linux",
+		"template_id": tpl.ID,
+		"image":       "rocky9.qcow2", // override the windows image, otherwise libvirt would try to boot windows
+		"os_type":     "linux",
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.Spec.IsWindows() {
+		t.Fatalf("explicit os_type=linux must override the template; got %q", created.Spec.OSType)
+	}
+}
+
 func TestCreateVM_WithMissingTemplate(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -1052,6 +1133,167 @@ func TestListVMs_FilterByDefaultUser_RootMatchesEmpty(t *testing.T) {
 	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
 	if !names["alpha"] || !names["beta"] {
 		t.Fatalf("expected alpha (empty) and beta (root), got %+v", vms)
+	}
+}
+
+// --- ?os_type= filter (5.6.8) -------------------------------------------------
+
+func TestListVMs_FilterByOSType_ExactMatchWindows(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-app", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "gamma", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-app" {
+		t.Fatalf("expected only win-app, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSType_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=WINDOWS")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSType_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=%20%20windows%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSType_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByOSType_LinuxMatchesEmpty mirrors the
+// `?default_user=root` empty-means-root contract. `OSType` is a closed
+// two-member axis with a documented default (empty → linux), so an empty
+// stored value must belong to the linux bucket and an operator querying
+// `?os_type=linux` expects to find both explicit-linux and unset VMs.
+func TestListVMs_FilterByOSType_LinuxMatchesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{OSType: ""}})                // implicit linux
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{OSType: types.OSTypeLinux}})  // explicit linux
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win", Spec: types.VMSpec{OSType: types.OSTypeWindows}}) // not linux
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=linux")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 linux VMs (implicit + explicit), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["alpha"] || !names["beta"] {
+		t.Fatalf("expected alpha (empty) and beta (linux), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSType_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=plan9")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_type")
+}
+
+func TestListVMs_FilterByOSType_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", State: types.VMStateStopped, Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "a" {
+		t.Fatalf("expected only running windows VM 'a', got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSType_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		ot := types.OSTypeLinux
+		if i%2 == 0 {
+			ot = types.OSTypeWindows
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{OSType: ot},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
 	}
 }
 
@@ -10557,6 +10799,128 @@ func TestListTemplates_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing
 	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-u", Name: "ec2", Image: "ubuntu.qcow2", DefaultUser: "ec2-user"})
 
 	resp, _ := http.Get(ts.URL + "/api/v1/templates?default_user=deploy&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "5" {
+		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
+// --- template list ?os_type= (5.6.8) ---
+
+func TestListTemplates_FilterByOSType_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky", Image: "rocky9.qcow2", OSType: types.OSTypeLinux})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "win22", Image: "win-server-2022.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=windows")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "win22" {
+		t.Errorf("filter = %+v, want only win22", got)
+	}
+	if hdr := resp.Header.Get("X-Total-Count"); hdr != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", hdr)
+	}
+}
+
+func TestListTemplates_FilterByOSType_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win22", Image: "win.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=WINDOWS")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 {
+		t.Errorf("filter = %+v, want 1 case-insensitive match", got)
+	}
+}
+
+func TestListTemplates_FilterByOSType_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win22", Image: "win.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=%20%20windows%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 {
+		t.Errorf("filter = %+v, want 1 after whitespace trim", got)
+	}
+}
+
+func TestListTemplates_FilterByOSType_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky", Image: "rocky9.qcow2", OSType: types.OSTypeLinux})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "win22", Image: "win.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("empty filter should return all templates, got %+v", got)
+	}
+}
+
+// TestListTemplates_FilterByOSType_LinuxMatchesEmpty: OS family is a closed
+// two-member axis with a documented default — every record belongs to
+// exactly one bucket — so `?os_type=linux` matches both explicit-linux
+// templates AND those with an empty stored os_type. Deliberate divergence
+// from the `?default_user=` filter (which has no empty-means-X fallback
+// because the default_user vocabulary is open-ended); mirrors the VM
+// `?os_type=linux` semantics for cohort-symmetry.
+func TestListTemplates_FilterByOSType_LinuxMatchesEmpty(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "implicit-linux", Image: "rocky9.qcow2", OSType: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "explicit-linux", Image: "rocky9.qcow2", OSType: types.OSTypeLinux})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "win", Image: "win.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=linux")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 linux templates (implicit + explicit), got %+v", got)
+	}
+	names := map[string]bool{got[0].Name: true, got[1].Name: true}
+	if !names["implicit-linux"] || !names["explicit-linux"] {
+		t.Errorf("expected both implicit-linux and explicit-linux, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByOSType_InvalidValueReturns400(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=plan9")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_type")
+}
+
+func TestListTemplates_FilterByOSType_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win-prod", Image: "w.qcow2", OSType: types.OSTypeWindows, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "win-qa", Image: "w.qcow2", OSType: types.OSTypeWindows, Tags: []string{"qa"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "linux-prod", Image: "l.qcow2", OSType: types.OSTypeLinux, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=windows&tag=prod")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "win-prod" {
+		t.Errorf("compose filter = %+v, want only win-prod", got)
+	}
+}
+
+func TestListTemplates_FilterByOSType_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 5; i++ {
+		seedStoredTemplate(t, s, &types.VMTemplate{ID: fmt.Sprintf("tmpl-%d", i), Name: fmt.Sprintf("w-%d", i), Image: "w.qcow2", OSType: types.OSTypeWindows})
+	}
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-x", Name: "linux", Image: "l.qcow2", OSType: types.OSTypeLinux})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=windows&per_page=2&page=1")
 	if got := resp.Header.Get("X-Total-Count"); got != "5" {
 		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
 	}
