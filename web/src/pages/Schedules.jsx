@@ -78,6 +78,11 @@ export default function Schedules() {
   })();
   const [catchUpFilter, setCatchUpFilter] = useState(initialCatchUp);
 
+  // Exact timezone filter (case-sensitive — IANA timezone names are
+  // case-sensitive). Debounced like `search`; round-trips through `?timezone=`.
+  const [timezoneInput, setTimezoneInput] = useState(searchParams.get('timezone') || '');
+  const [timezoneFilter, setTimezoneFilter] = useState(searchParams.get('timezone') || '');
+
   const VALID_ENABLED = ['', 'true', 'false'];
   const initialEnabled = (() => {
     const raw = (searchParams.get('enabled') || '').toLowerCase();
@@ -126,11 +131,17 @@ export default function Schedules() {
     return () => clearTimeout(id);
   }, [tagSelectorInput]);
 
+  useEffect(() => {
+    const trimmed = timezoneInput.trim();
+    const id = setTimeout(() => setTimezoneFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [timezoneInput]);
+
   // Reset to page 1 on any filter / sort change so the user doesn't land on
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -138,6 +149,7 @@ export default function Schedules() {
     if (tagSelectorFilter) next.set('tag_selector', tagSelectorFilter); else next.delete('tag_selector');
     if (actionFilter) next.set('action', actionFilter); else next.delete('action');
     if (catchUpFilter) next.set('catch_up_policy', catchUpFilter); else next.delete('catch_up_policy');
+    if (timezoneFilter) next.set('timezone', timezoneFilter); else next.delete('timezone');
     if (enabledFilter) next.set('enabled', enabledFilter); else next.delete('enabled');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
@@ -146,11 +158,11 @@ export default function Schedules() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, timezone: timezoneFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -261,6 +273,18 @@ export default function Schedules() {
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Timezone
+          <input
+            type="text"
+            value={timezoneInput}
+            onChange={(e) => setTimezoneInput(e.target.value)}
+            placeholder="UTC, America/New_York…"
+            className="input py-1 text-xs w-40"
+            data-testid="schedule-timezone-filter"
+            aria-label="Filter by timezone"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Enabled
           <select
             value={enabledFilter}
@@ -343,11 +367,11 @@ export default function Schedules() {
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : items.length === 0 ? (
         <div className="card">
-          {searchFilter || actionFilter || catchUpFilter || enabledFilter || sinceFilter || untilFilter ? (
+          {searchFilter || actionFilter || catchUpFilter || timezoneFilter || enabledFilter || sinceFilter || untilFilter ? (
             <EmptyState
               icon={Search}
               title="No schedules match your filters"
-              description="Try a different search term, action, catch-up policy, enabled state, or created-at range."
+              description="Try a different search term, action, catch-up policy, timezone, enabled state, or created-at range."
             />
           ) : (
             <EmptyState

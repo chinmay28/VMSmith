@@ -505,6 +505,91 @@ func TestListSchedules_FilterByCatchUpPolicy(t *testing.T) {
 	}
 }
 
+// TestListSchedules_FilterByTimezone covers the ?timezone= filter (5.4.55):
+// case-sensitive exact-match against the stored Timezone field, whitespace-
+// trimmed, empty disables, no default-fallback for unset values (mirrors the
+// ?vm_id= / ?actor= / ?resource_id= exact-match contracts).
+func TestListSchedules_FilterByTimezone(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "utc-snap", VMID: "vm-1", Action: types.ScheduleActionSnapshot, CronSpec: "0 0 2 * * *", Timezone: "UTC"})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "ny-stop", VMID: "vm-2", Action: types.ScheduleActionStop, CronSpec: "0 0 3 * * *", Timezone: "America/New_York"})
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "tokyo-start", VMID: "vm-3", Action: types.ScheduleActionStart, CronSpec: "0 0 4 * * *", Timezone: "Asia/Tokyo"})
+	// No timezone set: the engine treats empty as time.Local. Stored value is "".
+	createSchedule(t, ts.URL, types.CreateScheduleRequest{Name: "default-tz", VMID: "vm-4", Action: types.ScheduleActionRestart, CronSpec: "0 0 5 * * *"})
+
+	list := func(q string) ([]*types.Schedule, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		if resp.StatusCode == http.StatusOK {
+			json.Unmarshal(data, &out)
+		}
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: no filter returns all four.
+	if out, total, code := list(""); code != http.StatusOK || len(out) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(out), total)
+	}
+
+	// Exact match: timezone=UTC returns only utc-snap. The default-tz schedule
+	// has an empty stored timezone and must NOT match UTC (no default-fallback).
+	if out, total, _ := list("?timezone=UTC"); len(out) != 1 || total != 1 || out[0].Name != "utc-snap" {
+		t.Fatalf("timezone=UTC: %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?timezone=America/New_York"); len(out) != 1 || total != 1 || out[0].Name != "ny-stop" {
+		t.Fatalf("timezone=America/New_York: %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?timezone=Asia/Tokyo"); len(out) != 1 || total != 1 || out[0].Name != "tokyo-start" {
+		t.Fatalf("timezone=Asia/Tokyo: %+v total=%d", out, total)
+	}
+
+	// Case-sensitive: lowercase variants do not match (IANA names are case-sensitive).
+	if out, total, _ := list("?timezone=utc"); len(out) != 0 || total != 0 {
+		t.Fatalf("timezone=utc (case-sensitive): %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?timezone=america/new_york"); len(out) != 0 || total != 0 {
+		t.Fatalf("timezone=america/new_york (case-sensitive): %+v total=%d", out, total)
+	}
+
+	// Whitespace-trimmed.
+	if out, total, _ := list("?timezone=%20UTC%20"); len(out) != 1 || total != 1 || out[0].Name != "utc-snap" {
+		t.Fatalf("timezone trim: %+v total=%d", out, total)
+	}
+
+	// Empty value disables the filter — all four returned.
+	if out, total, _ := list("?timezone="); len(out) != 4 || total != 4 {
+		t.Fatalf("empty timezone should be no-op: %+v total=%d", out, total)
+	}
+
+	// No match yields an empty array + total 0.
+	if out, total, code := list("?timezone=Europe/Berlin"); code != http.StatusOK || len(out) != 0 || total != 0 {
+		t.Fatalf("timezone=Europe/Berlin (unknown): code=%d %+v total=%d", code, out, total)
+	}
+
+	// Composes additively with action: utc-snap is the only snapshot in UTC.
+	if out, total, _ := list("?timezone=UTC&action=snapshot"); len(out) != 1 || total != 1 || out[0].Name != "utc-snap" {
+		t.Fatalf("timezone+action compose: %+v total=%d", out, total)
+	}
+	// timezone=UTC + action=stop → empty (ny-stop is in America/New_York).
+	if out, total, _ := list("?timezone=UTC&action=stop"); len(out) != 0 || total != 0 {
+		t.Fatalf("timezone+non-matching action should be empty: %+v total=%d", out, total)
+	}
+
+	// Composes with catch_up_policy (all use default skip): UTC+skip → utc-snap.
+	if out, total, _ := list("?timezone=UTC&catch_up_policy=skip"); len(out) != 1 || total != 1 || out[0].Name != "utc-snap" {
+		t.Fatalf("timezone+catch_up_policy compose: %+v total=%d", out, total)
+	}
+
+	// X-Total-Count reflects the post-filter population even when paginated.
+	if out, total, _ := list("?timezone=UTC&per_page=1"); len(out) != 1 || total != 1 {
+		t.Fatalf("timezone paginated: len=%d total=%d", len(out), total)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

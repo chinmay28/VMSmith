@@ -154,7 +154,12 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // webhook ?event_type= membership semantics), action (exact), catch_up_policy
 // (case-insensitive exact-match: skip|run_once|run_all; an empty stored policy
 // is treated as "skip" so ?catch_up_policy=skip matches it; invalid values
-// return 400 invalid_catch_up_policy), enabled
+// return 400 invalid_catch_up_policy), timezone (case-sensitive exact-match
+// against the stored Timezone field — IANA names are case-sensitive
+// `America/New_York` not `america/new_york`; whitespace-trimmed; empty
+// disables the filter; mirrors the ?vm_id= / ?actor= exact-match contracts;
+// no default-fallback for empty stored values since the engine's effective
+// default is host-dependent (`time.Local`)), enabled
 // (tristate true/false), since/until (inclusive RFC3339 bounds on created_at;
 // invalid values return 400 invalid_since/invalid_until; a schedule with a
 // zero created_at is filtered OUT when any bound is set), search
@@ -207,6 +212,7 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_catch_up_policy", "catch_up_policy must be one of: skip, run_once, run_all")
 		return
 	}
+	timezoneFilter := strings.TrimSpace(q.Get("timezone"))
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
 	all, err := s.scheduleStore.ListSchedules()
@@ -230,6 +236,9 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if catchUpFilter != "" && scheduleCatchUpPolicy(sched) != catchUpFilter {
+			continue
+		}
+		if timezoneFilter != "" && sched.Timezone != timezoneFilter {
 			continue
 		}
 		if enabledSet && sched.Enabled != enabledFilter {
