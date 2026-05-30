@@ -400,7 +400,7 @@ func TestParseLevel(t *testing.T) {
 		{"warning", LevelWarn},
 		{"error", LevelError},
 		{"ERROR", LevelError},
-		{"", LevelInfo},      // default
+		{"", LevelInfo},        // default
 		{"unknown", LevelInfo}, // default
 	}
 

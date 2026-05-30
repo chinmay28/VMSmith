@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	defaultTicketTTL         = 60 * time.Second
-	defaultJanitorInterval   = 30 * time.Second
-	ticketEntropyBytes       = 32
+	defaultTicketTTL       = 60 * time.Second
+	defaultJanitorInterval = 30 * time.Second
+	ticketEntropyBytes     = 32
 )
 
 var (

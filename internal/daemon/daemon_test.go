@@ -23,7 +23,7 @@ import (
 func TestServeUsesHTTPWithoutTLS(t *testing.T) {
 	called := false
 	d := &Daemon{
-		cfg: &config.Config{},
+		cfg:    &config.Config{},
 		server: &http.Server{},
 	}
 	d.server = &http.Server{}
@@ -196,9 +196,9 @@ func TestCloseResourcesClosesAllManagedDependencies(t *testing.T) {
 	}
 
 	d := &Daemon{
-		vmManager: vm.NewMockManager(),
+		vmManager:  vm.NewMockManager(),
 		netManager: &network.Manager{},
-		store:     db,
+		store:      db,
 	}
 
 	origCloseVMManager := closeVMManager
@@ -239,9 +239,9 @@ func TestCloseResourcesJoinsCleanupErrors(t *testing.T) {
 	}
 
 	d := &Daemon{
-		vmManager: vm.NewMockManager(),
+		vmManager:  vm.NewMockManager(),
 		netManager: &network.Manager{},
-		store:     db,
+		store:      db,
 	}
 
 	origCloseVMManager := closeVMManager
@@ -288,21 +288,21 @@ func TestRunAutoStartSweepStartsOnlyMarkedStoppedVMs(t *testing.T) {
 	//   on-marked   → AutoStart=true, state=running → already running, skip
 	//   off-plain   → AutoStart=false              → ignore entirely
 	mgr.SeedVM(&types.VM{
-		ID:   "off-marked",
-		Name: "off-marked",
-		Spec: types.VMSpec{Name: "off-marked", AutoStart: true},
+		ID:    "off-marked",
+		Name:  "off-marked",
+		Spec:  types.VMSpec{Name: "off-marked", AutoStart: true},
 		State: types.VMStateStopped,
 	})
 	mgr.SeedVM(&types.VM{
-		ID:   "on-marked",
-		Name: "on-marked",
-		Spec: types.VMSpec{Name: "on-marked", AutoStart: true},
+		ID:    "on-marked",
+		Name:  "on-marked",
+		Spec:  types.VMSpec{Name: "on-marked", AutoStart: true},
 		State: types.VMStateRunning,
 	})
 	mgr.SeedVM(&types.VM{
-		ID:   "off-plain",
-		Name: "off-plain",
-		Spec: types.VMSpec{Name: "off-plain", AutoStart: false},
+		ID:    "off-plain",
+		Name:  "off-plain",
+		Spec:  types.VMSpec{Name: "off-plain", AutoStart: false},
 		State: types.VMStateStopped,
 	})
 
@@ -332,9 +332,9 @@ func TestRunAutoStartSweepStartsOnlyMarkedStoppedVMs(t *testing.T) {
 func TestRunAutoStartSweepReportsFailures(t *testing.T) {
 	mgr := vm.NewMockManager()
 	mgr.SeedVM(&types.VM{
-		ID:   "boom",
-		Name: "boom",
-		Spec: types.VMSpec{Name: "boom", AutoStart: true},
+		ID:    "boom",
+		Name:  "boom",
+		Spec:  types.VMSpec{Name: "boom", AutoStart: true},
 		State: types.VMStateStopped,
 	})
 	mgr.StartErr = errors.New("libvirt: simulated boot failure")
