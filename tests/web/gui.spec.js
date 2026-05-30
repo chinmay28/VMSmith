@@ -254,9 +254,9 @@ test.describe("VM List", () => {
 
     const select = page.getByTestId("input-vm-template");
     await expect(select).toBeVisible();
-    // Wait for the second template to appear; otherwise the assertion
+    // Wait for every template to appear; otherwise the assertion
     // can race the API fetch.
-    await expect(select.locator("option")).toHaveCount(3);
+    await expect(select.locator("option")).toHaveCount(4);
     const options = await select.locator("option").evaluateAll((nodes) =>
       nodes.map((n) => ({ value: n.value, text: n.textContent || "" })),
     );
@@ -264,6 +264,7 @@ test.describe("VM List", () => {
     expect(options[0].value).toBe("");
     expect(options[1].text).toBe("big-rocky");
     expect(options[2].text).toBe("small-ubuntu");
+    expect(options[3].text).toBe("windows-2022");
   });
 
   // 5.4.12 — template search filter narrows the Create-VM template dropdown.
@@ -276,7 +277,7 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(3); // placeholder + 2 templates
+    await expect(select.locator("option")).toHaveCount(4); // placeholder + 3 templates
 
     // Search for "rocky" — should reduce the dropdown to big-rocky only.
     await page.getByTestId("template-search-input").fill("rocky");
@@ -285,20 +286,21 @@ test.describe("VM List", () => {
 
     // Clear via the X button and the full list comes back.
     await page.getByTestId("template-search-clear").click();
-    await expect(select.locator("option")).toHaveCount(3);
+    await expect(select.locator("option")).toHaveCount(4);
   });
 
   test("template search filter is case-insensitive and matches description", async ({ page }) => {
-    // The mock-server seeds two templates with descriptions: "Small Ubuntu
-    // template" and "Big Rocky template". A case-insensitive needle that
-    // only appears in one description should reduce the dropdown to that
-    // template — confirming the haystack covers description, not just name.
+    // The mock-server seeds templates with descriptions: "Small Ubuntu
+    // template", "Big Rocky template", "Windows Server 2022 template". A
+    // case-insensitive needle that only appears in one description should
+    // reduce the dropdown to that template — confirming the haystack covers
+    // description, not just name.
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(3);
+    await expect(select.locator("option")).toHaveCount(4);
 
     await page.getByTestId("template-search-input").fill("UBUNTU");
     await expect(select.locator("option")).toHaveCount(2);
@@ -311,7 +313,7 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(3);
+    await expect(select.locator("option")).toHaveCount(4);
 
     await page.getByTestId("template-search-input").fill("needle-not-present");
     // Only the placeholder remains; its label is updated to reflect the
@@ -333,24 +335,24 @@ test.describe("VM List", () => {
 
   // 2.3.8 — bulk lifecycle: select multiple VMs and apply a lifecycle verb
   // (restart / force-stop / reboot / suspend / resume) from the bulk-action
-  // bar.  The mock seeds web-server (running) and db-server (stopped); only
-  // running VMs are eligible for restart, so the action should leave
-  // db-server alone and the success label should report "1 restarts
-  // succeeded".
+  // bar.  The mock seeds web-server (running), db-server (stopped), and
+  // win-app (running); only running VMs are eligible for restart, so the
+  // action should leave db-server alone and the success label should report
+  // "2 restarts succeeded · 1 skipped".
   test("bulk restart only acts on running VMs", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
 
     await page.getByTestId("checkbox-select-all-vms").check();
-    await expect(page.getByTestId("bulk-action-bar")).toContainText("2 selected");
-    await expect(page.getByTestId("bulk-action-bar")).toContainText("1 running");
+    await expect(page.getByTestId("bulk-action-bar")).toContainText("3 selected");
+    await expect(page.getByTestId("bulk-action-bar")).toContainText("2 running");
     await expect(page.getByTestId("bulk-action-bar")).toContainText("1 stopped");
 
     await page.getByTestId("btn-bulk-restart").click();
     // After execution the success summary banner reads "<n> restarts
-    // succeeded · <n> skipped".  The mock seeds 1 running + 1 stopped so we
-    // expect 1 succeeded and 1 skipped.
-    await expect(page.getByText(/1 restart succeeded/)).toBeVisible();
+    // succeeded · <n> skipped".  The mock seeds 2 running + 1 stopped so we
+    // expect 2 succeeded and 1 skipped.
+    await expect(page.getByText(/2 restarts succeeded/)).toBeVisible();
     await expect(page.getByText(/1 skipped/)).toBeVisible();
   });
 
@@ -605,20 +607,22 @@ test.describe("VM List", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
 
-    // Default sort=id asc; the seeded "vm-1" (web-server) is rendered before vm-2 (db-server).
+    // Default sort=id asc; seeded ordering: vm-1 (web-server), vm-2 (db-server), vm-3 (win-app).
     const cards = () => page.getByTestId(/^vm-card-/);
-    await expect(cards()).toHaveCount(2);
+    await expect(cards()).toHaveCount(3);
     const idAscIds = await cards().evaluateAll(els => els.map(el => el.getAttribute("data-testid")));
     expect(idAscIds[0]).toBe("vm-card-web-server");
     expect(idAscIds[1]).toBe("vm-card-db-server");
+    expect(idAscIds[2]).toBe("vm-card-win-app");
 
-    // Switch to sort=name asc -> "db-server" comes before "web-server".
+    // Switch to sort=name asc -> "db-server" comes before "web-server" before "win-app".
     await page.getByTestId("vm-list-sort-field").selectOption("name");
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
 
-    // Switch order to desc and verify the URL captures the change.
+    // Switch order to desc and verify the URL captures the change. With three
+    // VMs alphabetically: win-app > web-server > db-server (desc).
     await page.getByTestId("vm-list-sort-order").selectOption("desc");
-    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
     await expect.poll(() => new URL(page.url()).search).toContain("sort=name");
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
@@ -628,11 +632,14 @@ test.describe("VM List", () => {
     await page.getByTestId("nav-vms").click();
 
     const cards = () => page.getByTestId(/^vm-card-/);
-    await expect(cards()).toHaveCount(2);
+    await expect(cards()).toHaveCount(3);
 
-    // Seed has web-server (cpus=2, ram=4096, disk=40) and db-server (cpus=4,
-    // ram=8192, disk=100). Every capacity axis orders the seed the same way:
-    // web-server < db-server asc; reversed desc.
+    // Seed has web-server (cpus=2, ram=4096, disk=40), db-server (cpus=4,
+    // ram=8192, disk=100), and win-app (cpus=4, ram=4096, disk=64).
+    // - cpus asc: web-server (2) < db-server/win-app (4, tiebreak by id → db-server then win-app)
+    // - ram asc: web-server/win-app (4096, tiebreak by id → web-server then win-app) < db-server (8192)
+    // - disk asc: web-server (40) < win-app (64) < db-server (100)
+    // The `first` card in every asc sort below is therefore web-server.
     await page.getByTestId("vm-list-sort-field").selectOption("cpus");
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
     await expect.poll(() => new URL(page.url()).search).toContain("sort=cpus");
@@ -2299,10 +2306,11 @@ test.describe("Templates", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("desc");
 
     const rows = page.locator('[data-testid^="template-row-"]');
-    await expect(rows).toHaveCount(2);
-    // name desc → "small-ubuntu" precedes "big-rocky" alphabetically (s > b)
-    await expect(rows.nth(0)).toHaveAttribute("data-testid", "template-row-small-ubuntu");
-    await expect(rows.nth(1)).toHaveAttribute("data-testid", "template-row-big-rocky");
+    await expect(rows).toHaveCount(3);
+    // name desc → "windows-2022" > "small-ubuntu" > "big-rocky" alphabetically.
+    await expect(rows.nth(0)).toHaveAttribute("data-testid", "template-row-windows-2022");
+    await expect(rows.nth(1)).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect(rows.nth(2)).toHaveAttribute("data-testid", "template-row-big-rocky");
   });
 
   test("edit modal updates description and tags via PATCH", async ({ page }) => {
@@ -2335,12 +2343,14 @@ test.describe("Templates", () => {
     await page.getByTestId("nav-templates").click();
     await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
     await page.getByTestId("template-select-all").check();
     await page.getByTestId("btn-bulk-delete-templates").click();
-    // Once the second row drops, the table card is replaced by the EmptyState
+    // Once every row drops, the table card is replaced by the EmptyState
     // branch, so just assert the rows are gone and the empty state renders.
     await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
   });
 
   test("delete single template via row action", async ({ page }) => {

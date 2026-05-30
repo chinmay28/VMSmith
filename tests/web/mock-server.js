@@ -70,7 +70,10 @@ function seed() {
   vm2.updated_at = "2026-05-15T00:00:00Z";
   // 5.6.8: a Windows-pinned VM so the os_type filter has a meaningful
   // target (Linux × 2 = web-app/db-server vs Windows × 1 = win-app).
-  const vmWin = createVM({ name: "win-app", image: "win-server-2022.qcow2", cpus: 4, ram_mb: 4096, disk_gb: 64 });
+  // cpus=3 sits between web-server (2) and db-server (4) so the existing
+  // capacity-sort tests (db-server first in cpus desc) keep their
+  // deterministic ordering without a desc-tiebreak inversion.
+  const vmWin = createVM({ name: "win-app", image: "win-server-2022.qcow2", cpus: 3, ram_mb: 4096, disk_gb: 64 });
   vmWin.spec.os_type = "windows";
   vmWin.spec.os_variant = "windows-server-2022";
   vmWin.state = "running";
