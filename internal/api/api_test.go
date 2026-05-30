@@ -2244,6 +2244,90 @@ func TestListVMs_SortByState(t *testing.T) {
 	}
 }
 
+func TestListVMs_SortByCPUs(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "small", Spec: types.VMSpec{CPUs: 1}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "medium", Spec: types.VMSpec{CPUs: 4}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "large", Spec: types.VMSpec{CPUs: 8}})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=cpus")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"small", "medium", "large"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %v)", i, vm.Name, want[i], namesOf(got))
+		}
+	}
+}
+
+func TestListVMs_SortByCPUsDesc_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{CPUs: 4}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{CPUs: 4}}) // tie
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{CPUs: 1}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=cpus&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// Largest CPUs first; equal-cpu pair should reverse on tiebreak too
+	// because the descending wrapper inverts the entire compare result.
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByRAMMB(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "tiny", Spec: types.VMSpec{RAMMB: 512}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "big", Spec: types.VMSpec{RAMMB: 8192}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "med", Spec: types.VMSpec{RAMMB: 2048}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=ram_mb&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"big", "med", "tiny"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDiskGB(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "small", Spec: types.VMSpec{DiskGB: 10}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "huge", Spec: types.VMSpec{DiskGB: 500}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "med", Spec: types.VMSpec{DiskGB: 100}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_gb")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"small", "med", "huge"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -2279,7 +2363,7 @@ func TestListVMs_RejectsInvalidSort(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
 
-	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=ram_mb")
+	resp, err := http.Get(ts.URL + "/api/v1/vms?sort=memory")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

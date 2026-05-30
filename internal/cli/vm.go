@@ -206,9 +206,10 @@ var vmListCmd = &cobra.Command{
 			sortField = types.VMSortID
 		}
 		switch sortField {
-		case types.VMSortID, types.VMSortName, types.VMSortCreatedAt, types.VMSortState:
+		case types.VMSortID, types.VMSortName, types.VMSortCreatedAt, types.VMSortState,
+			types.VMSortCPUs, types.VMSortRAMMB, types.VMSortDiskGB:
 		default:
-			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state", sortField)
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state, cpus, ram_mb, disk_gb", sortField)
 		}
 		orderField = strings.TrimSpace(strings.ToLower(orderField))
 		if orderField == "" {
@@ -1073,7 +1074,7 @@ Examples:
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
-	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state")
+	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmListCmd.Flags().String("since", "", "keep VMs created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	vmListCmd.Flags().String("until", "", "keep VMs created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")

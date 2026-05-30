@@ -586,6 +586,36 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
 
+  test("capacity sort axes (cpus / ram_mb / disk_gb) reorder the VM list and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(2);
+
+    // Seed has web-server (cpus=2, ram=4096, disk=40) and db-server (cpus=4,
+    // ram=8192, disk=100). Every capacity axis orders the seed the same way:
+    // web-server < db-server asc; reversed desc.
+    await page.getByTestId("vm-list-sort-field").selectOption("cpus");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=cpus");
+
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+
+    // Reset to asc for the next axis so the assertion below is unambiguous.
+    await page.getByTestId("vm-list-sort-order").selectOption("asc");
+
+    await page.getByTestId("vm-list-sort-field").selectOption("ram_mb");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=ram_mb");
+
+    await page.getByTestId("vm-list-sort-field").selectOption("disk_gb");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=disk_gb");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

@@ -12,6 +12,9 @@ const (
 	VMSortName      = "name"
 	VMSortCreatedAt = "created_at"
 	VMSortState     = "state"
+	VMSortCPUs      = "cpus"
+	VMSortRAMMB     = "ram_mb"
+	VMSortDiskGB    = "disk_gb"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -48,6 +51,24 @@ func SortVMs(vms []*VM, sortField, order string) {
 			si, sj := string(ai.State), string(aj.State)
 			if si != sj {
 				less = si < sj
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortCPUs:
+			if ai.Spec.CPUs != aj.Spec.CPUs {
+				less = ai.Spec.CPUs < aj.Spec.CPUs
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortRAMMB:
+			if ai.Spec.RAMMB != aj.Spec.RAMMB {
+				less = ai.Spec.RAMMB < aj.Spec.RAMMB
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortDiskGB:
+			if ai.Spec.DiskGB != aj.Spec.DiskGB {
+				less = ai.Spec.DiskGB < aj.Spec.DiskGB
 				break
 			}
 			less = ai.ID < aj.ID

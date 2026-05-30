@@ -347,8 +347,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -419,10 +419,14 @@ const server = http.createServer(async (req, res) => {
     }
     const cmp = (a, b) => {
       let l;
+      const num = (x) => (typeof x === "number" && !Number.isNaN(x) ? x : 0);
       switch (sortField) {
         case "name":       l = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
         case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
         case "state":      l = (a.state || "").localeCompare(b.state || ""); break;
+        case "cpus":       l = num(a?.spec?.cpus) - num(b?.spec?.cpus); break;
+        case "ram_mb":     l = num(a?.spec?.ram_mb) - num(b?.spec?.ram_mb); break;
+        case "disk_gb":    l = num(a?.spec?.disk_gb) - num(b?.spec?.disk_gb); break;
         default:           l = 0;
       }
       if (l === 0) l = a.id.localeCompare(b.id); // tiebreak on id

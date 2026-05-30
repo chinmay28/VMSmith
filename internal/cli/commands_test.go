@@ -990,9 +990,84 @@ func TestCLI_VMList_RejectsInvalidSort(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()
 
-	_, err := runCLI("vm", "list", "--sort", "ram_mb")
+	_, err := runCLI("vm", "list", "--sort", "memory")
 	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
 		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_SortByCPUs(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "large", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 8, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "medium", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "cpus")
+	if err != nil {
+		t.Fatalf("vm list --sort cpus: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"small", "medium", "large"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByRAMMBDesc(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "tiny", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "big", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 8192}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "med", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 2048}})
+
+	out, err := runCLI("vm", "list", "--sort", "ram_mb", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list --sort ram_mb --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d", len(rows))
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"big", "med", "tiny"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDiskGB(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024, DiskGB: 10}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "huge", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024, DiskGB: 500}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "med", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024, DiskGB: 100}})
+
+	out, err := runCLI("vm", "list", "--sort", "disk_gb")
+	if err != nil {
+		t.Fatalf("vm list --sort disk_gb: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d", len(rows))
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"small", "med", "huge"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q", i, got[i], want[i])
+		}
 	}
 }
 
