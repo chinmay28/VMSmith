@@ -81,6 +81,14 @@ type VMSpec struct {
 	// OSType is "windows". See types.KnownWindowsVariants.
 	OSVariant string `json:"os_variant,omitempty" yaml:"os_variant,omitempty"`
 
+	// ClockOffset overrides the libvirt domain clock offset. Allowed values
+	// are "utc" and "localtime" (case-insensitive). Empty resolves to the
+	// OS-family default: utc for Linux, localtime for Windows. Operators
+	// running Windows guests alongside Linux peers (NTP-synced fleet, hybrid
+	// labs) can pin "utc" to stop the hourly RTC drift that the default
+	// localtime behaviour produces. Mutable post-create via VMUpdateSpec.
+	ClockOffset string `json:"clock_offset,omitempty" yaml:"clock_offset,omitempty"`
+
 	// AdminPassword is the Windows local Administrator password injected into
 	// the cloudbase-init datasource at first boot. It is write-only: the
 	// LibvirtManager redacts it from the stored/returned VM record once the
@@ -142,6 +150,28 @@ type VMUpdateSpec struct {
 	// Locked toggles delete-protection on the VM. Use a pointer so we can
 	// distinguish "not provided" (no change) from "explicitly false" (unlock).
 	Locked *bool `json:"locked,omitempty"`
+
+	// ClockOffset overrides the libvirt domain clock offset on an existing VM.
+	// Allowed values are "utc" and "localtime" (case-insensitive). Empty means
+	// "no change". Applying a change triggers a domain redefine and restarts
+	// the VM, mirroring the cpus / ram_mb change path. Use a pointer so we
+	// can distinguish "not provided" (no change) from "explicitly clear",
+	// where clearing returns the OS-family default at next render. A nil
+	// pointer or empty-pointer string is treated as no-change.
+	ClockOffset *string `json:"clock_offset,omitempty"`
+
+	// OSType is intentionally a pointer so the API surface can detect when a
+	// client tries to change the guest OS family on an existing VM and return
+	// `os_type_immutable` instead of silently ignoring it. The device profile
+	// (disk bus, NIC model, clock, Hyper-V, video, provisioning ISO format)
+	// is baked at create time. Any value here — including the empty string —
+	// is rejected by validateVMUpdateSpec.
+	OSType *string `json:"os_type,omitempty"`
+
+	// OSVariant follows the same immutability contract as OSType: the field
+	// is captured at create time and validateVMUpdateSpec rejects any attempt
+	// to change it on PATCH.
+	OSVariant *string `json:"os_variant,omitempty"`
 }
 
 // ResolvedOSType returns the guest OS family, defaulting an empty value to
@@ -158,6 +188,29 @@ func (s VMSpec) ResolvedOSType() OSType {
 // IsWindows reports whether this spec targets a Windows guest.
 func (s VMSpec) IsWindows() bool {
 	return s.ResolvedOSType() == OSTypeWindows
+}
+
+// ClockOffsetUTC and ClockOffsetLocaltime are the only accepted values for
+// VMSpec.ClockOffset and VMUpdateSpec.ClockOffset. They map 1:1 to the
+// libvirt <clock offset='...'/> attribute.
+const (
+	ClockOffsetUTC       = "utc"
+	ClockOffsetLocaltime = "localtime"
+)
+
+// ResolvedClockOffset returns the effective libvirt clock offset for this
+// spec. An explicit ClockOffset (case-insensitive, whitespace-trimmed)
+// always wins. Otherwise the OS family decides: localtime for Windows
+// (matches the Windows RTC convention so the system clock reads correctly
+// before NTP catches up) and utc for everything else.
+func (s VMSpec) ResolvedClockOffset() string {
+	if v := strings.ToLower(strings.TrimSpace(s.ClockOffset)); v != "" {
+		return v
+	}
+	if s.IsWindows() {
+		return ClockOffsetLocaltime
+	}
+	return ClockOffsetUTC
 }
 
 // VM represents a virtual machine and its current state.

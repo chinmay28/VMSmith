@@ -253,6 +253,12 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		params.VideoModel = "qxl"
 	}
 
+	// Apply an explicit ClockOffset override last so it wins over the OS
+	// family default. This lets operators pin "utc" on a Windows guest that
+	// is NTP-synced with a Linux fleet, or "localtime" on a Linux dual-boot
+	// guest sharing an RTC with Windows.
+	params.ClockOffset = spec.ResolvedClockOffset()
+
 	return params
 }
 

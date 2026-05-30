@@ -787,14 +787,27 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		lockedChanged = true
 	}
 
+	// Resolve ClockOffset change. nil pointer means "no change"; an explicit
+	// empty string clears the override so the OS-family default takes over
+	// again at next render.
+	newClockOffset := storedVM.Spec.ClockOffset
+	clockChanged := false
+	if patch.ClockOffset != nil {
+		desired := strings.ToLower(strings.TrimSpace(*patch.ClockOffset))
+		if desired != strings.ToLower(strings.TrimSpace(storedVM.Spec.ClockOffset)) {
+			newClockOffset = desired
+			clockChanged = true
+		}
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged {
 		return storedVM, nil
 	}
 
 	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
 	// dance and any libvirt redefinitions — they're pure bbolt writes.
-	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged
 	if metadataOnly {
 		if autoStartChanged {
 			storedVM.Spec.AutoStart = newAutoStart
@@ -854,14 +867,15 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
-	// Redefine the domain XML with updated CPU/RAM.
-	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB {
+	// Redefine the domain XML with updated CPU/RAM/clock offset.
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged {
 		// Preserve the existing domain UUID so libvirt accepts the redefinition.
 		existingUUID, _ := dom.GetUUIDString()
 
 		updatedSpec := storedVM.Spec
 		updatedSpec.CPUs = newCPUs
 		updatedSpec.RAMMB = newRAMMB
+		updatedSpec.ClockOffset = newClockOffset
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
 		params.UUID = existingUUID
@@ -904,6 +918,9 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if lockedChanged {
 		storedVM.Spec.Locked = newLocked
+	}
+	if clockChanged {
+		storedVM.Spec.ClockOffset = newClockOffset
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {

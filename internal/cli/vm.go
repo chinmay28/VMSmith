@@ -41,6 +41,7 @@ var vmCreateCmd = &cobra.Command{
 		osType, _ := cmd.Flags().GetString("os")
 		osVariant, _ := cmd.Flags().GetString("os-variant")
 		adminPassword, _ := cmd.Flags().GetString("admin-password")
+		clockOffset, _ := cmd.Flags().GetString("clock-offset")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		description, _ := cmd.Flags().GetString("description")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
@@ -80,6 +81,7 @@ var vmCreateCmd = &cobra.Command{
 			DefaultUser:   defaultUser,
 			OSType:        types.OSType(strings.TrimSpace(strings.ToLower(osType))),
 			OSVariant:     strings.TrimSpace(strings.ToLower(osVariant)),
+			ClockOffset:   strings.TrimSpace(strings.ToLower(clockOffset)),
 			AdminPassword: adminPassword,
 			CloudInitFile: cloudInit,
 			Networks:      networks,
@@ -495,9 +497,11 @@ var vmEditCmd = &cobra.Command{
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
 		lockedChanged := cmd.Flags().Changed("locked")
 		locked, _ := cmd.Flags().GetBool("locked")
+		clockOffsetChanged := cmd.Flags().Changed("clock-offset")
+		clockOffset, _ := cmd.Flags().GetString("clock-offset")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, or --locked")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, or --clock-offset")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -529,6 +533,10 @@ var vmEditCmd = &cobra.Command{
 		if lockedChanged {
 			val := locked
 			patch.Locked = &val
+		}
+		if clockOffsetChanged {
+			normalised := strings.TrimSpace(strings.ToLower(clockOffset))
+			patch.ClockOffset = &normalised
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -1052,6 +1060,7 @@ func init() {
 	vmCreateCmd.Flags().String("os", "", "guest OS family: linux (default) or windows")
 	vmCreateCmd.Flags().String("os-variant", "", "Windows variant: windows-10|windows-11|windows-server-2019|windows-server-2022|windows-server-2025")
 	vmCreateCmd.Flags().String("admin-password", "", "Windows local Administrator password (injected at first boot, not persisted)")
+	vmCreateCmd.Flags().String("clock-offset", "", "libvirt domain clock offset: utc or localtime (default: linux=utc, windows=localtime)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init / cloudbase-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
@@ -1088,6 +1097,7 @@ Examples:
 	vmEditCmd.Flags().String("nat-gw", "", "gateway for --nat-ip; defaults to subnet gateway when omitted")
 	vmEditCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmEditCmd.Flags().Bool("locked", false, "set delete-protected status (true to lock, false to unlock)")
+	vmEditCmd.Flags().String("clock-offset", "", "new libvirt domain clock offset: utc, localtime, or empty to clear the override and use the OS-family default")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")

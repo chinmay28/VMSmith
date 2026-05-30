@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -1958,6 +1959,59 @@ func TestCLI_VMEdit_RAM(t *testing.T) {
 	}
 	if !strings.Contains(out, "RAM:   4096 MB") {
 		t.Errorf("expected RAM: 4096 MB in output, got: %s", out)
+	}
+}
+
+func TestCLI_VMEdit_ClockOffset(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-clk",
+		Name: "clocktest",
+		Spec: types.VMSpec{Name: "clocktest", CPUs: 2, RAMMB: 2048, DiskGB: 20, OSType: types.OSTypeWindows},
+	})
+
+	if _, err := runCLI("vm", "edit", "vm-clk", "--clock-offset", "UTC"); err != nil {
+		t.Fatalf("vm edit --clock-offset: %v", err)
+	}
+	updated, err := mock.Get(context.Background(), "vm-clk")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ClockOffset != "utc" {
+		t.Errorf("Spec.ClockOffset = %q, want utc (cli lowercases)", updated.Spec.ClockOffset)
+	}
+
+	// Clearing the override (--clock-offset "") returns the OS-family default
+	// at next render via ResolvedClockOffset().
+	if _, err := runCLI("vm", "edit", "vm-clk", "--clock-offset", ""); err != nil {
+		t.Fatalf("vm edit --clock-offset \"\": %v", err)
+	}
+	cleared, _ := mock.Get(context.Background(), "vm-clk")
+	if cleared.Spec.ClockOffset != "" {
+		t.Errorf("Spec.ClockOffset after clear = %q, want empty", cleared.Spec.ClockOffset)
+	}
+	if got := cleared.Spec.ResolvedClockOffset(); got != "localtime" {
+		t.Errorf("ResolvedClockOffset after clear = %q, want localtime (windows default)", got)
+	}
+}
+
+func TestCLI_VMCreate_ClockOffset(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	if _, err := runCLI("vm", "create", "clk-create",
+		"--image", "rocky9", "--cpus", "2", "--ram", "2048", "--disk", "20",
+		"--clock-offset", "UTC"); err != nil {
+		t.Fatalf("vm create: %v", err)
+	}
+	vms, _ := mock.List(context.Background())
+	if len(vms) != 1 {
+		t.Fatalf("vms len = %d, want 1", len(vms))
+	}
+	if vms[0].Spec.ClockOffset != "utc" {
+		t.Errorf("Spec.ClockOffset = %q, want utc (cli lowercases)", vms[0].Spec.ClockOffset)
 	}
 }
 

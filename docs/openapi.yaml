@@ -2929,6 +2929,16 @@ components:
             cloudbase-init datasource at first boot. Write-only: it is redacted
             from the stored/returned VM record once the provisioning ISO is
             written. Ignored for Linux guests.
+        clock_offset:
+          type: string
+          enum: [utc, localtime]
+          description: >-
+            Override the libvirt domain `<clock offset='...'>`. Empty/omitted
+            resolves to the OS-family default (utc for Linux, localtime for
+            Windows). Lets operators pin "utc" on Windows guests synced with
+            an NTP-driven Linux fleet, or "localtime" on a dual-boot Linux
+            guest sharing an RTC with Windows. Any other value returns
+            400 `invalid_clock_offset`.
         networks:
           type: array
           items:
@@ -2970,6 +2980,35 @@ components:
           type: boolean
           description: Toggle delete-protection. Omit to leave unchanged.
           nullable: true
+        clock_offset:
+          type: string
+          enum: [utc, localtime, ""]
+          nullable: true
+          description: >-
+            Override the libvirt domain `<clock offset='...'>` on an existing
+            VM. Allowed values are `utc` / `localtime` (case-insensitive). An
+            explicit empty string clears the override so the OS-family default
+            (utc for Linux, localtime for Windows) applies again at next
+            render. Omit (null) to leave unchanged. Applying a change
+            triggers a domain redefine + VM restart, mirroring the cpus /
+            ram_mb change path. Any other value returns 400
+            `invalid_clock_offset`.
+        os_type:
+          type: string
+          nullable: true
+          description: >-
+            **Immutable.** Sending any value (including the empty string)
+            returns 400 `os_type_immutable` — the guest OS family is baked at
+            create time because it drives the device profile (disk bus, NIC
+            model, clock, Hyper-V, video, provisioning datasource).
+        os_variant:
+          type: string
+          nullable: true
+          description: >-
+            **Immutable.** Sending any value returns 400 `os_type_immutable`;
+            capture os_variant at create time. Use the dedicated `os_type` /
+            `os_variant` create endpoint to express variant changes by cloning
+            a new VM from the same base image.
     VM:
       type: object
       required: [id, name, spec, state, disk_path, created_at, updated_at]
