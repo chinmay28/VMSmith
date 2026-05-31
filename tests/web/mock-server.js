@@ -1413,14 +1413,15 @@ const server = http.createServer(async (req, res) => {
     }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
-    const allowedSort = ["id", "name", "created_at"];
+    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb"];
     if (!allowedSort.includes(sort)) {
-      return json(res, 400, { error: "sort must be one of: id, name, created_at", code: "invalid_sort" });
+      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb", code: "invalid_sort" });
     }
     if (order !== "asc" && order !== "desc") {
       return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
     }
     const desc = order === "desc";
+    const numTpl = (x) => (typeof x === "number" && !Number.isNaN(x) ? x : 0);
     list.sort((a, b) => {
       let cmp = 0;
       if (sort === "name") {
@@ -1428,6 +1429,15 @@ const server = http.createServer(async (req, res) => {
         if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
       } else if (sort === "created_at") {
         cmp = String(a.created_at || "").localeCompare(String(b.created_at || ""));
+        if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else if (sort === "cpus") {
+        cmp = numTpl(a.cpus) - numTpl(b.cpus);
+        if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else if (sort === "ram_mb") {
+        cmp = numTpl(a.ram_mb) - numTpl(b.ram_mb);
+        if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else if (sort === "disk_gb") {
+        cmp = numTpl(a.disk_gb) - numTpl(b.disk_gb);
         if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
       } else {
         cmp = String(a.id).localeCompare(String(b.id));

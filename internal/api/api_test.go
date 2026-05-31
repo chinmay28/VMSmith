@@ -10687,11 +10687,89 @@ func TestListTemplates_SortPaginationDeterministic(t *testing.T) {
 func TestListTemplates_RejectsInvalidSort(t *testing.T) {
 	ts, _, _, cleanup := testServerFull(t)
 	defer cleanup()
-	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=ram_mb")
+	// `ram_mb` is now a valid template sort axis (5.4.57); use a sentinel
+	// that's still unsupported so the 400 path is exercised.
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=memory")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_sort")
+}
+
+func TestListTemplates_SortByCPUs(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", CPUs: 1})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "medium", Image: "rocky9.qcow2", CPUs: 4})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "large", Image: "rocky9.qcow2", CPUs: 8})
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?sort=cpus")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	want := []string{"small", "medium", "large"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortByCPUsDesc_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", CPUs: 4})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", CPUs: 4}) // tie
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", CPUs: 1})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=cpus&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Largest CPUs first; equal-cpu pair reverses on tiebreak too because
+	// the descending wrapper inverts the entire compare result.
+	want := []string{"tmpl-2", "tmpl-1", "tmpl-3"}
+	for i, tpl := range got {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, tpl.ID, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortByRAMMB(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "tiny", Image: "rocky9.qcow2", RAMMB: 512})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "big", Image: "rocky9.qcow2", RAMMB: 8192})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "med", Image: "rocky9.qcow2", RAMMB: 2048})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=ram_mb&order=desc")
+	got := decodeTemplateList(t, resp)
+	want := []string{"big", "med", "tiny"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+func TestListTemplates_SortByDiskGB(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "huge", Image: "rocky9.qcow2", DiskGB: 500})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "med", Image: "rocky9.qcow2", DiskGB: 100})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=disk_gb")
+	got := decodeTemplateList(t, resp)
+	want := []string{"small", "med", "huge"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
 }
 
 func TestListTemplates_RejectsInvalidOrder(t *testing.T) {

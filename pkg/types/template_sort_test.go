@@ -82,12 +82,73 @@ func TestSortTemplates_UnknownFieldFallsBackToID(t *testing.T) {
 		{ID: "tpl-1"},
 		{ID: "tpl-2"},
 	}
-	SortTemplates(templates, "ram_mb", SortOrderAsc)
+	// `ram_mb` is now a valid template sort axis (5.4.57); use a sentinel
+	// that's still unsupported so the fallback path is exercised.
+	SortTemplates(templates, "memory", SortOrderAsc)
 	want := []string{"tpl-1", "tpl-2", "tpl-3"}
 	for i, tpl := range templates {
 		if tpl.ID != want[i] {
 			t.Errorf("idx %d: id = %q, want %q", i, tpl.ID, want[i])
 		}
+	}
+}
+
+func TestSortTemplates_ByCPUs_AscTiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-2", Name: "b", CPUs: 4},
+		{ID: "tpl-1", Name: "a", CPUs: 4}, // tie with tpl-2
+		{ID: "tpl-3", Name: "c", CPUs: 1},
+		{ID: "tpl-4", Name: "d", CPUs: 8},
+	}
+	SortTemplates(templates, TemplateSortCPUs, SortOrderAsc)
+	got := []string{templates[0].ID, templates[1].ID, templates[2].ID, templates[3].ID}
+	want := []string{"tpl-3", "tpl-1", "tpl-2", "tpl-4"} // 1 < 4(tpl-1<tpl-2) < 8
+	for i, id := range got {
+		if id != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, id, want[i], got)
+		}
+	}
+}
+
+func TestSortTemplates_ByCPUs_Desc(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", Name: "a", CPUs: 1},
+		{ID: "tpl-2", Name: "b", CPUs: 4},
+		{ID: "tpl-3", Name: "c", CPUs: 8},
+	}
+	SortTemplates(templates, TemplateSortCPUs, SortOrderDesc)
+	got := []string{templates[0].ID, templates[1].ID, templates[2].ID}
+	want := []string{"tpl-3", "tpl-2", "tpl-1"}
+	for i, id := range got {
+		if id != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, id, want[i])
+		}
+	}
+}
+
+func TestSortTemplates_ByRAMMB_AscTiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-2", Name: "b", RAMMB: 2048},
+		{ID: "tpl-1", Name: "a", RAMMB: 2048}, // tie with tpl-2
+		{ID: "tpl-3", Name: "c", RAMMB: 1024},
+	}
+	SortTemplates(templates, TemplateSortRAMMB, SortOrderAsc)
+	if templates[0].ID != "tpl-3" || templates[1].ID != "tpl-1" || templates[2].ID != "tpl-2" {
+		t.Errorf("ram_mb asc with tie wrong: got %q,%q,%q want tpl-3,tpl-1,tpl-2", templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+func TestSortTemplates_ByDiskGB_DescTiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", Name: "a", DiskGB: 100},
+		{ID: "tpl-2", Name: "b", DiskGB: 100}, // tie with tpl-1
+		{ID: "tpl-3", Name: "c", DiskGB: 20},
+	}
+	SortTemplates(templates, TemplateSortDiskGB, SortOrderDesc)
+	// Largest disk first; equal-disk pair reverses on tiebreak too because
+	// the descending wrapper inverts the entire compare result.
+	if templates[0].ID != "tpl-2" || templates[1].ID != "tpl-1" || templates[2].ID != "tpl-3" {
+		t.Errorf("disk_gb desc with tie wrong: got %q,%q,%q want tpl-2,tpl-1,tpl-3", templates[0].ID, templates[1].ID, templates[2].ID)
 	}
 }
 

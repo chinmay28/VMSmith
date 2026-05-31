@@ -5609,12 +5609,98 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	_, _, cleanup := withTestStorage(t)
 	defer cleanup()
 
-	_, err := runCLI("template", "list", "--sort", "ram_mb")
+	// `ram_mb` is now a valid template sort axis (5.4.57); use a sentinel
+	// that's still unsupported so the error path is exercised.
+	_, err := runCLI("template", "list", "--sort", "memory")
 	if err == nil {
 		t.Fatal("expected error for unsupported --sort, got nil")
 	}
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Errorf("error = %v, want it to mention 'invalid --sort'", err)
+	}
+}
+
+func TestCLI_TemplateList_SortByCPUs(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "ubuntu", CPUs: 1}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "medium", Image: "ubuntu", CPUs: 4}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "large", Image: "ubuntu", CPUs: 8}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "cpus")
+	if err != nil {
+		t.Fatalf("template list --sort cpus: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want header + 3", len(rows))
+	}
+	want := []string{"small", "medium", "large"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByRAMMBDesc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "tiny", Image: "ubuntu", RAMMB: 512}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "big", Image: "ubuntu", RAMMB: 8192}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "med", Image: "ubuntu", RAMMB: 2048}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "ram_mb", "--order", "desc")
+	if err != nil {
+		t.Fatalf("template list --sort ram_mb: %v", err)
+	}
+	rows := tableRows(t, out)
+	want := []string{"big", "med", "tiny"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByDiskGB(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "small", Image: "ubuntu", DiskGB: 10}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "huge", Image: "ubuntu", DiskGB: 500}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "med", Image: "ubuntu", DiskGB: 100}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "disk_gb")
+	if err != nil {
+		t.Fatalf("template list --sort disk_gb: %v", err)
+	}
+	rows := tableRows(t, out)
+	want := []string{"small", "med", "huge"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
 	}
 }
 

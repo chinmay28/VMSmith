@@ -487,6 +487,9 @@ export default function TemplateList() {
           <option value="id">ID</option>
           <option value="name">Name</option>
           <option value="created_at">Created</option>
+          <option value="cpus">vCPUs</option>
+          <option value="ram_mb">RAM (MB)</option>
+          <option value="disk_gb">Disk (GB)</option>
         </select>
         <select
           value={order}

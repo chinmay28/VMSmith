@@ -2347,6 +2347,37 @@ test.describe("Templates", () => {
     await expect(rows.nth(2)).toHaveAttribute("data-testid", "template-row-big-rocky");
   });
 
+  test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+    await expect(rows).toHaveCount(3);
+
+    // Seed has small-ubuntu (cpus=1, ram=1024, disk=10), big-rocky (cpus=8,
+    // ram=16384, disk=200), and windows-2022 (cpus=4, ram=4096, disk=64).
+    // Every asc ordering puts small-ubuntu first; flipping to desc puts
+    // big-rocky first.
+    await page.getByTestId("template-list-sort-field").selectOption("cpus");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=cpus");
+
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-big-rocky");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+
+    // Reset to asc for the next axis so the assertion below is unambiguous.
+    await page.getByTestId("template-list-sort-order").selectOption("asc");
+
+    await page.getByTestId("template-list-sort-field").selectOption("ram_mb");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=ram_mb");
+
+    await page.getByTestId("template-list-sort-field").selectOption("disk_gb");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=disk_gb");
+  });
+
   test("edit modal updates description and tags via PATCH", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
