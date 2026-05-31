@@ -203,6 +203,39 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-test-new-vm")).toBeVisible();
   });
 
+  // 5.6.17 — when a Windows VM is created without an admin_password the
+  // daemon auto-generates one and surfaces it exactly once in the create
+  // response. The GUI must show it in a one-time-reveal modal with a copy
+  // button and never refer back to the value after dismissal.
+  test("creating a Windows VM without admin_password surfaces a one-time reveal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("win-auto-pw");
+    // Apply the windows-2022 template so the request carries os_type=windows.
+    await page.getByTestId("input-vm-template").selectOption("tmpl-3");
+
+    await page.getByTestId("btn-submit-create").click();
+
+    const modal = page.getByTestId("generated-admin-password-modal");
+    await expect(modal).toBeVisible();
+    const valueLocator = page.getByTestId("generated-admin-password-value");
+    await expect(valueLocator).toBeVisible();
+    const password = (await valueLocator.textContent())?.trim() ?? "";
+    expect(password.length).toBeGreaterThanOrEqual(12);
+
+    // Copy button toggles to "Copied" briefly.
+    await page.getByTestId("generated-admin-password-copy").click();
+    await expect(page.getByTestId("generated-admin-password-copy")).toHaveText("Copied");
+
+    // Dismissing closes the modal and the password is gone — it was shown once.
+    await page.getByTestId("generated-admin-password-dismiss").click();
+    await expect(modal).toHaveCount(0);
+    // The newly-created VM should appear.
+    await expect(page.getByTestId("vm-card-win-auto-pw")).toBeVisible();
+  });
+
   test("template selection prefills create form", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

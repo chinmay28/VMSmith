@@ -76,12 +76,27 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 		spec.DiskGB = 20
 	}
 
+	// Mirror the libvirt manager's auto-generate-then-redact behaviour so
+	// API integration tests exercise the one-time-password path end-to-end.
+	var generatedAdminPassword string
+	if spec.IsWindows() && spec.AdminPassword == "" {
+		pw, err := generateAdminPassword()
+		if err != nil {
+			return nil, err
+		}
+		generatedAdminPassword = pw
+	}
+	// AdminPassword is redacted from the stored record (it never lingers in
+	// bbolt in production); the mock VM persisted in m.vms mirrors that.
+	storedSpec := spec
+	storedSpec.AdminPassword = ""
+
 	vm := &types.VM{
 		ID:          id,
 		Name:        spec.Name,
 		Description: spec.Description,
 		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        spec,
+		Spec:        storedSpec,
 		State:       types.VMStateRunning,
 		IP:          "192.168.100.10",
 		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
@@ -90,7 +105,12 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	}
 
 	m.vms[id] = vm
-	return vm, nil
+
+	// Return a copy with the transient generated password so the stored
+	// record stays clean (subsequent Get/List won't see the password).
+	response := *vm
+	response.GeneratedAdminPassword = generatedAdminPassword
+	return &response, nil
 }
 
 func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string) (*types.VM, error) {

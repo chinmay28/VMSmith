@@ -281,6 +281,93 @@ func TestCreateVM_WindowsResourceFloor(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_spec")
 }
 
+func TestCreateVM_GeneratesAdminPasswordForWindowsWhenOmitted(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	spec := types.VMSpec{
+		Name:      "win-autopw",
+		Image:     "win2022.qcow2",
+		CPUs:      4,
+		RAMMB:     4096,
+		DiskGB:    64,
+		OSType:    types.OSTypeWindows,
+		OSVariant: "windows-server-2022",
+	}
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+
+	if created.GeneratedAdminPassword == "" {
+		t.Fatal("expected generated_admin_password on Windows create without admin_password")
+	}
+	if len(created.GeneratedAdminPassword) < 12 {
+		t.Errorf("generated password too short: %q (len=%d)", created.GeneratedAdminPassword, len(created.GeneratedAdminPassword))
+	}
+	// The stored record must NOT include the password (Get/List redacts it).
+	getResp, _ := http.Get(ts.URL + "/api/v1/vms/" + created.ID)
+	var fetched types.VM
+	decodeJSON(t, getResp, &fetched)
+	if fetched.GeneratedAdminPassword != "" {
+		t.Fatalf("GET /vms/{id} should not return generated_admin_password, got %q", fetched.GeneratedAdminPassword)
+	}
+	if fetched.Spec.AdminPassword != "" {
+		t.Fatalf("GET /vms/{id} should not echo admin_password, got %q", fetched.Spec.AdminPassword)
+	}
+}
+
+func TestCreateVM_DoesNotGenerateAdminPasswordWhenSupplied(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	spec := types.VMSpec{
+		Name:          "win-explicit-pw",
+		Image:         "win2022.qcow2",
+		CPUs:          4,
+		RAMMB:         4096,
+		DiskGB:        64,
+		OSType:        types.OSTypeWindows,
+		AdminPassword: "MyChosen!Pass1",
+	}
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.GeneratedAdminPassword != "" {
+		t.Fatalf("expected no generated_admin_password when admin_password supplied; got %q", created.GeneratedAdminPassword)
+	}
+}
+
+func TestCreateVM_DoesNotGenerateAdminPasswordForLinux(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	spec := types.VMSpec{
+		Name:   "linux-no-pw",
+		Image:  "ubuntu.qcow2",
+		CPUs:   2,
+		RAMMB:  2048,
+		DiskGB: 20,
+	}
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.VM
+	decodeJSON(t, resp, &created)
+	if created.GeneratedAdminPassword != "" {
+		t.Fatalf("expected no generated_admin_password for Linux VM; got %q", created.GeneratedAdminPassword)
+	}
+}
+
 func TestCreateVM_BadJSON(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

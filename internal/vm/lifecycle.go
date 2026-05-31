@@ -112,6 +112,21 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// DefaultUser intentionally left empty here: empty means "use root".
 	// A non-empty DefaultUser creates a named sudo user and disables root.
 
+	// Windows guests get a one-time auto-generated Administrator password when
+	// the caller omits admin_password. The password is shown exactly once on
+	// the create response (vm.GeneratedAdminPassword) so the operator can copy
+	// it; it is never returned by Get/List and never persisted to bbolt
+	// (spec.AdminPassword is redacted after the provisioning ISO is written).
+	var generatedAdminPassword string
+	if spec.IsWindows() && spec.AdminPassword == "" {
+		pw, err := generateAdminPassword()
+		if err != nil {
+			return nil, fmt.Errorf("generating admin password: %w", err)
+		}
+		spec.AdminPassword = pw
+		generatedAdminPassword = pw
+	}
+
 	// Validate network attachments
 	if len(spec.Networks) > 0 {
 		if err := ValidateNetworkAttachments(spec.Networks); err != nil {
@@ -275,6 +290,11 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// Monitor in background: wait for DHCP IP; if none after 60 s apply a
 	// static IP fallback via libvirt DHCP reservation + VM restart.
 	go m.startIPMonitor(id, spec.Name, vmDir, natMAC, spec)
+
+	// Set the one-time generated password on the response copy AFTER
+	// PutVM so it never lands in bbolt. Get/List rehydrate from the store and
+	// will not see this field.
+	vm.GeneratedAdminPassword = generatedAdminPassword
 
 	return vm, nil
 }

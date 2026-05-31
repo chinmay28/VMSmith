@@ -28,6 +28,9 @@ function datetimeLocalToISO(value) {
 export default function VMList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(searchParams.get('create') === '1');
+  // Captured create response when the daemon returned a one-time generated
+  // Administrator password. Cleared after the operator dismisses the modal.
+  const [generatedPassword, setGeneratedPassword] = useState(null);
   const [actionMenu, setActionMenu] = useState(null);
   const [tagFilter, setTagFilter] = useState('');
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '');
@@ -598,8 +601,80 @@ export default function VMList() {
         />
       )}
 
-      <CreateVMModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={refresh} />
+      <CreateVMModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={refresh}
+        onPasswordGenerated={setGeneratedPassword}
+      />
+      <GeneratedAdminPasswordModal
+        info={generatedPassword}
+        onClose={() => setGeneratedPassword(null)}
+      />
     </div>
+  );
+}
+
+// GeneratedAdminPasswordModal renders the one-time-reveal banner for a Windows
+// VM whose Administrator password vmsmith generated. It shows the password,
+// offers a copy button, and warns that the value cannot be recovered later.
+function GeneratedAdminPasswordModal({ info, onClose }) {
+  const [copied, setCopied] = useState(false);
+  if (!info || !info.generated_admin_password) return null;
+  const handleCopy = async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(info.generated_admin_password);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable in some environments — the password is
+      // still visible in the field so the operator can copy manually.
+    }
+  };
+  return (
+    <Modal open={!!info} onClose={onClose} title="Generated Administrator password">
+      <div className="space-y-4" data-testid="generated-admin-password-modal">
+        <p className="text-sm text-amber-300">
+          vmsmith generated a Windows Administrator password for{' '}
+          <span className="font-mono">{info.name || info.id}</span>. This value
+          is <strong>shown once and never stored</strong> — copy it now.
+        </p>
+        <div className="flex items-center gap-2">
+          <code
+            className="input flex-1 font-mono select-all"
+            data-testid="generated-admin-password-value"
+          >
+            {info.generated_admin_password}
+          </code>
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={handleCopy}
+            data-testid="generated-admin-password-copy"
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <p className="text-xs text-steel-500">
+          Save it in your password manager. Reloading the VM list, opening{' '}
+          <span className="font-mono">vm get</span>, or refreshing the GUI will
+          not show this value again. To rotate the password later, re-create
+          the VM with an explicit <span className="font-mono">admin_password</span>.
+        </p>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={onClose}
+            data-testid="generated-admin-password-dismiss"
+          >
+            I've saved it
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -894,7 +969,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
   );
 }
 
-function CreateVMModal({ open, onClose, onCreated }) {
+function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
@@ -980,7 +1055,14 @@ function CreateVMModal({ open, onClose, onCreated }) {
       });
     }
     try {
-      await createMut.execute(spec);
+      const created = await createMut.execute(spec);
+      // Surface a one-time-reveal modal if the daemon auto-generated a
+      // Windows Administrator password (Windows guest, no admin_password
+      // supplied). The value is shown here exactly once — there is no
+      // re-read path.
+      if (created?.generated_admin_password && typeof onPasswordGenerated === 'function') {
+        onPasswordGenerated(created);
+      }
       onCreated();
       onClose();
       setForm(emptyForm);

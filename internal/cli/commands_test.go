@@ -274,6 +274,62 @@ func TestCLI_VMCreate_Windows(t *testing.T) {
 	}
 }
 
+func TestCLI_VMCreate_WindowsGeneratesAdminPassword(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	out, err := runCLI("vm", "create", "win-autopw",
+		"--image", "win2022.qcow2",
+		"--os", "windows",
+		"--ram", "4096",
+		"--disk", "64",
+	)
+	if err != nil {
+		t.Fatalf("vm create: %v", err)
+	}
+	if !strings.Contains(out, "Generated Administrator password") {
+		t.Errorf("expected one-time password banner; got %q", out)
+	}
+	// Extract the password line — it's the indented line after the banner.
+	if !strings.Contains(out, "Save it now") {
+		t.Errorf("expected one-time-only warning in output; got %q", out)
+	}
+}
+
+func TestCLI_VMCreate_LinuxDoesNotShowPasswordBanner(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	out, err := runCLI("vm", "create", "linux-vm",
+		"--image", "ubuntu.qcow2",
+	)
+	if err != nil {
+		t.Fatalf("vm create: %v", err)
+	}
+	if strings.Contains(out, "Generated Administrator password") {
+		t.Errorf("Linux VM should not show password banner; got %q", out)
+	}
+}
+
+func TestCLI_VMCreate_WindowsWithExplicitPasswordDoesNotShowBanner(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	out, err := runCLI("vm", "create", "win-explicit-pw",
+		"--image", "win2022.qcow2",
+		"--os", "windows",
+		"--admin-password", "MyChosen!Pass1",
+		"--ram", "4096",
+		"--disk", "64",
+	)
+	if err != nil {
+		t.Fatalf("vm create: %v", err)
+	}
+	if strings.Contains(out, "Generated Administrator password") {
+		t.Errorf("explicit admin_password should suppress the banner; got %q", out)
+	}
+}
+
 func TestCLI_VMCreate_MissingImage(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()
