@@ -153,6 +153,7 @@ var vmListCmd = &cobra.Command{
 		searchFilter, _ := cmd.Flags().GetString("search")
 		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
+		osTypeFilterRaw, _ := cmd.Flags().GetString("os-type")
 		networkFilter, _ := cmd.Flags().GetString("network")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
@@ -173,6 +174,10 @@ var vmListCmd = &cobra.Command{
 		searchFilter = strings.TrimSpace(strings.ToLower(searchFilter))
 		imageFilter = strings.TrimSpace(strings.ToLower(imageFilter))
 		defaultUserFilter = strings.TrimSpace(strings.ToLower(defaultUserFilter))
+		osTypeFilter, osTypeSet, err := parseCLIOSType(osTypeFilterRaw, "--os-type")
+		if err != nil {
+			return err
+		}
 		networkFilter = strings.TrimSpace(strings.ToLower(networkFilter))
 		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
 		if err != nil {
@@ -251,7 +256,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -289,6 +294,9 @@ var vmListCmd = &cobra.Command{
 					if !strings.EqualFold(effectiveUser, defaultUserFilter) {
 						continue
 					}
+				}
+				if osTypeSet && v.Spec.ResolvedOSType() != osTypeFilter {
+					continue
 				}
 				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
 					continue
@@ -1087,6 +1095,7 @@ Examples:
 	vmListCmd.Flags().String("search", "", "case-insensitive substring search over VM name, description, and tags")
 	vmListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the VM's base image")
 	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match; empty matches 'root')")
+	vmListCmd.Flags().String("os-type", "", "filter VMs by guest OS family: 'linux' or 'windows' (case-insensitive; empty spec.os_type is treated as 'linux')")
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")

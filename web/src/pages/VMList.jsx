@@ -36,6 +36,7 @@ export default function VMList() {
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
   const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
+  const [osTypeFilter, setOsTypeFilter] = useState(searchParams.get('os_type') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
@@ -63,8 +64,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -97,7 +98,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -182,6 +183,7 @@ export default function VMList() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
+    if (osTypeFilter) next.set('os_type', osTypeFilter); else next.delete('os_type');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
@@ -194,7 +196,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -300,6 +302,19 @@ export default function VMList() {
               <X size={13} />
             </button>
           )}
+        </div>
+        <div className="w-full sm:w-40">
+          <select
+            value={osTypeFilter}
+            onChange={(e) => setOsTypeFilter(e.target.value)}
+            className="input w-full py-1.5 text-sm"
+            data-testid="vm-list-os-type-filter"
+            aria-label="Filter by guest OS family"
+          >
+            <option value="">All OSes</option>
+            <option value="linux">Linux</option>
+            <option value="windows">Windows</option>
+          </select>
         </div>
         <div className="relative w-full sm:w-60">
           <input

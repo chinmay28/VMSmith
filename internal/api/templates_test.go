@@ -105,6 +105,71 @@ func TestCreateTemplateValidation(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_name")
 }
 
+func TestCreateTemplateRejectsInvalidOSType(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":    "bad-os-template",
+		"image":   "ubuntu-22.04",
+		"os_type": "plan9",
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_type")
+}
+
+func TestCreateTemplateRejectsInvalidOSVariant(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":       "bad-variant-template",
+		"image":      "win.qcow2",
+		"os_type":    "windows",
+		"os_variant": "windows-vista",
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_variant")
+}
+
+func TestCreateTemplateAcceptsMixedCaseOSType(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Post(ts.URL+"/api/v1/templates", "application/json", jsonBody(t, map[string]any{
+		"name":       "windows-mixed-case",
+		"image":      "win.qcow2",
+		"os_type":    "Windows",
+		"os_variant": "Windows-Server-2022",
+		"ram_mb":     4096,
+		"disk_gb":    64,
+	}))
+	if err != nil {
+		t.Fatalf("POST /templates: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var tpl types.VMTemplate
+	decodeJSON(t, resp, &tpl)
+	if tpl.OSType != types.OSTypeWindows {
+		t.Errorf("os_type = %q, want windows (lowercased on store)", tpl.OSType)
+	}
+	if tpl.OSVariant != "windows-server-2022" {
+		t.Errorf("os_variant = %q, want windows-server-2022 (lowercased on store)", tpl.OSVariant)
+	}
+}
+
 func TestCreateTemplateRejectsDuplicateName(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

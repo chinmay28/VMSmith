@@ -190,6 +190,12 @@ func mergeVMSpecWithTemplate(spec types.VMSpec, tpl *types.VMTemplate) types.VMS
 	if strings.TrimSpace(merged.DefaultUser) == "" {
 		merged.DefaultUser = tpl.DefaultUser
 	}
+	if strings.TrimSpace(string(merged.OSType)) == "" {
+		merged.OSType = tpl.OSType
+	}
+	if strings.TrimSpace(merged.OSVariant) == "" {
+		merged.OSVariant = tpl.OSVariant
+	}
 	if len(merged.Tags) == 0 && len(tpl.Tags) > 0 {
 		merged.Tags = append([]string(nil), tpl.Tags...)
 	}
@@ -321,7 +327,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
 	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -359,6 +370,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				if !strings.EqualFold(effectiveUser, defaultUserFilter) {
 					continue
 				}
+			}
+			if osTypeSet && vm.Spec.ResolvedOSType() != osTypeFilter {
+				continue
 			}
 			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {
 				continue

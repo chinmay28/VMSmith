@@ -68,6 +68,18 @@ function seed() {
   vm2.spec.networks = [{ name: "storage-net", mode: "bridge", bridge: "br-storage" }];
   vm2.created_at = "2026-05-15T00:00:00Z";
   vm2.updated_at = "2026-05-15T00:00:00Z";
+  // 5.6.8: a Windows-pinned VM so the os_type filter has a meaningful
+  // target (Linux × 2 = web-app/db-server vs Windows × 1 = win-app).
+  // cpus=3 sits between web-server (2) and db-server (4) so the existing
+  // capacity-sort tests (db-server first in cpus desc) keep their
+  // deterministic ordering without a desc-tiebreak inversion.
+  const vmWin = createVM({ name: "win-app", image: "win-server-2022.qcow2", cpus: 3, ram_mb: 4096, disk_gb: 64 });
+  vmWin.spec.os_type = "windows";
+  vmWin.spec.os_variant = "windows-server-2022";
+  vmWin.state = "running";
+  vmWin.ip = "192.168.100.12";
+  vmWin.created_at = "2026-05-20T00:00:00Z";
+  vmWin.updated_at = "2026-05-20T00:00:00Z";
   snapshots.set(vm1.id, [
     {
       id: `${vm1.id}/before-deploy`,
@@ -125,6 +137,24 @@ function seed() {
     networks: [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }],
     created_at: "2026-05-15T12:00:00Z",
     updated_at: "2026-05-15T12:00:00Z",
+  });
+  // 5.6.7 / 5.6.8: a Windows-pinned template so the os_type filter has a
+  // meaningful target on the template list (Linux × 2 vs Windows × 1).
+  templates.set("tmpl-3", {
+    id: "tmpl-3",
+    name: "windows-2022",
+    image: "/images/win-server-2022.qcow2",
+    cpus: 4,
+    ram_mb: 4096,
+    disk_gb: 64,
+    description: "Windows Server 2022 template",
+    tags: ["prod", "windows"],
+    default_user: "",
+    os_type: "windows",
+    os_variant: "windows-server-2022",
+    networks: [],
+    created_at: "2026-05-20T12:00:00Z",
+    updated_at: "2026-05-20T12:00:00Z",
   });
 
   // Seed a couple of schedules so the GUI has rows to render / filter / edit.
@@ -244,7 +274,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -291,6 +321,10 @@ const server = http.createServer(async (req, res) => {
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     const imageFilter = (url.searchParams.get("image") || "").trim().toLowerCase();
     const defaultUserFilter = (url.searchParams.get("default_user") || "").trim().toLowerCase();
+    const osTypeFilter = (url.searchParams.get("os_type") || "").trim().toLowerCase();
+    if (osTypeFilter && osTypeFilter !== "linux" && osTypeFilter !== "windows") {
+      return json(res, 400, { code: "invalid_os_type", message: "os_type must be \"linux\" or \"windows\"" });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -369,6 +403,18 @@ const server = http.createServer(async (req, res) => {
         const du = vm?.spec?.default_user || vm?.default_user || "";
         const effective = du === "" ? "root" : String(du).toLowerCase();
         return effective === defaultUserFilter;
+      });
+    }
+    if (osTypeFilter) {
+      // OS family is a closed two-member axis with a documented default —
+      // empty stored os_type resolves to "linux" (mirrors the API's
+      // VMSpec.ResolvedOSType and the `?default_user=root` empty-means-root
+      // semantics). Any non-windows non-empty value also collapses to
+      // "linux" to match the Go resolver.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
+        const effective = raw === "windows" ? "windows" : "linux";
+        return effective === osTypeFilter;
       });
     }
     if (networkFilter) {
@@ -1180,6 +1226,8 @@ const server = http.createServer(async (req, res) => {
       description: typeof spec.description === "string" ? spec.description.trim() : "",
       tags: Array.isArray(spec.tags) ? spec.tags.slice() : [],
       default_user: typeof spec.default_user === "string" ? spec.default_user.trim() : "",
+      os_type: typeof spec.os_type === "string" ? spec.os_type.trim().toLowerCase() : "",
+      os_variant: typeof spec.os_variant === "string" ? spec.os_variant.trim().toLowerCase() : "",
       networks: Array.isArray(spec.networks) ? spec.networks.slice() : [],
       created_at: now,
       updated_at: now,
@@ -1225,6 +1273,18 @@ const server = http.createServer(async (req, res) => {
     const defaultUser = (url.searchParams.get("default_user") || "").trim().toLowerCase();
     if (defaultUser) {
       list = list.filter(t => String(t.default_user || "").toLowerCase() === defaultUser);
+    }
+    const tplOsType = (url.searchParams.get("os_type") || "").trim().toLowerCase();
+    if (tplOsType && tplOsType !== "linux" && tplOsType !== "windows") {
+      return json(res, 400, { code: "invalid_os_type", message: "os_type must be \"linux\" or \"windows\"" });
+    }
+    if (tplOsType) {
+      // Mirrors the API: empty stored os_type resolves to "linux".
+      list = list.filter(t => {
+        const raw = String(t.os_type || "").trim().toLowerCase();
+        const effective = raw === "windows" ? "windows" : "linux";
+        return effective === tplOsType;
+      });
     }
     // network: case-insensitive exact-match (any-of) against networks[].name.
     const network = (url.searchParams.get("network") || "").trim().toLowerCase();

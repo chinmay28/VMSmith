@@ -18,6 +18,8 @@ type createTemplateRequest struct {
 	Description string                    `json:"description,omitempty"`
 	Tags        []string                  `json:"tags,omitempty"`
 	DefaultUser string                    `json:"default_user,omitempty"`
+	OSType      types.OSType              `json:"os_type,omitempty"`
+	OSVariant   string                    `json:"os_variant,omitempty"`
 	Networks    []types.NetworkAttachment `json:"networks,omitempty"`
 }
 
@@ -32,6 +34,8 @@ func (req createTemplateRequest) toTemplate() *types.VMTemplate {
 		Description: strings.TrimSpace(req.Description),
 		Tags:        req.Tags,
 		DefaultUser: strings.TrimSpace(req.DefaultUser),
+		OSType:      normaliseOSType(string(req.OSType)),
+		OSVariant:   strings.ToLower(strings.TrimSpace(req.OSVariant)),
 		Networks:    req.Networks,
 	}
 }
@@ -224,6 +228,21 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if strings.EqualFold(tpl.DefaultUser, defaultUserFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
+	}
+
+	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if osTypeSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if tpl.ResolvedOSType() == osTypeFilter {
 				filtered = append(filtered, tpl)
 			}
 		}
