@@ -342,11 +342,11 @@ func TestCloneVMSpec(t *testing.T) {
 		NatGateway:  "192.168.100.1",
 		Networks: []types.NetworkAttachment{
 			{
-				Mode:        types.NetworkModeMacvtap,
+				Mode:          types.NetworkModeMacvtap,
 				HostInterface: "eth1",
-				StaticIP:    "10.0.0.10/24",
-				Gateway:     "10.0.0.1",
-				MacAddress:  "52:54:00:aa:bb:cc",
+				StaticIP:      "10.0.0.10/24",
+				Gateway:       "10.0.0.1",
+				MacAddress:    "52:54:00:aa:bb:cc",
 			},
 		},
 	}

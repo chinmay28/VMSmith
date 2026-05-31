@@ -47,13 +47,13 @@ func TestSnapshotInTimeRange(t *testing.T) {
 	t2 := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
 
 	cases := []struct {
-		name      string
-		ct        time.Time
-		since     time.Time
-		sinceSet  bool
-		until     time.Time
-		untilSet  bool
-		want      bool
+		name     string
+		ct       time.Time
+		since    time.Time
+		sinceSet bool
+		until    time.Time
+		untilSet bool
+		want     bool
 	}{
 		{"no bounds", t1, time.Time{}, false, time.Time{}, false, true},
 		{"in range", t1, t0, true, t2, true, true},

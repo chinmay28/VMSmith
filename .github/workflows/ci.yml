@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         go-version:
-          - '1.22'
+          - '1.22.5'
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -35,6 +35,9 @@ jobs:
 
       - name: Create stub frontend dist for embed
         run: mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep
+
+      - name: Check gofmt
+        run: make fmt-check
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6

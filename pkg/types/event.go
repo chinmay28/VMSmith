@@ -13,11 +13,11 @@ const EventSchemaVersion = 1
 // preserved as-is and sort before numeric IDs lexicographically.
 type Event struct {
 	ID         string            `json:"id"`
-	Type       string            `json:"type"`             // e.g., "vm.started", "vm.created"
-	Source     string            `json:"source"`           // "libvirt" | "app" | "system"
+	Type       string            `json:"type"`   // e.g., "vm.started", "vm.created"
+	Source     string            `json:"source"` // "libvirt" | "app" | "system"
 	VMID       string            `json:"vm_id,omitempty"`
 	ResourceID string            `json:"resource_id,omitempty"`
-	Severity   string            `json:"severity"`         // "info" | "warn" | "error"
+	Severity   string            `json:"severity"` // "info" | "warn" | "error"
 	Message    string            `json:"message"`
 	Attributes map[string]string `json:"attributes,omitempty"`
 	Actor      string            `json:"actor,omitempty"`

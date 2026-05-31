@@ -64,11 +64,11 @@ func TestQuotaManagerUpdateRejectsExceededQuota(t *testing.T) {
 func TestQuotaManagerSnapshotRetention(t *testing.T) {
 	base := NewMockManager()
 	base.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
-	
+
 	// Set snapshot limit to 2
 	mgr := WithQuotas(base, config.QuotasConfig{MaxSnapshotsPerVM: 2})
 	ctx := context.Background()
-	
+
 	// Create first two snapshots (within limit)
 	_, err := mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap1"})
 	if err != nil {
@@ -78,18 +78,18 @@ func TestQuotaManagerSnapshotRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSnapshot 2 failed: %v", err)
 	}
-	
+
 	snaps, _ := mgr.ListSnapshots(ctx, "vm-1")
 	if len(snaps) != 2 {
 		t.Fatalf("expected 2 snapshots, got %d", len(snaps))
 	}
-	
+
 	// Creating 3rd snapshot should succeed but prune snap1
 	_, err = mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap3"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 3 failed: %v", err)
 	}
-	
+
 	snaps, _ = mgr.ListSnapshots(ctx, "vm-1")
 	if len(snaps) != 2 {
 		t.Fatalf("expected 2 snapshots after retention pruning, got %d", len(snaps))
@@ -105,21 +105,21 @@ func TestQuotaManagerSnapshotRetention(t *testing.T) {
 func TestQuotaManagerSnapshotRetention_DeleteErrorIsHandled(t *testing.T) {
 	base := NewMockManager()
 	base.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
-	
+
 	mgr := WithQuotas(base, config.QuotasConfig{MaxSnapshotsPerVM: 1})
 	ctx := context.Background()
-	
+
 	_, _ = mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap1"})
-	
+
 	// Force the mock to return an error on deletion
 	base.DeleteSnapshotErr = fmt.Errorf("mock delete error")
-	
+
 	// Create second snapshot (over limit)
 	_, err := mgr.CreateSnapshot(ctx, "vm-1", types.SnapshotSpec{Name: "snap2"})
 	if err != nil {
 		t.Fatalf("CreateSnapshot 2 failed: %v", err)
 	}
-	
+
 	// Deletion failed, so we should actually have 2 snapshots now
 	snaps, _ := mgr.ListSnapshots(ctx, "vm-1")
 	if len(snaps) != 2 {

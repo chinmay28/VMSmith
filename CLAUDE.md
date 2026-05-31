@@ -8,7 +8,7 @@ VM Smith is a single-binary CLI tool, REST API server, and embedded React web GU
 
 | Aspect | Details |
 |---|---|
-| Language | Go 1.22+ (CGO_ENABLED=1 required for libvirt C bindings) |
+| Language | Go 1.22.5 pinned via `toolchain go1.22.5` (CGO_ENABLED=1 required for libvirt C bindings) |
 | Module | `github.com/vmsmith/vmsmith` |
 | Entry point | `cmd/vmsmith/main.go` → `cli.Execute()` |
 | VM backend | libvirt + QEMU/KVM |
@@ -148,7 +148,7 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make test-e2e-portforward` | Port forwarding E2E tests only |
 | `make test-e2e-deps` | Install Python + Playwright deps for E2E tests |
 | `make lint` | golangci-lint |
-| `make fmt` | gofmt |
+| `make fmt` | gofmt (use the pinned Go 1.22.5 toolchain from `go.mod`) |
 | `make install` | Build + install to `/usr/local/bin/vmsmith` |
 | `sh scripts/install.sh` | Download the latest GitHub release binary and install it to `/usr/local/bin/vmsmith` |
 | `make clean` | Remove `./bin/`, `internal/web/dist/`, `web/node_modules/` |

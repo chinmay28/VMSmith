@@ -11,7 +11,7 @@ VERSION_PKG := github.com/vmsmith/vmsmith/pkg/version
 LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_DATE)"
 WEB_DIR   := ./web
 
-.PHONY: build install install-service clean purge test lint fmt deps web web-install \
+.PHONY: build install install-service clean purge test lint fmt fmt-check deps web web-install \
        test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb
 
 # --- Full build (frontend + backend) ---
@@ -114,6 +114,14 @@ lint:
 
 fmt:
 	gofmt -w -s .
+
+fmt-check:
+	@unformatted=$$(gofmt -l $$(find . -path ./internal/web/dist -prune -o -name '*.go' -print)); \
+	if [ -n "$$unformatted" ]; then \
+		echo "The following files are not gofmt-formatted:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
 
 deps:
 	go mod tidy

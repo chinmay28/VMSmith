@@ -16,9 +16,9 @@ dnf install -y \
     curl \
     git
 
-# --- Go 1.22+ ---
-if ! command -v go &>/dev/null || ! go version 2>/dev/null | grep -qE 'go1\.(2[2-9]|[3-9][0-9])'; then
-    echo "Installing Go 1.22..."
+# --- Go 1.22.5+ ---
+if ! command -v go &>/dev/null || ! go version 2>/dev/null | grep -qE 'go1\.(22\.[5-9]|2[3-9](\.|$)|[3-9][0-9](\.|$))'; then
+    echo "Installing Go 1.22.5..."
     GOVERSION="1.22.5"
     curl -fsSL "https://go.dev/dl/go${GOVERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
     rm -rf /usr/local/go
@@ -28,7 +28,7 @@ if ! command -v go &>/dev/null || ! go version 2>/dev/null | grep -qE 'go1\.(2[2
     export PATH=$PATH:/usr/local/go/bin
     echo "Go $(go version) installed."
 else
-    echo "Go $(go version) already installed, skipping."
+    echo "Go $(go version) already installed (meets >= 1.22.5), skipping."
 fi
 
 # --- Node.js 22+ ---
