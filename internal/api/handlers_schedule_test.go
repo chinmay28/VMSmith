@@ -806,3 +806,99 @@ func TestListScheduleRuns_FilterByVMID(t *testing.T) {
 		t.Fatalf("vm-1 paginated: len=%d total=%d", len(runs), total)
 	}
 }
+
+func TestListScheduleRuns_FilterBySearch(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-srch", Name: "srch", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started string, status types.ScheduleRunStatus, errMsg string, skip types.ScheduleRunSkipReason) {
+		t.Helper()
+		at, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		if err := s.AppendRun("sched-srch", &types.ScheduleRun{
+			VMID: "vm-1", StartedAt: at, Status: status, Error: errMsg, SkipReason: skip,
+		}); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	// 4 runs with different error/skip-reason content the search filter
+	// should be able to slice without leaking across statuses.
+	mk("2026-05-20T02:00:00Z", types.ScheduleRunStatusError, "context deadline exceeded waiting for VM", "")
+	mk("2026-05-21T02:00:00Z", types.ScheduleRunStatusError, "libvirt connection refused", "")
+	mk("2026-05-22T02:00:00Z", types.ScheduleRunStatusSkipped, "", types.ScheduleRunSkipReasonVMAlreadyStopped)
+	mk("2026-05-23T02:00:00Z", types.ScheduleRunStatusSuccess, "", "")
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-srch/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: 4 runs, no filter.
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	// Empty search disables the filter (mirrors the events handler contract).
+	if runs, total, _ := list("?search="); len(runs) != 4 || total != 4 {
+		t.Fatalf("empty search: len=%d total=%d", len(runs), total)
+	}
+
+	// Substring match against the error field.
+	if runs, total, _ := list("?search=deadline"); len(runs) != 1 || total != 1 || runs[0].Error == "" {
+		t.Fatalf("search=deadline: %+v total=%d", runs, total)
+	}
+
+	// Case-insensitive ("LIBVIRT" matches lowercase "libvirt").
+	if runs, total, _ := list("?search=LIBVIRT"); len(runs) != 1 || total != 1 {
+		t.Fatalf("search=LIBVIRT: %+v total=%d", runs, total)
+	}
+
+	// Whitespace-trimmed (URL-encoded spaces around the needle).
+	if runs, total, _ := list("?search=%20libvirt%20"); len(runs) != 1 || total != 1 {
+		t.Fatalf("search whitespace: %+v total=%d", runs, total)
+	}
+
+	// Substring match against the skip_reason field (a typed
+	// ScheduleRunSkipReason — round-tripped via string(...)).
+	if runs, total, _ := list("?search=vm_already_stopped"); len(runs) != 1 || total != 1 {
+		t.Fatalf("search=vm_already_stopped: %+v total=%d", runs, total)
+	}
+
+	// id / schedule_id / vm_id / status are intentionally NOT in the haystack.
+	// vm-1 is shared by every run so a vm-1 search would match all four if it
+	// were in the haystack — assert it returns 0.
+	if runs, total, _ := list("?search=vm-1"); len(runs) != 0 || total != 0 {
+		t.Fatalf("vm-1 should be excluded from search haystack: %+v total=%d", runs, total)
+	}
+	// "success" is a status string — it should NOT match (status is also excluded).
+	if runs, total, _ := list("?search=success"); len(runs) != 0 || total != 0 {
+		t.Fatalf("success should be excluded from search haystack: %+v total=%d", runs, total)
+	}
+
+	// Composes with status: search=context + status=error → 1 run.
+	if runs, total, _ := list("?status=error&search=context"); len(runs) != 1 || total != 1 {
+		t.Fatalf("status+search compose: %+v total=%d", runs, total)
+	}
+	// Composes with status: search=deadline + status=skipped → 0 (deadline is on an error).
+	if runs, total, _ := list("?status=skipped&search=deadline"); len(runs) != 0 || total != 0 {
+		t.Fatalf("status+search no-cross-bleed: %+v total=%d", runs, total)
+	}
+
+	// X-Total-Count reflects post-filter population under pagination.
+	if runs, total, _ := list("?search=connection%20refused&per_page=1"); len(runs) != 1 || total != 1 {
+		t.Fatalf("search paginated: %+v total=%d", runs, total)
+	}
+}

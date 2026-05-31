@@ -2273,6 +2273,20 @@ paths:
             Inclusive RFC3339 upper bound on the run's `started_at`. Invalid
             values return 400 `invalid_until`.
         - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-insensitive substring match across the run's `error` and
+            `skip_reason` fields. Whitespace is trimmed; empty disables the
+            filter. The id / schedule_id / vm_id / status fields are
+            intentionally excluded from the haystack so short numeric
+            needles don't generate noisy matches against opaque IDs.
+            Composes additively with `status`, `vm_id`, and `since`/`until`;
+            applied before pagination so `X-Total-Count` reflects the
+            post-filter population.
+        - in: query
           name: page
           required: false
           schema:

@@ -2862,6 +2862,42 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
   });
 
+  test("runs search filter narrows the recent-runs expander to matching error text", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+    // All four seeded runs visible at baseline.
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // Search for "libvirt" — only run-3 carries that error message.
+    await page.getByTestId("schedule-runs-search-filter-sch-1").fill("libvirt");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+
+    // Case-insensitive: "SNAPSHOT" matches the lowercase "snapshot failed".
+    await page.getByTestId("schedule-runs-search-filter-sch-1").fill("SNAPSHOT");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+
+    // A needle with no matches yields an empty population (the three success
+    // runs have no error text to match against).
+    await page.getByTestId("schedule-runs-search-filter-sch-1").fill("ghost-error-no-match");
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+
+    // Clearing the search restores the full population.
+    await page.getByTestId("schedule-runs-search-filter-sch-1").fill("");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

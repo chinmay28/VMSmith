@@ -465,15 +465,22 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const [runStatus, setRunStatus] = useState('');
   const [runVMID, setRunVMID] = useState('');
   const [runVMIDDebounced, setRunVMIDDebounced] = useState('');
+  const [runSearch, setRunSearch] = useState('');
+  const [runSearchDebounced, setRunSearchDebounced] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setRunVMIDDebounced(runVMID.trim()), 250);
     return () => clearTimeout(t);
   }, [runVMID]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setRunSearchDebounced(runSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [runSearch]);
+
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus, runVMIDDebounced],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -573,6 +580,15 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   onChange={(e) => setRunVMID(e.target.value)}
                   data-testid={`schedule-runs-vm-filter-${schedule.id}`}
                   aria-label="Filter runs by VM id"
+                />
+                <input
+                  type="text"
+                  className="input input-sm text-[11px] py-0.5 w-44"
+                  placeholder="Search error / skip-reason"
+                  value={runSearch}
+                  onChange={(e) => setRunSearch(e.target.value)}
+                  data-testid={`schedule-runs-search-filter-${schedule.id}`}
+                  aria-label="Search runs by error or skip-reason"
                 />
                 <select
                   className="input input-sm text-[11px] py-0.5"

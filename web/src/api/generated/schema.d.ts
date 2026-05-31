@@ -3033,6 +3033,17 @@ export interface paths {
                      *     values return 400 `invalid_until`.
                      */
                     until?: string;
+                    /**
+                     * @description Case-insensitive substring match across the run's `error` and
+                     *     `skip_reason` fields. Whitespace is trimmed; empty disables the
+                     *     filter. The id / schedule_id / vm_id / status fields are
+                     *     intentionally excluded from the haystack so short numeric
+                     *     needles don't generate noisy matches against opaque IDs.
+                     *     Composes additively with `status`, `vm_id`, and `since`/`until`;
+                     *     applied before pagination so `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    search?: string;
                     /** @description 1-based page number when paginating the run history. */
                     page?: number;
                     /**

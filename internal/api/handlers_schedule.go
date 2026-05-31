@@ -470,7 +470,10 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // IDs are opaque vm-<unix-nano> strings; whitespace-trimmed; empty disables
 // the filter), since/until (inclusive RFC3339 bounds on started_at; invalid
 // values return 400 invalid_since/invalid_until; a run with a zero started_at
-// is filtered OUT when any bound is set).
+// is filtered OUT when any bound is set), search (case-insensitive substring
+// match across the run's error and skip_reason fields — whitespace-trimmed;
+// id/schedule_id/vm_id/status are intentionally excluded from the haystack to
+// avoid noisy matches on short numeric queries; empty disables).
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -488,6 +491,7 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
+	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -519,6 +523,9 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		if !snapshotInTimeRange(run.StartedAt, sinceTime, sinceSet, untilTime, untilSet) {
 			continue
 		}
+		if searchFilter != "" && !scheduleRunMatchesSearch(run, searchFilter) {
+			continue
+		}
 		runs = append(runs, run)
 	}
 
@@ -548,4 +555,21 @@ func (s *Server) RunNowSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sched)
+}
+
+// scheduleRunMatchesSearch reports whether the run's error or skip_reason
+// fields contain the given (already lowercased and trimmed) needle. The
+// haystack intentionally excludes id / schedule_id / vm_id / status so short
+// numeric needles don't generate noisy matches against opaque IDs.
+func scheduleRunMatchesSearch(run *types.ScheduleRun, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(run.Error), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(string(run.SkipReason)), needle) {
+		return true
+	}
+	return false
 }

@@ -377,3 +377,36 @@ func TestCLI_ScheduleRuns_Empty(t *testing.T) {
 		t.Fatalf("expected empty message: %s", out)
 	}
 }
+
+func TestCLI_ScheduleRuns_ForwardsSearchFilter(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-1","started_at":"2026-05-22T02:00:00Z","status":"error","error":"context deadline exceeded"}]`)
+
+	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--search", "  deadline  ")
+	if err != nil {
+		t.Fatalf("runs: %v\nout=%s", err, out)
+	}
+	if d.lastMeth != http.MethodGet || d.lastPath != "/api/v1/schedules/sched-1/runs" {
+		t.Fatalf("unexpected request: %s %s", d.lastMeth, d.lastPath)
+	}
+	// The CLI trims whitespace before forwarding so the daemon never sees the padding.
+	if !strings.Contains(d.lastQuery, "search=deadline") {
+		t.Fatalf("query missing search=deadline (trimmed): %s", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "search=%20deadline") || strings.Contains(d.lastQuery, "search=+deadline") {
+		t.Fatalf("query should not retain leading whitespace, got %s", d.lastQuery)
+	}
+	if !strings.Contains(out, "deadline") {
+		t.Fatalf("output missing run detail: %s", out)
+	}
+}
+
+func TestCLI_ScheduleRuns_EmptySearchFlagSendsNothing(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--search", "   "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "search=") {
+		t.Fatalf("empty --search should not send search query param, got %q", d.lastQuery)
+	}
+}

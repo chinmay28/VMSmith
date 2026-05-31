@@ -2310,6 +2310,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_status", message: "status must be one of: running, success, error, skipped" });
     }
     const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
+    const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const since = (url.searchParams.get("since") || "").trim();
     const until = (url.searchParams.get("until") || "").trim();
     const sinceMs = since ? Date.parse(since) : NaN;
@@ -2328,6 +2329,11 @@ const server = http.createServer(async (req, res) => {
         if (isNaN(startMs)) return false;
         if (!isNaN(sinceMs) && startMs < sinceMs) return false;
         if (!isNaN(untilMs) && startMs > untilMs) return false;
+      }
+      if (searchFilter) {
+        const err = String(run.error || "").toLowerCase();
+        const skip = String(run.skip_reason || "").toLowerCase();
+        if (!err.includes(searchFilter) && !skip.includes(searchFilter)) return false;
       }
       return true;
     });
