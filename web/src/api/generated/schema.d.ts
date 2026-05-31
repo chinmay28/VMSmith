@@ -1896,9 +1896,14 @@ export interface paths {
                     per_page?: components["parameters"]["PerPage"];
                     /**
                      * @description Field to sort the template list by. Defaults to `id`. Unknown
-                     *     values return 400 `invalid_sort`. All comparators tiebreak on
-                     *     `id` so paginated requests return the same set across two
-                     *     independent fetches.
+                     *     values return 400 `invalid_sort`. `cpus`, `ram_mb`, and `disk_gb`
+                     *     are numeric capacity axes on the template (asc = smallest first,
+                     *     desc = largest first); they complement the matching `?min_cpus=` /
+                     *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
+                     *     `?max_disk_gb=` range filters so the same capacity-audit query can
+                     *     be sorted as well as filtered on the template cohort. All
+                     *     comparators tiebreak on `id` so paginated requests return the
+                     *     same set across two independent fetches.
                      */
                     sort?: components["parameters"]["TemplateSort"];
                     /**
@@ -4207,11 +4212,16 @@ export interface components {
         SnapshotSort: "id" | "name" | "created_at";
         /**
          * @description Field to sort the template list by. Defaults to `id`. Unknown
-         *     values return 400 `invalid_sort`. All comparators tiebreak on
-         *     `id` so paginated requests return the same set across two
-         *     independent fetches.
+         *     values return 400 `invalid_sort`. `cpus`, `ram_mb`, and `disk_gb`
+         *     are numeric capacity axes on the template (asc = smallest first,
+         *     desc = largest first); they complement the matching `?min_cpus=` /
+         *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
+         *     `?max_disk_gb=` range filters so the same capacity-audit query can
+         *     be sorted as well as filtered on the template cohort. All
+         *     comparators tiebreak on `id` so paginated requests return the
+         *     same set across two independent fetches.
          */
-        TemplateSort: "id" | "name" | "created_at";
+        TemplateSort: "id" | "name" | "created_at" | "cpus" | "ram_mb" | "disk_gb";
         /**
          * @description Sort direction. Defaults to `asc`. Unknown values return 400
          *     `invalid_order`.

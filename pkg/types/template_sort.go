@@ -11,6 +11,9 @@ const (
 	TemplateSortID        = "id"
 	TemplateSortName      = "name"
 	TemplateSortCreatedAt = "created_at"
+	TemplateSortCPUs      = "cpus"
+	TemplateSortRAMMB     = "ram_mb"
+	TemplateSortDiskGB    = "disk_gb"
 )
 
 // SortTemplates sorts the given templates in place by the requested field
@@ -37,6 +40,24 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 		case TemplateSortCreatedAt:
 			if !ai.CreatedAt.Equal(aj.CreatedAt) {
 				less = ai.CreatedAt.Before(aj.CreatedAt)
+				break
+			}
+			less = ai.ID < aj.ID
+		case TemplateSortCPUs:
+			if ai.CPUs != aj.CPUs {
+				less = ai.CPUs < aj.CPUs
+				break
+			}
+			less = ai.ID < aj.ID
+		case TemplateSortRAMMB:
+			if ai.RAMMB != aj.RAMMB {
+				less = ai.RAMMB < aj.RAMMB
+				break
+			}
+			less = ai.ID < aj.ID
+		case TemplateSortDiskGB:
+			if ai.DiskGB != aj.DiskGB {
+				less = ai.DiskGB < aj.DiskGB
 				break
 			}
 			less = ai.ID < aj.ID
