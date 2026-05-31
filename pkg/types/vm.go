@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// regexpMustCompile is a thin wrapper around regexp.MustCompile that lets
-// us keep the regex literal next to the consumer without polluting init()
-// or repeating the panic-on-error boilerplate.
-func regexpMustCompile(pattern string) *regexp.Regexp {
-	return regexp.MustCompile(pattern)
-}
-
 // VMState represents the current state of a virtual machine.
 type VMState string
 
@@ -134,8 +127,8 @@ type VMSpec struct {
 	// falls back to the OS-family default — "virtio" for Linux, "sata" for
 	// Windows — set in DomainParamsFromSpec. When the bus is overridden the
 	// disk target letter is adjusted to match ("vda" for virtio, "sda" for
-	// sata). Baked at create time; see VMUpdateSpec for the mutability
-	// contract.
+	// sata). Baked at create time and ignored on PATCH; resend on a new
+	// create to change.
 	DiskBus string `json:"disk_bus,omitempty" yaml:"disk_bus,omitempty"`
 
 	// NICModel overrides the model attribute on every libvirt
@@ -263,7 +256,7 @@ const (
 // exposes (e.g. "pc-q35-6.2", "pc-q35-rhel9.6.0", "q35", "virt-7.2"). It
 // rejects shell metacharacters / quotes / whitespace so a malformed value
 // cannot break the domain XML template.
-var machineTypeRe = regexpMustCompile(`^[A-Za-z0-9._-]+$`)
+var machineTypeRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // IsValidMachineType reports whether v passes the conservative
 // pc-q35-style alphabet check above. Empty returns true so the empty

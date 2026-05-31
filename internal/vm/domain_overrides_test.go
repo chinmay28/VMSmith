@@ -177,3 +177,39 @@ func TestDomainParamsFromSpec_NICModelOverrideAppliedToEveryInterface(t *testing
 		}
 	}
 }
+
+// TestResolveMachine pins the per-VM machine override (5.6.15) to the
+// lifecycle path. Without the gate every entry point that defines a
+// libvirt domain (Create / Clone / Update) silently overwrote
+// spec.Machine with detectMachineType(conn). This test exercises the
+// pure helper that all three call sites now route through.
+func TestResolveMachine(t *testing.T) {
+	cases := []struct {
+		name         string
+		specMachine  string
+		fallback     string
+		expectCall   bool
+		expectResult string
+	}{
+		{name: "empty falls back", specMachine: "", fallback: "pc-q35-7.2", expectCall: true, expectResult: "pc-q35-7.2"},
+		{name: "whitespace-only falls back", specMachine: "   \t\n", fallback: "pc-q35-7.2", expectCall: true, expectResult: "pc-q35-7.2"},
+		{name: "override honoured", specMachine: "pc-q35-rhel9.6.0", fallback: "pc-q35-7.2", expectCall: false, expectResult: "pc-q35-rhel9.6.0"},
+		{name: "override trimmed but kept", specMachine: "  pc-i440fx-6.2  ", fallback: "pc-q35-7.2", expectCall: false, expectResult: "pc-i440fx-6.2"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			got := resolveMachine(tc.specMachine, func() string {
+				called = true
+				return tc.fallback
+			})
+			if got != tc.expectResult {
+				t.Errorf("resolveMachine = %q, want %q", got, tc.expectResult)
+			}
+			if called != tc.expectCall {
+				t.Errorf("fallback called = %v, want %v (override would be silently overwritten)", called, tc.expectCall)
+			}
+		})
+	}
+}
