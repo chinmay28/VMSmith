@@ -154,27 +154,6 @@ export default function VMDetail() {
   }, [portMaxGuestPortInput]);
 
   useEffect(() => {
-    const trimmed = portMinHostPortInput.trim();
-    const t = setTimeout(() => setPortMinHostPort(trimmed), 250);
-    return () => clearTimeout(t);
-  }, [portMinHostPortInput]);
-  useEffect(() => {
-    const trimmed = portMaxHostPortInput.trim();
-    const t = setTimeout(() => setPortMaxHostPort(trimmed), 250);
-    return () => clearTimeout(t);
-  }, [portMaxHostPortInput]);
-  useEffect(() => {
-    const trimmed = portMinGuestPortInput.trim();
-    const t = setTimeout(() => setPortMinGuestPort(trimmed), 250);
-    return () => clearTimeout(t);
-  }, [portMinGuestPortInput]);
-  useEffect(() => {
-    const trimmed = portMaxGuestPortInput.trim();
-    const t = setTimeout(() => setPortMaxGuestPort(trimmed), 250);
-    return () => clearTimeout(t);
-  }, [portMaxGuestPortInput]);
-
-  useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (portSort !== 'id') sp.set('port_sort', portSort); else sp.delete('port_sort');
     if (portOrder !== 'asc') sp.set('port_order', portOrder); else sp.delete('port_order');
