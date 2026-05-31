@@ -3395,6 +3395,11 @@ export interface components {
             os_variant?: "windows-10" | "windows-11" | "windows-server-2019" | "windows-server-2022" | "windows-server-2025";
             /** @description Windows local Administrator password injected into the cloudbase-init datasource at first boot. Write-only: it is redacted from the stored/returned VM record once the provisioning ISO is written. Ignored for Linux guests. */
             admin_password?: string;
+            /**
+             * @description Override the libvirt domain `<clock offset='...'>`. Empty/omitted resolves to the OS-family default (utc for Linux, localtime for Windows). Lets operators pin "utc" on Windows guests synced with an NTP-driven Linux fleet, or "localtime" on a dual-boot Linux guest sharing an RTC with Windows. Any other value returns 400 `invalid_clock_offset`.
+             * @enum {string}
+             */
+            clock_offset?: "utc" | "localtime";
             networks?: components["schemas"]["NetworkAttachment"][];
             nat_static_ip?: string;
             nat_gateway?: string;
@@ -3415,6 +3420,15 @@ export interface components {
             auto_start?: boolean | null;
             /** @description Toggle delete-protection. Omit to leave unchanged. */
             locked?: boolean | null;
+            /**
+             * @description Override the libvirt domain `<clock offset='...'>` on an existing VM. Allowed values are `utc` / `localtime` (case-insensitive). An explicit empty string clears the override so the OS-family default (utc for Linux, localtime for Windows) applies again at next render. Omit (null) to leave unchanged. Applying a change triggers a domain redefine + VM restart, mirroring the cpus / ram_mb change path. Any other value returns 400 `invalid_clock_offset`.
+             * @enum {string|null}
+             */
+            clock_offset?: "utc" | "localtime" | "" | null;
+            /** @description **Immutable.** Sending any value (including the empty string) returns 400 `os_type_immutable` — the guest OS family is baked at create time because it drives the device profile (disk bus, NIC model, clock, Hyper-V, video, provisioning datasource). */
+            os_type?: string | null;
+            /** @description **Immutable.** Sending any value returns 400 `os_type_immutable`; capture os_variant at create time. Use the dedicated `os_type` / `os_variant` create endpoint to express variant changes by cloning a new VM from the same base image. */
+            os_variant?: string | null;
         };
         VM: {
             id: string;

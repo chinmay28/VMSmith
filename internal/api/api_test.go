@@ -3678,6 +3678,193 @@ func TestUpdateVM_InvalidTags(t *testing.T) {
 }
 
 // ============================================================
+// 5.6.18 — os_type/os_variant immutability + clock_offset control
+// ============================================================
+
+func TestUpdateVM_OSTypeRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-os", Name: "linux-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, OSType: types.OSTypeLinux}})
+
+	// Even an empty string for os_type is rejected: the field has pointer
+	// semantics so a present-but-empty key signals intent to "clear" the OS
+	// family, which is not a valid operation on an existing VM.
+	for _, body := range []string{
+		`{"os_type":"windows"}`,
+		`{"os_type":""}`,
+		`{"os_type":"linux"}`,
+		`{"os_type":"WINDOWS"}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-os", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "os_type_immutable")
+	}
+}
+
+func TestUpdateVM_OSVariantRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-osv", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+
+	for _, body := range []string{
+		`{"os_variant":"windows-server-2025"}`,
+		`{"os_variant":""}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-osv", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "os_type_immutable")
+	}
+}
+
+func TestUpdateVM_OSFieldOmittedIsOK(t *testing.T) {
+	// Sanity check: omitting os_type / os_variant entirely (the normal case)
+	// must not trip the immutability guard.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-osok", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, OSType: types.OSTypeLinux}})
+
+	patch := types.VMUpdateSpec{CPUs: 4}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-osok", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestUpdateVM_ClockOffsetChange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-clock", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows}})
+
+	utc := "utc"
+	patch := types.VMUpdateSpec{ClockOffset: &utc}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-clock", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.ClockOffset != "utc" {
+		t.Errorf("Spec.ClockOffset = %q, want %q", updated.Spec.ClockOffset, "utc")
+	}
+	if got := updated.Spec.ResolvedClockOffset(); got != "utc" {
+		t.Errorf("ResolvedClockOffset = %q, want utc", got)
+	}
+}
+
+func TestUpdateVM_ClockOffsetClear(t *testing.T) {
+	// Pointer-to-empty-string clears the override; the resolved offset then
+	// falls back to the OS-family default (localtime for Windows).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-clock-clear", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, ClockOffset: "utc"}})
+
+	empty := ""
+	patch := types.VMUpdateSpec{ClockOffset: &empty}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-clock-clear", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.ClockOffset != "" {
+		t.Errorf("Spec.ClockOffset = %q, want empty after clear", updated.Spec.ClockOffset)
+	}
+	if got := updated.Spec.ResolvedClockOffset(); got != "localtime" {
+		t.Errorf("ResolvedClockOffset = %q, want localtime (windows default)", got)
+	}
+}
+
+func TestUpdateVM_ClockOffsetInvalid(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-clock-bad", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	for _, bad := range []string{"foo", "UTC+0", "bsd-time"} {
+		patch := types.VMUpdateSpec{ClockOffset: &bad}
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-clock-bad", jsonBody(t, patch))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", bad, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "invalid_clock_offset")
+	}
+}
+
+func TestUpdateVM_ClockOffsetMixedCase(t *testing.T) {
+	// Case-insensitive normalisation: "UTC" / "LocalTime" must work.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-clock-mixed", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	for _, in := range []string{"UTC", "Utc", "LocalTime", "LOCALTIME"} {
+		patch := types.VMUpdateSpec{ClockOffset: &in}
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-clock-mixed", jsonBody(t, patch))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("input %q: status = %d, want 200", in, resp.StatusCode)
+		}
+	}
+}
+
+func TestCreateVM_ClockOffsetInvalid(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"clk","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"clock_offset":"bogus"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_clock_offset")
+}
+
+func TestCreateVM_ClockOffsetAccepted(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"clk-ok","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"clock_offset":"UTC"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var vm types.VM
+	decodeJSON(t, resp, &vm)
+	if vm.Spec.ClockOffset != "UTC" {
+		// The handler stores what the client sent (the API layer does NOT
+		// lowercase the persisted value). ResolvedClockOffset() normalises
+		// on read. This keeps the field round-trip-honest for clients that
+		// already lowercased.
+		t.Logf("ClockOffset persisted as %q (case-preserving)", vm.Spec.ClockOffset)
+	}
+	if got := vm.Spec.ResolvedClockOffset(); got != "utc" {
+		t.Errorf("ResolvedClockOffset = %q, want utc", got)
+	}
+}
+
+// ============================================================
 // Snapshot endpoint tests
 // ============================================================
 

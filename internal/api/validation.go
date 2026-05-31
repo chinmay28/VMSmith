@@ -41,6 +41,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if err := validateOSType(spec); err != nil {
 		return err
 	}
+	if err := validateClockOffset(spec.ClockOffset); err != nil {
+		return err
+	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
 			return err
@@ -56,6 +59,12 @@ func validateVMSpec(spec types.VMSpec) error {
 }
 
 func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
+	if patch.OSType != nil {
+		return types.NewAPIError("os_type_immutable", "os_type cannot be changed after VM creation: the device profile (disk bus, NIC model, clock, Hyper-V, video, provisioning datasource) is baked at create time")
+	}
+	if patch.OSVariant != nil {
+		return types.NewAPIError("os_type_immutable", "os_variant cannot be changed after VM creation: capture it at create time")
+	}
 	if err := validateOptionalVMResourceValue(patch.CPUs, 1, 128, "cpus"); err != nil {
 		return err
 	}
@@ -73,10 +82,31 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	if patch.NatGateway != "" && net.ParseIP(patch.NatGateway) == nil {
 		return types.NewAPIError("invalid_spec", "nat_gateway must be a valid IP address")
 	}
+	if patch.ClockOffset != nil {
+		if err := validateClockOffset(*patch.ClockOffset); err != nil {
+			return err
+		}
+	}
 	if _, err := normalizeTags(patch.Tags); err != nil {
 		return err
 	}
 	return nil
+}
+
+// validateClockOffset checks an explicit ClockOffset value. An empty string
+// resolves to the OS-family default at render time, so it is always allowed.
+// Any non-empty value is matched case-insensitively against the libvirt
+// vocabulary ("utc" / "localtime"); other values are rejected so a
+// `clock_offset=foo` typo surfaces as a 400 rather than booting with the
+// silent OS default.
+func validateClockOffset(v string) error {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", types.ClockOffsetUTC, types.ClockOffsetLocaltime:
+		return nil
+	default:
+		return types.NewAPIError("invalid_clock_offset",
+			fmt.Sprintf("clock_offset must be %q or %q", types.ClockOffsetUTC, types.ClockOffsetLocaltime))
+	}
 }
 
 // windowsMinRAMMB and windowsMinDiskGB are the floor resource sizes vmsmith
@@ -348,7 +378,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "os_type_immutable", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503

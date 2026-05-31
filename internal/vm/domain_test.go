@@ -111,6 +111,59 @@ func TestDomainParamsFromSpec_WindowsTuning(t *testing.T) {
 	}
 }
 
+func TestDomainParamsFromSpec_ClockOffsetOverride(t *testing.T) {
+	// Explicit ClockOffset wins over the OS-family default in both directions:
+	// "utc" pins a Windows guest to utc (for NTP-synced fleets) and
+	// "localtime" pins a Linux guest to localtime (for dual-boot scenarios).
+	cases := []struct {
+		name string
+		spec types.VMSpec
+		want string
+	}{
+		{
+			name: "windows pinned to utc",
+			spec: types.VMSpec{Name: "win-utc", CPUs: 2, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: "utc"},
+			want: "utc",
+		},
+		{
+			name: "linux pinned to localtime",
+			spec: types.VMSpec{Name: "linux-local", CPUs: 2, RAMMB: 2048, ClockOffset: "localtime"},
+			want: "localtime",
+		},
+		{
+			name: "linux default is utc",
+			spec: types.VMSpec{Name: "linux-default", CPUs: 2, RAMMB: 2048},
+			want: "utc",
+		},
+		{
+			name: "windows default is localtime",
+			spec: types.VMSpec{Name: "win-default", CPUs: 2, RAMMB: 4096, OSType: types.OSTypeWindows},
+			want: "localtime",
+		},
+		{
+			name: "mixed-case input lowercased",
+			spec: types.VMSpec{Name: "case", CPUs: 2, RAMMB: 2048, ClockOffset: "UTC"},
+			want: "utc",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			params := DomainParamsFromSpec(c.spec, "/tmp/d.qcow2", "/tmp/c.iso", "net", "52:54:00:aa:bb:cc")
+			if params.ClockOffset != c.want {
+				t.Errorf("ClockOffset = %q, want %q", params.ClockOffset, c.want)
+			}
+			xmlDoc, err := GenerateDomainXML(params)
+			if err != nil {
+				t.Fatalf("GenerateDomainXML: %v", err)
+			}
+			needle := "<clock offset='" + c.want + "'>"
+			if !strings.Contains(xmlDoc, needle) {
+				t.Errorf("xml missing %q:\n%s", needle, xmlDoc)
+			}
+		})
+	}
+}
+
 func TestDomainParamsFromSpec_LinuxDefaultsUnchanged(t *testing.T) {
 	spec := types.VMSpec{Name: "linux-vm", CPUs: 2, RAMMB: 2048}
 	params := DomainParamsFromSpec(spec, "/tmp/disk.qcow2", "", "vmsmith-net", "52:54:00:11:22:33")

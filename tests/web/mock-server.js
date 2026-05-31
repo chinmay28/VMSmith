@@ -274,7 +274,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "" },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -513,6 +513,13 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/vms" && method === "POST") {
     const spec = await parseBody(req);
+    if (spec && typeof spec.clock_offset === "string" && spec.clock_offset.trim() !== "") {
+      const normalised = spec.clock_offset.trim().toLowerCase();
+      if (normalised !== "utc" && normalised !== "localtime") {
+        return json(res, 400, { code: "invalid_clock_offset", message: 'clock_offset must be "utc" or "localtime"' });
+      }
+      spec.clock_offset = normalised;
+    }
     const vm = createVM(spec);
     vm.ip = `192.168.100.${10 + vmCounter}`;
     return json(res, 201, vm);
@@ -527,6 +534,15 @@ const server = http.createServer(async (req, res) => {
     const vm = vms.get(m[1]);
     if (!vm) return json(res, 404, { error: "not found" });
     const body = await parseBody(req);
+    // os_type / os_variant are baked at create time. Any presence on PATCH —
+    // including the empty string — is rejected with 400 `os_type_immutable`
+    // so the GUI surfaces the same error the daemon would return.
+    if (Object.prototype.hasOwnProperty.call(body, "os_type")) {
+      return json(res, 400, { code: "os_type_immutable", message: "os_type cannot be changed after VM creation" });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "os_variant")) {
+      return json(res, 400, { code: "os_type_immutable", message: "os_variant cannot be changed after VM creation" });
+    }
     if (body.cpus > 0) vm.spec.cpus = body.cpus;
     if (body.ram_mb > 0) vm.spec.ram_mb = body.ram_mb;
     if (body.disk_gb > 0) {
@@ -544,6 +560,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (typeof body.locked === "boolean") {
       vm.spec.locked = body.locked;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "clock_offset")) {
+      const raw = body.clock_offset;
+      if (raw !== null && typeof raw === "string") {
+        const normalised = raw.trim().toLowerCase();
+        if (normalised !== "" && normalised !== "utc" && normalised !== "localtime") {
+          return json(res, 400, { code: "invalid_clock_offset", message: 'clock_offset must be "utc" or "localtime"' });
+        }
+        vm.spec.clock_offset = normalised;
+      }
     }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);

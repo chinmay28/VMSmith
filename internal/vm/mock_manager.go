@@ -181,6 +181,9 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	if patch.Locked != nil {
 		vm.Spec.Locked = *patch.Locked
 	}
+	if patch.ClockOffset != nil {
+		vm.Spec.ClockOffset = strings.ToLower(strings.TrimSpace(*patch.ClockOffset))
+	}
 
 	vm.UpdatedAt = time.Now()
 	vmCopy := *vm
