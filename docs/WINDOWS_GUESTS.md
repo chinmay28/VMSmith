@@ -129,6 +129,29 @@ multipart bundle).
 > provisioning ISO and then redacts it from the stored bbolt record and every
 > API response, so it never lingers in the metadata store.
 
+### Auto-generated Administrator password
+
+If you omit `admin_password` on a Windows create, VMSmith generates a strong
+random password (20 chars across the four Windows complexity classes, drawn
+from `crypto/rand`) and returns it **exactly once** in the create response as
+`generated_admin_password`. Surfaces:
+
+- **CLI** — `vmsmith vm create` prints a banner immediately after the VM ID
+  with the password and a "save it now" warning. There is no second copy.
+- **REST** — `POST /api/v1/vms` includes the field on the create body only.
+  Subsequent `GET /vms/{id}` / `GET /vms` never return it.
+- **GUI** — a one-time-reveal modal opens after the create succeeds with a
+  copy-to-clipboard button. Dismissing closes the modal and the value is gone.
+
+Because the value is never stored, the only "rotation" path is to recreate the
+VM with an explicit `admin_password` (or omit it again to mint a fresh
+generated one). There is no in-place password reset; that would require
+re-running cloudbase-init on a live guest, which is out of scope for VMSmith.
+
+> If a workflow needs an in-guest password change, RDP/SSH into the VM and run
+> `net user Administrator <new-password>` directly — that is a guest-side
+> change that VMSmith never persists.
+
 ---
 
 ## Accessing a Windows guest

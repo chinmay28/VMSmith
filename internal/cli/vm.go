@@ -110,6 +110,15 @@ var vmCreateCmd = &cobra.Command{
 			}
 			fmt.Printf("  OS:    %s\n", osLabel)
 		}
+		// One-time auto-generated Windows Administrator password. The daemon
+		// returns this only on the create response; it is never stored and
+		// cannot be re-read via vm get / vm list. Surface it prominently so
+		// the operator can copy it before the terminal scrolls.
+		if result.GeneratedAdminPassword != "" {
+			fmt.Printf("\n  ⚠  Generated Administrator password (shown once, NOT stored):\n")
+			fmt.Printf("       %s\n", result.GeneratedAdminPassword)
+			fmt.Printf("  Save it now — re-running 'vmsmith vm get' will not show this value.\n\n")
+		}
 		// Show the IP immediately.  When a static IP was pre-assigned the VM
 		// record carries it in Spec.NatStaticIP before the interface is up.
 		displayIP := result.IP

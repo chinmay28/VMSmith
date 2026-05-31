@@ -284,6 +284,26 @@ function createVM(spec) {
   return vm;
 }
 
+// mockGenerateAdminPassword returns a 16-character password covering the four
+// Windows complexity classes so Playwright assertions on the one-time reveal
+// banner have a realistic-looking value to display. The mock alphabet matches
+// the daemon's generator (`internal/vm/admin_password.go`) modulo length.
+function mockGenerateAdminPassword() {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#%^&*()-_=+[]{};:,.<>?";
+  const all = upper + lower + digits + symbols;
+  const pick = (s) => s[Math.floor(Math.random() * s.length)];
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < 16) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
 function parseBody(req) {
   return new Promise((resolve) => {
     let data = "";
@@ -520,9 +540,25 @@ const server = http.createServer(async (req, res) => {
       }
       spec.clock_offset = normalised;
     }
+    // Auto-generate a one-time Administrator password for Windows VMs created
+    // without an explicit admin_password — mirrors the daemon's contract so
+    // Playwright tests can exercise the GUI's one-time-reveal flow.
+    const wantsAutoPassword =
+      spec &&
+      typeof spec.os_type === "string" &&
+      spec.os_type.trim().toLowerCase() === "windows" &&
+      (typeof spec.admin_password !== "string" || spec.admin_password === "");
     const vm = createVM(spec);
     vm.ip = `192.168.100.${10 + vmCounter}`;
-    return json(res, 201, vm);
+    // Build the response separately so the one-time password never lands in
+    // the stored record — subsequent GETs must not return it.
+    const response = { ...vm };
+    if (wantsAutoPassword) {
+      // Mock-only synthesis — 16 chars across the four Windows complexity
+      // classes plus filler so the GUI gets a realistic-looking value.
+      response.generated_admin_password = mockGenerateAdminPassword();
+    }
+    return json(res, 201, response);
   }
 
   let m;

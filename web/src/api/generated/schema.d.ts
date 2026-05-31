@@ -3444,6 +3444,20 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /**
+             * @description One-time Windows Administrator password that vmsmith generated
+             *     because the create request set `os_type: windows` without
+             *     supplying `admin_password`. Returned **only** on `POST /vms` and
+             *     **only** for that path — `GET /vms/{id}` and `GET /vms` never
+             *     return this field. The value is shown exactly once so the
+             *     operator can copy it before the response is discarded; vmsmith
+             *     does not store it anywhere recoverable. Surfaced as a CLI banner
+             *     (`vmsmith vm create`) and a one-time-reveal modal in the GUI.
+             *     For non-Windows guests, Windows guests with an explicit
+             *     `admin_password`, and any non-create response this field is
+             *     absent.
+             */
+            generated_admin_password?: string;
         };
         CloneVMRequest: {
             name: string;

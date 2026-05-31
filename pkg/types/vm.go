@@ -226,4 +226,11 @@ type VM struct {
 	DiskPath    string    `json:"disk_path"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+
+	// GeneratedAdminPassword is set on the create response only when the
+	// caller created a Windows VM without supplying an AdminPassword and
+	// vmsmith generated one. It is shown exactly once in the create response
+	// and never persisted — Get/List will not return it. Empty for every
+	// other path (Linux VMs, explicit admin_password, non-Windows clones).
+	GeneratedAdminPassword string `json:"generated_admin_password,omitempty"`
 }
