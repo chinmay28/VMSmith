@@ -236,6 +236,43 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-win-auto-pw")).toBeVisible();
   });
 
+  // 5.6.15 — per-VM device overrides should round-trip through the Advanced
+  // tab "Device Tuning" subsection. Setting the four enum selects + the
+  // virtio-win path field on create should persist on the VM record.
+  test("device tuning overrides round-trip through the Advanced tab", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("dev-overrides");
+    await page.getByTestId("input-vm-image").fill("rocky9");
+
+    await page.getByTestId("tab-advanced").click();
+    await page.getByTestId("input-vm-disk-bus").selectOption("sata");
+    await page.getByTestId("input-vm-nic-model").selectOption("e1000e");
+    await page.getByTestId("input-vm-firmware").selectOption("uefi");
+    await page.getByTestId("input-vm-machine").fill("pc-q35-rhel9.6.0");
+    await page.getByTestId("input-vm-virtio-win-iso").fill("/tmp/virtio-win.iso");
+
+    await page.getByTestId("btn-submit-create").click();
+    await expect(page.getByTestId("vm-card-dev-overrides")).toBeVisible();
+
+    // Hit the daemon directly and confirm every field landed on spec.
+    const stored = await page.evaluate(async () => {
+      const r = await fetch("/api/v1/vms");
+      const list = await r.json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      const match = arr.find((vm) => vm.name === "dev-overrides");
+      return match ? match.spec : null;
+    });
+    expect(stored).toBeTruthy();
+    expect(stored.disk_bus).toBe("sata");
+    expect(stored.nic_model).toBe("e1000e");
+    expect(stored.firmware).toBe("uefi");
+    expect(stored.machine).toBe("pc-q35-rhel9.6.0");
+    expect(stored.virtio_win_iso).toBe("/tmp/virtio-win.iso");
+  });
+
   test("template selection prefills create form", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

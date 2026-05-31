@@ -2071,6 +2071,46 @@ func TestCLI_VMCreate_ClockOffset(t *testing.T) {
 	}
 }
 
+// TestCLI_VMCreate_DeviceOverrides exercises the 5.6.15 per-VM device
+// override flags. Each flag is lowercased + whitespace-trimmed by the CLI
+// before being forwarded to the daemon, mirroring the --os / --clock-offset
+// contract.
+func TestCLI_VMCreate_DeviceOverrides(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	if _, err := runCLI("vm", "create", "dev-cli",
+		"--image", "rocky9", "--cpus", "2", "--ram", "2048", "--disk", "20",
+		"--disk-bus", "SATA",
+		"--nic-model", "E1000E",
+		"--machine", "pc-q35-rhel9.6.0",
+		"--firmware", "UEFI",
+		"--virtio-win-iso", "/tmp/virtio-win.iso",
+	); err != nil {
+		t.Fatalf("vm create: %v", err)
+	}
+	vms, _ := mock.List(context.Background())
+	if len(vms) != 1 {
+		t.Fatalf("vms len = %d, want 1", len(vms))
+	}
+	got := vms[0].Spec
+	if got.DiskBus != "sata" {
+		t.Errorf("DiskBus = %q, want sata", got.DiskBus)
+	}
+	if got.NICModel != "e1000e" {
+		t.Errorf("NICModel = %q, want e1000e", got.NICModel)
+	}
+	if got.Machine != "pc-q35-rhel9.6.0" {
+		t.Errorf("Machine = %q, want pc-q35-rhel9.6.0", got.Machine)
+	}
+	if got.Firmware != "uefi" {
+		t.Errorf("Firmware = %q, want uefi", got.Firmware)
+	}
+	if got.VirtioWinISO != "/tmp/virtio-win.iso" {
+		t.Errorf("VirtioWinISO = %q, want /tmp/virtio-win.iso", got.VirtioWinISO)
+	}
+}
+
 // =====================================================// Snapshot command tests
 // =====================================================
 func TestCLI_SnapshotCreate(t *testing.T) {
