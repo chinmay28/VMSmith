@@ -124,6 +124,19 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 //     rule's transport protocol. Empty disables; anything other than
 //     tcp/udp returns 400 `invalid_protocol`. Mirrors the bulk_delete
 //     `protocol` selector so the filter and bulk-action surfaces agree.
+//   - min_host_port / max_host_port   inclusive numeric range on the rule's
+//     host_port. Empty disables the bound; non-numeric or negative values
+//     return 400 `invalid_min_host_port` / `invalid_max_host_port`. Mirrors
+//     the image size-range (5.4.40) numeric-range filter — there is no
+//     zero-value exclusion, so a fully-known port matches whenever it falls
+//     inside the window. Applied after protocol + before search.
+//   - min_guest_port / max_guest_port inclusive numeric range on the rule's
+//     guest_port. Same contract as the host_port range above; 400
+//     `invalid_min_guest_port` / `invalid_max_guest_port` on garbage. Applied
+//     right after the host_port range + before search. The symmetric
+//     counterpart to the host-port range (5.4.47): host_port answers the
+//     host-side allocation audit ("which forward listens on host :8080") and
+//     guest_port the guest-side one ("which forwards target the guest's :22").
 //   - search=<needle>            case-insensitive substring filter across
 //     description, protocol, host_port, guest_port, guest_ip, and tags.
 //     Applied before sort.
@@ -156,6 +169,28 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	minHostPort, minHostPortSet, hpErr := parsePortRangeParam(r.URL.Query().Get("min_host_port"), "min_host_port")
+	if hpErr != nil {
+		writeAPIError(w, http.StatusBadRequest, hpErr)
+		return
+	}
+	maxHostPort, maxHostPortSet, hpErr := parsePortRangeParam(r.URL.Query().Get("max_host_port"), "max_host_port")
+	if hpErr != nil {
+		writeAPIError(w, http.StatusBadRequest, hpErr)
+		return
+	}
+
+	minGuestPort, minGuestPortSet, gpErr := parsePortRangeParam(r.URL.Query().Get("min_guest_port"), "min_guest_port")
+	if gpErr != nil {
+		writeAPIError(w, http.StatusBadRequest, gpErr)
+		return
+	}
+	maxGuestPort, maxGuestPortSet, gpErr := parsePortRangeParam(r.URL.Query().Get("max_guest_port"), "max_guest_port")
+	if gpErr != nil {
+		writeAPIError(w, http.StatusBadRequest, gpErr)
+		return
+	}
+
 	ports, err := s.portFwd.List(vmID)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
@@ -181,6 +216,26 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		filtered := ports[:0]
 		for _, pf := range ports {
 			if pf.Protocol == protocolFilter {
+				filtered = append(filtered, pf)
+			}
+		}
+		ports = filtered
+	}
+
+	if minHostPortSet || maxHostPortSet {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			if portInRange(pf.HostPort, minHostPort, minHostPortSet, maxHostPort, maxHostPortSet) {
+				filtered = append(filtered, pf)
+			}
+		}
+		ports = filtered
+	}
+
+	if minGuestPortSet || maxGuestPortSet {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			if portInRange(pf.GuestPort, minGuestPort, minGuestPortSet, maxGuestPort, maxGuestPortSet) {
 				filtered = append(filtered, pf)
 			}
 		}

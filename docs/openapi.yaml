@@ -70,6 +70,81 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: min_cpus
+          in: query
+          required: false
+          description: |
+            Inclusive lower bound on the VM's `spec.cpus` (vCPU count).
+            VMs with fewer vCPUs are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_min_cpus`. Composes additively with every
+            other list filter so `X-Total-Count` reflects the post-filter
+            population.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_cpus
+          in: query
+          required: false
+          description: |
+            Inclusive upper bound on the VM's `spec.cpus` (vCPU count).
+            VMs with more vCPUs are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_max_cpus`. Same count-range semantics as
+            `min_cpus`.
+          schema:
+            type: integer
+            minimum: 0
+        - name: min_ram_mb
+          in: query
+          required: false
+          description: |
+            Inclusive lower bound on the VM's `spec.ram_mb` (RAM in MB).
+            VMs with less RAM are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_min_ram_mb`. Composes additively with every
+            other list filter so `X-Total-Count` reflects the post-filter
+            population.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_ram_mb
+          in: query
+          required: false
+          description: |
+            Inclusive upper bound on the VM's `spec.ram_mb` (RAM in MB).
+            VMs with more RAM are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_max_ram_mb`. Same count-range semantics as
+            `min_ram_mb`.
+          schema:
+            type: integer
+            minimum: 0
+        - name: min_disk_gb
+          in: query
+          required: false
+          description: |
+            Inclusive lower bound on the VM's `spec.disk_gb` (disk in GB).
+            VMs with less disk are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_min_disk_gb`. Composes additively with every
+            other list filter so `X-Total-Count` reflects the post-filter
+            population.
+          schema:
+            type: integer
+            minimum: 0
+        - name: max_disk_gb
+          in: query
+          required: false
+          description: |
+            Inclusive upper bound on the VM's `spec.disk_gb` (disk in GB).
+            VMs with more disk are filtered out. Whitespace is trimmed;
+            empty disables the bound. Non-numeric or negative values
+            return 400 `invalid_max_disk_gb`. Same count-range semantics as
+            `min_disk_gb`.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: VM list
@@ -761,6 +836,51 @@ paths:
             Empty disables; anything other than tcp/udp returns 400
             `invalid_protocol`. Composes additively with `tag` and
             `search`.
+        - in: query
+          name: min_host_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive lower bound on the rule's `host_port`. Whitespace-trimmed;
+            empty disables the bound; non-numeric or negative values return 400
+            `invalid_min_host_port`. Applied after `protocol` and before
+            `search`; composes additively with every other filter so
+            `X-Total-Count` reflects the post-filter population.
+        - in: query
+          name: max_host_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive upper bound on the rule's `host_port`. Same shape as
+            `min_host_port`; non-numeric or negative values return 400
+            `invalid_max_host_port`.
+        - in: query
+          name: min_guest_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive lower bound on the rule's `guest_port`. Whitespace-trimmed;
+            empty disables the bound; non-numeric or negative values return 400
+            `invalid_min_guest_port`. The symmetric counterpart to
+            `min_host_port`; applied right after the host-port range and before
+            `search`; composes additively with every other filter so
+            `X-Total-Count` reflects the post-filter population.
+        - in: query
+          name: max_guest_port
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: |
+            Inclusive upper bound on the rule's `guest_port`. Same shape as
+            `min_guest_port`; non-numeric or negative values return 400
+            `invalid_max_guest_port`.
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -1237,6 +1357,25 @@ paths:
           schema:
             type: string
         - in: query
+          name: network
+          required: false
+          description: |
+            Case-insensitive exact-match filter on the name of any of the
+            template's additional network attachments (`networks[].name`). A
+            template matches when any attachment name equals the value
+            (any-of). Whitespace is trimmed before comparison; an empty value
+            disables the filter. Closes the operator query "show me every
+            template that attaches `data-net`". Mirrors the VMs `?network=`
+            filter (5.4.36): the implicit primary NAT network is not
+            represented in the template's networks list, so this only scopes
+            to explicitly-attached extra networks operators name and group by
+            ("data-net", "storage-net"). Composes additively with `?tag=`,
+            `?image=`, `?default_user=`, `?search=`, `?since=`, `?until=`,
+            `?sort=`, `?order=`, and pagination so `X-Total-Count` reflects
+            the post-filter population.
+          schema:
+            type: string
+        - in: query
           name: since
           required: false
           description: |
@@ -1264,6 +1403,88 @@ paths:
             / unknown / additive-composition semantics as `since`.
           schema:
             type: string
+        - in: query
+          name: min_cpus
+          required: false
+          description: |
+            Inclusive lower bound on the template's `cpus` field.
+            Templates with fewer vCPUs are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_min_cpus`. Composes additively with
+            every other list filter so `X-Total-Count` reflects the
+            post-filter population. Mirrors the VM `?min_cpus=` filter
+            (5.4.44) — opens the same capacity-audit query against the
+            template cohort.
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: max_cpus
+          required: false
+          description: |
+            Inclusive upper bound on the template's `cpus` field.
+            Templates with more vCPUs are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_max_cpus`. Same count-range
+            semantics as `min_cpus`.
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: min_ram_mb
+          required: false
+          description: |
+            Inclusive lower bound on the template's `ram_mb` field.
+            Templates with less RAM are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_min_ram_mb`. Composes additively with
+            every other list filter so `X-Total-Count` reflects the
+            post-filter population. Mirrors the VM `?min_ram_mb=` filter
+            (5.4.48) — opens the same capacity-audit query against the
+            template cohort.
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: max_ram_mb
+          required: false
+          description: |
+            Inclusive upper bound on the template's `ram_mb` field.
+            Templates with more RAM are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_max_ram_mb`. Same count-range
+            semantics as `min_ram_mb`.
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: min_disk_gb
+          required: false
+          description: |
+            Inclusive lower bound on the template's `disk_gb` field.
+            Templates with less disk are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_min_disk_gb`. Composes additively
+            with every other list filter so `X-Total-Count` reflects the
+            post-filter population. Mirrors the VM `?min_disk_gb=` filter
+            (5.4.50) — opens the same capacity-audit query against the
+            template cohort and completes the cpus/ram/disk capacity-audit
+            trio on the template list.
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: max_disk_gb
+          required: false
+          description: |
+            Inclusive upper bound on the template's `disk_gb` field.
+            Templates with more disk are filtered out. Whitespace is
+            trimmed; empty disables the bound. Non-numeric or negative
+            values return 400 `invalid_max_disk_gb`. Same count-range
+            semantics as `min_disk_gb`.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: Template list
@@ -1773,6 +1994,20 @@ paths:
             Exact-match filter on the schedule's `action`.
             Whitespace-trimmed; empty disables the filter.
         - in: query
+          name: catch_up_policy
+          required: false
+          schema:
+            type: string
+            enum: [skip, run_once, run_all]
+          description: |
+            Case-insensitive exact-match filter on the schedule's
+            `catch_up_policy`. Whitespace-trimmed; empty disables the filter;
+            invalid values return 400 `invalid_catch_up_policy`. A schedule
+            persisted with an empty policy is treated as `skip` (the engine's
+            default) so `catch_up_policy=skip` matches it, mirroring the VM
+            `default_user=root` empty-means-root filter semantics. Composes
+            additively with every other schedule filter.
+        - in: query
           name: enabled
           required: false
           schema:
@@ -1986,6 +2221,19 @@ paths:
           description: |
             Case-insensitive exact-match on the run status. Empty disables the
             filter; unknown values return 400 `invalid_status`.
+        - in: query
+          name: vm_id
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-sensitive exact-match against the run's `vm_id`. Whitespace
+            is trimmed; empty disables the filter. Useful for tag-selector
+            schedules that target many VMs — narrows the run history to a
+            single VM (e.g. "which runs of `nightly-snapshot` targeted
+            `vm-1700000000000`"). Composes additively with `status` and
+            `since`/`until`; applied before pagination so `X-Total-Count`
+            reflects the post-filter population.
         - in: query
           name: since
           required: false

@@ -612,7 +612,11 @@ function DeliveryStatus({ webhook, testResult }) {
       </span>
     );
   }
-  if (webhook.last_status) {
+
+  const hasPersistedAttempt = Boolean(webhook.last_delivery_at);
+  const isHealthy = !webhook.last_error && webhook.last_status >= 200 && webhook.last_status < 300;
+
+  if (hasPersistedAttempt && isHealthy) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-300" data-testid="webhook-status">
         <CheckCircle2 size={13} />
@@ -624,7 +628,15 @@ function DeliveryStatus({ webhook, testResult }) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-mono text-red-300" data-testid="webhook-status">
         <AlertCircle size={13} />
-        {webhook.last_error}
+        {webhook.last_status > 0 ? `HTTP ${webhook.last_status} — ${webhook.last_error}` : webhook.last_error}
+      </span>
+    );
+  }
+  if (hasPersistedAttempt && webhook.last_status > 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-mono text-red-300" data-testid="webhook-status">
+        <AlertCircle size={13} />
+        HTTP {webhook.last_status}
       </span>
     );
   }

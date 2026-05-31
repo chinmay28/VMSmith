@@ -17,8 +17,22 @@ export default function TemplateList() {
   const [imageFilter, setImageFilter] = useState(searchParams.get('image') || '');
   const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
+  const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
+  const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
+  const [minCpusInput, setMinCpusInput] = useState(searchParams.get('min_cpus') || '');
+  const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
+  const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
+  const [maxCpusFilter, setMaxCpusFilter] = useState(searchParams.get('max_cpus') || '');
+  const [minRamInput, setMinRamInput] = useState(searchParams.get('min_ram_mb') || '');
+  const [minRamFilter, setMinRamFilter] = useState(searchParams.get('min_ram_mb') || '');
+  const [maxRamInput, setMaxRamInput] = useState(searchParams.get('max_ram_mb') || '');
+  const [maxRamFilter, setMaxRamFilter] = useState(searchParams.get('max_ram_mb') || '');
+  const [minDiskGbInput, setMinDiskGbInput] = useState(searchParams.get('min_disk_gb') || '');
+  const [minDiskGbFilter, setMinDiskGbFilter] = useState(searchParams.get('min_disk_gb') || '');
+  const [maxDiskGbInput, setMaxDiskGbInput] = useState(searchParams.get('max_disk_gb') || '');
+  const [maxDiskGbFilter, setMaxDiskGbFilter] = useState(searchParams.get('max_disk_gb') || '');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sort, setSort] = useState(searchParams.get('sort') || 'id');
@@ -27,8 +41,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, since, until, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, since, until, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -41,7 +55,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, since, until, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -64,6 +78,49 @@ export default function TemplateList() {
     return () => clearTimeout(id);
   }, [defaultUserInput]);
 
+  // Debounce the network filter input.
+  useEffect(() => {
+    const trimmed = networkInput.trim();
+    const id = setTimeout(() => setNetworkFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [networkInput]);
+
+  // Debounce the min-cpus / max-cpus inputs (5.4.51).
+  useEffect(() => {
+    const trimmed = minCpusInput.trim();
+    const id = setTimeout(() => setMinCpusFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minCpusInput]);
+  useEffect(() => {
+    const trimmed = maxCpusInput.trim();
+    const id = setTimeout(() => setMaxCpusFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxCpusInput]);
+
+  // Debounce the min-ram / max-ram inputs (5.4.52).
+  useEffect(() => {
+    const trimmed = minRamInput.trim();
+    const id = setTimeout(() => setMinRamFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minRamInput]);
+  useEffect(() => {
+    const trimmed = maxRamInput.trim();
+    const id = setTimeout(() => setMaxRamFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxRamInput]);
+
+  // Debounce the min-disk-gb / max-disk-gb inputs (5.4.53).
+  useEffect(() => {
+    const trimmed = minDiskGbInput.trim();
+    const id = setTimeout(() => setMinDiskGbFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [minDiskGbInput]);
+  useEffect(() => {
+    const trimmed = maxDiskGbInput.trim();
+    const id = setTimeout(() => setMaxDiskGbFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [maxDiskGbInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -71,10 +128,17 @@ export default function TemplateList() {
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
+    if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
+    if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
+    if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
+    if (minRamFilter) next.set('min_ram_mb', minRamFilter); else next.delete('min_ram_mb');
+    if (maxRamFilter) next.set('max_ram_mb', maxRamFilter); else next.delete('max_ram_mb');
+    if (minDiskGbFilter) next.set('min_disk_gb', minDiskGbFilter); else next.delete('min_disk_gb');
+    if (maxDiskGbFilter) next.set('max_disk_gb', maxDiskGbFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, since, until]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -199,6 +263,28 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+        <div className="relative w-64">
+          <input
+            type="text"
+            value={networkInput}
+            onChange={(e) => setNetworkInput(e.target.value)}
+            placeholder="Filter by network…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="template-list-network-filter"
+            aria-label="Filter templates by network"
+          />
+          {networkInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setNetworkInput('')}
+              data-testid="template-list-network-filter-clear"
+              aria-label="Clear network filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
           <label className="flex items-center gap-1">
             <span>Since</span>
@@ -231,6 +317,115 @@ export default function TemplateList() {
               aria-label="Clear template time range"
             >
               Clear range
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Min CPUs</span>
+            <input
+              type="number"
+              min="0"
+              value={minCpusInput}
+              onChange={(e) => setMinCpusInput(e.target.value)}
+              data-testid="template-list-min-cpus"
+              aria-label="Minimum vCPUs"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max CPUs</span>
+            <input
+              type="number"
+              min="0"
+              value={maxCpusInput}
+              onChange={(e) => setMaxCpusInput(e.target.value)}
+              data-testid="template-list-max-cpus"
+              aria-label="Maximum vCPUs"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          {(minCpusInput || maxCpusInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinCpusInput(''); setMaxCpusInput(''); }}
+              data-testid="template-list-cpu-range-clear"
+              aria-label="Clear template CPU range"
+            >
+              Clear CPUs
+            </button>
+          )}
+          <label className="flex items-center gap-1">
+            <span>Min RAM (MB)</span>
+            <input
+              type="number"
+              min="0"
+              value={minRamInput}
+              onChange={(e) => setMinRamInput(e.target.value)}
+              data-testid="template-list-min-ram-mb"
+              aria-label="Minimum RAM in MB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-24"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max RAM (MB)</span>
+            <input
+              type="number"
+              min="0"
+              value={maxRamInput}
+              onChange={(e) => setMaxRamInput(e.target.value)}
+              data-testid="template-list-max-ram-mb"
+              aria-label="Maximum RAM in MB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-24"
+            />
+          </label>
+          {(minRamInput || maxRamInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinRamInput(''); setMaxRamInput(''); }}
+              data-testid="template-list-ram-range-clear"
+              aria-label="Clear template RAM range"
+            >
+              Clear RAM
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel-400">
+          <label className="flex items-center gap-1">
+            <span>Min disk (GB)</span>
+            <input
+              type="number"
+              min="0"
+              value={minDiskGbInput}
+              onChange={(e) => setMinDiskGbInput(e.target.value)}
+              data-testid="template-list-min-disk-gb"
+              aria-label="Minimum disk GB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            <span>Max disk (GB)</span>
+            <input
+              type="number"
+              min="0"
+              value={maxDiskGbInput}
+              onChange={(e) => setMaxDiskGbInput(e.target.value)}
+              data-testid="template-list-max-disk-gb"
+              aria-label="Maximum disk GB"
+              className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200 w-20"
+            />
+          </label>
+          {(minDiskGbInput || maxDiskGbInput) && (
+            <button
+              type="button"
+              className="text-steel-500 hover:text-steel-200"
+              onClick={() => { setMinDiskGbInput(''); setMaxDiskGbInput(''); }}
+              data-testid="template-list-disk-range-clear"
+              aria-label="Clear template disk range"
+            >
+              Clear disk
             </button>
           )}
         </div>
@@ -295,8 +490,16 @@ export default function TemplateList() {
                 ? `No templates use image "${imageFilter}".`
                 : defaultUserFilter
                 ? `No templates use default user "${defaultUserFilter}".`
+                : networkFilter
+                ? `No templates attach network "${networkFilter}".`
                 : (since || until)
                 ? 'No templates were created in the selected time range.'
+                : (minCpusFilter || maxCpusFilter)
+                ? 'No templates match the selected CPU range.'
+                : (minRamFilter || maxRamFilter)
+                ? 'No templates match the selected RAM range.'
+                : (minDiskGbFilter || maxDiskGbFilter)
+                ? 'No templates match the selected disk range.'
                 : tagFilter
                 ? `No templates carry tag "${tagFilter}".`
                 : 'Create a template from the Create-VM modal to save reusable defaults.'

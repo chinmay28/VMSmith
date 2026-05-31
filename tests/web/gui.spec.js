@@ -477,6 +477,93 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.44 — vCPU range filter on the VM list. Seed data: web-server has 2
+  // vCPUs, db-server has 4. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_cpus= / ?max_cpus=.
+  test("vCPU range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_cpus=4 -> only db-server (4 vCPUs).
+    await page.getByTestId("vm-list-min-cpus").fill("4");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_cpus=4");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-cpus-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_cpus=");
+
+    // max_cpus=2 -> only web-server (2 vCPUs).
+    await page.getByTestId("vm-list-max-cpus").fill("2");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_cpus=2");
+  });
+
+  // 5.4.48 — RAM range filter on the VM list. Seed data: web-server has 4096 MB,
+  // db-server has 8192 MB. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_ram_mb= / ?max_ram_mb=.
+  test("RAM range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_ram_mb=8000 -> only db-server (8192 MB).
+    await page.getByTestId("vm-list-min-ram").fill("8000");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_ram_mb=8000");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-ram-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_ram_mb=");
+
+    // max_ram_mb=5000 -> only web-server (4096 MB).
+    await page.getByTestId("vm-list-max-ram").fill("5000");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_ram_mb=5000");
+  });
+
+  // 5.4.50 — Disk size range filter on the VM list. Seed data: web-server has 40 GB,
+  // db-server has 100 GB. 250 ms-debounced number inputs with URL round-trip
+  // via ?min_disk_gb= / ?max_disk_gb=.
+  test("disk range filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+
+    // min_disk_gb=100 -> only db-server.
+    await page.getByTestId("vm-list-min-disk").fill("100");
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("min_disk_gb=100");
+
+    // Clearing restores both VMs and drops the URL param.
+    await page.getByTestId("vm-list-disk-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("min_disk_gb=");
+
+    // max_disk_gb=50 -> only web-server (40 GB).
+    await page.getByTestId("vm-list-max-disk").fill("50");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("max_disk_gb=50");
+  });
+
   test("sort controls reorder the VM list and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
@@ -1221,6 +1308,60 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
     await expect.poll(() => new URL(page.url()).searchParams.get("port_protocol")).toBeNull();
+  });
+
+  test("host-port range filter narrows the list and round-trips through the URL (5.4.47)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seeded host ports: pf-seed-ssh=2222, pf-seed-http=8080.
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+
+    // min host port 8000 keeps only the 8080 rule.
+    await page.getByTestId("port-min-host-port").fill("8000");
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_host")).toBe("8000");
+
+    // Clearing restores both rows and drops the URL param.
+    await page.getByTestId("port-host-port-clear").click();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_host")).toBeNull();
+
+    // max host port 5000 keeps only the 2222 rule.
+    await page.getByTestId("port-max-host-port").fill("5000");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_max_host")).toBe("5000");
+  });
+
+  test("guest-port range filter narrows the list and round-trips through the URL (5.4.49)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Seeded guest ports: pf-seed-ssh guest=22, pf-seed-http guest=80.
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+
+    // min guest port 50 keeps only the guest=80 rule.
+    await page.getByTestId("port-min-guest-port").fill("50");
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_guest")).toBe("50");
+
+    // Clearing restores both rows and drops the URL param.
+    await page.getByTestId("port-guest-port-clear").click();
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_min_guest")).toBeNull();
+
+    // max guest port 50 keeps only the guest=22 rule.
+    await page.getByTestId("port-max-guest-port").fill("50");
+    await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_max_guest")).toBe("50");
   });
 
   test("protocol filter composes with the existing search filter (5.4.25)", async ({ page }) => {
@@ -2012,6 +2153,39 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
+  test("network filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    // big-rocky attaches data-net; small-ubuntu has no extra networks.
+    await page.getByTestId("template-list-network-filter").fill("data-net");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("network")).toBe("data-net");
+
+    await page.getByTestId("template-list-network-filter-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("network=");
+  });
+
+  test("network filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-network-filter").fill("DATA-NET");
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
+  test("network filter matches no templates when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await page.getByTestId("template-list-network-filter").fill("storage-net");
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+  });
+
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
@@ -2118,6 +2292,87 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
     await expect(page.getByText("No templates were created in the selected time range.")).toBeVisible();
   });
+
+  // --- roadmap 5.4.51: ?min_cpus= / ?max_cpus= range filter on template list ---
+  // Seed templates: small-ubuntu has cpus=1, big-rocky has cpus=8, so a
+  // min_cpus=4 boundary cleanly separates them.
+  test("vCPU range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_cpus=4 keeps only big-rocky (cpus=8).
+    await page.getByTestId("template-list-min-cpus").fill("4");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_cpus")).toBe("4");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear CPUs" button restores both templates and drops the params.
+    await page.getByTestId("template-list-cpu-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_cpus")).toBeNull();
+
+    // max_cpus=4 keeps only small-ubuntu (cpus=1).
+    await page.getByTestId("template-list-max-cpus").fill("4");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_cpus")).toBe("4");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
+
+  // --- roadmap 5.4.52: ?min_ram_mb= / ?max_ram_mb= range filter on template list ---
+  // Seed templates: small-ubuntu has ram_mb=1024, big-rocky has ram_mb=16384,
+  // so a min_ram_mb=4096 boundary cleanly separates them.
+  test("RAM range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_ram_mb=4096 keeps only big-rocky (ram_mb=16384).
+    await page.getByTestId("template-list-min-ram-mb").fill("4096");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_ram_mb")).toBe("4096");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear RAM" button restores both templates and drops the params.
+    await page.getByTestId("template-list-ram-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_ram_mb")).toBeNull();
+
+    // max_ram_mb=4096 keeps only small-ubuntu (ram_mb=1024).
+    await page.getByTestId("template-list-max-ram-mb").fill("4096");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_ram_mb")).toBe("4096");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
+
+  // --- roadmap 5.4.53: ?min_disk_gb= / ?max_disk_gb= range filter on template list ---
+  // Seed templates: small-ubuntu has disk_gb=10, big-rocky has disk_gb=200, so a
+  // min_disk_gb=50 boundary cleanly separates them.
+  test("disk range filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // min_disk_gb=50 keeps only big-rocky (disk_gb=200).
+    await page.getByTestId("template-list-min-disk-gb").fill("50");
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_disk_gb")).toBe("50");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toHaveCount(0);
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+
+    // Clear via "Clear disk" button restores both templates and drops the params.
+    await page.getByTestId("template-list-disk-range-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("min_disk_gb")).toBeNull();
+
+    // max_disk_gb=50 keeps only small-ubuntu (disk_gb=10).
+    await page.getByTestId("template-list-max-disk-gb").fill("50");
+    await expect.poll(() => new URL(page.url()).searchParams.get("max_disk_gb")).toBe("50");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toHaveCount(0);
+  });
 });
 
 // ============================================================
@@ -2214,6 +2469,28 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
   });
 
+  test("catch-up filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // sch-1 catch_up_policy "skip"; sch-2 "run_once".
+    await page.getByTestId("schedule-catchup-filter").selectOption("run_once");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBe("run_once");
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+
+    await page.getByTestId("schedule-catchup-filter").selectOption("skip");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBe("skip");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+
+    await page.getByTestId("schedule-catchup-filter").selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("catch_up_policy")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+  });
+
   test("edits a schedule via the edit modal", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();
@@ -2260,6 +2537,37 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
   });
 
+  test("runs vm_id filter narrows the recent-runs expander", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+    // All four seeded runs are visible by default (run-4 vm-2, run-2 vm-1, run-1 vm-1, run-3 vm-1).
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // Filter to vm-2: only run-4 survives.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("vm-2");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Switch to vm-1: the three vm-1 runs come back, run-4 (vm-2) drops out.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("vm-1");
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+
+    // Clearing the filter restores the full population.
+    await page.getByTestId("schedule-runs-vm-filter-sch-1").fill("");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();
@@ -2271,12 +2579,14 @@ test.describe("Schedules", () => {
     await expect(page.locator('[data-testid^="schedule-run-run-now-"]').first()).toBeVisible();
   });
 
-  test("vm detail shows matching schedules and can prefill a new VM schedule", async ({ page }) => {
+  test("vm detail shows direct, tag-targeted, and global schedules and can prefill a new VM schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
     await expect(page.getByTestId("vm-detail-schedules")).toBeVisible();
     await expect(page.getByTestId("vm-detail-schedule-sch-1")).toContainText("nightly-snapshot");
+    await expect(page.getByTestId("vm-detail-schedule-sch-2")).toContainText("weekend-shutdown");
+    await expect(page.getByTestId("vm-detail-schedule-sch-3")).toContainText("weekly-health-check");
 
     await page.getByTestId("btn-add-schedule-from-vm").click();
     await expect(page.getByTestId("vm-schedule-create-form")).toBeVisible();
@@ -2412,6 +2722,14 @@ test.describe("Settings — Webhooks", () => {
     const status = page.getByTestId("webhook-status").first();
     await expect(status).toContainText(/204|test ok/i);
 
+    // Reload to discard the local probe result and verify the persisted
+    // last_status contract still renders as healthy even when last_error is
+    // omitted from the API payload.
+    await page.reload();
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId(`webhook-row-${rowID}`)).toBeVisible();
+    await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 204/i);
+
     // Delete.
     page.on("dialog", (dialog) => dialog.accept());
     await page.getByTestId(`webhook-delete-${rowID}`).click();
@@ -2432,6 +2750,13 @@ test.describe("Settings — Webhooks", () => {
     const rowID = (await row.getAttribute("data-testid")).replace("webhook-row-", "");
     await page.getByTestId(`webhook-test-${rowID}`).click();
     await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500|failed|500/i);
+
+    // Reload to discard the local probe result and verify the persisted
+    // last_status + last_error contract still renders as a failure.
+    await page.reload();
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId(`webhook-row-${rowID}`)).toBeVisible();
+    await expect(page.getByTestId("webhook-status").first()).toContainText(/HTTP 500/i);
   });
 
   // 2.2.14 — editable webhook config (URL / secret / event types / active).

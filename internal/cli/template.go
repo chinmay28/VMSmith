@@ -121,13 +121,44 @@ var templateListCmd = &cobra.Command{
 		searchFlag, _ := cmd.Flags().GetString("search")
 		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
+		networkFilter, _ := cmd.Flags().GetString("network")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
+		minCPUsRaw, _ := cmd.Flags().GetString("min-cpus")
+		maxCPUsRaw, _ := cmd.Flags().GetString("max-cpus")
+		minRAMRaw, _ := cmd.Flags().GetString("min-ram-mb")
+		maxRAMRaw, _ := cmd.Flags().GetString("max-ram-mb")
+		minDiskRaw, _ := cmd.Flags().GetString("min-disk-gb")
+		maxDiskRaw, _ := cmd.Flags().GetString("max-disk-gb")
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
 		if err != nil {
 			return err
 		}
 		untilTime, untilSet, err := parseCLITimeRange(untilRaw, "--until")
+		if err != nil {
+			return err
+		}
+		minCPUs, minCPUsSet, err := parseCLICountRange(minCPUsRaw, "--min-cpus")
+		if err != nil {
+			return err
+		}
+		maxCPUs, maxCPUsSet, err := parseCLICountRange(maxCPUsRaw, "--max-cpus")
+		if err != nil {
+			return err
+		}
+		minRAM, minRAMSet, err := parseCLICountRange(minRAMRaw, "--min-ram-mb")
+		if err != nil {
+			return err
+		}
+		maxRAM, maxRAMSet, err := parseCLICountRange(maxRAMRaw, "--max-ram-mb")
+		if err != nil {
+			return err
+		}
+		minDisk, minDiskSet, err := parseCLICountRange(minDiskRaw, "--min-disk-gb")
+		if err != nil {
+			return err
+		}
+		maxDisk, maxDiskSet, err := parseCLICountRange(maxDiskRaw, "--max-disk-gb")
 		if err != nil {
 			return err
 		}
@@ -189,10 +220,49 @@ var templateListCmd = &cobra.Command{
 			}
 			templates = filtered
 		}
+		if networkQuery := strings.TrimSpace(strings.ToLower(networkFilter)); networkQuery != "" {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if types.TemplateMatchesNetwork(tpl, networkQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
+		}
 		if sinceSet || untilSet {
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if !snapshotInCLITimeRange(tpl.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+					continue
+				}
+				filtered = append(filtered, tpl)
+			}
+			templates = filtered
+		}
+		if minCPUsSet || maxCPUsSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if !countInCLIRange(tpl.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
+					continue
+				}
+				filtered = append(filtered, tpl)
+			}
+			templates = filtered
+		}
+		if minRAMSet || maxRAMSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if !countInCLIRange(tpl.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
+					continue
+				}
+				filtered = append(filtered, tpl)
+			}
+			templates = filtered
+		}
+		if minDiskSet || maxDiskSet {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if !countInCLIRange(tpl.DiskGB, minDisk, minDiskSet, maxDisk, maxDiskSet) {
 					continue
 				}
 				filtered = append(filtered, tpl)
@@ -404,9 +474,7 @@ func init() {
 	templateCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to template-created VMs (repeatable)")
 	templateCreateCmd.Flags().String("default-user", "", "default login user for VMs created from this template")
 	templateCreateCmd.Flags().StringSlice("network", nil, "attach template VMs to host network (repeatable); same format as vm create --network")
-	if err := templateCreateCmd.MarkFlagRequired("image"); err != nil {
-		panic(err)
-	}
+	_ = templateCreateCmd.MarkFlagRequired("image")
 
 	templateListCmd.Flags().Int("limit", 0, "maximum number of templates to show (0 = no limit)")
 	templateListCmd.Flags().Int("offset", 0, "number of templates to skip before printing results")
@@ -414,8 +482,15 @@ func init() {
 	templateListCmd.Flags().String("search", "", "case-insensitive substring filter applied to name, description, and tags")
 	templateListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the template's base image")
 	templateListCmd.Flags().String("default-user", "", "case-insensitive exact-match filter on the template's default login user")
+	templateListCmd.Flags().String("network", "", "filter templates attached to a named network (case-insensitive exact match against networks names)")
 	templateListCmd.Flags().String("since", "", "keep templates created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	templateListCmd.Flags().String("until", "", "keep templates created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
+	templateListCmd.Flags().String("min-cpus", "", "keep templates with at least this many vCPUs (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("max-cpus", "", "keep templates with at most this many vCPUs (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("min-ram-mb", "", "keep templates with at least this much RAM in MB (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("max-ram-mb", "", "keep templates with at most this much RAM in MB (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("min-disk-gb", "", "keep templates with at least this many GB of disk (inclusive; non-negative integer)")
+	templateListCmd.Flags().String("max-disk-gb", "", "keep templates with at most this many GB of disk (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 

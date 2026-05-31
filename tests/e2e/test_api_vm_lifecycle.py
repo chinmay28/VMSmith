@@ -276,3 +276,48 @@ class TestAPIVMLifecycle:
 
         if image_id:
             api_delete(f"/images/{image_id}")
+
+
+@pytest.mark.api
+class TestAPIVMNameReuse:
+    """Regression: a VM name can be reused after the original is deleted.
+
+    Deleting a VM must fully undefine its libvirt domain (whose name is the VM
+    name, not the unique id). If teardown leaves the domain registered, the next
+    create that reuses the name fails at DomainDefineXML with "domain already
+    exists", surfacing to clients as the opaque "vm definition failed".
+    """
+
+    def test_recreate_with_same_name_after_delete(self, rocky_image, ssh_pubkey, api_vm_cleanup):
+        name = "e2e-api-name-reuse"
+        spec = {
+            "name": name,
+            "image": rocky_image,
+            "cpus": 2,
+            "ram_mb": 2048,
+            "disk_gb": 20,
+            "ssh_pub_key": ssh_pubkey,
+        }
+
+        # First create — wait until it is actually running so the domain is a
+        # live, defined libvirt domain that delete must tear down.
+        resp = api_post("/vms", json=spec)
+        assert resp.status_code == 201, f"First create failed: {resp.text}"
+        first_id = resp.json()["id"]
+        wait_for_vm_state(first_id, "running", timeout=120)
+
+        # Delete it (stop + DELETE). This must fully undefine the domain.
+        delete_vm_api(first_id)
+        deadline_resp = api_get(f"/vms/{first_id}")
+        assert deadline_resp.status_code == 404, "VM record should be gone after delete"
+
+        # Recreate with the SAME name. Before the fix this failed with
+        # 500 vm_definition_failed because the libvirt domain still existed.
+        resp = api_post("/vms", json=spec)
+        assert resp.status_code == 201, f"Recreate with reused name failed: {resp.text}"
+        second_id = resp.json()["id"]
+        api_vm_cleanup.append(second_id)
+
+        assert second_id != first_id, "Recreated VM should have a fresh unique id"
+        assert resp.json()["name"] == name
+        wait_for_vm_state(second_id, "running", timeout=120)

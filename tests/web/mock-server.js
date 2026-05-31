@@ -54,6 +54,7 @@ const scheduleRuns = new Map();
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
+  vm1.tags = ["dev"];
   // Named network attachments power the 5.4.36 ?network= filter tests.
   vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
   // Fixed timestamps so the 5.4.30 created-at time-range filter tests are
@@ -103,7 +104,7 @@ function seed() {
     image: "/images/ubuntu-base.qcow2",
     cpus: 1,
     ram_mb: 1024,
-    disk_gb: 12,
+    disk_gb: 10,
     description: "Small Ubuntu template",
     tags: ["starter", "ubuntu"],
     default_user: "ubuntu",
@@ -117,11 +118,11 @@ function seed() {
     image: "/images/rocky9.qcow2",
     cpus: 8,
     ram_mb: 16384,
-    disk_gb: 80,
+    disk_gb: 200,
     description: "Big Rocky template",
     tags: ["prod", "rocky"],
     default_user: "root",
-    networks: [],
+    networks: [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }],
     created_at: "2026-05-15T12:00:00Z",
     updated_at: "2026-05-15T12:00:00Z",
   });
@@ -165,7 +166,34 @@ function seed() {
     last_result: "",
     next_fire_at: null,
   });
+  scheduleList.set("sch-3", {
+    id: "sch-3",
+    name: "weekly-health-check",
+    vm_id: "",
+    tag_selector: null,
+    action: "snapshot",
+    cron_spec: "0 30 4 * * 1",
+    timezone: "UTC",
+    enabled: true,
+    catch_up_policy: "skip",
+    max_concurrent: 1,
+    retention_count: 0,
+    params: {},
+    created_at: "2026-05-12T00:00:00Z",
+    updated_at: "2026-05-12T00:00:00Z",
+    last_fired_at: null,
+    last_result: "",
+    next_fire_at: "2026-05-26T04:30:00Z",
+  });
   scheduleRuns.set("sch-1", [
+    {
+      id: "run-4",
+      schedule_id: "sch-1",
+      vm_id: vm2.id,
+      started_at: "2026-05-24T02:00:00Z",
+      finished_at: "2026-05-24T02:00:06Z",
+      status: "success",
+    },
     {
       id: "run-2",
       schedule_id: "sch-1",
@@ -297,6 +325,28 @@ const server = http.createServer(async (req, res) => {
     if (until.invalid) {
       return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
     }
+    // min_cpus / max_cpus: inclusive non-negative integer range filter on
+    // spec.cpus; non-numeric/negative value -> 400; whitespace-only disables.
+    const parseCount = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      if (!/^\d+$/.test(v)) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a non-negative integer` };
+      }
+      return { set: true, value: Number(v) };
+    };
+    const minCpusP = parseCount(url.searchParams.get("min_cpus"), "min_cpus");
+    if (minCpusP.invalid) return json(res, 400, { code: minCpusP.code, message: minCpusP.msg });
+    const maxCpusP = parseCount(url.searchParams.get("max_cpus"), "max_cpus");
+    if (maxCpusP.invalid) return json(res, 400, { code: maxCpusP.code, message: maxCpusP.msg });
+    const minRamP = parseCount(url.searchParams.get("min_ram_mb"), "min_ram_mb");
+    if (minRamP.invalid) return json(res, 400, { code: minRamP.code, message: minRamP.msg });
+    const maxRamP = parseCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
+    if (maxRamP.invalid) return json(res, 400, { code: maxRamP.code, message: maxRamP.msg });
+    const minDiskP = parseCount(url.searchParams.get("min_disk_gb"), "min_disk_gb");
+    if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
+    const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
+    if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
     if (!["id", "name", "created_at", "state"].includes(sortField)) {
       return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state" });
     }
@@ -340,6 +390,30 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(t.getTime())) return false;
         if (since.set && t < since.value) return false;
         if (until.set && t > until.value) return false;
+        return true;
+      });
+    }
+    if (minCpusP.set || maxCpusP.set) {
+      list = list.filter(vm => {
+        const cpus = (vm.spec && vm.spec.cpus) || 0;
+        if (minCpusP.set && cpus < minCpusP.value) return false;
+        if (maxCpusP.set && cpus > maxCpusP.value) return false;
+        return true;
+      });
+    }
+    if (minRamP.set || maxRamP.set) {
+      list = list.filter(vm => {
+        const ram = (vm.spec && vm.spec.ram_mb) || 0;
+        if (minRamP.set && ram < minRamP.value) return false;
+        if (maxRamP.set && ram > maxRamP.value) return false;
+        return true;
+      });
+    }
+    if (minDiskP.set || maxDiskP.set) {
+      list = list.filter(vm => {
+        const disk = (vm.spec && vm.spec.disk_gb) || 0;
+        if (minDiskP.set && disk < minDiskP.value) return false;
+        if (maxDiskP.set && disk > maxDiskP.value) return false;
         return true;
       });
     }
@@ -740,6 +814,31 @@ const server = http.createServer(async (req, res) => {
     if (protocolFilter && protocolFilter !== "tcp" && protocolFilter !== "udp") {
       return json(res, 400, { code: "invalid_protocol", message: "protocol must be 'tcp' or 'udp'" });
     }
+    // Host-port range filter (5.4.47): inclusive [min, max] on host_port.
+    const parsePortBound = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) return { err: name };
+      return { set: true, value: n };
+    };
+    const minHostPort = parsePortBound(url.searchParams.get("min_host_port"), "min_host_port");
+    if (minHostPort.err) {
+      return json(res, 400, { code: "invalid_min_host_port", message: "min_host_port must be a non-negative integer port number" });
+    }
+    const maxHostPort = parsePortBound(url.searchParams.get("max_host_port"), "max_host_port");
+    if (maxHostPort.err) {
+      return json(res, 400, { code: "invalid_max_host_port", message: "max_host_port must be a non-negative integer port number" });
+    }
+    // Guest-port range filter (5.4.49): inclusive [min, max] on guest_port.
+    const minGuestPort = parsePortBound(url.searchParams.get("min_guest_port"), "min_guest_port");
+    if (minGuestPort.err) {
+      return json(res, 400, { code: "invalid_min_guest_port", message: "min_guest_port must be a non-negative integer port number" });
+    }
+    const maxGuestPort = parsePortBound(url.searchParams.get("max_guest_port"), "max_guest_port");
+    if (maxGuestPort.err) {
+      return json(res, 400, { code: "invalid_max_guest_port", message: "max_guest_port must be a non-negative integer port number" });
+    }
     let list = (portForwards.get(m[1]) || []).slice();
     const tagFilter = (url.searchParams.get("tag") || "").trim().toLowerCase();
     if (tagFilter) {
@@ -748,6 +847,10 @@ const server = http.createServer(async (req, res) => {
     if (protocolFilter) {
       list = list.filter(pf => (pf.protocol || "").toLowerCase() === protocolFilter);
     }
+    if (minHostPort.set) list = list.filter(pf => (pf.host_port || 0) >= minHostPort.value);
+    if (maxHostPort.set) list = list.filter(pf => (pf.host_port || 0) <= maxHostPort.value);
+    if (minGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) >= minGuestPort.value);
+    if (maxGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) <= maxGuestPort.value);
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(pf => {
@@ -1055,6 +1158,30 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === "/api/v1/templates" && method === "GET") {
     let list = [...templates.values()];
+    // min_cpus / max_cpus and min_ram_mb / max_ram_mb: inclusive non-negative
+    // integer range filters on the template's `cpus` / `ram_mb` fields;
+    // non-numeric/negative value -> 400; whitespace-only disables
+    // (mirrors the VM list filters, 5.4.44 / 5.4.48).
+    const parseTplCount = (raw, name) => {
+      const v = (raw || "").trim();
+      if (v === "") return { set: false };
+      if (!/^\d+$/.test(v)) {
+        return { invalid: true, code: `invalid_${name}`, msg: `${name} must be a non-negative integer` };
+      }
+      return { set: true, value: Number(v) };
+    };
+    const tplMinCpus = parseTplCount(url.searchParams.get("min_cpus"), "min_cpus");
+    if (tplMinCpus.invalid) return json(res, 400, { code: tplMinCpus.code, message: tplMinCpus.msg });
+    const tplMaxCpus = parseTplCount(url.searchParams.get("max_cpus"), "max_cpus");
+    if (tplMaxCpus.invalid) return json(res, 400, { code: tplMaxCpus.code, message: tplMaxCpus.msg });
+    const tplMinRam = parseTplCount(url.searchParams.get("min_ram_mb"), "min_ram_mb");
+    if (tplMinRam.invalid) return json(res, 400, { code: tplMinRam.code, message: tplMinRam.msg });
+    const tplMaxRam = parseTplCount(url.searchParams.get("max_ram_mb"), "max_ram_mb");
+    if (tplMaxRam.invalid) return json(res, 400, { code: tplMaxRam.code, message: tplMaxRam.msg });
+    const tplMinDisk = parseTplCount(url.searchParams.get("min_disk_gb"), "min_disk_gb");
+    if (tplMinDisk.invalid) return json(res, 400, { code: tplMinDisk.code, message: tplMinDisk.msg });
+    const tplMaxDisk = parseTplCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
+    if (tplMaxDisk.invalid) return json(res, 400, { code: tplMaxDisk.code, message: tplMaxDisk.msg });
     const tag = (url.searchParams.get("tag") || "").trim();
     if (tag) {
       const lc = tag.toLowerCase();
@@ -1067,6 +1194,11 @@ const server = http.createServer(async (req, res) => {
     const defaultUser = (url.searchParams.get("default_user") || "").trim().toLowerCase();
     if (defaultUser) {
       list = list.filter(t => String(t.default_user || "").toLowerCase() === defaultUser);
+    }
+    // network: case-insensitive exact-match (any-of) against networks[].name.
+    const network = (url.searchParams.get("network") || "").trim().toLowerCase();
+    if (network) {
+      list = list.filter(t => Array.isArray(t.networks) && t.networks.some(n => String(n.name || "").toLowerCase() === network));
     }
     // since / until: inclusive RFC3339 time-range filter on created_at;
     // invalid value → 400; whitespace-only disables; zero/missing
@@ -1091,6 +1223,30 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(ts.getTime())) return false;
         if (tplSince.set && ts < tplSince.value) return false;
         if (tplUntil.set && ts > tplUntil.value) return false;
+        return true;
+      });
+    }
+    if (tplMinCpus.set || tplMaxCpus.set) {
+      list = list.filter(t => {
+        const cpus = Number(t.cpus) || 0;
+        if (tplMinCpus.set && cpus < tplMinCpus.value) return false;
+        if (tplMaxCpus.set && cpus > tplMaxCpus.value) return false;
+        return true;
+      });
+    }
+    if (tplMinRam.set || tplMaxRam.set) {
+      list = list.filter(t => {
+        const ram = Number(t.ram_mb) || 0;
+        if (tplMinRam.set && ram < tplMinRam.value) return false;
+        if (tplMaxRam.set && ram > tplMaxRam.value) return false;
+        return true;
+      });
+    }
+    if (tplMinDisk.set || tplMaxDisk.set) {
+      list = list.filter(t => {
+        const disk = Number(t.disk_gb) || 0;
+        if (tplMinDisk.set && disk < tplMinDisk.value) return false;
+        if (tplMaxDisk.set && disk > tplMaxDisk.value) return false;
         return true;
       });
     }
@@ -1765,9 +1921,9 @@ const server = http.createServer(async (req, res) => {
     wh.last_delivery_at = now;
     if (result.success) {
       wh.last_status = result.status_code;
-      wh.last_error = "";
+      delete wh.last_error;
     } else {
-      wh.last_status = 0;
+      wh.last_status = result.status_code || 0;
       wh.last_error = result.error;
     }
     webhookList.set(wh.id, wh);
@@ -1778,6 +1934,10 @@ const server = http.createServer(async (req, res) => {
     const vmIdFilter = (url.searchParams.get("vm_id") || "").trim();
     const tagSelectorFilter = (url.searchParams.get("tag_selector") || "").trim().toLowerCase();
     const actionFilter = (url.searchParams.get("action") || "").trim();
+    const catchUpFilter = (url.searchParams.get("catch_up_policy") || "").trim().toLowerCase();
+    if (catchUpFilter !== "" && !["skip", "run_once", "run_all"].includes(catchUpFilter)) {
+      return json(res, 400, { code: "invalid_catch_up_policy", message: "catch_up_policy must be one of: skip, run_once, run_all" });
+    }
     const needle = (url.searchParams.get("search") || "").trim().toLowerCase();
     const enabledRaw = (url.searchParams.get("enabled") || "").trim().toLowerCase();
     let enabledFilter = null;
@@ -1826,6 +1986,7 @@ const server = http.createServer(async (req, res) => {
       );
     }
     if (actionFilter) list = list.filter((s) => (s.action || "") === actionFilter);
+    if (catchUpFilter) list = list.filter((s) => ((s.catch_up_policy || "skip").toLowerCase()) === catchUpFilter);
     if (enabledFilter !== null) list = list.filter((s) => Boolean(s.enabled) === enabledFilter);
     if (since.set || until.set) {
       list = list.filter((s) => {
@@ -1959,6 +2120,7 @@ const server = http.createServer(async (req, res) => {
     if (statusFilter && !validStatuses.includes(statusFilter)) {
       return json(res, 400, { code: "invalid_status", message: "status must be one of: running, success, error, skipped" });
     }
+    const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
     const since = (url.searchParams.get("since") || "").trim();
     const until = (url.searchParams.get("until") || "").trim();
     const sinceMs = since ? Date.parse(since) : NaN;
@@ -1971,6 +2133,7 @@ const server = http.createServer(async (req, res) => {
     }
     const all = (scheduleRuns.get(m[1]) || []).filter((run) => {
       if (statusFilter && String(run.status).toLowerCase() !== statusFilter) return false;
+      if (vmIDFilter && String(run.vm_id || "") !== vmIDFilter) return false;
       if (since || until) {
         const startMs = run.started_at ? Date.parse(run.started_at) : NaN;
         if (isNaN(startMs)) return false;

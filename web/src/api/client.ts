@@ -62,8 +62,8 @@ function parseJSONSafe(text: string) {
 
 // --- VMs ---
 export const vms = {
-  list: ({ tag = '', status = '', search = '', image = '', defaultUser = '', network = '', autoStart = '', locked = '', since = '', until = '', sort = '', order = '', page, perPage }: { tag?: string; status?: string; search?: string; image?: string; defaultUser?: string; network?: string; autoStart?: 'true' | 'false' | ''; locked?: 'true' | 'false' | ''; since?: string; until?: string; sort?: 'id' | 'name' | 'created_at' | 'state' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, search: search || undefined, image: image || undefined, default_user: defaultUser || undefined, network: network || undefined, auto_start: autoStart || undefined, locked: locked || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  list: ({ tag = '', status = '', search = '', image = '', defaultUser = '', network = '', autoStart = '', locked = '', since = '', until = '', minCpus = '', maxCpus = '', minRamMb = '', maxRamMb = '', minDiskGb = '', maxDiskGb = '', sort = '', order = '', page, perPage }: { tag?: string; status?: string; search?: string; image?: string; defaultUser?: string; network?: string; autoStart?: 'true' | 'false' | ''; locked?: 'true' | 'false' | ''; since?: string; until?: string; minCpus?: string; maxCpus?: string; minRamMb?: string; maxRamMb?: string; minDiskGb?: string; maxDiskGb?: string; sort?: 'id' | 'name' | 'created_at' | 'state' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/vms', { params: { query: { tag, status, search: search || undefined, image: image || undefined, default_user: defaultUser || undefined, network: network || undefined, auto_start: autoStart || undefined, locked: locked || undefined, since: since || undefined, until: until || undefined, min_cpus: minCpus || undefined, max_cpus: maxCpus || undefined, min_ram_mb: minRamMb || undefined, max_ram_mb: maxRamMb || undefined, min_disk_gb: minDiskGb || undefined, max_disk_gb: maxDiskGb || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   get: (id: string) => unwrap(apiClient.GET('/vms/{vmID}', { params: { path: { vmID: id } } })),
   create: (spec: paths['/vms']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/vms', { body: spec })),
@@ -209,16 +209,20 @@ export const images = {
 export const ports = {
   list: (
     vmId: string,
-    opts: { sort?: string; order?: string; search?: string; tag?: string; protocol?: string; page?: number; perPage?: number } = {},
+    opts: { sort?: string; order?: string; search?: string; tag?: string; protocol?: string; minHostPort?: string; maxHostPort?: string; minGuestPort?: string; maxGuestPort?: string; page?: number; perPage?: number } = {},
   ) => {
     const query: Record<string, string | number> = {};
-    if (opts.sort)     query.sort     = opts.sort;
-    if (opts.order)    query.order    = opts.order;
-    if (opts.search)   query.search   = opts.search;
-    if (opts.tag)      query.tag      = opts.tag;
-    if (opts.protocol) query.protocol = opts.protocol;
-    if (opts.page)     query.page     = opts.page;
-    if (opts.perPage)  query.per_page = opts.perPage;
+    if (opts.sort)         query.sort           = opts.sort;
+    if (opts.order)        query.order          = opts.order;
+    if (opts.search)       query.search         = opts.search;
+    if (opts.tag)          query.tag            = opts.tag;
+    if (opts.protocol)     query.protocol       = opts.protocol;
+    if (opts.minHostPort)  query.min_host_port  = opts.minHostPort;
+    if (opts.maxHostPort)  query.max_host_port  = opts.maxHostPort;
+    if (opts.minGuestPort) query.min_guest_port = opts.minGuestPort;
+    if (opts.maxGuestPort) query.max_guest_port = opts.maxGuestPort;
+    if (opts.page)         query.page           = opts.page;
+    if (opts.perPage)     query.per_page      = opts.perPage;
     return unwrap(apiClient.GET('/vms/{vmID}/ports', {
       params: { path: { vmID: vmId }, query: query as any },
     } as any), { withMeta: true });
@@ -267,8 +271,8 @@ export const ports = {
 
 // --- Templates ---
 export const templates = {
-  list: ({ page, perPage, tag, search, image, defaultUser, since, until, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; since?: string; until?: string; sort?: string; order?: string } = {}) =>
-    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, since: since || undefined, until: until || undefined, sort, order } } }), { withMeta: true }),
+  list: ({ page, perPage, tag, search, image, defaultUser, network, since, until, minCpus, maxCpus, minRamMb, maxRamMb, minDiskGb, maxDiskGb, sort, order }: { page?: number; perPage?: number; tag?: string; search?: string; image?: string; defaultUser?: string; network?: string; since?: string; until?: string; minCpus?: string; maxCpus?: string; minRamMb?: string; maxRamMb?: string; minDiskGb?: string; maxDiskGb?: string; sort?: string; order?: string } = {}) =>
+    unwrap(apiClient.GET('/templates', { params: { query: { page, per_page: perPage, tag, search, image, default_user: defaultUser || undefined, network: network || undefined, since: since || undefined, until: until || undefined, min_cpus: minCpus || undefined, max_cpus: maxCpus || undefined, min_ram_mb: minRamMb || undefined, max_ram_mb: maxRamMb || undefined, min_disk_gb: minDiskGb || undefined, max_disk_gb: maxDiskGb || undefined, sort, order } as any } } as any), { withMeta: true }),
   create: (spec: paths['/templates']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/templates', { body: spec })),
   update: (id: string, patch: { description?: string; tags?: string[] }) =>
@@ -364,8 +368,8 @@ export const webhooks = {
 // `sort`/`order` whitelist mirrors the daemon: sort one of
 // id|name|created_at|next_fire_at (default id); order asc|desc (default asc).
 export const schedules = {
-  list: ({ page, perPage, vmId = '', tagSelector = '', action = '', enabled = '', search = '', since = '', until = '', sort = '', order = '' }: { page?: number; perPage?: number; vmId?: string; tagSelector?: string; action?: 'snapshot' | 'start' | 'stop' | 'restart' | ''; enabled?: 'true' | 'false' | ''; search?: string; since?: string; until?: string; sort?: 'id' | 'name' | 'created_at' | 'next_fire_at' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
-    unwrap(apiClient.GET('/schedules', { params: { query: { vm_id: vmId || undefined, tag_selector: tagSelector || undefined, action: action || undefined, enabled: enabled || undefined, search: search || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  list: ({ page, perPage, vmId = '', tagSelector = '', action = '', catchUpPolicy = '', enabled = '', search = '', since = '', until = '', sort = '', order = '' }: { page?: number; perPage?: number; vmId?: string; tagSelector?: string; action?: 'snapshot' | 'start' | 'stop' | 'restart' | ''; catchUpPolicy?: 'skip' | 'run_once' | 'run_all' | ''; enabled?: 'true' | 'false' | ''; search?: string; since?: string; until?: string; sort?: 'id' | 'name' | 'created_at' | 'next_fire_at' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
+    unwrap(apiClient.GET('/schedules', { params: { query: { vm_id: vmId || undefined, tag_selector: tagSelector || undefined, action: action || undefined, catch_up_policy: catchUpPolicy || undefined, enabled: enabled || undefined, search: search || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   get: (id: string) => unwrap(apiClient.GET('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
   create: (spec: paths['/schedules']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/schedules', { body: spec as any })),
@@ -373,8 +377,8 @@ export const schedules = {
     unwrap(apiClient.PATCH('/schedules/{scheduleID}', { params: { path: { scheduleID: id } }, body: patch as any })),
   delete: (id: string) =>
     unwrap(apiClient.DELETE('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
-  runs: (id: string, { page, perPage, status = '', since = '', until = '' }: { page?: number; perPage?: number; status?: 'running' | 'success' | 'error' | 'skipped' | ''; since?: string; until?: string } = {}) =>
-    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { status: status || undefined, since: since || undefined, until: until || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  runs: (id: string, { page, perPage, status = '', vmId = '', since = '', until = '' }: { page?: number; perPage?: number; status?: 'running' | 'success' | 'error' | 'skipped' | ''; vmId?: string; since?: string; until?: string } = {}) =>
+    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { status: status || undefined, vm_id: vmId || undefined, since: since || undefined, until: until || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   runNow: (id: string) =>
     unwrap(apiClient.POST('/schedules/{scheduleID}/run-now', { params: { path: { scheduleID: id } } })),
 };

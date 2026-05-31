@@ -2703,6 +2703,218 @@ func TestCLI_ImageList_RejectsNegativeMaxSize(t *testing.T) {
 	}
 }
 
+// --- VM list --min-cpus / --max-cpus (5.4.44) ---
+
+func seedCPUVMs(mock interface {
+	SeedVM(*types.VM)
+}) {
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "small", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "mid", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 80}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "big", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 8, RAMMB: 8192, DiskGB: 500}})
+}
+
+func TestCLI_VMList_FilterByMinCpus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-cpus", "4")
+	if err != nil {
+		t.Fatalf("vm list --min-cpus: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxCpus(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-cpus", "4")
+	if err != nil {
+		t.Fatalf("vm list --max-cpus: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByCpuRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-cpus", "3", "--max-cpus", "6")
+	if err != nil {
+		t.Fatalf("vm list cpu range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinCpus(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-cpus", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-cpus") {
+		t.Fatalf("expected invalid --min-cpus error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxCpus(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-cpus=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-cpus") {
+		t.Fatalf("expected invalid --max-cpus error, got %v", err)
+	}
+}
+
+// --- VM list --min-ram-mb / --max-ram-mb (5.4.48) ---
+
+func TestCLI_VMList_FilterByMinRAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock) // small=2048, mid=4096, big=8192 MB
+
+	out, err := runCLI("vm", "list", "--min-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("vm list --min-ram-mb: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 4096 MB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxRAM(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("vm list --max-ram-mb: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 4096 MB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByRAMRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-ram-mb", "3000", "--max-ram-mb", "5000")
+	if err != nil {
+		t.Fatalf("vm list ram range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinRAM(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-ram-mb", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-ram-mb") {
+		t.Fatalf("expected invalid --min-ram-mb error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxRAM(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-ram-mb=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-ram-mb") {
+		t.Fatalf("expected invalid --max-ram-mb error, got %v", err)
+	}
+}
+
+// --- VM list --min-disk-gb / --max-disk-gb (5.4.50) ---
+
+func TestCLI_VMList_FilterByMinDisk(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock) // small=20, mid=80, big=500 GB
+
+	out, err := runCLI("vm", "list", "--min-disk-gb", "80")
+	if err != nil {
+		t.Fatalf("vm list --min-disk-gb: %v", err)
+	}
+	if strings.Contains(out, "small") || !strings.Contains(out, "mid") || !strings.Contains(out, "big") {
+		t.Fatalf("expected mid+big (>= 80 GB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMaxDisk(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--max-disk-gb", "80")
+	if err != nil {
+		t.Fatalf("vm list --max-disk-gb: %v", err)
+	}
+	if !strings.Contains(out, "small") || !strings.Contains(out, "mid") || strings.Contains(out, "big") {
+		t.Fatalf("expected small+mid (<= 80 GB), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskRange(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	seedCPUVMs(mock)
+
+	out, err := runCLI("vm", "list", "--min-disk-gb", "50", "--max-disk-gb", "100")
+	if err != nil {
+		t.Fatalf("vm list disk range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + only "mid"
+		t.Fatalf("expected header + 1 row (mid), got %d: %v", len(rows), rows)
+	}
+	if rows[1][1] != "mid" {
+		t.Fatalf("expected only mid in range, got %q", rows[1][1])
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidMinDisk(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--min-disk-gb", "lots")
+	if err == nil || !strings.Contains(err.Error(), "invalid --min-disk-gb") {
+		t.Fatalf("expected invalid --min-disk-gb error, got %v", err)
+	}
+}
+
+func TestCLI_VMList_RejectsNegativeMaxDisk(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--max-disk-gb=-1")
+	if err == nil || !strings.Contains(err.Error(), "invalid --max-disk-gb") {
+		t.Fatalf("expected invalid --max-disk-gb error, got %v", err)
+	}
+}
+
 // --- Image list --search (5.4.9) ---
 
 func TestCLI_ImageList_FilterBySearch_MatchesName(t *testing.T) {
@@ -4205,6 +4417,170 @@ func TestCLI_PortList_FilterByProtocol_ComposesWithTag(t *testing.T) {
 	}
 }
 
+func TestCLI_PortList_FilterByMinHostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // host ports: 22001, 8081, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-host-port", "9000")
+	if err != nil {
+		t.Fatalf("port list --min-host-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 9090 + 22001
+		t.Fatalf("expected header + 2 rows (host_port >= 9000), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "8081") {
+		t.Errorf("8081 should be excluded by --min-host-port 9000, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByMaxHostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // host ports: 22001, 8081, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--max-host-port", "9090")
+	if err != nil {
+		t.Fatalf("port list --max-host-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 8081 + 9090
+		t.Fatalf("expected header + 2 rows (host_port <= 9090), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "22001") {
+		t.Errorf("22001 should be excluded by --max-host-port 9090, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByHostPortRange(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // host ports: 22001, 8081, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-host-port", "8000", "--max-host-port", "9000")
+	if err != nil {
+		t.Fatalf("port list range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + 8081 only
+		t.Fatalf("expected header + 1 row (8081 in [8000,9000]), got %d from %q", len(rows), out)
+	}
+	if !strings.Contains(out, "8081") {
+		t.Errorf("expected 8081 in range output, got %q", out)
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidMinHostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--min-host-port", "abc")
+	if err == nil {
+		t.Fatal("expected error for non-numeric --min-host-port")
+	}
+	if !strings.Contains(err.Error(), "--min-host-port") {
+		t.Errorf("error %q should name --min-host-port", err.Error())
+	}
+}
+
+func TestCLI_PortList_RejectsNegativeMaxHostPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--max-host-port", "-1")
+	if err == nil {
+		t.Fatal("expected error for negative --max-host-port")
+	}
+	if !strings.Contains(err.Error(), "--max-host-port") {
+		t.Errorf("error %q should name --max-host-port", err.Error())
+	}
+}
+
+func TestCLI_PortList_FilterByMinGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-guest-port", "80")
+	if err != nil {
+		t.Fatalf("port list --min-guest-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 80 + 9090
+		t.Fatalf("expected header + 2 rows (guest_port >= 80), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "22001") {
+		t.Errorf("guest 22 (host 22001) should be excluded by --min-guest-port 80, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByMaxGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--max-guest-port", "80")
+	if err != nil {
+		t.Fatalf("port list --max-guest-port: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 22 + 80
+		t.Fatalf("expected header + 2 rows (guest_port <= 80), got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "9090") {
+		t.Errorf("guest 9090 should be excluded by --max-guest-port 80, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestPortRange(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s) // guest ports: 22, 80, 9090
+
+	out, err := runCLI("port", "list", "vm-s", "--min-guest-port", "50", "--max-guest-port", "100")
+	if err != nil {
+		t.Fatalf("port list guest range: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + guest 80 only
+		t.Fatalf("expected header + 1 row (guest 80 in [50,100]), got %d from %q", len(rows), out)
+	}
+	if !strings.Contains(out, "8081") {
+		t.Errorf("expected the host 8081 / guest 80 rule in range output, got %q", out)
+	}
+}
+
+func TestCLI_PortList_RejectsInvalidMinGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--min-guest-port", "abc")
+	if err == nil {
+		t.Fatal("expected error for non-numeric --min-guest-port")
+	}
+	if !strings.Contains(err.Error(), "--min-guest-port") {
+		t.Errorf("error %q should name --min-guest-port", err.Error())
+	}
+}
+
+func TestCLI_PortList_RejectsNegativeMaxGuestPort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListFixtures(t, s)
+
+	_, err := runCLI("port", "list", "vm-s", "--max-guest-port", "-1")
+	if err == nil {
+		t.Fatal("expected error for negative --max-guest-port")
+	}
+	if !strings.Contains(err.Error(), "--max-guest-port") {
+		t.Errorf("error %q should name --max-guest-port", err.Error())
+	}
+}
+
 func TestCLI_PortList_ShowsTagsColumn(t *testing.T) {
 	s, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()
@@ -5274,6 +5650,103 @@ func TestCLI_TemplateList_FilterByDefaultUser_NoMatch(t *testing.T) {
 	}
 }
 
+// --- template list --network (roadmap 5.4.45) ---
+
+func tmplNet(names ...string) []types.NetworkAttachment {
+	attachments := make([]types.NetworkAttachment, 0, len(names))
+	for _, n := range names {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return attachments
+}
+
+func TestCLI_TemplateList_FilterByNetwork_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "storage-tpl", Image: "rocky9.qcow2", Networks: tmplNet("storage-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "data-net")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected data-tpl in output, got %q", out)
+	}
+	if strings.Contains(out, "storage-tpl") {
+		t.Fatalf("did not expect storage-tpl in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("Data-Net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "storage-tpl", Image: "rocky9.qcow2", Networks: tmplNet("storage-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "DATA-NET")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected case-insensitive match for data-tpl, got %q", out)
+	}
+	if strings.Contains(out, "storage-tpl") {
+		t.Fatalf("did not expect storage-tpl in output, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "no-net", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "   ")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if !strings.Contains(out, "data-tpl") || !strings.Contains(out, "no-net") {
+		t.Fatalf("expected every template (whitespace --network is a no-op), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByNetwork_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "data-tpl", Image: "rocky9.qcow2", Networks: tmplNet("data-net"), CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--network", "mgmt-net")
+	if err != nil {
+		t.Fatalf("template list --network: %v", err)
+	}
+	if strings.Contains(out, "data-tpl") {
+		t.Fatalf("expected empty list for no-match, got %q", out)
+	}
+}
+
 // --- template list --since / --until (roadmap 5.4.31) ---
 
 func TestCLI_TemplateList_FilterBySince(t *testing.T) {
@@ -5377,6 +5850,270 @@ func TestCLI_TemplateList_EmptySinceOmitsFilter(t *testing.T) {
 	}
 	if !strings.Contains(out, "any") {
 		t.Fatalf("whitespace --since should be no-op, got %q", out)
+	}
+}
+
+// --- template list --min-cpus / --max-cpus (roadmap 5.4.51) ---
+
+func seedCPUTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-small", Name: "small-tpl", Image: "rocky9.qcow2", CPUs: 2, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-mid", Name: "mid-tpl", Image: "rocky9.qcow2", CPUs: 4, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-big", Name: "big-tpl", Image: "rocky9.qcow2", CPUs: 16, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-cpus", "4")
+	if err != nil {
+		t.Fatalf("template list --min-cpus: %v", err)
+	}
+	if strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || !strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-cpus", "4")
+	if err != nil {
+		t.Fatalf("template list --max-cpus: %v", err)
+	}
+	if !strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByCpusRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-cpus", "3", "--max-cpus", "8")
+	if err != nil {
+		t.Fatalf("template list cpu range: %v", err)
+	}
+	if strings.Contains(out, "small-tpl") || !strings.Contains(out, "mid-tpl") || strings.Contains(out, "big-tpl") {
+		t.Fatalf("expected only mid-tpl in [3,8] vCPUs, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-cpus", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-cpus")
+	}
+	if !strings.Contains(err.Error(), "--min-cpus") {
+		t.Fatalf("expected error to mention --min-cpus, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxCpus(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedCPUTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-cpus", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-cpus")
+	}
+	if !strings.Contains(err.Error(), "--max-cpus") {
+		t.Fatalf("expected error to mention --max-cpus, got %v", err)
+	}
+}
+
+// --- template list --min-ram-mb / --max-ram-mb (roadmap 5.4.52) ---
+
+func seedRAMTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-rsmall", Name: "small-ram-tpl", Image: "rocky9.qcow2", RAMMB: 1024, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-rmid", Name: "mid-ram-tpl", Image: "rocky9.qcow2", RAMMB: 4096, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-rbig", Name: "big-ram-tpl", Image: "rocky9.qcow2", RAMMB: 16384, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("template list --min-ram-mb: %v", err)
+	}
+	if strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || !strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected mid+big (>= 4096 MB RAM), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-ram-mb", "4096")
+	if err != nil {
+		t.Fatalf("template list --max-ram-mb: %v", err)
+	}
+	if !strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected small+mid (<= 4096 MB RAM), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByRAMRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-ram-mb", "2048", "--max-ram-mb", "8192")
+	if err != nil {
+		t.Fatalf("template list ram range: %v", err)
+	}
+	if strings.Contains(out, "small-ram-tpl") || !strings.Contains(out, "mid-ram-tpl") || strings.Contains(out, "big-ram-tpl") {
+		t.Fatalf("expected only mid-ram-tpl in [2048,8192] MB RAM, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-ram-mb", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-ram-mb")
+	}
+	if !strings.Contains(err.Error(), "--min-ram-mb") {
+		t.Fatalf("expected error to mention --min-ram-mb, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxRAM(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedRAMTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-ram-mb", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-ram-mb")
+	}
+	if !strings.Contains(err.Error(), "--max-ram-mb") {
+		t.Fatalf("expected error to mention --max-ram-mb, got %v", err)
+	}
+}
+
+// --- template list --min-disk-gb / --max-disk-gb (roadmap 5.4.53) ---
+
+func seedDiskTemplates(t *testing.T, s interface {
+	PutTemplate(*types.VMTemplate) error
+}) {
+	t.Helper()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tpl := range []*types.VMTemplate{
+		{ID: "tmpl-dsmall", Name: "small-dtpl", Image: "rocky9.qcow2", DiskGB: 10, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-dmid", Name: "mid-dtpl", Image: "rocky9.qcow2", DiskGB: 50, CreatedAt: t0, UpdatedAt: t0},
+		{ID: "tmpl-dbig", Name: "big-dtpl", Image: "rocky9.qcow2", DiskGB: 200, CreatedAt: t0, UpdatedAt: t0},
+	} {
+		if err := s.PutTemplate(tpl); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+}
+
+func TestCLI_TemplateList_FilterByMinDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-disk-gb", "50")
+	if err != nil {
+		t.Fatalf("template list --min-disk-gb: %v", err)
+	}
+	if strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || !strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected mid+big (>= 50 GB), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByMaxDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--max-disk-gb", "50")
+	if err != nil {
+		t.Fatalf("template list --max-disk-gb: %v", err)
+	}
+	if !strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected small+mid (<= 50 GB), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByDiskRange(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	out, err := runCLI("template", "list", "--min-disk-gb", "40", "--max-disk-gb", "100")
+	if err != nil {
+		t.Fatalf("template list disk range: %v", err)
+	}
+	if strings.Contains(out, "small-dtpl") || !strings.Contains(out, "mid-dtpl") || strings.Contains(out, "big-dtpl") {
+		t.Fatalf("expected only mid-dtpl in [40,100] GB, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_RejectsInvalidMinDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--min-disk-gb", "lots")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric --min-disk-gb")
+	}
+	if !strings.Contains(err.Error(), "--min-disk-gb") {
+		t.Fatalf("expected error to mention --min-disk-gb, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_RejectsNegativeMaxDisk(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedDiskTemplates(t, s)
+
+	_, err := runCLI("template", "list", "--max-disk-gb", "-2")
+	if err == nil {
+		t.Fatalf("expected error for negative --max-disk-gb")
+	}
+	if !strings.Contains(err.Error(), "--max-disk-gb") {
+		t.Fatalf("expected error to mention --max-disk-gb, got %v", err)
 	}
 }
 

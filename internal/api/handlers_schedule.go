@@ -151,7 +151,10 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // exact-membership against the schedule's tag_selector list — a schedule
 // matches when any entry equals the value; schedules with an empty
 // tag_selector (vm_id-targeted or all-VMs) are NOT matched, mirroring the
-// webhook ?event_type= membership semantics), action (exact), enabled
+// webhook ?event_type= membership semantics), action (exact), catch_up_policy
+// (case-insensitive exact-match: skip|run_once|run_all; an empty stored policy
+// is treated as "skip" so ?catch_up_policy=skip matches it; invalid values
+// return 400 invalid_catch_up_policy), enabled
 // (tristate true/false), since/until (inclusive RFC3339 bounds on created_at;
 // invalid values return 400 invalid_since/invalid_until; a schedule with a
 // zero created_at is filtered OUT when any bound is set), search
@@ -199,6 +202,11 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
 	tagSelectorFilter := strings.ToLower(strings.TrimSpace(q.Get("tag_selector")))
 	actionFilter := strings.ToLower(strings.TrimSpace(q.Get("action")))
+	catchUpFilter := strings.ToLower(strings.TrimSpace(q.Get("catch_up_policy")))
+	if catchUpFilter != "" && !types.IsValidCatchUpPolicy(types.ScheduleCatchUpPolicy(catchUpFilter)) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_catch_up_policy", "catch_up_policy must be one of: skip, run_once, run_all")
+		return
+	}
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
 	all, err := s.scheduleStore.ListSchedules()
@@ -219,6 +227,9 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if actionFilter != "" && string(sched.Action) != actionFilter {
+			continue
+		}
+		if catchUpFilter != "" && scheduleCatchUpPolicy(sched) != catchUpFilter {
 			continue
 		}
 		if enabledSet && sched.Enabled != enabledFilter {
@@ -256,6 +267,18 @@ func scheduleHasTagSelector(sched *types.Schedule, needle string) bool {
 		}
 	}
 	return false
+}
+
+// scheduleCatchUpPolicy returns the schedule's effective catch-up policy
+// (lowercased), treating an empty stored value as "skip" — the default the
+// engine applies at fire time. This lets ?catch_up_policy=skip match schedules
+// persisted without an explicit policy, mirroring the VM ?default_user=root
+// empty-means-root filter semantics.
+func scheduleCatchUpPolicy(sched *types.Schedule) string {
+	if sched.CatchUpPolicy == "" {
+		return string(types.ScheduleCatchUpSkip)
+	}
+	return strings.ToLower(string(sched.CatchUpPolicy))
 }
 
 func scheduleMatchesSearch(sched *types.Schedule, needle string) bool {
@@ -434,9 +457,11 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 //
 // Filters (applied before pagination so X-Total-Count reflects the post-filter
 // population): status (exact, case-insensitive: running|success|error|skipped;
-// invalid values return 400 invalid_status), since/until (inclusive RFC3339
-// bounds on started_at; invalid values return 400 invalid_since/invalid_until;
-// a run with a zero started_at is filtered OUT when any bound is set).
+// invalid values return 400 invalid_status), vm_id (exact, case-sensitive — VM
+// IDs are opaque vm-<unix-nano> strings; whitespace-trimmed; empty disables
+// the filter), since/until (inclusive RFC3339 bounds on started_at; invalid
+// values return 400 invalid_since/invalid_until; a run with a zero started_at
+// is filtered OUT when any bound is set).
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -453,6 +478,7 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_status", "status must be one of: running, success, error, skipped")
 		return
 	}
+	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
 	sinceTime, sinceSet, apiErr := parseTimeRangeParam(q.Get("since"), "since")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -476,6 +502,9 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if statusFilter != "" && string(run.Status) != statusFilter {
+			continue
+		}
+		if vmIDFilter != "" && run.VMID != vmIDFilter {
 			continue
 		}
 		if !snapshotInTimeRange(run.StartedAt, sinceTime, sinceSet, untilTime, untilSet) {

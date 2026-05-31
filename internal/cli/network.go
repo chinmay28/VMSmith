@@ -113,6 +113,10 @@ var portListCmd = &cobra.Command{
 		searchRaw, _ := cmd.Flags().GetString("search")
 		tagRaw, _ := cmd.Flags().GetString("tag")
 		protocolRaw, _ := cmd.Flags().GetString("protocol")
+		minHostPortRaw, _ := cmd.Flags().GetString("min-host-port")
+		maxHostPortRaw, _ := cmd.Flags().GetString("max-host-port")
+		minGuestPortRaw, _ := cmd.Flags().GetString("min-guest-port")
+		maxGuestPortRaw, _ := cmd.Flags().GetString("max-guest-port")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
@@ -122,6 +126,22 @@ var portListCmd = &cobra.Command{
 		protocolFilter := types.Protocol(strings.ToLower(strings.TrimSpace(protocolRaw)))
 		if protocolFilter != "" && protocolFilter != types.ProtocolTCP && protocolFilter != types.ProtocolUDP {
 			return fmt.Errorf("invalid --protocol %q: must be 'tcp' or 'udp'", protocolRaw)
+		}
+		minHostPort, minHostPortSet, err := parseCLIPortRange(minHostPortRaw, "--min-host-port")
+		if err != nil {
+			return err
+		}
+		maxHostPort, maxHostPortSet, err := parseCLIPortRange(maxHostPortRaw, "--max-host-port")
+		if err != nil {
+			return err
+		}
+		minGuestPort, minGuestPortSet, err := parseCLIPortRange(minGuestPortRaw, "--min-guest-port")
+		if err != nil {
+			return err
+		}
+		maxGuestPort, maxGuestPortSet, err := parseCLIPortRange(maxGuestPortRaw, "--max-guest-port")
+		if err != nil {
+			return err
 		}
 		if sortField == "" {
 			sortField = types.PortForwardSortID
@@ -143,12 +163,12 @@ var portListCmd = &cobra.Command{
 		default:
 			return fmt.Errorf("invalid --order %q: must be 'asc' or 'desc'", order)
 		}
-		limit, offset, err := normalizeLimitOffset(limit, offset)
+		limit, offset, err = normalizeLimitOffset(limit, offset)
 		if err != nil {
 			return err
 		}
 
-		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter, "protocol", string(protocolFilter), "limit", fmt.Sprintf("%d", limit), "offset", fmt.Sprintf("%d", offset))
+		logger.Info("cli", "port list", "vm_id", vmID, "sort", sortField, "order", order, "search", searchFilter, "tag", tagFilter, "protocol", string(protocolFilter), "min_host_port", minHostPortRaw, "max_host_port", maxHostPortRaw, "min_guest_port", minGuestPortRaw, "max_guest_port", maxGuestPortRaw, "limit", fmt.Sprintf("%d", limit), "offset", fmt.Sprintf("%d", offset))
 
 		pf, cleanup, err := newPortForwarder()
 		if err != nil {
@@ -178,6 +198,24 @@ var portListCmd = &cobra.Command{
 			filtered := ports[:0]
 			for _, p := range ports {
 				if p.Protocol == protocolFilter {
+					filtered = append(filtered, p)
+				}
+			}
+			ports = filtered
+		}
+		if minHostPortSet || maxHostPortSet {
+			filtered := ports[:0]
+			for _, p := range ports {
+				if portInCLIRange(p.HostPort, minHostPort, minHostPortSet, maxHostPort, maxHostPortSet) {
+					filtered = append(filtered, p)
+				}
+			}
+			ports = filtered
+		}
+		if minGuestPortSet || maxGuestPortSet {
+			filtered := ports[:0]
+			for _, p := range ports {
+				if portInCLIRange(p.GuestPort, minGuestPort, minGuestPortSet, maxGuestPort, maxGuestPortSet) {
 					filtered = append(filtered, p)
 				}
 			}
@@ -419,6 +457,10 @@ func init() {
 	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, guest_ip, and tags")
 	portListCmd.Flags().String("tag", "", "filter by a single tag (case-insensitive exact match)")
 	portListCmd.Flags().String("protocol", "", "filter by transport protocol: tcp or udp (case-insensitive; empty = no filter)")
+	portListCmd.Flags().String("min-host-port", "", "only show forwards with host_port >= this value (inclusive; empty = no lower bound)")
+	portListCmd.Flags().String("max-host-port", "", "only show forwards with host_port <= this value (inclusive; empty = no upper bound)")
+	portListCmd.Flags().String("min-guest-port", "", "only show forwards with guest_port >= this value (inclusive; empty = no lower bound)")
+	portListCmd.Flags().String("max-guest-port", "", "only show forwards with guest_port <= this value (inclusive; empty = no upper bound)")
 	portListCmd.Flags().Int("limit", 0, "maximum number of port forwards to show (0 = no limit)")
 	portListCmd.Flags().Int("offset", 0, "number of port forwards to skip before printing results")
 

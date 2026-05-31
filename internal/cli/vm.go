@@ -147,6 +147,12 @@ var vmListCmd = &cobra.Command{
 		orderField, _ := cmd.Flags().GetString("order")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
+		minCPUsRaw, _ := cmd.Flags().GetString("min-cpus")
+		maxCPUsRaw, _ := cmd.Flags().GetString("max-cpus")
+		minRAMRaw, _ := cmd.Flags().GetString("min-ram-mb")
+		maxRAMRaw, _ := cmd.Flags().GetString("max-ram-mb")
+		minDiskRaw, _ := cmd.Flags().GetString("min-disk-gb")
+		maxDiskRaw, _ := cmd.Flags().GetString("max-disk-gb")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		tagFilter = strings.TrimSpace(strings.ToLower(tagFilter))
@@ -168,6 +174,30 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 		untilTime, untilSet, err := parseCLITimeRange(untilRaw, "--until")
+		if err != nil {
+			return err
+		}
+		minCPUs, minCPUsSet, err := parseCLICountRange(minCPUsRaw, "--min-cpus")
+		if err != nil {
+			return err
+		}
+		maxCPUs, maxCPUsSet, err := parseCLICountRange(maxCPUsRaw, "--max-cpus")
+		if err != nil {
+			return err
+		}
+		minRAM, minRAMSet, err := parseCLICountRange(minRAMRaw, "--min-ram-mb")
+		if err != nil {
+			return err
+		}
+		maxRAM, maxRAMSet, err := parseCLICountRange(maxRAMRaw, "--max-ram-mb")
+		if err != nil {
+			return err
+		}
+		minDisk, minDiskSet, err := parseCLICountRange(minDiskRaw, "--min-disk-gb")
+		if err != nil {
+			return err
+		}
+		maxDisk, maxDiskSet, err := parseCLICountRange(maxDiskRaw, "--max-disk-gb")
 		if err != nil {
 			return err
 		}
@@ -207,10 +237,19 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
+					continue
+				}
+				if !countInCLIRange(v.Spec.CPUs, minCPUs, minCPUsSet, maxCPUs, maxCPUsSet) {
+					continue
+				}
+				if !countInCLIRange(v.Spec.RAMMB, minRAM, minRAMSet, maxRAM, maxRAMSet) {
+					continue
+				}
+				if !countInCLIRange(v.Spec.DiskGB, minDisk, minDiskSet, maxDisk, maxDiskSet) {
 					continue
 				}
 				if imageFilter != "" && !strings.EqualFold(v.Spec.Image, imageFilter) {
@@ -1038,6 +1077,12 @@ Examples:
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmListCmd.Flags().String("since", "", "keep VMs created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	vmListCmd.Flags().String("until", "", "keep VMs created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
+	vmListCmd.Flags().String("min-cpus", "", "keep VMs with at least this many vCPUs (inclusive; non-negative integer)")
+	vmListCmd.Flags().String("max-cpus", "", "keep VMs with at most this many vCPUs (inclusive; non-negative integer)")
+	vmListCmd.Flags().String("min-ram-mb", "", "keep VMs with at least this much RAM in MB (inclusive; non-negative integer)")
+	vmListCmd.Flags().String("max-ram-mb", "", "keep VMs with at most this much RAM in MB (inclusive; non-negative integer)")
+	vmListCmd.Flags().String("min-disk-gb", "", "keep VMs with at least this much disk in GB (inclusive; non-negative integer)")
+	vmListCmd.Flags().String("max-disk-gb", "", "keep VMs with at most this much disk in GB (inclusive; non-negative integer)")
 	vmStartCmd.Flags().Bool("all", false, "start all stopped VMs")
 	vmStartCmd.Flags().String("tag", "", "limit --all to VMs with the given tag")
 	vmStopCmd.Flags().Bool("all", false, "stop all running VMs")

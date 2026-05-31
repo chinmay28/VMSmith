@@ -42,6 +42,18 @@ export default function VMList() {
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
   const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
+  const [minCpusInput, setMinCpusInput] = useState(searchParams.get('min_cpus') || '');
+  const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
+  const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
+  const [maxCpusFilter, setMaxCpusFilter] = useState(searchParams.get('max_cpus') || '');
+  const [minRamInput, setMinRamInput] = useState(searchParams.get('min_ram_mb') || '');
+  const [minRamFilter, setMinRamFilter] = useState(searchParams.get('min_ram_mb') || '');
+  const [maxRamInput, setMaxRamInput] = useState(searchParams.get('max_ram_mb') || '');
+  const [maxRamFilter, setMaxRamFilter] = useState(searchParams.get('max_ram_mb') || '');
+  const [minDiskInput, setMinDiskInput] = useState(searchParams.get('min_disk_gb') || '');
+  const [minDiskFilter, setMinDiskFilter] = useState(searchParams.get('min_disk_gb') || '');
+  const [maxDiskInput, setMaxDiskInput] = useState(searchParams.get('max_disk_gb') || '');
+  const [maxDiskFilter, setMaxDiskFilter] = useState(searchParams.get('max_disk_gb') || '');
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkMessage, setBulkMessage] = useState(null);
   const [page, setPage] = useState(1);
@@ -51,8 +63,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -85,7 +97,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -124,6 +136,45 @@ export default function VMList() {
     return () => clearTimeout(handle);
   }, [networkInput]);
 
+  // Debounce the vCPU range inputs — the committed filters drive useFetch.
+  useEffect(() => {
+    const trimmed = minCpusInput.trim();
+    const handle = setTimeout(() => setMinCpusFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [minCpusInput]);
+
+  useEffect(() => {
+    const trimmed = maxCpusInput.trim();
+    const handle = setTimeout(() => setMaxCpusFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [maxCpusInput]);
+
+  // Debounce the RAM range inputs — the committed filters drive useFetch.
+  useEffect(() => {
+    const trimmed = minRamInput.trim();
+    const handle = setTimeout(() => setMinRamFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [minRamInput]);
+
+  useEffect(() => {
+    const trimmed = maxRamInput.trim();
+    const handle = setTimeout(() => setMaxRamFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [maxRamInput]);
+
+  // Debounce the disk range inputs — the committed filters drive useFetch.
+  useEffect(() => {
+    const trimmed = minDiskInput.trim();
+    const handle = setTimeout(() => setMinDiskFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [minDiskInput]);
+
+  useEffect(() => {
+    const trimmed = maxDiskInput.trim();
+    const handle = setTimeout(() => setMaxDiskFilter(trimmed), 250);
+    return () => clearTimeout(handle);
+  }, [maxDiskInput]);
+
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (sort && sort !== 'id') next.set('sort', sort); else next.delete('sort');
@@ -136,8 +187,14 @@ export default function VMList() {
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
+    if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
+    if (maxCpusFilter) next.set('max_cpus', maxCpusFilter); else next.delete('max_cpus');
+    if (minRamFilter) next.set('min_ram_mb', minRamFilter); else next.delete('min_ram_mb');
+    if (maxRamFilter) next.set('max_ram_mb', maxRamFilter); else next.delete('max_ram_mb');
+    if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
+    if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -266,6 +323,117 @@ export default function VMList() {
             </button>
           )}
         </div>
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Min vCPUs</span>
+          <input
+            type="number"
+            min="0"
+            value={minCpusInput}
+            onChange={(e) => setMinCpusInput(e.target.value)}
+            placeholder="0"
+            className="input w-20 py-1.5 text-sm"
+            data-testid="vm-list-min-cpus"
+            aria-label="Minimum vCPUs"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Max vCPUs</span>
+          <input
+            type="number"
+            min="0"
+            value={maxCpusInput}
+            onChange={(e) => setMaxCpusInput(e.target.value)}
+            placeholder="∞"
+            className="input w-20 py-1.5 text-sm"
+            data-testid="vm-list-max-cpus"
+            aria-label="Maximum vCPUs"
+          />
+        </label>
+        {(minCpusInput || maxCpusInput) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setMinCpusInput(''); setMaxCpusInput(''); }}
+            data-testid="vm-list-cpus-filter-clear"
+            aria-label="Clear vCPU filter"
+          >
+            Clear vCPUs
+          </button>
+        )}
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Min RAM (MB)</span>
+          <input
+            type="number"
+            min="0"
+            value={minRamInput}
+            onChange={(e) => setMinRamInput(e.target.value)}
+            placeholder="0"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-min-ram"
+            aria-label="Minimum RAM in MB"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Max RAM (MB)</span>
+          <input
+            type="number"
+            min="0"
+            value={maxRamInput}
+            onChange={(e) => setMaxRamInput(e.target.value)}
+            placeholder="∞"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-max-ram"
+            aria-label="Maximum RAM in MB"
+          />
+        </label>
+        {(minRamInput || maxRamInput) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setMinRamInput(''); setMaxRamInput(''); }}
+            data-testid="vm-list-ram-filter-clear"
+            aria-label="Clear RAM filter"
+          >
+            Clear RAM
+          </button>
+        )}
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Min disk (GB)</span>
+          <input
+            type="number"
+            min="0"
+            value={minDiskInput}
+            onChange={(e) => setMinDiskInput(e.target.value)}
+            placeholder="0"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-min-disk"
+            aria-label="Minimum disk in GB"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-steel-400">
+          <span>Max disk (GB)</span>
+          <input
+            type="number"
+            min="0"
+            value={maxDiskInput}
+            onChange={(e) => setMaxDiskInput(e.target.value)}
+            placeholder="∞"
+            className="input w-24 py-1.5 text-sm"
+            data-testid="vm-list-max-disk"
+            aria-label="Maximum disk in GB"
+          />
+        </label>
+        {(minDiskInput || maxDiskInput) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setMinDiskInput(''); setMaxDiskInput(''); }}
+            data-testid="vm-list-disk-filter-clear"
+            aria-label="Clear disk filter"
+          >
+            Clear disk
+          </button>
+        )}
       </div>
 
       {allTags.length > 0 && (

@@ -797,7 +797,7 @@ File: `~/.vmsmith/config.yaml` or `/etc/vmsmith/config.yaml`
 daemon:
   listen: "0.0.0.0:8080"
   pid_file: "/var/run/vmsmith.pid"
-  log_file: "~/.vmsmith/vmsmith.log"   # structured log output; leave empty to disable file logging
+  log_file: "/var/log/vmsmith/vmsmith.log"   # structured log output (absolute path; '~' is NOT expanded). Leave empty to disable file logging.
 
 libvirt:
   uri: "qemu:///system"        # use qemu:///session for rootless

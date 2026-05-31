@@ -115,6 +115,57 @@ export interface paths {
                      *     unknown / additive-composition semantics as `since`.
                      */
                     until?: string;
+                    /**
+                     * @description Inclusive lower bound on the VM's `spec.cpus` (vCPU count).
+                     *     VMs with fewer vCPUs are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_min_cpus`. Composes additively with every
+                     *     other list filter so `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    min_cpus?: number;
+                    /**
+                     * @description Inclusive upper bound on the VM's `spec.cpus` (vCPU count).
+                     *     VMs with more vCPUs are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_max_cpus`. Same count-range semantics as
+                     *     `min_cpus`.
+                     */
+                    max_cpus?: number;
+                    /**
+                     * @description Inclusive lower bound on the VM's `spec.ram_mb` (RAM in MB).
+                     *     VMs with less RAM are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_min_ram_mb`. Composes additively with every
+                     *     other list filter so `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    min_ram_mb?: number;
+                    /**
+                     * @description Inclusive upper bound on the VM's `spec.ram_mb` (RAM in MB).
+                     *     VMs with more RAM are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_max_ram_mb`. Same count-range semantics as
+                     *     `min_ram_mb`.
+                     */
+                    max_ram_mb?: number;
+                    /**
+                     * @description Inclusive lower bound on the VM's `spec.disk_gb` (disk in GB).
+                     *     VMs with less disk are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_min_disk_gb`. Composes additively with every
+                     *     other list filter so `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    min_disk_gb?: number;
+                    /**
+                     * @description Inclusive upper bound on the VM's `spec.disk_gb` (disk in GB).
+                     *     VMs with more disk are filtered out. Whitespace is trimmed;
+                     *     empty disables the bound. Non-numeric or negative values
+                     *     return 400 `invalid_max_disk_gb`. Same count-range semantics as
+                     *     `min_disk_gb`.
+                     */
+                    max_disk_gb?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1184,6 +1235,35 @@ export interface paths {
                      *     `search`.
                      */
                     protocol?: "tcp" | "udp";
+                    /**
+                     * @description Inclusive lower bound on the rule's `host_port`. Whitespace-trimmed;
+                     *     empty disables the bound; non-numeric or negative values return 400
+                     *     `invalid_min_host_port`. Applied after `protocol` and before
+                     *     `search`; composes additively with every other filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    min_host_port?: number;
+                    /**
+                     * @description Inclusive upper bound on the rule's `host_port`. Same shape as
+                     *     `min_host_port`; non-numeric or negative values return 400
+                     *     `invalid_max_host_port`.
+                     */
+                    max_host_port?: number;
+                    /**
+                     * @description Inclusive lower bound on the rule's `guest_port`. Whitespace-trimmed;
+                     *     empty disables the bound; non-numeric or negative values return 400
+                     *     `invalid_min_guest_port`. The symmetric counterpart to
+                     *     `min_host_port`; applied right after the host-port range and before
+                     *     `search`; composes additively with every other filter so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    min_guest_port?: number;
+                    /**
+                     * @description Inclusive upper bound on the rule's `guest_port`. Same shape as
+                     *     `min_guest_port`; non-numeric or negative values return 400
+                     *     `invalid_max_guest_port`.
+                     */
+                    max_guest_port?: number;
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };
@@ -1851,6 +1931,22 @@ export interface paths {
                      */
                     default_user?: string;
                     /**
+                     * @description Case-insensitive exact-match filter on the name of any of the
+                     *     template's additional network attachments (`networks[].name`). A
+                     *     template matches when any attachment name equals the value
+                     *     (any-of). Whitespace is trimmed before comparison; an empty value
+                     *     disables the filter. Closes the operator query "show me every
+                     *     template that attaches `data-net`". Mirrors the VMs `?network=`
+                     *     filter (5.4.36): the implicit primary NAT network is not
+                     *     represented in the template's networks list, so this only scopes
+                     *     to explicitly-attached extra networks operators name and group by
+                     *     ("data-net", "storage-net"). Composes additively with `?tag=`,
+                     *     `?image=`, `?default_user=`, `?search=`, `?since=`, `?until=`,
+                     *     `?sort=`, `?order=`, and pagination so `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    network?: string;
+                    /**
                      * @description RFC3339 timestamp lower bound (inclusive) on the template's
                      *     `created_at`. Templates created before this instant are
                      *     filtered out. Whitespace is trimmed; empty disables the
@@ -1872,6 +1968,64 @@ export interface paths {
                      *     / unknown / additive-composition semantics as `since`.
                      */
                     until?: string;
+                    /**
+                     * @description Inclusive lower bound on the template's `cpus` field.
+                     *     Templates with fewer vCPUs are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_min_cpus`. Composes additively with
+                     *     every other list filter so `X-Total-Count` reflects the
+                     *     post-filter population. Mirrors the VM `?min_cpus=` filter
+                     *     (5.4.44) — opens the same capacity-audit query against the
+                     *     template cohort.
+                     */
+                    min_cpus?: number;
+                    /**
+                     * @description Inclusive upper bound on the template's `cpus` field.
+                     *     Templates with more vCPUs are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_max_cpus`. Same count-range
+                     *     semantics as `min_cpus`.
+                     */
+                    max_cpus?: number;
+                    /**
+                     * @description Inclusive lower bound on the template's `ram_mb` field.
+                     *     Templates with less RAM are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_min_ram_mb`. Composes additively with
+                     *     every other list filter so `X-Total-Count` reflects the
+                     *     post-filter population. Mirrors the VM `?min_ram_mb=` filter
+                     *     (5.4.48) — opens the same capacity-audit query against the
+                     *     template cohort.
+                     */
+                    min_ram_mb?: number;
+                    /**
+                     * @description Inclusive upper bound on the template's `ram_mb` field.
+                     *     Templates with more RAM are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_max_ram_mb`. Same count-range
+                     *     semantics as `min_ram_mb`.
+                     */
+                    max_ram_mb?: number;
+                    /**
+                     * @description Inclusive lower bound on the template's `disk_gb` field.
+                     *     Templates with less disk are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_min_disk_gb`. Composes additively
+                     *     with every other list filter so `X-Total-Count` reflects the
+                     *     post-filter population. Mirrors the VM `?min_disk_gb=` filter
+                     *     (5.4.50) — opens the same capacity-audit query against the
+                     *     template cohort and completes the cpus/ram/disk capacity-audit
+                     *     trio on the template list.
+                     */
+                    min_disk_gb?: number;
+                    /**
+                     * @description Inclusive upper bound on the template's `disk_gb` field.
+                     *     Templates with more disk are filtered out. Whitespace is
+                     *     trimmed; empty disables the bound. Non-numeric or negative
+                     *     values return 400 `invalid_max_disk_gb`. Same count-range
+                     *     semantics as `min_disk_gb`.
+                     */
+                    max_disk_gb?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2568,6 +2722,16 @@ export interface paths {
                      */
                     action?: "snapshot" | "start" | "stop" | "restart";
                     /**
+                     * @description Case-insensitive exact-match filter on the schedule's
+                     *     `catch_up_policy`. Whitespace-trimmed; empty disables the filter;
+                     *     invalid values return 400 `invalid_catch_up_policy`. A schedule
+                     *     persisted with an empty policy is treated as `skip` (the engine's
+                     *     default) so `catch_up_policy=skip` matches it, mirroring the VM
+                     *     `default_user=root` empty-means-root filter semantics. Composes
+                     *     additively with every other schedule filter.
+                     */
+                    catch_up_policy?: "skip" | "run_once" | "run_all";
+                    /**
                      * @description Tristate boolean filter on the schedule's `enabled` flag.
                      *     Case-insensitive `true` / `false`; whitespace-trimmed; empty
                      *     disables the filter; anything else returns 400 `invalid_enabled`.
@@ -2796,6 +2960,16 @@ export interface paths {
                      *     filter; unknown values return 400 `invalid_status`.
                      */
                     status?: "running" | "success" | "error" | "skipped";
+                    /**
+                     * @description Case-sensitive exact-match against the run's `vm_id`. Whitespace
+                     *     is trimmed; empty disables the filter. Useful for tag-selector
+                     *     schedules that target many VMs — narrows the run history to a
+                     *     single VM (e.g. "which runs of `nightly-snapshot` targeted
+                     *     `vm-1700000000000`"). Composes additively with `status` and
+                     *     `since`/`until`; applied before pagination so `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    vm_id?: string;
                     /**
                      * @description Inclusive RFC3339 lower bound on the run's `started_at`. Invalid
                      *     values return 400 `invalid_since`. A run with a zero `started_at`

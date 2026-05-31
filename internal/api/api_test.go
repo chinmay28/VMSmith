@@ -1255,6 +1255,458 @@ func TestListVMs_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// --- VM list ?min_cpus= / ?max_cpus= range filter (5.4.44) ---
+
+func seedVMWithCPUs(id, name string, cpus int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{CPUs: cpus}, State: types.VMStateRunning}
+}
+
+func seedVMWithRAM(id, name string, ramMB int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{RAMMB: ramMB}, State: types.VMStateRunning}
+}
+
+func seedVMWithDisk(id, name string, diskGB int) *types.VM {
+	return &types.VM{ID: id, Name: name, Spec: types.VMSpec{DiskGB: diskGB}, State: types.VMStateRunning}
+}
+
+func TestListVMs_FilterByMinCpus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxCpus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_cpus=4")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByCpuRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "mid", 4))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-3", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=3&max_cpus=6")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [3,6] vCPUs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinCpus_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "edge", 4))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinCpus_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithCPUs("vm-1", "small", 2))
+	mockMgr.SeedVM(seedVMWithCPUs("vm-2", "big", 8))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_cpus should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinCpus(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_cpus" {
+		t.Fatalf("code = %q, want invalid_min_cpus", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxCpus_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_cpus=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_cpus" {
+		t.Fatalf("code = %q, want invalid_max_cpus", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByCpus_ComposesWithStatusAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "run-big", Spec: types.VMSpec{CPUs: 8}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "stop-big", Spec: types.VMSpec{CPUs: 8}, State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "run-small", Spec: types.VMSpec{CPUs: 2}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?status=running&min_cpus=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "run-big" {
+		t.Fatalf("expected only run-big, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4096 MB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxRAM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_ram_mb=4096")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4096 MB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByRAMRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "mid", 4096))
+	mockMgr.SeedVM(seedVMWithRAM("vm-3", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=3000&max_ram_mb=5000")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [3000,5000] MB, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "edge", 4096))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinRAM_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithRAM("vm-1", "small", 2048))
+	mockMgr.SeedVM(seedVMWithRAM("vm-2", "big", 8192))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_ram_mb should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinRAM(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_ram_mb" {
+		t.Fatalf("code = %q, want invalid_min_ram_mb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxRAM_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_ram_mb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_ram_mb" {
+		t.Fatalf("code = %q, want invalid_max_ram_mb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByRAM_ComposesWithCpusAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-big", Spec: types.VMSpec{CPUs: 8, RAMMB: 8192}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "big-small", Spec: types.VMSpec{CPUs: 8, RAMMB: 2048}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-big", Spec: types.VMSpec{CPUs: 2, RAMMB: 8192}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_cpus=4&min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "big-big" {
+		t.Fatalf("expected only big-big, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=80")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 80 GB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMaxDisk(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_disk_gb=80")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	names := map[string]bool{}
+	for _, vm := range vms {
+		names[vm.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 80 GB), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskRange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "mid", 80))
+	mockMgr.SeedVM(seedVMWithDisk("vm-3", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=50&max_disk_gb=100")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "mid" {
+		t.Fatalf("expected only mid in [50,100] GB, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk_Inclusive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "edge", 80))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=80")
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMinDisk_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(seedVMWithDisk("vm-1", "small", 20))
+	mockMgr.SeedVM(seedVMWithDisk("vm-2", "big", 500))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("whitespace-only min_disk_gb should disable the filter, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByInvalidMinDisk(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_disk_gb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_min_disk_gb" {
+		t.Fatalf("code = %q, want invalid_min_disk_gb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByMaxDisk_RejectsNegative(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?max_disk_gb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_max_disk_gb" {
+		t.Fatalf("code = %q, want invalid_max_disk_gb", apiErr.Code)
+	}
+}
+
+func TestListVMs_FilterByDisk_ComposesWithRAMAndCount(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-big", Spec: types.VMSpec{RAMMB: 8192, DiskGB: 500}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "big-ram-small-disk", Spec: types.VMSpec{RAMMB: 8192, DiskGB: 20}, State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-ram-big-disk", Spec: types.VMSpec{RAMMB: 2048, DiskGB: 500}, State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?min_ram_mb=4096&min_disk_gb=100")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "big-big" {
+		t.Fatalf("expected only big-big, got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByAutoStart_True(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -9932,6 +10384,150 @@ func TestListTemplates_FilterByDefaultUser_TotalCountReflectsFiltered(t *testing
 	}
 }
 
+// --- template list ?network= (roadmap 5.4.45) ---
+
+func tmplWithNet(id, name string, networks ...string) *types.VMTemplate {
+	attachments := make([]types.NetworkAttachment, 0, len(networks))
+	for _, n := range networks {
+		attachments = append(attachments, types.NetworkAttachment{Name: n})
+	}
+	return &types.VMTemplate{ID: id, Name: name, Image: "rocky9.qcow2", Networks: attachments}
+}
+
+func TestListTemplates_FilterByNetwork_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, err := http.Get(ts.URL + "/api/v1/templates?network=data-net")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "Data-Net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=DATA-NET")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl (case-insensitive)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=%20%20data-net%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl after trim", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_AnyOf(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "multi-tpl", "data-net", "storage-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "single-tpl", "mgmt-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=storage-net")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "multi-tpl" {
+		t.Errorf("filter = %+v, want only multi-tpl (any-of attachment match)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "data-tpl", "data-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "no-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("filter = %+v, want every template when network is whitespace-only", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_NoAttachmentsNeverMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "no-net"))
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-2", "data-tpl", "data-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-tpl" {
+		t.Errorf("filter = %+v, want only data-tpl (template with no networks must not match)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_PartialIsNotAMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-1", "storage-tpl", "storage-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=storage")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 0 {
+		t.Errorf("filter = %+v, want empty list (substring must not match exact filter)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	prod := tmplWithNet("tmpl-1", "data-prod", "data-net")
+	prod.Tags = []string{"prod"}
+	qa := tmplWithNet("tmpl-2", "data-qa", "data-net")
+	qa.Tags = []string{"qa"}
+	other := tmplWithNet("tmpl-3", "mgmt-prod", "mgmt-net")
+	other.Tags = []string{"prod"}
+	seedStoredTemplate(t, s, prod)
+	seedStoredTemplate(t, s, qa)
+	seedStoredTemplate(t, s, other)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net&tag=prod")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "data-prod" {
+		t.Errorf("filter = %+v, want only data-prod (intersection of network+tag)", got)
+	}
+}
+
+func TestListTemplates_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 5; i++ {
+		seedStoredTemplate(t, s, tmplWithNet(fmt.Sprintf("tmpl-%d", i), fmt.Sprintf("data-%d", i), "data-net"))
+	}
+	seedStoredTemplate(t, s, tmplWithNet("tmpl-x", "mgmt", "mgmt-net"))
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?network=data-net&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "5" {
+		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
 func TestListTemplates_FilterBySince(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()
@@ -10064,6 +10660,381 @@ func TestListTemplates_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
 	got := decodeTemplateList(t, resp)
 	if len(got) != 1 || got[0].Name != "rocky-base-new" {
 		t.Fatalf("expected only rocky-base-new, got %+v", got)
+	}
+}
+
+// --- Template list ?min_cpus= / ?max_cpus= (5.4.51) ---
+
+func TestListTemplates_FilterByMinCpus(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", CPUs: 2})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", CPUs: 4})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", CPUs: 16})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4 vCPUs), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMaxCpus(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", CPUs: 2})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", CPUs: 4})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", CPUs: 16})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_cpus=4")
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4 vCPUs), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByCpusRange(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", CPUs: 2})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", CPUs: 4})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", CPUs: 16})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=3&max_cpus=8")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "mid" {
+		t.Fatalf("expected only mid in [3,8] vCPUs, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinCpus_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", CPUs: 4})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=4")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinCpus_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", CPUs: 2})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", CPUs: 16})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only min_cpus should disable the filter, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidMinCpus(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_min_cpus")
+}
+
+func TestListTemplates_FilterByMaxCpus_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_cpus=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_max_cpus")
+}
+
+func TestListTemplates_FilterByCpus_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-big-prod", Image: "rocky9.qcow2", CPUs: 16, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky-big-stg", Image: "rocky9.qcow2", CPUs: 16, Tags: []string{"staging"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "rocky-small-prod", Image: "rocky9.qcow2", CPUs: 2, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_cpus=8&tag=prod&search=rocky")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-big-prod" {
+		t.Fatalf("expected only rocky-big-prod, got %+v", got)
+	}
+}
+
+// --- Template list ?min_ram_mb= / ?max_ram_mb= (5.4.52) ---
+
+func TestListTemplates_FilterByMinRAM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=4096")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 4096 MB RAM), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMaxRAM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_ram_mb=4096")
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 4096 MB RAM), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByRAMRange(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", RAMMB: 4096})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=2048&max_ram_mb=8192")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "mid" {
+		t.Fatalf("expected only mid in [2048,8192] MB RAM, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinRAM_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", RAMMB: 4096})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=4096")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinRAM_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", RAMMB: 1024})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", RAMMB: 16384})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only min_ram_mb should disable the filter, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidMinRAM(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_min_ram_mb")
+}
+
+func TestListTemplates_FilterByMaxRAM_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_ram_mb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_max_ram_mb")
+}
+
+func TestListTemplates_FilterByRAM_ComposesWithTagAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-big-prod", Image: "rocky9.qcow2", RAMMB: 16384, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky-big-stg", Image: "rocky9.qcow2", RAMMB: 16384, Tags: []string{"staging"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "rocky-small-prod", Image: "rocky9.qcow2", RAMMB: 1024, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_ram_mb=8192&tag=prod&search=rocky")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-big-prod" {
+		t.Fatalf("expected only rocky-big-prod, got %+v", got)
+	}
+}
+
+// --- Template list ?min_disk_gb= / ?max_disk_gb= (5.4.53) ---
+
+func TestListTemplates_FilterByMinDisk(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=50")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if names["small"] || !names["mid"] || !names["big"] {
+		t.Fatalf("expected mid+big (>= 50 GB disk), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMaxDisk(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_disk_gb=50")
+	got := decodeTemplateList(t, resp)
+	names := map[string]bool{}
+	for _, tpl := range got {
+		names[tpl.Name] = true
+	}
+	if !names["small"] || !names["mid"] || names["big"] {
+		t.Fatalf("expected small+mid (<= 50 GB disk), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByDiskRange(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-mid", Name: "mid", Image: "rocky9.qcow2", DiskGB: 50})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=40&max_disk_gb=100")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "mid" {
+		t.Fatalf("expected only mid in [40,100] GB disk, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinDisk_Inclusive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-edge", Name: "edge", Image: "rocky9.qcow2", DiskGB: 50})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=50")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "edge" {
+		t.Fatalf("expected boundary match, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByMinDisk_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-small", Name: "small", Image: "rocky9.qcow2", DiskGB: 10})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-big", Name: "big", Image: "rocky9.qcow2", DiskGB: 200})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Fatalf("whitespace-only min_disk_gb should disable the filter, got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByInvalidMinDisk(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=lots")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_min_disk_gb")
+}
+
+func TestListTemplates_FilterByMaxDisk_RejectsNegative(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?max_disk_gb=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_max_disk_gb")
+}
+
+func TestListTemplates_FilterByDisk_ComposesWithCpusAndSearch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-big-prod", Image: "rocky9.qcow2", CPUs: 16, DiskGB: 200, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky-big-small-disk", Image: "rocky9.qcow2", CPUs: 16, DiskGB: 10, Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "rocky-small-prod", Image: "rocky9.qcow2", CPUs: 2, DiskGB: 200, Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?min_disk_gb=100&min_cpus=8&search=rocky")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "rocky-big-prod" {
+		t.Fatalf("expected only rocky-big-prod, got %+v", got)
 	}
 }
 
@@ -10484,6 +11455,335 @@ func TestListPorts_FilterByProtocol_TotalCountReflectsFiltered(t *testing.T) {
 	seedProtocolPorts(t, s, "vm-proto-cnt")
 
 	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-proto-cnt/ports?protocol=tcp")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
+// Port-forward list host-port range filter tests (5.4.47)
+// ============================================================
+
+// seedHostPortRangePorts seeds four forwards spanning a spread of host ports
+// so the inclusive [min, max] range filter can be exercised at both endpoints.
+func seedHostPortRangePorts(t *testing.T, s *store.Store, vmID string) {
+	t.Helper()
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22", VMID: vmID, HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "ssh"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8080", VMID: vmID, HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "http"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8443", VMID: vmID, HostPort: 8443, GuestPort: 443, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "https"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/9090", VMID: vmID, HostPort: 9090, GuestPort: 9090, GuestIP: "192.168.100.50", Protocol: types.ProtocolUDP, Description: "metrics"})
+}
+
+func TestListPorts_FilterByMinHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-min")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-min", "min_host_port=8443")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with host_port >= 8443, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.HostPort < 8443 {
+			t.Errorf("host_port %d below min 8443", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMaxHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-max")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-max", "max_host_port=8080")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with host_port <= 8080, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.HostPort > 8080 {
+			t.Errorf("host_port %d above max 8080", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByHostPortRange(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-range")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-range", "min_host_port=8000&max_host_port=9000")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules in [8000,9000], got %d", len(got))
+	}
+	for _, p := range got {
+		if p.HostPort < 8000 || p.HostPort > 9000 {
+			t.Errorf("host_port %d outside [8000,9000]", p.HostPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMinHostPort_Inclusive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-incl")
+
+	// 8080 itself must be included by min_host_port=8080.
+	got := listPortsWithQuery(t, ts, "vm-hp-incl", "min_host_port=8080")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 rules with host_port >= 8080 (inclusive), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByMinHostPort_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-hp-empty", "min_host_port=%20")
+	if len(got) != 4 {
+		t.Fatalf("whitespace min_host_port should be a no-op (4 rules), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByInvalidMinHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-bad")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-bad/ports?min_host_port=abc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_min_host_port" {
+		t.Errorf("error code = %q, want invalid_min_host_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByMaxHostPort_RejectsNegative(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-neg")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-neg/ports?max_host_port=-5")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_max_host_port" {
+		t.Errorf("error code = %q, want invalid_max_host_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByHostPort_ComposesWithProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-cmb")
+
+	// host_port >= 8000 → {8080(tcp), 8443(tcp), 9090(udp)}; protocol=tcp narrows to 2.
+	got := listPortsWithQuery(t, ts, "vm-hp-cmb", "min_host_port=8000&protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_host_port=8000 + protocol=tcp = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolTCP || p.HostPort < 8000 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByHostPort_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-hp-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-hp-cnt/ports?min_host_port=8000&max_host_port=9000")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
+// Port-forward list guest-port range filter tests (5.4.49)
+// ============================================================
+
+func TestListPorts_FilterByMinGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-min") // guest ports: 22, 80, 443, 9090
+
+	got := listPortsWithQuery(t, ts, "vm-gp-min", "min_guest_port=443")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with guest_port >= 443, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.GuestPort < 443 {
+			t.Errorf("guest_port %d below min 443", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMaxGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-max")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-max", "max_guest_port=80")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with guest_port <= 80, got %d", len(got))
+	}
+	for _, p := range got {
+		if p.GuestPort > 80 {
+			t.Errorf("guest_port %d above max 80", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPortRange(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-range")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-range", "min_guest_port=80&max_guest_port=500")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules in guest [80,500], got %d", len(got))
+	}
+	for _, p := range got {
+		if p.GuestPort < 80 || p.GuestPort > 500 {
+			t.Errorf("guest_port %d outside [80,500]", p.GuestPort)
+		}
+	}
+}
+
+func TestListPorts_FilterByMinGuestPort_Inclusive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-incl")
+
+	// 80 itself must be included by min_guest_port=80.
+	got := listPortsWithQuery(t, ts, "vm-gp-incl", "min_guest_port=80")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 rules with guest_port >= 80 (inclusive), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByMinGuestPort_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-gp-empty", "min_guest_port=%20")
+	if len(got) != 4 {
+		t.Fatalf("whitespace min_guest_port should be a no-op (4 rules), got %d", len(got))
+	}
+}
+
+func TestListPorts_FilterByInvalidMinGuestPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-bad")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-bad/ports?min_guest_port=abc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_min_guest_port" {
+		t.Errorf("error code = %q, want invalid_min_guest_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByMaxGuestPort_RejectsNegative(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-neg")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-neg/ports?max_guest_port=-5")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if apiErr.Code != "invalid_max_guest_port" {
+		t.Errorf("error code = %q, want invalid_max_guest_port", apiErr.Code)
+	}
+}
+
+func TestListPorts_FilterByGuestPort_ComposesWithProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-cmb")
+
+	// guest_port >= 80 → {80(tcp), 443(tcp), 9090(udp)}; protocol=tcp narrows to 2.
+	got := listPortsWithQuery(t, ts, "vm-gp-cmb", "min_guest_port=80&protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_guest_port=80 + protocol=tcp = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.Protocol != types.ProtocolTCP || p.GuestPort < 80 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPort_ComposesWithHostPort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-hp") // host→guest: 22→22, 8080→80, 8443→443, 9090→9090
+
+	// host_port >= 8000 → {8080/80, 8443/443, 9090/9090}; guest_port <= 500 drops 9090.
+	got := listPortsWithQuery(t, ts, "vm-gp-hp", "min_host_port=8000&max_guest_port=500")
+	if len(got) != 2 {
+		t.Fatalf("intersection of min_host_port=8000 + max_guest_port=500 = %d, want 2 (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.HostPort < 8000 || p.GuestPort > 500 {
+			t.Errorf("unexpected rule in intersection: %+v", p)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestPort_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedHostPortRangePorts(t, s, "vm-gp-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gp-cnt/ports?min_guest_port=80&max_guest_port=500")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

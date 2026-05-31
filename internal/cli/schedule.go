@@ -129,6 +129,7 @@ var scheduleListCmd = &cobra.Command{
 		vmID, _ := cmd.Flags().GetString("vm")
 		tagSelector, _ := cmd.Flags().GetString("tag-selector")
 		action, _ := cmd.Flags().GetString("action")
+		catchUp, _ := cmd.Flags().GetString("catch-up")
 		enabled, _ := cmd.Flags().GetString("enabled")
 		search, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
@@ -150,6 +151,10 @@ var scheduleListCmd = &cobra.Command{
 		if enabled != "" && enabled != "true" && enabled != "false" {
 			return fmt.Errorf("invalid --enabled: must be 'true' or 'false'")
 		}
+		catchUp = strings.ToLower(strings.TrimSpace(catchUp))
+		if catchUp != "" && !types.IsValidCatchUpPolicy(types.ScheduleCatchUpPolicy(catchUp)) {
+			return fmt.Errorf("invalid --catch-up: must be one of skip, run_once, run_all")
+		}
 		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
 			return err
 		}
@@ -166,6 +171,9 @@ var scheduleListCmd = &cobra.Command{
 		}
 		if v := strings.ToLower(strings.TrimSpace(action)); v != "" {
 			q.Set("action", v)
+		}
+		if catchUp != "" {
+			q.Set("catch_up_policy", catchUp)
 		}
 		if enabled != "" {
 			q.Set("enabled", enabled)
@@ -276,12 +284,15 @@ var scheduleRunsCmd = &cobra.Command{
 	Use:   "runs <id>",
 	Short: "List a schedule's run history",
 	Long: `List the run history for a schedule (newest first).  Filter with
---status (running|success|error|skipped) and an inclusive RFC3339 --since /
---until window on each run's started_at, and page with --limit / --page.`,
+--status (running|success|error|skipped), --vm <vm-id> (exact match — useful
+for tag-selector schedules that target many VMs), and an inclusive RFC3339
+--since / --until window on each run's started_at, and page with --limit /
+--page.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
 		status, _ := cmd.Flags().GetString("status")
+		vmID, _ := cmd.Flags().GetString("vm")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -291,6 +302,7 @@ var scheduleRunsCmd = &cobra.Command{
 		if status != "" && !types.IsValidScheduleRunStatus(types.ScheduleRunStatus(status)) {
 			return fmt.Errorf("invalid --status: must be one of running, success, error, skipped")
 		}
+		vmID = strings.TrimSpace(vmID)
 		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
 			return err
 		}
@@ -301,6 +313,9 @@ var scheduleRunsCmd = &cobra.Command{
 		q := url.Values{}
 		if status != "" {
 			q.Set("status", status)
+		}
+		if vmID != "" {
+			q.Set("vm_id", vmID)
 		}
 		if v := strings.TrimSpace(sinceFlag); v != "" {
 			q.Set("since", v)
@@ -537,6 +552,7 @@ func init() {
 	scheduleListCmd.Flags().String("vm", "", "filter by exact VM id")
 	scheduleListCmd.Flags().String("tag-selector", "", "filter by exact tag-selector membership (case-insensitive)")
 	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart)")
+	scheduleListCmd.Flags().String("catch-up", "", "filter by catch-up policy (skip|run_once|run_all)")
 	scheduleListCmd.Flags().String("enabled", "", "filter by enabled flag: true|false")
 	scheduleListCmd.Flags().String("search", "", "case-insensitive substring filter (name, action, vm_id, tag selector)")
 	scheduleListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
@@ -547,6 +563,7 @@ func init() {
 	scheduleListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 
 	scheduleRunsCmd.Flags().String("status", "", "filter by run status: running|success|error|skipped")
+	scheduleRunsCmd.Flags().String("vm", "", "filter by VM id (exact match; useful for tag-selector schedules)")
 	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
