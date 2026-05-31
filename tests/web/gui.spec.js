@@ -203,6 +203,18 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-test-new-vm")).toBeVisible();
   });
 
+  test("windows create form surfaces variant/password fields and enforces client floors", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-os-type").selectOption("windows");
+    await expect(page.getByTestId("input-vm-os-variant")).toBeVisible();
+    await expect(page.getByTestId("input-vm-admin-password")).toBeVisible();
+    await expect(page.getByTestId("input-vm-ram")).toHaveValue("4096");
+    await expect(page.getByTestId("input-vm-disk")).toHaveValue("64");
+  });
+
   // 5.6.17 — when a Windows VM is created without an admin_password the
   // daemon auto-generates one and surfaces it exactly once in the create
   // response. The GUI must show it in a one-time-reveal modal with a copy
@@ -271,6 +283,15 @@ test.describe("VM List", () => {
     expect(stored.firmware).toBe("uefi");
     expect(stored.machine).toBe("pc-q35-rhel9.6.0");
     expect(stored.virtio_win_iso).toBe("/tmp/virtio-win.iso");
+  });
+
+  test("vm cards render guest OS badges", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("badge-os-web-server")).toHaveText("Linux");
+    await expect(page.getByTestId("badge-os-win-app")).toContainText("Windows");
+    await expect(page.getByTestId("badge-os-win-app")).toContainText("Server");
   });
 
   test("template selection prefills create form", async ({ page }) => {
@@ -844,6 +865,14 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-image")).toHaveText("ubuntu-22.04");
     await expect(page.getByTestId("vm-detail-resources")).toContainText("2 vCPU");
     await expect(page.getByTestId("vm-detail-resources")).toContainText("4096 MB");
+  });
+
+  test("windows VM detail shows OS badge and RDP hint", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-win-app").click();
+
+    await expect(page.getByTestId("vm-detail-os-badge")).toContainText("Windows");
+    await expect(page.getByTestId("vm-detail-rdp-hint")).toContainText("localhost:33890");
   });
 
   test("shows snapshots", async ({ page }) => {

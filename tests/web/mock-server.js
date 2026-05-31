@@ -96,6 +96,9 @@ function seed() {
     { id: "pf-seed-ssh", vm_id: vm1.id, host_port: 2222, guest_port: 22, guest_ip: vm1.ip, protocol: "tcp", description: "ssh-jumpbox" },
     { id: "pf-seed-http", vm_id: vm1.id, host_port: 8080, guest_port: 80, guest_ip: vm1.ip, protocol: "tcp" },
   ]);
+  portForwards.set(vmWin.id, [
+    { id: "pf-seed-rdp", vm_id: vmWin.id, host_port: 33890, guest_port: 3389, guest_ip: vmWin.ip, protocol: "tcp", description: "rdp-console" },
+  ]);
   images.set("img-1", {
     id: "img-1", name: "ubuntu-base", path: "/images/ubuntu-base.qcow2",
     size_bytes: 1073741824, format: "qcow2", source_vm: vm1.id,
