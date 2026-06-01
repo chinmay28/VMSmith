@@ -820,14 +820,37 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// Resolve DiskBus / NICModel changes (roadmap 5.6.12 switch-to-virtio).
+	// nil = no change; empty string clears the override; case-insensitive
+	// match against the stored value to skip a redefine when the operator
+	// re-supplies the existing value with different casing.
+	newDiskBus := storedVM.Spec.DiskBus
+	diskBusChanged := false
+	if patch.DiskBus != nil {
+		desired := strings.ToLower(strings.TrimSpace(*patch.DiskBus))
+		if desired != strings.ToLower(strings.TrimSpace(storedVM.Spec.DiskBus)) {
+			newDiskBus = desired
+			diskBusChanged = true
+		}
+	}
+	newNICModel := storedVM.Spec.NICModel
+	nicModelChanged := false
+	if patch.NICModel != nil {
+		desired := strings.ToLower(strings.TrimSpace(*patch.NICModel))
+		if desired != strings.ToLower(strings.TrimSpace(storedVM.Spec.NICModel)) {
+			newNICModel = desired
+			nicModelChanged = true
+		}
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged {
 		return storedVM, nil
 	}
 
 	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
 	// dance and any libvirt redefinitions — they're pure bbolt writes.
-	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged
 	if metadataOnly {
 		if autoStartChanged {
 			storedVM.Spec.AutoStart = newAutoStart
@@ -887,8 +910,8 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
-	// Redefine the domain XML with updated CPU/RAM/clock offset.
-	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged {
+	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model.
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged {
 		// Preserve the existing domain UUID so libvirt accepts the redefinition.
 		existingUUID, _ := dom.GetUUIDString()
 
@@ -896,6 +919,8 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		updatedSpec.CPUs = newCPUs
 		updatedSpec.RAMMB = newRAMMB
 		updatedSpec.ClockOffset = newClockOffset
+		updatedSpec.DiskBus = newDiskBus
+		updatedSpec.NICModel = newNICModel
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
 		params.UUID = existingUUID
@@ -941,6 +966,12 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if clockChanged {
 		storedVM.Spec.ClockOffset = newClockOffset
+	}
+	if diskBusChanged {
+		storedVM.Spec.DiskBus = newDiskBus
+	}
+	if nicModelChanged {
+		storedVM.Spec.NICModel = newNICModel
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {

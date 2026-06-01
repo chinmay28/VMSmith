@@ -2111,6 +2111,80 @@ func TestCLI_VMCreate_DeviceOverrides(t *testing.T) {
 	}
 }
 
+// Roadmap 5.6.12 — `vm edit --disk-bus / --nic-model` and the
+// `vm set-virtio` shortcut. The CLI lowercases + trims the values
+// before forwarding to the daemon, mirroring the `--clock-offset`
+// contract.
+func TestCLI_VMEdit_DiskBusAndNICModel(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-bus",
+		Name: "wintest",
+		Spec: types.VMSpec{Name: "wintest", CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, DiskBus: "sata", NICModel: "e1000e"},
+	})
+
+	if _, err := runCLI("vm", "edit", "vm-bus", "--disk-bus", "VIRTIO", "--nic-model", "VIRTIO"); err != nil {
+		t.Fatalf("vm edit --disk-bus / --nic-model: %v", err)
+	}
+	updated, err := mock.Get(context.Background(), "vm-bus")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.DiskBus != "virtio" {
+		t.Errorf("Spec.DiskBus = %q, want virtio (cli lowercases)", updated.Spec.DiskBus)
+	}
+	if updated.Spec.NICModel != "virtio" {
+		t.Errorf("Spec.NICModel = %q, want virtio", updated.Spec.NICModel)
+	}
+
+	// Clear the override and confirm ResolvedDiskBus falls back to the
+	// Windows default (sata).
+	if _, err := runCLI("vm", "edit", "vm-bus", "--disk-bus", ""); err != nil {
+		t.Fatalf("vm edit --disk-bus \"\": %v", err)
+	}
+	cleared, _ := mock.Get(context.Background(), "vm-bus")
+	if cleared.Spec.DiskBus != "" {
+		t.Errorf("Spec.DiskBus after clear = %q, want empty", cleared.Spec.DiskBus)
+	}
+	if got := cleared.Spec.ResolvedDiskBus(); got != "sata" {
+		t.Errorf("ResolvedDiskBus after clear = %q, want sata (windows default)", got)
+	}
+}
+
+func TestCLI_VMSetVirtio(t *testing.T) {
+	// `vm set-virtio` is a shortcut for `vm edit --disk-bus virtio
+	// --nic-model virtio`. Verify it sends both fields atomically.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{
+		ID:   "vm-virt",
+		Name: "wintest",
+		Spec: types.VMSpec{Name: "wintest", CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, DiskBus: "sata", NICModel: "e1000e"},
+	})
+
+	out, err := runCLI("vm", "set-virtio", "vm-virt")
+	if err != nil {
+		t.Fatalf("vm set-virtio: %v", err)
+	}
+	if !strings.Contains(out, "virtio") {
+		t.Errorf("expected virtio in output, got: %q", out)
+	}
+
+	updated, err := mock.Get(context.Background(), "vm-virt")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.DiskBus != "virtio" {
+		t.Errorf("Spec.DiskBus = %q, want virtio", updated.Spec.DiskBus)
+	}
+	if updated.Spec.NICModel != "virtio" {
+		t.Errorf("Spec.NICModel = %q, want virtio", updated.Spec.NICModel)
+	}
+}
+
 // =====================================================// Snapshot command tests
 // =====================================================
 func TestCLI_SnapshotCreate(t *testing.T) {

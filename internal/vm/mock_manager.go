@@ -204,6 +204,12 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	if patch.ClockOffset != nil {
 		vm.Spec.ClockOffset = strings.ToLower(strings.TrimSpace(*patch.ClockOffset))
 	}
+	if patch.DiskBus != nil {
+		vm.Spec.DiskBus = strings.ToLower(strings.TrimSpace(*patch.DiskBus))
+	}
+	if patch.NICModel != nil {
+		vm.Spec.NICModel = strings.ToLower(strings.TrimSpace(*patch.NICModel))
+	}
 
 	vm.UpdatedAt = time.Now()
 	vmCopy := *vm

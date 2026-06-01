@@ -518,9 +518,13 @@ var vmEditCmd = &cobra.Command{
 		locked, _ := cmd.Flags().GetBool("locked")
 		clockOffsetChanged := cmd.Flags().Changed("clock-offset")
 		clockOffset, _ := cmd.Flags().GetString("clock-offset")
+		diskBusChanged := cmd.Flags().Changed("disk-bus")
+		diskBus, _ := cmd.Flags().GetString("disk-bus")
+		nicModelChanged := cmd.Flags().Changed("nic-model")
+		nicModel, _ := cmd.Flags().GetString("nic-model")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, or --clock-offset")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged && !diskBusChanged && !nicModelChanged {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, --clock-offset, --disk-bus, or --nic-model")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -557,6 +561,14 @@ var vmEditCmd = &cobra.Command{
 			normalised := strings.TrimSpace(strings.ToLower(clockOffset))
 			patch.ClockOffset = &normalised
 		}
+		if diskBusChanged {
+			normalised := strings.TrimSpace(strings.ToLower(diskBus))
+			patch.DiskBus = &normalised
+		}
+		if nicModelChanged {
+			normalised := strings.TrimSpace(strings.ToLower(nicModel))
+			patch.NICModel = &normalised
+		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
 		if err != nil {
@@ -585,6 +597,50 @@ var vmEditCmd = &cobra.Command{
 		}
 		fmt.Printf("  Auto-start: %t\n", result.Spec.AutoStart)
 		fmt.Printf("  Locked:     %t\n", result.Spec.Locked)
+		return nil
+	},
+}
+
+var vmSetVirtioCmd = &cobra.Command{
+	Use:   "set-virtio <id>",
+	Short: "Flip system disk bus + NIC model to virtio (roadmap 5.6.12 switch-to-virtio helper)",
+	Long: `Flip the system disk bus and every NIC model to virtio on an existing VM.
+
+Intended for Windows guests after the operator has installed the virtio-net /
+virtio-blk drivers from the attached virtio-win ISO — switching to virtio
+unlocks higher throughput. The VM is stopped (graceful, force-stop after
+60 s), the libvirt domain XML is redefined with the new bus + model, then
+restarted if it was running before.
+
+Equivalent to: vmsmith vm edit <id> --disk-bus virtio --nic-model virtio`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		logger.Info("cli", "vm set-virtio", "id", id)
+
+		mgr, cleanup, err := newVMManager()
+		if err != nil {
+			logger.Error("cli", "vm set-virtio: failed to init VM manager", "error", err.Error())
+			return err
+		}
+		defer cleanup()
+
+		bus := types.DiskBusVirtio
+		nic := types.NICModelVirtio
+		patch := types.VMUpdateSpec{DiskBus: &bus, NICModel: &nic}
+		result, err := mgr.Update(context.Background(), id, patch)
+		if err != nil {
+			logger.Error("cli", "vm set-virtio failed", "id", id, "error", err.Error())
+			return fmt.Errorf("switching VM to virtio: %w", err)
+		}
+
+		logger.Info("cli", "vm switched to virtio", "id", result.ID, "disk_bus", result.Spec.DiskBus, "nic_model", result.Spec.NICModel)
+		fmt.Printf("VM switched to virtio:\n")
+		fmt.Printf("  ID:        %s\n", result.ID)
+		fmt.Printf("  Name:      %s\n", result.Name)
+		fmt.Printf("  State:     %s\n", result.State)
+		fmt.Printf("  Disk bus:  %s\n", result.Spec.DiskBus)
+		fmt.Printf("  NIC model: %s\n", result.Spec.NICModel)
 		return nil
 	},
 }
@@ -1122,6 +1178,8 @@ Examples:
 	vmEditCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmEditCmd.Flags().Bool("locked", false, "set delete-protected status (true to lock, false to unlock)")
 	vmEditCmd.Flags().String("clock-offset", "", "new libvirt domain clock offset: utc, localtime, or empty to clear the override and use the OS-family default")
+	vmEditCmd.Flags().String("disk-bus", "", "switch the system disk bus: virtio or sata, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
+	vmEditCmd.Flags().String("nic-model", "", "switch every NIC model: virtio or e1000e, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")
@@ -1172,6 +1230,7 @@ Examples:
 	vmCmd.AddCommand(vmCreateCmd)
 	vmCmd.AddCommand(vmCloneCmd)
 	vmCmd.AddCommand(vmEditCmd)
+	vmCmd.AddCommand(vmSetVirtioCmd)
 	vmCmd.AddCommand(vmListCmd)
 	vmCmd.AddCommand(vmStartCmd)
 	vmCmd.AddCommand(vmStopCmd)

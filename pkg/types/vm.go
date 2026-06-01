@@ -127,8 +127,8 @@ type VMSpec struct {
 	// falls back to the OS-family default — "virtio" for Linux, "sata" for
 	// Windows — set in DomainParamsFromSpec. When the bus is overridden the
 	// disk target letter is adjusted to match ("vda" for virtio, "sda" for
-	// sata). Baked at create time and ignored on PATCH; resend on a new
-	// create to change.
+	// sata). Mutable via VMUpdateSpec.DiskBus (roadmap 5.6.12): an
+	// in-place change redefines the domain XML and restarts the VM.
 	DiskBus string `json:"disk_bus,omitempty" yaml:"disk_bus,omitempty"`
 
 	// NICModel overrides the model attribute on every libvirt
@@ -138,6 +138,7 @@ type VMSpec struct {
 	// falls back to the OS-family default — "virtio" for Linux, "e1000e"
 	// for Windows. Operators who have installed the virtio-net drivers in a
 	// Windows guest can pin "virtio" here to unlock the higher throughput.
+	// Mutable via VMUpdateSpec.NICModel (roadmap 5.6.12).
 	NICModel string `json:"nic_model,omitempty" yaml:"nic_model,omitempty"`
 
 	// Machine overrides the libvirt <os><type machine='...'/></os> machine
@@ -212,6 +213,28 @@ type VMUpdateSpec struct {
 	// is captured at create time and validateVMUpdateSpec rejects any attempt
 	// to change it on PATCH.
 	OSVariant *string `json:"os_variant,omitempty"`
+
+	// DiskBus flips the system-disk bus on an existing VM. Roadmap 5.6.12
+	// (switch-to-virtio helper) — once an operator has installed the virtio
+	// drivers in a Windows guest from the attached virtio-win ISO, pinning
+	// `disk_bus=virtio` here rewrites the libvirt domain XML on the next
+	// redefine and restarts the VM with the higher-throughput bus. The
+	// allowed vocabulary mirrors VMSpec.DiskBus (`virtio` / `sata`,
+	// case-insensitive). Pointer semantics: nil = no change; an explicit
+	// empty string clears the override so the OS-family default applies
+	// again at next render. Applying a change triggers a domain redefine
+	// and restarts the VM if it was running.
+	DiskBus *string `json:"disk_bus,omitempty"`
+
+	// NICModel flips the model attribute on every libvirt
+	// <interface><model type='...'/></interface> entry on an existing VM —
+	// the primary NAT interface plus any additional macvtap / bridge /
+	// nat attachments. Mirrors VMUpdateSpec.DiskBus pointer semantics:
+	// nil = no change; empty string = clear override; `virtio` / `e1000e`
+	// (case-insensitive) override the OS-family default. Pairs with
+	// DiskBus for the "switch to virtio after installing the in-guest
+	// drivers" workflow (roadmap 5.6.12).
+	NICModel *string `json:"nic_model,omitempty"`
 }
 
 // ResolvedOSType returns the guest OS family, defaulting an empty value to

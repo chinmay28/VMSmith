@@ -629,6 +629,31 @@ const server = http.createServer(async (req, res) => {
         vm.spec.clock_offset = normalised;
       }
     }
+    // Roadmap 5.6.12 — disk_bus / nic_model are mutable on PATCH so an
+    // operator can switch a Windows guest to virtio after installing the
+    // virtio drivers in-guest. Mirrors the daemon validation: empty string
+    // clears the override; "virtio"/"sata" / "virtio"/"e1000e" are allowed
+    // (case-insensitive); anything else returns 400 with a stable code.
+    if (Object.prototype.hasOwnProperty.call(body, "disk_bus")) {
+      const raw = body.disk_bus;
+      if (raw !== null && typeof raw === "string") {
+        const normalised = raw.trim().toLowerCase();
+        if (normalised !== "" && normalised !== "virtio" && normalised !== "sata") {
+          return json(res, 400, { code: "invalid_disk_bus", message: 'disk_bus must be "virtio" or "sata"' });
+        }
+        vm.spec.disk_bus = normalised;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "nic_model")) {
+      const raw = body.nic_model;
+      if (raw !== null && typeof raw === "string") {
+        const normalised = raw.trim().toLowerCase();
+        if (normalised !== "" && normalised !== "virtio" && normalised !== "e1000e") {
+          return json(res, 400, { code: "invalid_nic_model", message: 'nic_model must be "virtio" or "e1000e"' });
+        }
+        vm.spec.nic_model = normalised;
+      }
+    }
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);
   }
