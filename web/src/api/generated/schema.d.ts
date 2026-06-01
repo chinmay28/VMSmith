@@ -2809,6 +2809,26 @@ export interface paths {
                      */
                     until?: string;
                     /**
+                     * @description Inclusive lower bound (RFC3339) on the schedule's `next_fire_at`
+                     *     — the cron-computed wall-clock time of the next planned fire.
+                     *     Closes the *"what fires in the next N hours"* operator query that
+                     *     the `next_fire_at` sort axis can order but not narrow.
+                     *     Whitespace-trimmed; empty disables the bound; invalid values
+                     *     return 400 `invalid_next_fire_since`. Schedules with a nil
+                     *     `next_fire_at` (disabled / stalled) are filtered OUT whenever any
+                     *     bound is set, mirroring the zero-`created_at` handling of the
+                     *     existing `since` / `until` filter. Composes additively with every
+                     *     other schedule filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    next_fire_since?: string;
+                    /**
+                     * @description Inclusive upper bound (RFC3339) on the schedule's `next_fire_at`.
+                     *     Same shape as `next_fire_since`; invalid values return 400
+                     *     `invalid_next_fire_until`.
+                     */
+                    next_fire_until?: string;
+                    /**
                      * @description Field to sort by. `name` matches case-insensitively;
                      *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
                      *     unscheduled) at the tail of the ascending list. All comparators

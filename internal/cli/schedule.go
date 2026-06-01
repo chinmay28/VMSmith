@@ -135,6 +135,8 @@ var scheduleListCmd = &cobra.Command{
 		search, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
+		nextFireSinceFlag, _ := cmd.Flags().GetString("next-fire-since")
+		nextFireUntilFlag, _ := cmd.Flags().GetString("next-fire-until")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -160,6 +162,12 @@ var scheduleListCmd = &cobra.Command{
 			return err
 		}
 		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(nextFireSinceFlag, "--next-fire-since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(nextFireUntilFlag, "--next-fire-until"); err != nil {
 			return err
 		}
 
@@ -190,6 +198,12 @@ var scheduleListCmd = &cobra.Command{
 		}
 		if v := strings.TrimSpace(untilFlag); v != "" {
 			q.Set("until", v)
+		}
+		if v := strings.TrimSpace(nextFireSinceFlag); v != "" {
+			q.Set("next_fire_since", v)
+		}
+		if v := strings.TrimSpace(nextFireUntilFlag); v != "" {
+			q.Set("next_fire_until", v)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -587,6 +601,8 @@ func init() {
 	scheduleListCmd.Flags().String("search", "", "case-insensitive substring filter (name, action, vm_id, tag selector)")
 	scheduleListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
 	scheduleListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
+	scheduleListCmd.Flags().String("next-fire-since", "", "RFC3339 lower bound (inclusive) on next_fire_at (schedules with no next_fire_at are excluded)")
+	scheduleListCmd.Flags().String("next-fire-until", "", "RFC3339 upper bound (inclusive) on next_fire_at (schedules with no next_fire_at are excluded)")
 	scheduleListCmd.Flags().String("sort", "", "sort field: id|name|created_at|next_fire_at (default id)")
 	scheduleListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	scheduleListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")

@@ -2192,6 +2192,17 @@ const server = http.createServer(async (req, res) => {
     if (until.invalid) {
       return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
     }
+    // next_fire_since / next_fire_until (5.4.60): inclusive RFC3339 bounds on
+    // each schedule's NextFireAt. Schedules with a nil next_fire_at are
+    // filtered OUT when any bound is set, mirroring the API.
+    const nextFireSince = parseTime("next_fire_since");
+    if (nextFireSince.invalid) {
+      return json(res, 400, { code: "invalid_next_fire_since", message: "next_fire_since must be a valid RFC3339 timestamp" });
+    }
+    const nextFireUntil = parseTime("next_fire_until");
+    if (nextFireUntil.invalid) {
+      return json(res, 400, { code: "invalid_next_fire_until", message: "next_fire_until must be a valid RFC3339 timestamp" });
+    }
 
     let list = [...scheduleList.values()];
     if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
@@ -2212,6 +2223,16 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(t.getTime())) return false;
         if (since.set && t < since.value) return false;
         if (until.set && t > until.value) return false;
+        return true;
+      });
+    }
+    if (nextFireSince.set || nextFireUntil.set) {
+      list = list.filter((s) => {
+        if (!s.next_fire_at) return false;
+        const t = new Date(s.next_fire_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (nextFireSince.set && t < nextFireSince.value) return false;
+        if (nextFireUntil.set && t > nextFireUntil.value) return false;
         return true;
       });
     }
