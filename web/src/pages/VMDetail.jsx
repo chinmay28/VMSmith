@@ -1091,52 +1091,44 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           </span>
         </label>
 
-        <div className="rounded border border-steel-800 bg-steel-950/40 p-3 space-y-3">
-          <div className="text-[11px] uppercase tracking-wide text-steel-500">Device Tuning (advanced)</div>
-          <p className="text-[10px] text-steel-600">
-            Switch the system disk bus and NIC model on this VM. Useful after
-            installing virtio drivers in a Windows guest — pin both to{' '}
-            <span className="font-mono">virtio</span> for higher throughput.
-            Empty = use the OS-family default.
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Disk bus</label>
-              <select
-                data-testid="select-edit-disk-bus"
-                className="input"
-                value={diskBus}
-                onChange={e => setDiskBus(e.target.value)}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label flex items-center justify-between">
+              <span>Disk bus</span>
+              <button
+                type="button"
+                data-testid="btn-edit-switch-virtio"
+                className="text-[10px] text-bronze-400 hover:text-bronze-300 underline"
+                onClick={() => { setDiskBus('virtio'); setNicModel('virtio'); }}
+                title="Switch both disk bus and NIC to virtio (roadmap 5.6.12)"
               >
-                <option value="">default ({(spec.os_type || 'linux').toLowerCase() === 'windows' ? 'sata' : 'virtio'})</option>
-                <option value="virtio">virtio</option>
-                <option value="sata">sata</option>
-              </select>
-              <p className="text-[10px] text-steel-600 mt-1">current: {spec.disk_bus || 'default'}</p>
-            </div>
-            <div>
-              <label className="label">NIC model</label>
-              <select
-                data-testid="select-edit-nic-model"
-                className="input"
-                value={nicModel}
-                onChange={e => setNicModel(e.target.value)}
-              >
-                <option value="">default ({(spec.os_type || 'linux').toLowerCase() === 'windows' ? 'e1000e' : 'virtio'})</option>
-                <option value="virtio">virtio</option>
-                <option value="e1000e">e1000e</option>
-              </select>
-              <p className="text-[10px] text-steel-600 mt-1">current: {spec.nic_model || 'default'}</p>
-            </div>
+                Switch to virtio
+              </button>
+            </label>
+            <select
+              data-testid="select-edit-disk-bus"
+              className="input"
+              value={diskBus}
+              onChange={e => setDiskBus(e.target.value)}
+            >
+              <option value="">default</option>
+              <option value="virtio">virtio</option>
+              <option value="sata">sata</option>
+            </select>
           </div>
-          <button
-            type="button"
-            data-testid="btn-edit-switch-virtio"
-            className="text-[11px] text-bronze-400 hover:text-bronze-300 underline"
-            onClick={() => { setDiskBus('virtio'); setNicModel('virtio'); }}
-          >
-            Switch to virtio →
-          </button>
+          <div>
+            <label className="label">NIC model</label>
+            <select
+              data-testid="select-edit-nic-model"
+              className="input"
+              value={nicModel}
+              onChange={e => setNicModel(e.target.value)}
+            >
+              <option value="">default</option>
+              <option value="virtio">virtio</option>
+              <option value="e1000e">e1000e</option>
+            </select>
+          </div>
         </div>
 
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
