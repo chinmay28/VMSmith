@@ -7,6 +7,30 @@ import { useEventStream } from '../hooks/useEventStream';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls, LiveIndicator } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
 
+const WINDOWS_MIN_RAM_MB = 4096;
+const WINDOWS_MIN_DISK_GB = 64;
+
+function resolveOsType(spec = {}) {
+  return String(spec.os_type || '').trim().toLowerCase() === 'windows' ? 'windows' : 'linux';
+}
+
+function titleCaseWords(value) {
+  return String(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function osBadgeLabel(spec = {}) {
+  const osType = resolveOsType(spec);
+  if (osType === 'windows') {
+    if (spec.os_variant) return titleCaseWords(String(spec.os_variant).replace(/^windows-/, 'Windows ').replace(/-/g, ' '));
+    return 'Windows';
+  }
+  return 'Linux';
+}
+
 const VM_LIFECYCLE_TYPES = new Set([
   'vm.created', 'vm.cloned', 'vm.deleted', 'vm.updated',
   'vm.started', 'vm.stopped', 'vm.crashed', 'vm.shutdown',
@@ -874,6 +898,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
   const stopMut  = useMutation(vms.stop);
   const delMut   = useMutation(vms.delete);
   const spec = vm.spec || {};
+  const osType = resolveOsType(spec);
   const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
   const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
   const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
@@ -912,9 +937,15 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <span className="font-mono text-sm text-steel-100 truncate">{vm.name}</span>
           <StatusBadge state={vm.state} />
+          <span
+            className={`badge ${osType === 'windows' ? 'bg-sky-500/10 text-sky-300 border-sky-500/20' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'}`}
+            data-testid={`badge-os-${vm.name}`}
+          >
+            {osBadgeLabel(spec)}
+          </span>
           {spec.locked && (
             <span
               className="badge bg-amber-500/10 text-amber-300 border-amber-500/20 inline-flex items-center gap-1"
@@ -970,7 +1001,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -1013,6 +1044,8 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
         description: template.description || f.description,
         tags: (template.tags || []).join(', '),
         default_user: template.default_user || f.default_user,
+        os_type: template.os_type || f.os_type,
+        os_variant: template.os_variant || f.os_variant,
       };
     });
     setNetworks(template?.networks?.map(net => ({
@@ -1034,6 +1067,25 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   const addNetwork = () => setNetworks(n => [...n, { mode: 'macvtap', host_interface: '', static_ip: '', gateway: '', dhcp: false }]);
   const removeNetwork = (i) => setNetworks(n => n.filter((_, idx) => idx !== i));
   const updateNet = (i, field, val) => setNetworks(n => n.map((net, idx) => idx === i ? { ...net, [field]: val } : net));
+  const isWindows = resolveOsType(form) === 'windows';
+
+  useEffect(() => {
+    if (!isWindows) {
+      setForm((f) => {
+        if (!f.os_variant && !f.admin_password) return f;
+        return { ...f, os_variant: '', admin_password: '' };
+      });
+    }
+  }, [isWindows]);
+
+  useEffect(() => {
+    if (!isWindows) return;
+    setForm(f => ({
+      ...f,
+      ram_mb: Math.max(Number(f.ram_mb) || 0, WINDOWS_MIN_RAM_MB),
+      disk_gb: Math.max(Number(f.disk_gb) || 0, WINDOWS_MIN_DISK_GB),
+    }));
+  }, [isWindows]);
 
   const handleSubmit = async () => {
     const spec = { ...form };
@@ -1044,6 +1096,12 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (!spec.template_id) delete spec.template_id;
     if (!spec.auto_start) delete spec.auto_start;
+    if (!spec.os_variant) delete spec.os_variant;
+    if (!spec.admin_password) delete spec.admin_password;
+    if (resolveOsType(spec) !== 'windows') {
+      delete spec.os_variant;
+      delete spec.admin_password;
+    }
     // Per-VM device overrides (5.6.15) — only send keys the operator
     // actually filled in so the daemon resolves the OS-family default.
     if (!spec.disk_bus) delete spec.disk_bus;
@@ -1218,17 +1276,48 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
+                  <label className="label">Guest OS</label>
+                  <select className="input" value={form.os_type} onChange={update('os_type')} data-testid="input-vm-os-type">
+                    <option value="linux">Linux</option>
+                    <option value="windows">Windows</option>
+                  </select>
+                </div>
+                <div>
                   <label className="label">vCPUs</label>
                   <input className="input" type="number" min={1} value={form.cpus} onChange={updateNum('cpus')} data-testid="input-vm-cpus" />
                 </div>
                 <div>
                   <label className="label">RAM (MB)</label>
-                  <input className="input" type="number" min={256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} data-testid="input-vm-ram" />
+                  <input className="input" type="number" min={isWindows ? WINDOWS_MIN_RAM_MB : 256} step={256} value={form.ram_mb} onChange={updateNum('ram_mb')} data-testid="input-vm-ram" />
+                  {isWindows && <p className="mt-1 text-[11px] text-steel-500">Windows minimum: {WINDOWS_MIN_RAM_MB} MB</p>}
                 </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                {isWindows ? (
+                  <div>
+                    <label className="label">Windows variant</label>
+                    <select className="input" value={form.os_variant} onChange={update('os_variant')} data-testid="input-vm-os-variant">
+                      <option value="">Select variant…</option>
+                      <option value="windows-10">Windows 10</option>
+                      <option value="windows-11">Windows 11</option>
+                      <option value="windows-server-2019">Windows Server 2019</option>
+                      <option value="windows-server-2022">Windows Server 2022</option>
+                      <option value="windows-server-2025">Windows Server 2025</option>
+                    </select>
+                  </div>
+                ) : <div />}
                 <div>
                   <label className="label">Disk (GB)</label>
-                  <input className="input" type="number" min={1} value={form.disk_gb} onChange={updateNum('disk_gb')} data-testid="input-vm-disk" />
+                  <input className="input" type="number" min={isWindows ? WINDOWS_MIN_DISK_GB : 1} value={form.disk_gb} onChange={updateNum('disk_gb')} data-testid="input-vm-disk" />
+                  {isWindows && <p className="mt-1 text-[11px] text-steel-500">Windows minimum: {WINDOWS_MIN_DISK_GB} GB</p>}
                 </div>
+                {isWindows ? (
+                  <div>
+                    <label className="label">Administrator password <span className="text-steel-500 font-normal">(optional)</span></label>
+                    <input className="input font-mono" type="password" placeholder="Set once at first boot" value={form.admin_password} onChange={update('admin_password')} data-testid="input-vm-admin-password" />
+                  </div>
+                ) : <div />}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1252,8 +1341,8 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                 <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider mb-3">Access</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="label">Default SSH User <span className="text-steel-500 font-normal">(blank = root)</span></label>
-                    <input className="input font-mono" placeholder="root" value={form.default_user} onChange={update('default_user')} data-testid="input-vm-default-user" />
+                    <label className="label">Default SSH User <span className="text-steel-500 font-normal">(blank = {isWindows ? 'Administrator' : 'root'})</span></label>
+                    <input className="input font-mono" placeholder={isWindows ? 'Administrator' : 'root'} value={form.default_user} onChange={update('default_user')} data-testid="input-vm-default-user" />
                   </div>
                   <div>
                     <label className="label">SSH Public Key</label>

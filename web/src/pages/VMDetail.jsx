@@ -13,6 +13,18 @@ import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
 import Activity from './Activity';
 
+function resolveOsType(spec = {}) {
+  return String(spec.os_type || '').trim().toLowerCase() === 'windows' ? 'windows' : 'linux';
+}
+
+function titleCaseWords(value) {
+  return String(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 export default function VMDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -207,7 +219,11 @@ export default function VMDetail() {
   const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
   const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
   const createdText = vm.created_at ? new Date(vm.created_at).toLocaleString() : '—';
-  const sshUser = spec.default_user || 'root';
+  const osType = resolveOsType(spec);
+  const sshUser = spec.default_user || (osType === 'windows' ? 'Administrator' : 'root');
+  const rdpForward = portList.find((port) => Number(port.guest_port) === 3389 && String(port.protocol || '').toLowerCase() === 'tcp')
+    || portList.find((port) => Number(port.guest_port) === 3389);
+  const hasRDPForward = !!rdpForward;
   const vmTagSet = new Set(tags.map((tag) => String(tag).toLowerCase()));
   const vmScheduleList = (scheduleResponse?.data || []).filter((schedule) => {
     if (schedule.vm_id && schedule.vm_id === id) return true;
@@ -234,9 +250,15 @@ export default function VMDetail() {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="font-display font-bold text-2xl text-steel-100 tracking-tight" data-testid="vm-detail-name">{vm.name}</h1>
               <span data-testid="vm-detail-state"><StatusBadge state={vm.state} /></span>
+              <span
+                className={`badge ${osType === 'windows' ? 'bg-sky-500/10 text-sky-300 border-sky-500/20' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'}`}
+                data-testid="vm-detail-os-badge"
+              >
+                {osType === 'windows' ? (spec.os_variant ? titleCaseWords(String(spec.os_variant).replace(/^windows-/, 'Windows ').replace(/-/g, ' ')) : 'Windows') : 'Linux'}
+              </span>
             </div>
             <p className="text-xs font-mono text-steel-500 mt-0.5">{vm.id}</p>
           </div>
@@ -329,8 +351,8 @@ export default function VMDetail() {
         <InfoCard label="Description" value={vm.description || '—'} />
         <InfoCard label="Tags" value={tags.length ? tags.map(tag => `#${tag}`).join(' · ') : '—'} mono />
         <InfoCard
-          label="SSH"
-          value={vm.ip ? `ssh ${sshUser}@${vm.ip}` : `user: ${sshUser}`}
+          label={osType === 'windows' ? 'Access' : 'SSH'}
+          value={vm.ip ? `${osType === 'windows' ? `RDP ${vm.ip} · user: ${sshUser}` : `ssh ${sshUser}@${vm.ip}`}` : `user: ${sshUser}`}
           mono
         />
         <InfoCard
@@ -344,6 +366,14 @@ export default function VMDetail() {
           testId="vm-detail-locked"
         />
       </div>
+
+      {osType === 'windows' && hasRDPForward && (
+        <div className="card mb-4 border-sky-500/20" data-testid="vm-detail-rdp-hint">
+          <div className="px-4 py-3 text-sm text-sky-200">
+            Connect via RDP: <span className="font-mono">localhost:{rdpForward.host_port}</span>
+          </div>
+        </div>
+      )}
 
       {/* Attached Networks */}
       {networks.length > 0 && (
