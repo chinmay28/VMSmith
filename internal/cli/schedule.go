@@ -289,9 +289,10 @@ var scheduleRunsCmd = &cobra.Command{
 	Short: "List a schedule's run history",
 	Long: `List the run history for a schedule (newest first).  Filter with
 --status (running|success|error|skipped), --vm <vm-id> (exact match — useful
-for tag-selector schedules that target many VMs), and an inclusive RFC3339
---since / --until window on each run's started_at, and page with --limit /
---page.`,
+for tag-selector schedules that target many VMs), --search (case-insensitive
+substring across each run's error and skip_reason — handy for triaging "show
+me every run that timed out"), an inclusive RFC3339 --since / --until window
+on each run's started_at, and page with --limit / --page.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -299,6 +300,7 @@ for tag-selector schedules that target many VMs), and an inclusive RFC3339
 		vmID, _ := cmd.Flags().GetString("vm")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
+		searchFlag, _ := cmd.Flags().GetString("search")
 		limit, _ := cmd.Flags().GetInt("limit")
 		page, _ := cmd.Flags().GetInt("page")
 
@@ -326,6 +328,9 @@ for tag-selector schedules that target many VMs), and an inclusive RFC3339
 		}
 		if v := strings.TrimSpace(untilFlag); v != "" {
 			q.Set("until", v)
+		}
+		if v := strings.TrimSpace(searchFlag); v != "" {
+			q.Set("search", v)
 		}
 		if limit > 0 {
 			q.Set("per_page", strconv.Itoa(limit))
@@ -571,6 +576,7 @@ func init() {
 	scheduleRunsCmd.Flags().String("vm", "", "filter by VM id (exact match; useful for tag-selector schedules)")
 	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
+	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 
