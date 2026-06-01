@@ -970,7 +970,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -1044,6 +1044,13 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     if (!spec.nat_gateway)   delete spec.nat_gateway;
     if (!spec.template_id) delete spec.template_id;
     if (!spec.auto_start) delete spec.auto_start;
+    // Per-VM device overrides (5.6.15) — only send keys the operator
+    // actually filled in so the daemon resolves the OS-family default.
+    if (!spec.disk_bus) delete spec.disk_bus;
+    if (!spec.nic_model) delete spec.nic_model;
+    if (!spec.machine) delete spec.machine;
+    if (!spec.firmware) delete spec.firmware;
+    if (!spec.virtio_win_iso) delete spec.virtio_win_iso;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -1078,6 +1085,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
   const advancedCount = [
     form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
+    form.disk_bus, form.nic_model, form.machine, form.firmware, form.virtio_win_iso,
     networks.length > 0 ? 'x' : ''
   ].filter(Boolean).length;
 
@@ -1307,6 +1315,82 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                         onChange={update('nat_gateway')}
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Device tuning (5.6.15) */}
+              <div>
+                <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider mb-3">
+                  Device Tuning <span className="text-steel-500 font-normal normal-case">(advanced — overrides OS-family defaults)</span>
+                </h3>
+                <div className="p-3 rounded border border-steel-700/40 bg-steel-900/40 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label text-[10px]">Disk Bus</label>
+                      <select
+                        className="input py-1 text-xs"
+                        value={form.disk_bus}
+                        onChange={update('disk_bus')}
+                        data-testid="input-vm-disk-bus"
+                      >
+                        <option value="">Default (linux=virtio, windows=sata)</option>
+                        <option value="virtio">virtio</option>
+                        <option value="sata">sata</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label text-[10px]">NIC Model</label>
+                      <select
+                        className="input py-1 text-xs"
+                        value={form.nic_model}
+                        onChange={update('nic_model')}
+                        data-testid="input-vm-nic-model"
+                      >
+                        <option value="">Default (linux=virtio, windows=e1000e)</option>
+                        <option value="virtio">virtio</option>
+                        <option value="e1000e">e1000e</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label text-[10px]">Firmware</label>
+                      <select
+                        className="input py-1 text-xs"
+                        value={form.firmware}
+                        onChange={update('firmware')}
+                        data-testid="input-vm-firmware"
+                      >
+                        <option value="">Default (bios)</option>
+                        <option value="bios">bios</option>
+                        <option value="uefi">uefi (required for Windows 11)</option>
+                        <option value="ovmf">ovmf (alias for uefi)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label text-[10px]">Machine Type</label>
+                      <input
+                        className="input py-1 text-xs font-mono"
+                        placeholder="pc-q35-6.2 (default)"
+                        value={form.machine}
+                        onChange={update('machine')}
+                        data-testid="input-vm-machine"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label text-[10px]">Virtio-Win ISO (Windows only)</label>
+                    <input
+                      className="input py-1 text-xs font-mono"
+                      placeholder="/usr/share/virtio-win/virtio-win.iso"
+                      value={form.virtio_win_iso}
+                      onChange={update('virtio_win_iso')}
+                      data-testid="input-vm-virtio-win-iso"
+                    />
+                    <p className="text-[10px] text-steel-500 mt-1">
+                      Overrides the daemon-wide <span className="font-mono">storage.virtio_win_iso</span> for this VM only.
+                    </p>
                   </div>
                 </div>
               </div>

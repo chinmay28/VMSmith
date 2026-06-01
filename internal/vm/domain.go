@@ -19,7 +19,7 @@ const domainXMLTemplate = `<domain type='kvm'>
   {{- end}}
   <memory unit='MiB'>{{.RAMMB}}</memory>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
-  <os>
+  <os{{if .FirmwareAttr}} firmware='{{.FirmwareAttr}}'{{end}}>
     <type arch='x86_64' machine='{{.Machine}}'>hvm</type>
     <boot dev='hd'/>
   </os>
@@ -127,6 +127,19 @@ type DomainParams struct {
 	Hyperv          bool   // emit Hyper-V enlightenments + hypervclock timer (Windows)
 	Tablet          bool   // attach a USB tablet for usable VNC mouse tracking (Windows)
 	VideoModel      string // explicit video model (e.g. "qxl" for Windows); empty leaves the libvirt default
+	// FirmwareAttr is the value emitted into the libvirt <os firmware='...'>
+	// attribute (e.g. "efi"). Empty omits the attribute entirely, falling
+	// back to the libvirt default firmware (SeaBIOS on x86_64). Set
+	// indirectly from VMSpec.Firmware ("uefi"/"ovmf" → "efi"; "bios"/"" →
+	// empty) via VMSpec.ResolvedFirmwareAttr.
+	FirmwareAttr string
+	// NICModel is the libvirt <interface><model type='...'/></interface>
+	// value used for the primary NAT interface and every additional
+	// attachment. Populated in DomainParamsFromSpec via
+	// VMSpec.ResolvedNICModel. Exposed on DomainParams (rather than
+	// embedded only in the rendered interface XML strings) so tests can
+	// assert it without grepping XML.
+	NICModel string
 }
 
 // qemuBinaryCandidates is the ordered list of QEMU binary paths to probe.
@@ -157,12 +170,10 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 
 	// NIC model: virtio for Linux (drivers ship in-tree); e1000e for Windows
 	// so the guest has a working NIC out of the box without virtio-net drivers.
-	// Operators wanting virtio-net performance on Windows can install the
-	// drivers from the attached virtio-win ISO and switch the model later.
-	nicModel := "virtio"
-	if windows {
-		nicModel = "e1000e"
-	}
+	// VMSpec.NICModel overrides both defaults (5.6.15) so an operator who has
+	// installed the virtio-net drivers in-guest can pin "virtio" for
+	// throughput, or vice-versa.
+	nicModel := spec.ResolvedNICModel()
 
 	var ifaces []InterfaceEntry
 
@@ -225,6 +236,11 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		}
 	}
 
+	machine := "pc-q35-6.2"
+	if v := strings.TrimSpace(spec.Machine); v != "" {
+		machine = v
+	}
+
 	params := DomainParams{
 		Name:         spec.Name,
 		CPUs:         spec.CPUs,
@@ -232,8 +248,9 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		DiskPath:     diskPath,
 		CloudInitISO: cloudInitISO,
 		Interfaces:   ifaces,
-		Machine:      "pc-q35-6.2",
+		Machine:      machine,
 		Emulator:     detectQEMUBinary(),
+		NICModel:     nicModel,
 	}
 
 	if windows {
@@ -258,6 +275,31 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	// is NTP-synced with a Linux fleet, or "localtime" on a Linux dual-boot
 	// guest sharing an RTC with Windows.
 	params.ClockOffset = spec.ResolvedClockOffset()
+
+	// Apply DiskBus override (5.6.15). The disk target letter follows the
+	// bus (virtio → vd*, sata → sd*) so the libvirt XML stays consistent.
+	// We adjust both the system-disk target and, for SATA, push the
+	// cloud-init cdrom to sdb so it does not collide with the disk on sda
+	// (matches the Windows tuning above).
+	if v := spec.ResolvedDiskBus(); v != params.DiskBus {
+		params.DiskBus = v
+		switch v {
+		case types.DiskBusVirtio:
+			params.DiskTarget = "vda"
+			// virtio disk on vda frees up sda for the cdrom regardless of OS.
+			params.CloudInitTarget = "sda"
+		case types.DiskBusSATA:
+			params.DiskTarget = "sda"
+			params.CloudInitTarget = "sdb"
+		}
+	}
+
+	// Apply Firmware override (5.6.15). "uefi"/"ovmf" resolve to libvirt's
+	// firmware='efi' shorthand which auto-selects the host's OVMF code/vars
+	// pair from the QEMU firmware descriptors; "bios"/"" emit no attribute.
+	// This is the minimal-viable UEFI path — Secure Boot + virtual TPM are
+	// out of scope for 5.6.15 (tracked separately under roadmap 5.6.9).
+	params.FirmwareAttr = spec.ResolvedFirmwareAttr()
 
 	return params
 }

@@ -229,7 +229,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 
 	// Generate and define domain XML
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
-	params.Machine = detectMachineType(m.conn)
+	params.Machine = resolveMachine(spec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, spec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
@@ -372,7 +372,7 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	}
 
 	params := DomainParamsFromSpec(clonedSpec, clonedDiskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
-	params.Machine = detectMachineType(m.conn)
+	params.Machine = resolveMachine(clonedSpec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, clonedSpec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
@@ -899,7 +899,7 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
 		params.UUID = existingUUID
-		params.Machine = detectMachineType(m.conn)
+		params.Machine = resolveMachine(updatedSpec.Machine, func() string { return detectMachineType(m.conn) })
 		m.applyVirtioWin(&params, updatedSpec)
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
@@ -1525,13 +1525,32 @@ func (m *LibvirtManager) virtioWinISOPath() string {
 	return ""
 }
 
+// virtioWinISOPathForSpec extends virtioWinISOPath with the per-VM override
+// added in roadmap 5.6.15. An explicit spec.VirtioWinISO wins over both
+// the daemon config and the auto-probe so an operator can pin a different
+// driver bundle (e.g. a newer Fedora virtio-win snapshot, or a downgraded
+// stable build) for a single Windows VM without touching the daemon
+// config. Missing override files are logged + skipped (matching the
+// daemon-config behaviour); the resolver falls back to the daemon-wide
+// path so the guest still gets a virtio ISO when one is available.
+func (m *LibvirtManager) virtioWinISOPathForSpec(spec types.VMSpec) string {
+	if override := strings.TrimSpace(spec.VirtioWinISO); override != "" {
+		if _, err := os.Stat(override); err == nil {
+			return override
+		}
+		logger.Warn("daemon", "per-VM virtio_win_iso override not found; falling back to daemon config",
+			"path", override, "vm", spec.Name)
+	}
+	return m.virtioWinISOPath()
+}
+
 // applyVirtioWin attaches the virtio-win driver ISO to the domain params when
 // the spec targets Windows and an ISO is available. No-op for Linux guests.
 func (m *LibvirtManager) applyVirtioWin(params *DomainParams, spec types.VMSpec) {
 	if !spec.IsWindows() {
 		return
 	}
-	if iso := m.virtioWinISOPath(); iso != "" {
+	if iso := m.virtioWinISOPathForSpec(spec); iso != "" {
 		params.VirtioWinISO = iso
 	}
 }
@@ -2077,6 +2096,17 @@ func domainStateToVMState(dom *libvirt.Domain) types.VMState {
 	default:
 		return types.VMStateUnknown
 	}
+}
+
+// resolveMachine honours an operator's per-VM machine override (5.6.15) when
+// set, and only falls back to the libvirt-capability-derived default when the
+// spec leaves it blank. Without this gate every lifecycle entry point would
+// silently overwrite the override with detectMachineType.
+func resolveMachine(specMachine string, fallback func() string) string {
+	if v := strings.TrimSpace(specMachine); v != "" {
+		return v
+	}
+	return fallback()
 }
 
 // detectMachineType queries libvirt capabilities to find the best pc-q35-*

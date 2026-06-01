@@ -3412,6 +3412,25 @@ export interface components {
             auto_start?: boolean;
             /** @description When true, the VM is delete-protected. Stop/start/restart still work. */
             locked?: boolean;
+            /**
+             * @description Per-VM system-disk bus override. Empty/omitted resolves to the OS-family default (virtio for Linux, sata for Windows). When set on a Windows guest, the cdrom slot is moved to sdb so the virtio system disk takes vda; when set on a Linux guest the cdrom moves back to sda. Any other value returns 400 `invalid_disk_bus`. Baked at create time.
+             * @enum {string}
+             */
+            disk_bus?: "virtio" | "sata";
+            /**
+             * @description Per-VM NIC model override applied to every `<interface>` entry (primary NAT + extras). Empty/omitted resolves to the OS-family default (virtio for Linux, e1000e for Windows). Operators who have installed the virtio-net drivers in a Windows guest can pin "virtio" here for throughput. Any other value returns 400 `invalid_nic_model`.
+             * @enum {string}
+             */
+            nic_model?: "virtio" | "e1000e";
+            /** @description Libvirt machine type override (e.g. `pc-q35-rhel9.6.0`). Empty/omitted resolves to vmsmith's default (`pc-q35-6.2`). Only letters, digits, dots, hyphens, and underscores are allowed; anything else returns 400 `invalid_machine`. */
+            machine?: string;
+            /**
+             * @description Firmware override. "bios" (default) emits no firmware attribute and falls back to SeaBIOS; "uefi" and "ovmf" both resolve to libvirt's `firmware='efi'` shorthand, which auto-picks the host's OVMF code/vars pair. Required for Windows 11. Does NOT enable Secure Boot or attach a virtual TPM (tracked separately under roadmap 5.6.9). Any other value returns 400 `invalid_firmware`.
+             * @enum {string}
+             */
+            firmware?: "bios" | "uefi" | "ovmf";
+            /** @description Per-VM virtio-win driver ISO path. Overrides the daemon-wide `storage.virtio_win_iso` config for this Windows VM only; ignored for Linux guests. If the override path is missing on the daemon host the resolver logs a warning and falls back to the daemon config / probe. The guest still boots without an ISO (SATA + e1000e work natively); the ISO is only required in-guest to install virtio drivers. */
+            virtio_win_iso?: string;
         };
         VMUpdateSpec: {
             cpus?: number;

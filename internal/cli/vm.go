@@ -42,6 +42,11 @@ var vmCreateCmd = &cobra.Command{
 		osVariant, _ := cmd.Flags().GetString("os-variant")
 		adminPassword, _ := cmd.Flags().GetString("admin-password")
 		clockOffset, _ := cmd.Flags().GetString("clock-offset")
+		diskBus, _ := cmd.Flags().GetString("disk-bus")
+		nicModel, _ := cmd.Flags().GetString("nic-model")
+		machineType, _ := cmd.Flags().GetString("machine")
+		firmware, _ := cmd.Flags().GetString("firmware")
+		virtioWinISO, _ := cmd.Flags().GetString("virtio-win-iso")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		description, _ := cmd.Flags().GetString("description")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
@@ -83,6 +88,11 @@ var vmCreateCmd = &cobra.Command{
 			OSVariant:     strings.TrimSpace(strings.ToLower(osVariant)),
 			ClockOffset:   strings.TrimSpace(strings.ToLower(clockOffset)),
 			AdminPassword: adminPassword,
+			DiskBus:       strings.TrimSpace(strings.ToLower(diskBus)),
+			NICModel:      strings.TrimSpace(strings.ToLower(nicModel)),
+			Machine:       strings.TrimSpace(machineType),
+			Firmware:      strings.TrimSpace(strings.ToLower(firmware)),
+			VirtioWinISO:  strings.TrimSpace(virtioWinISO),
 			CloudInitFile: cloudInit,
 			Networks:      networks,
 			NatStaticIP:   natIP,
@@ -1070,6 +1080,11 @@ func init() {
 	vmCreateCmd.Flags().String("os-variant", "", "Windows variant: windows-10|windows-11|windows-server-2019|windows-server-2022|windows-server-2025")
 	vmCreateCmd.Flags().String("admin-password", "", "Windows local Administrator password (injected at first boot, not persisted)")
 	vmCreateCmd.Flags().String("clock-offset", "", "libvirt domain clock offset: utc or localtime (default: linux=utc, windows=localtime)")
+	vmCreateCmd.Flags().String("disk-bus", "", "system disk bus override: virtio or sata (default: linux=virtio, windows=sata)")
+	vmCreateCmd.Flags().String("nic-model", "", "NIC model override for every interface: virtio or e1000e (default: linux=virtio, windows=e1000e)")
+	vmCreateCmd.Flags().String("machine", "", "libvirt machine type override (default: pc-q35-6.2)")
+	vmCreateCmd.Flags().String("firmware", "", "firmware override: bios (default), uefi, or ovmf (uefi/ovmf both select libvirt's firmware='efi')")
+	vmCreateCmd.Flags().String("virtio-win-iso", "", "per-VM virtio-win driver ISO path (overrides daemon storage.virtio_win_iso for this Windows VM only)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init / cloudbase-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")

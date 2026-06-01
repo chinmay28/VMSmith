@@ -44,6 +44,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if err := validateClockOffset(spec.ClockOffset); err != nil {
 		return err
 	}
+	if err := validateDeviceOverrides(spec); err != nil {
+		return err
+	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
 			return err
@@ -107,6 +110,52 @@ func validateClockOffset(v string) error {
 		return types.NewAPIError("invalid_clock_offset",
 			fmt.Sprintf("clock_offset must be %q or %q", types.ClockOffsetUTC, types.ClockOffsetLocaltime))
 	}
+}
+
+// validateDeviceOverrides validates the optional per-VM device tuning
+// fields added by roadmap 5.6.15 (disk_bus, nic_model, machine, firmware,
+// virtio_win_iso). Empty values are always allowed — they resolve to the
+// OS-family defaults in DomainParamsFromSpec / virtioWinISOPathForSpec.
+// Non-empty values are matched case-insensitively against the libvirt
+// vocabulary; anything else returns a 400 with a stable error code so the
+// CLI / GUI can surface the typo to the operator instead of silently
+// dropping back to the default.
+func validateDeviceOverrides(spec types.VMSpec) error {
+	switch strings.ToLower(strings.TrimSpace(spec.DiskBus)) {
+	case "", types.DiskBusVirtio, types.DiskBusSATA:
+		// ok
+	default:
+		return types.NewAPIError("invalid_disk_bus",
+			fmt.Sprintf("disk_bus must be %q or %q", types.DiskBusVirtio, types.DiskBusSATA))
+	}
+	switch strings.ToLower(strings.TrimSpace(spec.NICModel)) {
+	case "", types.NICModelVirtio, types.NICModelE1000e:
+		// ok
+	default:
+		return types.NewAPIError("invalid_nic_model",
+			fmt.Sprintf("nic_model must be %q or %q", types.NICModelVirtio, types.NICModelE1000e))
+	}
+	switch strings.ToLower(strings.TrimSpace(spec.Firmware)) {
+	case "", types.FirmwareBIOS, types.FirmwareUEFI, types.FirmwareOVMF:
+		// ok
+	default:
+		return types.NewAPIError("invalid_firmware",
+			fmt.Sprintf("firmware must be one of %q, %q, %q",
+				types.FirmwareBIOS, types.FirmwareUEFI, types.FirmwareOVMF))
+	}
+	if !types.IsValidMachineType(spec.Machine) {
+		return types.NewAPIError("invalid_machine",
+			"machine must contain only letters, numbers, dots, hyphens, and underscores (e.g. pc-q35-6.2)")
+	}
+	// virtio_win_iso is a host path. We don't stat it here because the API
+	// server may run on a different node from the libvirt daemon; the
+	// LibvirtManager logs a warning + skips attachment if the path is
+	// missing at create time. Reject only obviously-invalid inputs (NUL
+	// bytes break filepath handling on every Unix).
+	if strings.ContainsRune(spec.VirtioWinISO, '\x00') {
+		return types.NewAPIError("invalid_spec", "virtio_win_iso must not contain NUL bytes")
+	}
+	return nil
 }
 
 // windowsMinRAMMB and windowsMinDiskGB are the floor resource sizes vmsmith
@@ -378,7 +427,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "os_type_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "os_type_immutable", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503

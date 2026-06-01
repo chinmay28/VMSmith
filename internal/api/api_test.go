@@ -3952,6 +3952,118 @@ func TestCreateVM_ClockOffsetAccepted(t *testing.T) {
 }
 
 // ============================================================
+// 5.6.15 — Per-VM device overrides
+// ============================================================
+
+func TestCreateVM_DeviceOverrides_Accepted(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"dev-ok","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,` +
+		`"disk_bus":"SATA","nic_model":"E1000E","machine":"pc-q35-rhel9.6.0",` +
+		`"firmware":"UEFI","virtio_win_iso":"/tmp/virtio-win.iso"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var vm types.VM
+	decodeJSON(t, resp, &vm)
+	// The handler stores what the client sent (case-preserving). The
+	// Resolved* helpers normalise on read, mirroring the clock_offset
+	// contract.
+	if vm.Spec.ResolvedDiskBus() != "sata" {
+		t.Errorf("ResolvedDiskBus = %q, want sata", vm.Spec.ResolvedDiskBus())
+	}
+	if vm.Spec.ResolvedNICModel() != "e1000e" {
+		t.Errorf("ResolvedNICModel = %q, want e1000e", vm.Spec.ResolvedNICModel())
+	}
+	if vm.Spec.ResolvedFirmwareAttr() != "efi" {
+		t.Errorf("ResolvedFirmwareAttr = %q, want efi", vm.Spec.ResolvedFirmwareAttr())
+	}
+	if vm.Spec.Machine != "pc-q35-rhel9.6.0" {
+		t.Errorf("Machine = %q, want pc-q35-rhel9.6.0", vm.Spec.Machine)
+	}
+	if vm.Spec.VirtioWinISO != "/tmp/virtio-win.iso" {
+		t.Errorf("VirtioWinISO = %q, want /tmp/virtio-win.iso", vm.Spec.VirtioWinISO)
+	}
+}
+
+func TestCreateVM_InvalidDiskBus(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"bad-bus","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"disk_bus":"scsi"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_disk_bus")
+}
+
+func TestCreateVM_InvalidNICModel(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"bad-nic","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"nic_model":"rtl8139"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_nic_model")
+}
+
+func TestCreateVM_InvalidFirmware(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	body := `{"name":"bad-fw","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"firmware":"coreboot"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_firmware")
+}
+
+func TestCreateVM_InvalidMachine(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Shell metacharacters in machine type are rejected before they reach
+	// the domain template.
+	body := `{"name":"bad-mach","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20,"machine":"pc;rm -rf /"}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_machine")
+}
+
+func TestCreateVM_DeviceOverrides_EmptyResolvesToDefaults(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// No override fields → linux defaults. Linux disk_bus resolves to
+	// "virtio" + nic_model "virtio" + no firmware attr; Windows defaults
+	// to sata + e1000e (covered by TestCreateVM_Windows).
+	body := `{"name":"defaults","image":"rocky9","cpus":2,"ram_mb":2048,"disk_gb":20}`
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", strings.NewReader(body))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var vm types.VM
+	decodeJSON(t, resp, &vm)
+	if got := vm.Spec.ResolvedDiskBus(); got != "virtio" {
+		t.Errorf("ResolvedDiskBus = %q, want virtio", got)
+	}
+	if got := vm.Spec.ResolvedNICModel(); got != "virtio" {
+		t.Errorf("ResolvedNICModel = %q, want virtio", got)
+	}
+	if got := vm.Spec.ResolvedFirmwareAttr(); got != "" {
+		t.Errorf("ResolvedFirmwareAttr = %q, want empty", got)
+	}
+}
+
+// ============================================================
 // Snapshot endpoint tests
 // ============================================================
 
