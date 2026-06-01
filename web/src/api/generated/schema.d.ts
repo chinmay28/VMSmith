@@ -3044,6 +3044,22 @@ export interface paths {
                      *     post-filter population.
                      */
                     search?: string;
+                    /**
+                     * @description Field to sort the run history by. Default is `started_at` to
+                     *     preserve the legacy newest-first contract. `finished_at` puts
+                     *     still-running runs (nil `finished_at`) at the tail when ascending
+                     *     and at the head when descending. All comparators tiebreak on
+                     *     `id` so paginated requests are deterministic. Unknown values
+                     *     return 400 `invalid_sort`.
+                     * @default started_at
+                     */
+                    sort?: "id" | "started_at" | "finished_at" | "status";
+                    /**
+                     * @description Sort order. When `sort` is omitted the default order is `desc`
+                     *     (newest first); when `sort` is explicitly supplied the default
+                     *     is `asc`. Unknown values return 400 `invalid_order`.
+                     */
+                    order?: "asc" | "desc";
                     /** @description 1-based page number when paginating the run history. */
                     page?: number;
                     /**

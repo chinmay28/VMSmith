@@ -2346,6 +2346,15 @@ const server = http.createServer(async (req, res) => {
     if (until && isNaN(untilMs)) {
       return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
     }
+    const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
+    const validRunSorts = ["id", "started_at", "finished_at", "status"];
+    if (sortRaw && !validRunSorts.includes(sortRaw)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status" });
+    }
+    const orderRaw = (url.searchParams.get("order") || "").trim().toLowerCase();
+    if (orderRaw && orderRaw !== "asc" && orderRaw !== "desc") {
+      return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
+    }
     const all = (scheduleRuns.get(m[1]) || []).filter((run) => {
       if (statusFilter && String(run.status).toLowerCase() !== statusFilter) return false;
       if (vmIDFilter && String(run.vm_id || "") !== vmIDFilter) return false;
@@ -2362,15 +2371,41 @@ const server = http.createServer(async (req, res) => {
       }
       return true;
     });
-    const total = all.length;
+    // Default sort is started_at desc (newest first) — preserves the legacy
+    // bolt-order contract when no ?sort= / ?order= is supplied.
+    const sortField = sortRaw || "started_at";
+    const order = orderRaw || (sortRaw ? "asc" : "desc");
+    const desc = order === "desc";
+    const sortedAll = all.slice();
+    sortedAll.sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "started_at") {
+        cmp = (Date.parse(a.started_at || 0) || 0) - (Date.parse(b.started_at || 0) || 0);
+      } else if (sortField === "finished_at") {
+        const aFin = a.finished_at ? Date.parse(a.finished_at) : NaN;
+        const bFin = b.finished_at ? Date.parse(b.finished_at) : NaN;
+        // nil-trailing in ascending order (matches the Go compareNextFire helper).
+        if (isNaN(aFin) && isNaN(bFin)) cmp = 0;
+        else if (isNaN(aFin)) cmp = 1;
+        else if (isNaN(bFin)) cmp = -1;
+        else cmp = aFin - bFin;
+      } else if (sortField === "status") {
+        cmp = String(a.status || "").localeCompare(String(b.status || ""));
+      } else { // id
+        cmp = String(a.id || "").localeCompare(String(b.id || ""));
+      }
+      if (cmp === 0) cmp = String(a.id || "").localeCompare(String(b.id || ""));
+      return desc ? -cmp : cmp;
+    });
+    const total = sortedAll.length;
     const pageRaw = parseInt(url.searchParams.get("page") || "1", 10);
     const perPageRaw = parseInt(url.searchParams.get("per_page") || url.searchParams.get("limit") || "0", 10);
     const page = isNaN(pageRaw) || pageRaw < 1 ? 1 : pageRaw;
     const perPage = isNaN(perPageRaw) || perPageRaw <= 0 ? 0 : perPageRaw;
-    let runs = all;
+    let runs = sortedAll;
     if (perPage > 0) {
       const start = (page - 1) * perPage;
-      runs = all.slice(start, start + perPage);
+      runs = sortedAll.slice(start, start + perPage);
     }
     return json(res, 200, runs, { "X-Total-Count": String(total) });
   }

@@ -377,8 +377,8 @@ export const schedules = {
     unwrap(apiClient.PATCH('/schedules/{scheduleID}', { params: { path: { scheduleID: id } }, body: patch as any })),
   delete: (id: string) =>
     unwrap(apiClient.DELETE('/schedules/{scheduleID}', { params: { path: { scheduleID: id } } })),
-  runs: (id: string, { page, perPage, status = '', vmId = '', since = '', until = '', search = '' }: { page?: number; perPage?: number; status?: 'running' | 'success' | 'error' | 'skipped' | ''; vmId?: string; since?: string; until?: string; search?: string } = {}) =>
-    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { status: status || undefined, vm_id: vmId || undefined, since: since || undefined, until: until || undefined, search: search || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  runs: (id: string, { page, perPage, status = '', vmId = '', since = '', until = '', search = '', sort = '', order = '' }: { page?: number; perPage?: number; status?: 'running' | 'success' | 'error' | 'skipped' | ''; vmId?: string; since?: string; until?: string; search?: string; sort?: 'id' | 'started_at' | 'finished_at' | 'status' | ''; order?: 'asc' | 'desc' | '' } = {}) =>
+    unwrap(apiClient.GET('/schedules/{scheduleID}/runs', { params: { path: { scheduleID: id }, query: { status: status || undefined, vm_id: vmId || undefined, since: since || undefined, until: until || undefined, search: search || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   runNow: (id: string) =>
     unwrap(apiClient.POST('/schedules/{scheduleID}/run-now', { params: { path: { scheduleID: id } } })),
 };

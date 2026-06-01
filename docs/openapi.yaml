@@ -2287,6 +2287,30 @@ paths:
             applied before pagination so `X-Total-Count` reflects the
             post-filter population.
         - in: query
+          name: sort
+          required: false
+          schema:
+            type: string
+            enum: [id, started_at, finished_at, status]
+            default: started_at
+          description: |
+            Field to sort the run history by. Default is `started_at` to
+            preserve the legacy newest-first contract. `finished_at` puts
+            still-running runs (nil `finished_at`) at the tail when ascending
+            and at the head when descending. All comparators tiebreak on
+            `id` so paginated requests are deterministic. Unknown values
+            return 400 `invalid_sort`.
+        - in: query
+          name: order
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+          description: |
+            Sort order. When `sort` is omitted the default order is `desc`
+            (newest first); when `sort` is explicitly supplied the default
+            is `asc`. Unknown values return 400 `invalid_order`.
+        - in: query
           name: page
           required: false
           schema:
