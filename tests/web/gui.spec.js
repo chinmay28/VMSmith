@@ -1775,6 +1775,33 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("badge-locked-web-server")).toBeVisible();
   });
 
+  test("device tuning surfaces in edit modal and switch-to-virtio shortcut round-trips", async ({ page }) => {
+    // Roadmap 5.6.12 — disk_bus / nic_model can be flipped via the
+    // Device Tuning subsection in the edit modal; the "Switch to virtio"
+    // shortcut pre-fills both selectors atomically.
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    await page.getByTestId("btn-edit-vm").click();
+    await expect(page.getByTestId("select-edit-disk-bus")).toBeVisible();
+    await expect(page.getByTestId("select-edit-nic-model")).toBeVisible();
+
+    // Click the "Switch to virtio" shortcut and verify both selectors update.
+    await page.getByTestId("btn-edit-switch-virtio").click();
+    await expect(page.getByTestId("select-edit-disk-bus")).toHaveValue("virtio");
+    await expect(page.getByTestId("select-edit-nic-model")).toHaveValue("virtio");
+
+    await page.getByTestId("btn-submit-edit").click();
+    await expect(page.getByTestId("select-edit-disk-bus")).not.toBeVisible();
+
+    // Re-fetch via API and assert the spec persisted both changes.
+    const resp = await page.request.get(`${BASE_URL}/api/v1/vms/vm-1`);
+    expect(resp.ok()).toBe(true);
+    const updated = await resp.json();
+    expect(updated.spec.disk_bus).toBe("virtio");
+    expect(updated.spec.nic_model).toBe("virtio");
+  });
+
   test("cancel edit closes modal without changes", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

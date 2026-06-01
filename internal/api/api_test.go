@@ -4038,6 +4038,159 @@ func TestCreateVM_InvalidMachine(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_machine")
 }
 
+// Roadmap 5.6.12 — disk_bus / nic_model are mutable on PATCH so an operator
+// can switch a Windows guest to virtio after installing the virtio drivers
+// in-guest. The mock manager mirrors the LibvirtManager normalisation
+// (lowercase + trim) so these assertions reflect the on-disk shape.
+
+func TestUpdateVM_DiskBusChange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bus", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, DiskBus: "sata"}})
+
+	virtio := "virtio"
+	patch := types.VMUpdateSpec{DiskBus: &virtio}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bus", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.DiskBus != "virtio" {
+		t.Errorf("Spec.DiskBus = %q, want virtio", updated.Spec.DiskBus)
+	}
+	if got := updated.Spec.ResolvedDiskBus(); got != "virtio" {
+		t.Errorf("ResolvedDiskBus = %q, want virtio", got)
+	}
+}
+
+func TestUpdateVM_NICModelChange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-nic", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, NICModel: "e1000e"}})
+
+	virtio := "virtio"
+	patch := types.VMUpdateSpec{NICModel: &virtio}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-nic", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.NICModel != "virtio" {
+		t.Errorf("Spec.NICModel = %q, want virtio", updated.Spec.NICModel)
+	}
+}
+
+func TestUpdateVM_SwitchToVirtio_BothFields(t *testing.T) {
+	// The set-virtio CLI sends both fields atomically; verify the API path
+	// accepts the pair.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-virt", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, DiskBus: "sata", NICModel: "e1000e"}})
+
+	bus, nic := "virtio", "virtio"
+	patch := types.VMUpdateSpec{DiskBus: &bus, NICModel: &nic}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-virt", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.DiskBus != "virtio" || updated.Spec.NICModel != "virtio" {
+		t.Errorf("Spec.DiskBus / Spec.NICModel = %q / %q, want virtio / virtio", updated.Spec.DiskBus, updated.Spec.NICModel)
+	}
+}
+
+func TestUpdateVM_DiskBusClear(t *testing.T) {
+	// Pointer-to-empty-string clears the override; ResolvedDiskBus then
+	// falls back to the OS-family default (sata for Windows).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bus-clear", Name: "win-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 4096, DiskGB: 40, OSType: types.OSTypeWindows, DiskBus: "virtio"}})
+
+	empty := ""
+	patch := types.VMUpdateSpec{DiskBus: &empty}
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bus-clear", jsonBody(t, patch))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var updated types.VM
+	decodeJSON(t, resp, &updated)
+	if updated.Spec.DiskBus != "" {
+		t.Errorf("Spec.DiskBus = %q, want empty after clear", updated.Spec.DiskBus)
+	}
+	if got := updated.Spec.ResolvedDiskBus(); got != "sata" {
+		t.Errorf("ResolvedDiskBus = %q, want sata (windows default)", got)
+	}
+}
+
+func TestUpdateVM_DiskBusInvalid(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bus-bad", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	for _, bad := range []string{"scsi", "ide", "nvme"} {
+		patch := types.VMUpdateSpec{DiskBus: &bad}
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bus-bad", jsonBody(t, patch))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", bad, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "invalid_disk_bus")
+	}
+}
+
+func TestUpdateVM_NICModelInvalid(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-nic-bad", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	for _, bad := range []string{"rtl8139", "ne2k_pci", "vmxnet3"} {
+		patch := types.VMUpdateSpec{NICModel: &bad}
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-nic-bad", jsonBody(t, patch))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", bad, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "invalid_nic_model")
+	}
+}
+
+func TestUpdateVM_DiskBusMixedCase(t *testing.T) {
+	// Case-insensitive normalisation: "VIRTIO" / "Sata" must work.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-bus-mixed", Name: "host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
+
+	for _, in := range []string{"VIRTIO", "Virtio", "SATA", "Sata"} {
+		patch := types.VMUpdateSpec{DiskBus: &in}
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-bus-mixed", jsonBody(t, patch))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("input %q: status = %d, want 200", in, resp.StatusCode)
+		}
+	}
+}
+
 func TestCreateVM_DeviceOverrides_EmptyResolvesToDefaults(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

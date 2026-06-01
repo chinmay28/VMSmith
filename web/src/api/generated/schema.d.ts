@@ -3464,6 +3464,16 @@ export interface components {
             os_type?: string | null;
             /** @description **Immutable.** Sending any value returns 400 `os_type_immutable`; capture os_variant at create time. Use the dedicated `os_type` / `os_variant` create endpoint to express variant changes by cloning a new VM from the same base image. */
             os_variant?: string | null;
+            /**
+             * @description Switch the system-disk bus on an existing VM (roadmap 5.6.12 switch-to-virtio helper). Allowed values are `virtio` / `sata` (case-insensitive). An explicit empty string clears the override so the OS-family default (virtio for Linux, sata for Windows) applies again at next render. Omit (null) to leave unchanged. Applying a change triggers a domain redefine and restarts the VM if it was running. Any other value returns 400 `invalid_disk_bus`. Pair with `nic_model` to switch a Windows guest fully to virtio after installing the virtio drivers in-guest.
+             * @enum {string|null}
+             */
+            disk_bus?: "virtio" | "sata" | "" | null;
+            /**
+             * @description Switch the NIC model on every libvirt `<interface>` entry on an existing VM (the primary NAT interface plus any additional macvtap / bridge / nat attachments). Allowed values are `virtio` / `e1000e` (case-insensitive). An explicit empty string clears the override so the OS-family default (virtio for Linux, e1000e for Windows) applies again at next render. Omit (null) to leave unchanged. Applying a change triggers a domain redefine and restarts the VM if it was running. Any other value returns 400 `invalid_nic_model`.
+             * @enum {string|null}
+             */
+            nic_model?: "virtio" | "e1000e" | "" | null;
         };
         VM: {
             id: string;

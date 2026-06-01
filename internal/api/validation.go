@@ -90,10 +90,45 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 			return err
 		}
 	}
+	if patch.DiskBus != nil {
+		if err := validateDiskBus(*patch.DiskBus); err != nil {
+			return err
+		}
+	}
+	if patch.NICModel != nil {
+		if err := validateNICModel(*patch.NICModel); err != nil {
+			return err
+		}
+	}
 	if _, err := normalizeTags(patch.Tags); err != nil {
 		return err
 	}
 	return nil
+}
+
+// validateDiskBus is the shared vocabulary check used by VMSpec create
+// validation and VMUpdateSpec.DiskBus PATCH validation. An empty string is
+// allowed — on create it resolves to the OS-family default; on PATCH it
+// clears the override.
+func validateDiskBus(v string) error {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", types.DiskBusVirtio, types.DiskBusSATA:
+		return nil
+	default:
+		return types.NewAPIError("invalid_disk_bus",
+			fmt.Sprintf("disk_bus must be %q or %q", types.DiskBusVirtio, types.DiskBusSATA))
+	}
+}
+
+// validateNICModel mirrors validateDiskBus for the NIC model override.
+func validateNICModel(v string) error {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", types.NICModelVirtio, types.NICModelE1000e:
+		return nil
+	default:
+		return types.NewAPIError("invalid_nic_model",
+			fmt.Sprintf("nic_model must be %q or %q", types.NICModelVirtio, types.NICModelE1000e))
+	}
 }
 
 // validateClockOffset checks an explicit ClockOffset value. An empty string
@@ -121,19 +156,11 @@ func validateClockOffset(v string) error {
 // CLI / GUI can surface the typo to the operator instead of silently
 // dropping back to the default.
 func validateDeviceOverrides(spec types.VMSpec) error {
-	switch strings.ToLower(strings.TrimSpace(spec.DiskBus)) {
-	case "", types.DiskBusVirtio, types.DiskBusSATA:
-		// ok
-	default:
-		return types.NewAPIError("invalid_disk_bus",
-			fmt.Sprintf("disk_bus must be %q or %q", types.DiskBusVirtio, types.DiskBusSATA))
+	if err := validateDiskBus(spec.DiskBus); err != nil {
+		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(spec.NICModel)) {
-	case "", types.NICModelVirtio, types.NICModelE1000e:
-		// ok
-	default:
-		return types.NewAPIError("invalid_nic_model",
-			fmt.Sprintf("nic_model must be %q or %q", types.NICModelVirtio, types.NICModelE1000e))
+	if err := validateNICModel(spec.NICModel); err != nil {
+		return err
 	}
 	switch strings.ToLower(strings.TrimSpace(spec.Firmware)) {
 	case "", types.FirmwareBIOS, types.FirmwareUEFI, types.FirmwareOVMF:

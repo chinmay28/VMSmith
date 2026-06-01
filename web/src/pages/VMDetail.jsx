@@ -907,6 +907,8 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
   const [natIP, setNatIP] = useState('');
   const [autoStart, setAutoStart] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [diskBus, setDiskBus] = useState('');
+  const [nicModel, setNicModel] = useState('');
   const updateMut = useMutation((patch) => vms.update(vm.id, patch));
   const spec = normalizeSpec(vm.spec);
   const currentCpus = Number.isFinite(spec.cpus) ? spec.cpus : 0;
@@ -929,6 +931,8 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
     setNatIP(currentIP);
     setAutoStart(!!spec.auto_start);
     setLocked(!!spec.locked);
+    setDiskBus(spec.disk_bus || '');
+    setNicModel(spec.nic_model || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -956,6 +960,18 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
 
     if (locked !== !!spec.locked) {
       patch.locked = locked;
+    }
+
+    // Roadmap 5.6.12 — disk_bus / nic_model are mutable on PATCH. Pointer
+    // semantics: send the new value (including empty string to clear) only
+    // when the user actually changed it.
+    const currentDiskBus = spec.disk_bus || '';
+    const currentNicModel = spec.nic_model || '';
+    if (diskBus !== currentDiskBus) {
+      patch.disk_bus = diskBus;
+    }
+    if (nicModel !== currentNicModel) {
+      patch.nic_model = nicModel;
     }
 
     if (Object.keys(patch).length === 0) { onClose(); return; }
@@ -1074,6 +1090,46 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
             </span>
           </span>
         </label>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label flex items-center justify-between">
+              <span>Disk bus</span>
+              <button
+                type="button"
+                data-testid="btn-edit-switch-virtio"
+                className="text-[10px] text-bronze-400 hover:text-bronze-300 underline"
+                onClick={() => { setDiskBus('virtio'); setNicModel('virtio'); }}
+                title="Switch both disk bus and NIC to virtio (roadmap 5.6.12)"
+              >
+                Switch to virtio
+              </button>
+            </label>
+            <select
+              data-testid="select-edit-disk-bus"
+              className="input"
+              value={diskBus}
+              onChange={e => setDiskBus(e.target.value)}
+            >
+              <option value="">default</option>
+              <option value="virtio">virtio</option>
+              <option value="sata">sata</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">NIC model</label>
+            <select
+              data-testid="select-edit-nic-model"
+              className="input"
+              value={nicModel}
+              onChange={e => setNicModel(e.target.value)}
+            >
+              <option value="">default</option>
+              <option value="virtio">virtio</option>
+              <option value="e1000e">e1000e</option>
+            </select>
+          </div>
+        </div>
 
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 
