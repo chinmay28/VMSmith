@@ -49,8 +49,12 @@ function targetLabel(schedule) {
 
 export default function Schedules() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [showAdd, setShowAdd] = useState(false);
+  const [showAdd, setShowAdd] = useState(searchParams.get('open') === 'create');
   const [editing, setEditing] = useState(null);
+  const prefillSchedule = {
+    vm_id: searchParams.get('prefill_vm_id') || '',
+    name: searchParams.get('prefill_name') || '',
+  };
 
   // Free-text search across name/action/vm_id/tag_selector. `searchInput` is
   // the live value; `searchFilter` is the debounced value that drives the
@@ -213,7 +217,19 @@ export default function Schedules() {
 
       {error && <div className="mb-4"><ErrorBanner message={error} onRetry={refresh} /></div>}
 
-      <AddScheduleModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={refresh} />
+      <AddScheduleModal
+        open={showAdd}
+        initialValues={prefillSchedule}
+        onClose={() => {
+          setShowAdd(false);
+          const next = new URLSearchParams(searchParams);
+          next.delete('open');
+          next.delete('prefill_vm_id');
+          next.delete('prefill_name');
+          setSearchParams(next, { replace: true });
+        }}
+        onCreated={refresh}
+      />
       <EditScheduleModal
         schedule={editing}
         open={editing !== null}
@@ -747,7 +763,7 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
 }
 
 // ScheduleForm is the shared create/edit body. `mode` is 'create' or 'edit'.
-function ScheduleForm({ mode, schedule, onClose, onSaved }) {
+function ScheduleForm({ mode, schedule, initialValues, onClose, onSaved }) {
   const [name, setName] = useState('');
   const [action, setAction] = useState('snapshot');
   const [vmId, setVmId] = useState('');
@@ -774,9 +790,9 @@ function ScheduleForm({ mode, schedule, onClose, onSaved }) {
       setRetentionCount(schedule.retention_count != null ? String(schedule.retention_count) : '');
       setMaxConcurrent(schedule.max_concurrent != null ? String(schedule.max_concurrent) : '');
     } else if (mode === 'create') {
-      setName('');
+      setName(initialValues?.name || '');
       setAction('snapshot');
-      setVmId('');
+      setVmId(initialValues?.vm_id || '');
       setTagsInput('');
       setCronSpec('0 0 2 * * *');
       setTimezone('');
@@ -787,7 +803,7 @@ function ScheduleForm({ mode, schedule, onClose, onSaved }) {
     }
     setErr(null);
     setSubmitting(false);
-  }, [mode, schedule]);
+  }, [mode, schedule, initialValues]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -976,10 +992,10 @@ function ScheduleForm({ mode, schedule, onClose, onSaved }) {
   );
 }
 
-function AddScheduleModal({ open, onClose, onCreated }) {
+function AddScheduleModal({ open, initialValues, onClose, onCreated }) {
   return (
     <Modal open={open} onClose={onClose} title="Add schedule" wide>
-      {open && <ScheduleForm mode="create" onClose={onClose} onSaved={onCreated} />}
+      {open && <ScheduleForm mode="create" initialValues={initialValues} onClose={onClose} onSaved={onCreated} />}
     </Modal>
   );
 }

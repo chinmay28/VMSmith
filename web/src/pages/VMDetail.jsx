@@ -190,7 +190,6 @@ export default function VMDetail() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCloneModal, setShowCloneModal] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
   const { data: scheduleResponse, refresh: refreshSchedules } = useFetch(
@@ -407,7 +406,11 @@ export default function VMDetail() {
             <Clock size={14} className="text-steel-500" />
             <h2 className="text-sm font-display font-semibold text-steel-300">Schedules</h2>
           </div>
-          <button className="btn-ghost text-xs" onClick={() => setShowScheduleModal(true)} data-testid="btn-add-schedule-from-vm">
+          <button
+            className="btn-ghost text-xs"
+            onClick={() => navigate(`/schedules?open=create&prefill_vm_id=${encodeURIComponent(id)}&prefill_name=${encodeURIComponent(`${vm?.name || id}-schedule`)}`)}
+            data-testid="btn-add-schedule-from-vm"
+          >
             <Plus size={13} /> Add schedule
           </button>
         </div>
@@ -711,12 +714,6 @@ export default function VMDetail() {
       {/* Modals */}
       <EditVMModal vm={vm} open={showEditModal} onClose={() => setShowEditModal(false)} onUpdated={refresh} />
       <CloneVMModal vm={vm} open={showCloneModal} onClose={() => setShowCloneModal(false)} />
-      <CreateVMScheduleModal
-        vm={vm}
-        open={showScheduleModal}
-        onClose={() => setShowScheduleModal(false)}
-        onCreated={refreshSchedules}
-      />
       <CreateSnapshotModal vmId={id} open={showSnapModal} onClose={() => setShowSnapModal(false)} onCreated={refreshSnaps} />
       <AddPortModal vmId={id} open={showPortModal} onClose={() => setShowPortModal(false)} onCreated={refreshPorts} />
       <ExportImageModal vmId={id} open={showImageModal} onClose={() => setShowImageModal(false)} />
