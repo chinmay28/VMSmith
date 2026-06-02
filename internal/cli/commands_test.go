@@ -7104,6 +7104,88 @@ func TestCLI_WebhookList_EmptySinceOmitsParam(t *testing.T) {
 }
 
 // =====================================================
+// webhook list --last-delivery-since / --last-delivery-until tests (5.4.61)
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsLastDeliverySince(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-since", "2026-05-01T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --last-delivery-since: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "last_delivery_since=2026-05-01") {
+		t.Fatalf("query missing last_delivery_since=2026-05-01: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsLastDeliveryUntil(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-until", "2026-05-20T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --last-delivery-until: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "last_delivery_until=2026-05-20") {
+		t.Fatalf("query missing last_delivery_until=2026-05-20: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_ForwardsLastDeliveryRange(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-since", "2026-05-01T00:00:00Z",
+		"--last-delivery-until", "2026-05-20T00:00:00Z"); err != nil {
+		t.Fatalf("webhook list --last-delivery-since --last-delivery-until: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "last_delivery_since=2026-05-01") ||
+		!strings.Contains(state.lastQuery, "last_delivery_until=2026-05-20") {
+		t.Fatalf("query missing last_delivery_since/until: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidLastDeliverySince(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-since", "yesterday")
+	if err == nil {
+		t.Fatalf("expected error for invalid --last-delivery-since, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --last-delivery-since") {
+		t.Fatalf("error = %q, want it to mention 'invalid --last-delivery-since'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_RejectsInvalidLastDeliveryUntil(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-until", "2026-13-99")
+	if err == nil {
+		t.Fatalf("expected error for invalid --last-delivery-until, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid --last-delivery-until") {
+		t.Fatalf("error = %q, want it to mention 'invalid --last-delivery-until'", err.Error())
+	}
+}
+
+func TestCLI_WebhookList_EmptyLastDeliveryFlagsOmitParams(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--last-delivery-since", "  ",
+		"--last-delivery-until", "  "); err != nil {
+		t.Fatalf("webhook list with whitespace last-delivery flags: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "last_delivery_since=") ||
+		strings.Contains(state.lastQuery, "last_delivery_until=") {
+		t.Fatalf("whitespace-only last-delivery flags must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+// =====================================================
 // webhook list --delivery-status tests (5.4.35)
 // =====================================================
 

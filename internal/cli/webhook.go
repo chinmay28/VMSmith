@@ -164,6 +164,21 @@ Optional filters and ordering:
                         unknown created_at is filtered OUT whenever any bound
                         is set.
 
+  --last-delivery-since <rfc3339>
+                        Keep webhooks with last_delivery_at >= <rfc3339>
+                        (inclusive).  Whitespace-trimmed; empty disables.
+                        Invalid values are rejected client-side before
+                        contacting the daemon.  A never-delivered webhook
+                        (zero last_delivery_at) is filtered OUT whenever
+                        either --last-delivery-since or --last-delivery-until
+                        is set.  Use --delivery-status never to *find*
+                        never-delivered webhooks.  Mirrors the symmetric
+                        time-range filter on created_at (--since / --until).
+
+  --last-delivery-until <rfc3339>
+                        Keep webhooks with last_delivery_at <= <rfc3339>
+                        (inclusive).  Same shape as --last-delivery-since.
+
   --sort <field>        Whitelisted to one of:
                           id, url, created_at, last_delivery_at
                         Default: id.
@@ -188,6 +203,8 @@ Optional filters and ordering:
 		activeFlag, _ := cmd.Flags().GetString("active")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
+		lastDeliverySinceFlag, _ := cmd.Flags().GetString("last-delivery-since")
+		lastDeliveryUntilFlag, _ := cmd.Flags().GetString("last-delivery-until")
 		sortField, _ := cmd.Flags().GetString("sort")
 		order, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
@@ -197,6 +214,12 @@ Optional filters and ordering:
 			return err
 		}
 		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(lastDeliverySinceFlag, "--last-delivery-since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(lastDeliveryUntilFlag, "--last-delivery-until"); err != nil {
 			return err
 		}
 		normalisedDeliveryStatus := strings.ToLower(strings.TrimSpace(deliveryStatus))
@@ -251,6 +274,12 @@ Optional filters and ordering:
 		}
 		if v := strings.TrimSpace(untilFlag); v != "" {
 			q.Set("until", v)
+		}
+		if v := strings.TrimSpace(lastDeliverySinceFlag); v != "" {
+			q.Set("last_delivery_since", v)
+		}
+		if v := strings.TrimSpace(lastDeliveryUntilFlag); v != "" {
+			q.Set("last_delivery_until", v)
 		}
 		if sortField != "" {
 			q.Set("sort", sortField)
@@ -716,6 +745,8 @@ func init() {
 	webhookListCmd.Flags().String("active", "", "filter by active flag: true|false (empty disables)")
 	webhookListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
+	webhookListCmd.Flags().String("last-delivery-since", "", "RFC3339 lower bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
+	webhookListCmd.Flags().String("last-delivery-until", "", "RFC3339 upper bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
 	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")

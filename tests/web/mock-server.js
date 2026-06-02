@@ -1864,6 +1864,27 @@ const server = http.createServer(async (req, res) => {
       }
       untilTime = t;
     }
+    // Last-delivery time-range filter on last_delivery_at (5.4.61). Same
+    // shape as the created_at range above; never-delivered webhooks (zero
+    // last_delivery_at) are excluded whenever either bound is set.
+    const lastDeliverySinceRaw = (url.searchParams.get("last_delivery_since") || "").trim();
+    const lastDeliveryUntilRaw = (url.searchParams.get("last_delivery_until") || "").trim();
+    let lastDeliverySinceTime = null;
+    let lastDeliveryUntilTime = null;
+    if (lastDeliverySinceRaw) {
+      const t = new Date(lastDeliverySinceRaw);
+      if (isNaN(t.getTime())) {
+        return json(res, 400, { code: "invalid_last_delivery_since", message: "last_delivery_since must be a valid RFC3339 timestamp" });
+      }
+      lastDeliverySinceTime = t;
+    }
+    if (lastDeliveryUntilRaw) {
+      const t = new Date(lastDeliveryUntilRaw);
+      if (isNaN(t.getTime())) {
+        return json(res, 400, { code: "invalid_last_delivery_until", message: "last_delivery_until must be a valid RFC3339 timestamp" });
+      }
+      lastDeliveryUntilTime = t;
+    }
 
     let hooks = [...webhookList.values()];
     if (tagFilter) {
@@ -1884,6 +1905,19 @@ const server = http.createServer(async (req, res) => {
         if (isNaN(ct.getTime()) || ct.getTime() === 0) return false;
         if (sinceTime && ct.getTime() < sinceTime.getTime()) return false;
         if (untilTime && ct.getTime() > untilTime.getTime()) return false;
+        return true;
+      });
+    }
+    if (lastDeliverySinceTime || lastDeliveryUntilTime) {
+      hooks = hooks.filter((wh) => {
+        // Zero / missing last_delivery_at → never-delivered → excluded
+        // whenever either bound is set, mirroring the daemon's
+        // snapshotInTimeRange contract.
+        if (!wh.last_delivery_at || wh.last_delivery_at === "") return false;
+        const lt = new Date(wh.last_delivery_at);
+        if (isNaN(lt.getTime()) || lt.getTime() === 0) return false;
+        if (lastDeliverySinceTime && lt.getTime() < lastDeliverySinceTime.getTime()) return false;
+        if (lastDeliveryUntilTime && lt.getTime() > lastDeliveryUntilTime.getTime()) return false;
         return true;
       });
     }
@@ -2052,6 +2086,21 @@ const server = http.createServer(async (req, res) => {
       active: true,
       created_at: new Date().toISOString(),
     };
+    // Mock-only test affordance: allow tests to pre-populate
+    // `last_delivery_at` / `last_status` / `last_error` so the 5.4.61 GUI
+    // tests can exercise the last-delivery time-range filter without
+    // round-tripping through the real delivery worker. The daemon's POST
+    // /webhooks ignores these fields — they're populated by the
+    // background delivery worker on real attempts.
+    if (typeof body.last_delivery_at === "string" && body.last_delivery_at !== "") {
+      wh.last_delivery_at = body.last_delivery_at;
+    }
+    if (typeof body.last_status === "number") {
+      wh.last_status = body.last_status;
+    }
+    if (typeof body.last_error === "string") {
+      wh.last_error = body.last_error;
+    }
     webhookList.set(wh.id, wh);
     return json(res, 201, wh);
   }

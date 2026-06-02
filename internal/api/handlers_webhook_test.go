@@ -1773,6 +1773,237 @@ func TestListWebhooks_FilterBySearch_SecretAndLastErrorNotInHaystack(t *testing.
 	}
 }
 
+// seedLastDeliveryWebhooks pins four webhooks with deterministic
+// LastDeliveryAt timestamps (and one never-delivered fixture) so the
+// ?last_delivery_since= / ?last_delivery_until= boundary tests below
+// split them cleanly. Mirrors the seedTimeRangeWebhooks fixture used by
+// the created_at time-range filter (5.4.32).
+func seedLastDeliveryWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	hooks := []*types.Webhook{
+		{ID: "wh-early", URL: "https://a.example.com", Secret: "k", Active: true, CreatedAt: day(1), LastDeliveryAt: day(1)},
+		{ID: "wh-mid", URL: "https://b.example.com", Secret: "k", Active: true, CreatedAt: day(2), LastDeliveryAt: day(15)},
+		{ID: "wh-late", URL: "https://c.example.com", Secret: "k", Active: true, CreatedAt: day(3), LastDeliveryAt: day(30)},
+		// wh-never is never-delivered (zero LastDeliveryAt). Boundary tests
+		// must filter it OUT whenever either bound is set, matching the
+		// snapshotInTimeRange zero-time-exclusion contract.
+		{ID: "wh-never", URL: "https://d.example.com", Secret: "k", Active: true, CreatedAt: day(4)},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliverySince(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?last_delivery_since=2026-05-10T00:00:00Z")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (wh-mid + wh-late; wh-never excluded by zero-time rule)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	ids := map[string]bool{}
+	for _, h := range hooks {
+		ids[h.ID] = true
+	}
+	if !ids["wh-mid"] || !ids["wh-late"] || ids["wh-early"] || ids["wh-never"] {
+		t.Fatalf("expected wh-mid + wh-late only, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliveryUntil(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "last_delivery_until=2026-05-20T00:00:00Z")
+	// wh-early (delivered day 1) + wh-mid (delivered day 15); wh-late after
+	// the bound, wh-never excluded by zero-time rule.
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 webhooks <= last_delivery_until, got %+v", hooks)
+	}
+	ids := map[string]bool{}
+	for _, h := range hooks {
+		ids[h.ID] = true
+	}
+	if !ids["wh-early"] || !ids["wh-mid"] || ids["wh-late"] || ids["wh-never"] {
+		t.Fatalf("expected wh-early + wh-mid only, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliveryRange(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL,
+		"last_delivery_since=2026-05-10T00:00:00Z&last_delivery_until=2026-05-20T00:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-mid" {
+		t.Fatalf("expected only wh-mid in [day 10, day 20], got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliverySince_Inclusive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	boundary := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-edge", URL: "https://edge.example.com", Secret: "k", Active: true, LastDeliveryAt: boundary}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "last_delivery_since=2026-05-01T00:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-edge" {
+		t.Fatalf("expected boundary match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliveryUntil_Inclusive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	boundary := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-edge", URL: "https://edge.example.com", Secret: "k", Active: true, LastDeliveryAt: boundary}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "last_delivery_until=2026-05-15T12:00:00Z")
+	if len(hooks) != 1 || hooks[0].ID != "wh-edge" {
+		t.Fatalf("expected boundary match, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByInvalidLastDeliverySince(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?last_delivery_since=last-tuesday")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_last_delivery_since")
+}
+
+func TestListWebhooks_FilterByInvalidLastDeliveryUntil(t *testing.T) {
+	ts, _, _, cleanup := webhookTestServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?last_delivery_until=2026-13-99")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_last_delivery_until")
+}
+
+func TestListWebhooks_FilterByLastDeliverySince_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "last_delivery_since=%20%20")
+	if len(hooks) != 4 {
+		t.Fatalf("whitespace-only last_delivery_since should be a no-op; got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDeliveryRange_ExcludesNeverDelivered(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	// Wide-open range that covers every dated webhook: wh-never (zero
+	// LastDeliveryAt) must still be filtered out because the predicate is
+	// "show me deliveries in a window".
+	hooks := listWebhooksWithQuery(t, ts.URL,
+		"last_delivery_since=2025-01-01T00:00:00Z&last_delivery_until=2027-01-01T00:00:00Z")
+	if len(hooks) != 3 {
+		t.Fatalf("expected 3 dated webhooks (never-delivered excluded), got %+v", hooks)
+	}
+	for _, h := range hooks {
+		if h.ID == "wh-never" {
+			t.Fatalf("never-delivered webhook leaked through wide range filter: %+v", h)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByLastDelivery_ComposesWithDeliveryStatus(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	day := func(d int) time.Time { return time.Date(2026, 5, d, 12, 0, 0, 0, time.UTC) }
+	// Three webhooks with deliveries in [day 10, day 20]: one healthy
+	// (200, no LastError), one failing (500), and one failing (200 + stale
+	// LastError). The status filter must narrow to the healthy one.
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-healthy", URL: "https://h.example.com", Secret: "k", Active: true, LastDeliveryAt: day(15), LastStatus: 200}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-fail-500", URL: "https://f.example.com", Secret: "k", Active: true, LastDeliveryAt: day(15), LastStatus: 500, LastError: "boom"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-fail-stale", URL: "https://s.example.com", Secret: "k", Active: true, LastDeliveryAt: day(15), LastStatus: 200, LastError: "earlier"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Out-of-range healthy hook so the range filter has work to do too.
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-out-of-range", URL: "https://o.example.com", Secret: "k", Active: true, LastDeliveryAt: day(1), LastStatus: 200}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?last_delivery_since=2026-05-10T00:00:00Z&last_delivery_until=2026-05-20T00:00:00Z&delivery_status=healthy")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 || hooks[0].ID != "wh-healthy" {
+		t.Fatalf("expected only wh-healthy, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByLastDelivery_PaginatedTotalCountReflectsFiltered(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedLastDeliveryWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?last_delivery_since=2026-05-10T00:00:00Z&per_page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	// Two webhooks satisfy the range filter (wh-mid + wh-late). Pagination
+	// caps the response at one row, but X-Total-Count must reflect the
+	// post-filter / pre-pagination population.
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter / pre-pagination)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 {
+		t.Fatalf("expected 1 row (per_page=1), got %d", len(hooks))
+	}
+}
+
 // seedSortableWebhooks seeds a deterministic set of webhooks with distinct
 // URLs, creation timestamps, and last-delivery timestamps so the sort tests
 // can assert exact orderings without depending on insertion order.

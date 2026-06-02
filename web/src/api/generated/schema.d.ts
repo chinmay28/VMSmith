@@ -2405,6 +2405,33 @@ export interface paths {
                      */
                     until?: string;
                     /**
+                     * @description RFC3339 timestamp lower bound (inclusive) on the webhook's
+                     *     `last_delivery_at` (5.4.61). Webhooks whose most recent
+                     *     delivery occurred before this instant are filtered out.
+                     *     Whitespace is trimmed; empty disables the filter. Invalid
+                     *     values return 400 `invalid_last_delivery_since`. A
+                     *     never-delivered webhook (zero `last_delivery_at`) is filtered
+                     *     OUT whenever either `last_delivery_since` or
+                     *     `last_delivery_until` is set — operators querying by
+                     *     delivery activity don't want unbounded entries silently
+                     *     included. Use `delivery_status=never` when the intent is to
+                     *     *find* never-delivered webhooks. Mirrors the `created_at`
+                     *     range (`since` / `until`) on this list and the
+                     *     `next_fire_since` / `next_fire_until` filter on the
+                     *     schedule list (5.4.60).
+                     */
+                    last_delivery_since?: string;
+                    /**
+                     * @description RFC3339 timestamp upper bound (inclusive) on the webhook's
+                     *     `last_delivery_at` (5.4.61). Webhooks whose most recent
+                     *     delivery occurred after this instant are filtered out. Same
+                     *     shape as `last_delivery_since`; 400
+                     *     `invalid_last_delivery_until` on garbage; never-delivered
+                     *     webhooks (zero `last_delivery_at`) are excluded when either
+                     *     bound is set.
+                     */
+                    last_delivery_until?: string;
+                    /**
                      * @description Case-insensitive substring filter applied across each webhook's
                      *     URL, description, event-type filters, and tags. Whitespace is
                      *     trimmed before matching. Secret, ID, and last_error are
