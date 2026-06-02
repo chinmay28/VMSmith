@@ -468,8 +468,6 @@ func TestCLI_ScheduleRuns_ForwardsSortAndOrder(t *testing.T) {
 		"--sort", "  FINISHED_AT  ", "--order", " DESC "); err != nil {
 		t.Fatalf("runs: %v", err)
 	}
-	// The CLI trims + lowercases sort/order so the daemon sees the canonical
-	// value (matches the API's whitespace-trimmed + case-insensitive contract).
 	if !strings.Contains(d.lastQuery, "sort=finished_at") {
 		t.Fatalf("query missing sort=finished_at: %s", d.lastQuery)
 	}
@@ -505,5 +503,62 @@ func TestCLI_ScheduleRuns_RejectsInvalidOrder(t *testing.T) {
 	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--order", "sideways")
 	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
 		t.Fatalf("expected client-side rejection, got err=%v", err)
+	}
+}
+
+func TestCLI_ScheduleRuns_ForwardsFinishedRange(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-1","started_at":"2026-05-22T02:00:00Z","finished_at":"2026-05-22T02:30:00Z","status":"success"}]`)
+
+	out, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--finished-since", "  2026-05-22T02:00:00Z  ", "--finished-until", "2026-05-22T03:00:00Z")
+	if err != nil {
+		t.Fatalf("runs: %v\nout=%s", err, out)
+	}
+	if d.lastMeth != http.MethodGet || d.lastPath != "/api/v1/schedules/sched-1/runs" {
+		t.Fatalf("unexpected request: %s %s", d.lastMeth, d.lastPath)
+	}
+	if !strings.Contains(d.lastQuery, "finished_since=2026-05-22T02") {
+		t.Fatalf("query missing finished_since (whitespace-trimmed): %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "finished_until=2026-05-22T03") {
+		t.Fatalf("query missing finished_until: %s", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "finished_since=%20") || strings.Contains(d.lastQuery, "finished_since=+") {
+		t.Fatalf("query should not retain whitespace, got %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_EmptyFinishedFlagsOmitParams(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--finished-since", "   ", "--finished-until", ""); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "finished_since=") {
+		t.Fatalf("empty --finished-since should not send the param, got %q", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "finished_until=") {
+		t.Fatalf("empty --finished-until should not send the param, got %q", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidFinishedSince(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--finished-since", "not-a-time"); err == nil {
+		t.Fatal("expected invalid --finished-since rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid finished-since should not contact the daemon")
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidFinishedUntil(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--finished-until", "garbage"); err == nil {
+		t.Fatal("expected invalid --finished-until rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid finished-until should not contact the daemon")
 	}
 }

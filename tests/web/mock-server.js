@@ -2419,6 +2419,16 @@ const server = http.createServer(async (req, res) => {
     if (until && isNaN(untilMs)) {
       return json(res, 400, { code: "invalid_until", message: "until must be a valid RFC3339 timestamp" });
     }
+    const finishedSince = (url.searchParams.get("finished_since") || "").trim();
+    const finishedUntil = (url.searchParams.get("finished_until") || "").trim();
+    const finishedSinceMs = finishedSince ? Date.parse(finishedSince) : NaN;
+    const finishedUntilMs = finishedUntil ? Date.parse(finishedUntil) : NaN;
+    if (finishedSince && isNaN(finishedSinceMs)) {
+      return json(res, 400, { code: "invalid_finished_since", message: "finished_since must be a valid RFC3339 timestamp" });
+    }
+    if (finishedUntil && isNaN(finishedUntilMs)) {
+      return json(res, 400, { code: "invalid_finished_until", message: "finished_until must be a valid RFC3339 timestamp" });
+    }
     const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
     const validRunSorts = ["id", "started_at", "finished_at", "status"];
     if (sortRaw && !validRunSorts.includes(sortRaw)) {
@@ -2436,6 +2446,13 @@ const server = http.createServer(async (req, res) => {
         if (isNaN(startMs)) return false;
         if (!isNaN(sinceMs) && startMs < sinceMs) return false;
         if (!isNaN(untilMs) && startMs > untilMs) return false;
+      }
+      if (finishedSince || finishedUntil) {
+        if (!run.finished_at) return false;
+        const finishedMs = Date.parse(run.finished_at);
+        if (isNaN(finishedMs)) return false;
+        if (!isNaN(finishedSinceMs) && finishedMs < finishedSinceMs) return false;
+        if (!isNaN(finishedUntilMs) && finishedMs > finishedUntilMs) return false;
       }
       if (searchFilter) {
         const err = String(run.error || "").toLowerCase();

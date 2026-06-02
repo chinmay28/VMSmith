@@ -3021,6 +3021,42 @@ test.describe("Schedules", () => {
     ]);
   });
 
+  test("finished_at range filter narrows the recent-runs expander to runs that finished inside the window", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Baseline: all 4 seeded runs visible (finished_at on 2026-05-21..2026-05-24).
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // finished_since=2026-05-23T00:00 — only run-4 (2026-05-24) and run-2
+    // (2026-05-23) survive; run-1 and run-3 finished earlier.
+    await page.getByTestId("schedule-runs-finished-since-filter-sch-1").fill("2026-05-23T00:00");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Add finished_until=2026-05-23T23:59 — narrows further to just run-2.
+    await page.getByTestId("schedule-runs-finished-until-filter-sch-1").fill("2026-05-23T23:59");
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Clear-finished button restores every run.
+    await page.getByTestId("schedule-runs-finished-clear-sch-1").click();
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();
