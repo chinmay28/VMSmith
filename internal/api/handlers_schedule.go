@@ -162,7 +162,15 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // default is host-dependent (`time.Local`)), enabled
 // (tristate true/false), since/until (inclusive RFC3339 bounds on created_at;
 // invalid values return 400 invalid_since/invalid_until; a schedule with a
-// zero created_at is filtered OUT when any bound is set), search
+// zero created_at is filtered OUT when any bound is set),
+// next_fire_since/next_fire_until (inclusive RFC3339 bounds on next_fire_at —
+// the cron-computed wall-clock time of the schedule's next planned fire;
+// closes the "what fires in the next 4 hours" operator query that the
+// next_fire_at sort axis can order but not narrow; whitespace-trimmed; empty
+// disables; invalid values return 400 invalid_next_fire_since /
+// invalid_next_fire_until; schedules with a nil NextFireAt — disabled or
+// otherwise stalled — are filtered OUT when any bound is set, mirroring the
+// zero-created_at handling and the snapshotInTimeRange contract), search
 // (case-insensitive substring across name, action, vm_id, and tag_selector).
 // Sorting: sort=id|name|created_at|next_fire_at (default id), order=asc|desc
 // (default asc). All comparators tiebreak on id.
@@ -200,6 +208,16 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	nextFireSinceTime, nextFireSinceSet, apiErr := parseTimeRangeParam(q.Get("next_fire_since"), "next_fire_since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	nextFireUntilTime, nextFireUntilSet, apiErr := parseTimeRangeParam(q.Get("next_fire_until"), "next_fire_until")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -246,6 +264,14 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		}
 		if !snapshotInTimeRange(sched.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
 			continue
+		}
+		if nextFireSinceSet || nextFireUntilSet {
+			if sched.NextFireAt == nil {
+				continue
+			}
+			if !snapshotInTimeRange(*sched.NextFireAt, nextFireSinceTime, nextFireSinceSet, nextFireUntilTime, nextFireUntilSet) {
+				continue
+			}
 		}
 		if searchFilter != "" && !scheduleMatchesSearch(sched, searchFilter) {
 			continue

@@ -3111,6 +3111,56 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
     await expect(page.getByText("No schedules match your filters")).toBeVisible();
   });
+
+  // --- 5.4.60: ?next_fire_since= / ?next_fire_until= filter on next_fire_at ---
+  // Seed data: sch-1 next_fire_at=2026-05-25T02:00:00Z, sch-2 next_fire_at=null
+  // (disabled), sch-3 next_fire_at=2026-05-26T04:30:00Z. The boundary at
+  // 2026-05-26T00:00 cleanly splits sch-1 and sch-3; the nil-next_fire schedule
+  // is always excluded once any bound is set.
+  test("next_fire range filter narrows the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+
+    // next_fire_since=2026-05-26T00:00 — only sch-3 (next 2026-05-26T04:30) survives.
+    // sch-1 is too early, sch-2 has a nil next_fire_at and is excluded under any bound.
+    await page.getByTestId("schedule-list-next-fire-since-filter").fill("2026-05-26T00:00");
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_since")).toContain("2026-05-26");
+
+    // Add an upper bound that excludes sch-3 — the post-filter set is empty.
+    await page.getByTestId("schedule-list-next-fire-until-filter").fill("2026-05-26T01:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+    await expect(page.getByText("No schedules match your filters")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_until")).toContain("2026-05-26");
+
+    // The Clear next-fire button drops both bounds and restores the unfiltered view.
+    await page.getByTestId("schedule-list-next-fire-range-clear").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_since")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_until")).toBeNull();
+  });
+
+  test("next_fire_until upper bound excludes nil-next_fire schedules", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    // until=2026-05-25T12:00 — only sch-1 (next 2026-05-25T02:00) remains.
+    // sch-3 is too late, sch-2 has a nil next_fire_at and is excluded.
+    await page.getByTestId("schedule-list-next-fire-until-filter").fill("2026-05-25T12:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_until")).toContain("2026-05-25");
+  });
 });
 
 test.describe("Navigation", () => {

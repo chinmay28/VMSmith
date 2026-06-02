@@ -590,6 +590,114 @@ func TestListSchedules_FilterByTimezone(t *testing.T) {
 	}
 }
 
+// TestListSchedules_FilterByNextFire covers the ?next_fire_since= /
+// ?next_fire_until= filter (5.4.60): inclusive RFC3339 bounds on the
+// cron-computed NextFireAt, schedules with a nil NextFireAt filtered OUT
+// whenever any bound is set, 400 on garbage values, composes additively
+// with action / created_at since/until / pagination.
+func TestListSchedules_FilterByNextFire(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id, name, nextFire string) {
+		t.Helper()
+		sched := &types.Schedule{
+			ID:        id,
+			Name:      name,
+			Action:    types.ScheduleActionSnapshot,
+			CronSpec:  "0 0 2 * * *",
+			Enabled:   true,
+			CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		}
+		if nextFire != "" {
+			parsed, err := time.Parse(time.RFC3339, nextFire)
+			if err != nil {
+				t.Fatalf("parse %q: %v", nextFire, err)
+			}
+			sched.NextFireAt = &parsed
+		}
+		if err := s.PutSchedule(sched); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	mk("sched-1", "early", "2026-06-01T12:00:00Z")
+	mk("sched-2", "mid", "2026-06-01T15:00:00Z")
+	mk("sched-3", "late", "2026-06-01T20:00:00Z")
+	mk("sched-4", "nilfire", "") // disabled / stalled — nil NextFireAt
+
+	list := func(q string) ([]*types.Schedule, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		if resp.StatusCode == http.StatusOK {
+			json.Unmarshal(data, &out)
+		}
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: no filter returns all four (including nil-NextFireAt).
+	if out, total, code := list(""); code != http.StatusOK || len(out) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(out), total)
+	}
+
+	// next_fire_since alone: inclusive lower bound drops the early one.
+	// The nilfire schedule must be filtered OUT under any bound.
+	if out, total, _ := list("?next_fire_since=2026-06-01T15:00:00Z"); len(out) != 2 || total != 2 {
+		t.Fatalf("next_fire_since lower bound wrong: %+v total=%d", out, total)
+	}
+
+	// next_fire_until alone: inclusive upper bound.
+	if out, total, _ := list("?next_fire_until=2026-06-01T15:00:00Z"); len(out) != 2 || total != 2 {
+		t.Fatalf("next_fire_until upper bound wrong: %+v total=%d", out, total)
+	}
+
+	// Both bounds: only mid falls in the window.
+	if out, total, _ := list("?next_fire_since=2026-06-01T13:00:00Z&next_fire_until=2026-06-01T18:00:00Z"); len(out) != 1 || total != 1 || out[0].Name != "mid" {
+		t.Fatalf("range window wrong: %+v total=%d", out, total)
+	}
+
+	// nil-NextFireAt schedule is excluded under any bound.
+	if out, _, _ := list("?next_fire_since=2000-01-01T00:00:00Z&next_fire_until=2100-01-01T00:00:00Z"); len(out) != 3 {
+		t.Fatalf("nil NextFireAt should be excluded under bounds, got %d", len(out))
+	}
+
+	// Empty values disable both bounds (no-op).
+	if out, total, _ := list("?next_fire_since=&next_fire_until="); len(out) != 4 || total != 4 {
+		t.Fatalf("empty bounds should be no-op: %+v total=%d", out, total)
+	}
+
+	// Whitespace-trimmed.
+	if out, total, _ := list("?next_fire_since=%202026-06-01T15:00:00Z%20"); len(out) != 2 || total != 2 {
+		t.Fatalf("whitespace-trim wrong: %+v total=%d", out, total)
+	}
+
+	// Composes additively with action (all four are snapshot).
+	if out, total, _ := list("?action=snapshot&next_fire_since=2026-06-01T17:00:00Z"); len(out) != 1 || total != 1 || out[0].Name != "late" {
+		t.Fatalf("action+next_fire_since compose wrong: %+v total=%d", out, total)
+	}
+
+	// Composes additively with the existing since (on created_at) — every schedule
+	// has created_at on 2026-05-01, so since=2026-04-01 leaves all in scope but
+	// the next_fire bound still narrows.
+	if out, total, _ := list("?since=2026-04-01T00:00:00Z&next_fire_until=2026-06-01T13:00:00Z"); len(out) != 1 || total != 1 || out[0].Name != "early" {
+		t.Fatalf("since(created_at)+next_fire_until compose wrong: %+v total=%d", out, total)
+	}
+
+	// Invalid bounds → 400 with typed error codes.
+	if _, _, code := list("?next_fire_since=nope"); code != http.StatusBadRequest {
+		t.Fatalf("invalid next_fire_since should 400, got %d", code)
+	}
+	if _, _, code := list("?next_fire_until=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid next_fire_until should 400, got %d", code)
+	}
+
+	// X-Total-Count reflects the post-filter population under pagination.
+	if out, total, _ := list("?next_fire_since=2026-06-01T13:00:00Z&per_page=1"); len(out) != 1 || total != 2 {
+		t.Fatalf("paginated post-filter total wrong: len=%d total=%d", len(out), total)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

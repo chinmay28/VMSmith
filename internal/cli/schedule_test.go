@@ -195,6 +195,57 @@ func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsNextFireRange covers the --next-fire-since /
+// --next-fire-until flags (5.4.60): whitespace-trim, both bounds forwarded
+// as next_fire_since= / next_fire_until=.
+func TestCLI_ScheduleList_ForwardsNextFireRange(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--next-fire-since", "  2026-06-01T12:00:00Z  ",
+		"--next-fire-until", "2026-06-01T20:00:00Z"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, want := range []string{"next_fire_since=2026-06-01", "next_fire_until=2026-06-01T20"} {
+		if !strings.Contains(d.lastQuery, want) {
+			t.Fatalf("query missing %q: %s", want, d.lastQuery)
+		}
+	}
+}
+
+func TestCLI_ScheduleList_EmptyNextFireOmitsParam(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--next-fire-since", "   ", "--next-fire-until", ""); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "next_fire_since=") {
+		t.Fatalf("whitespace-only next-fire-since should not send the param: %s", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "next_fire_until=") {
+		t.Fatalf("empty next-fire-until should not send the param: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleList_RejectsInvalidNextFireSince(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--next-fire-since", "not-a-time"); err == nil {
+		t.Fatal("expected invalid --next-fire-since rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid next-fire-since should not contact daemon")
+	}
+}
+
+func TestCLI_ScheduleList_RejectsInvalidNextFireUntil(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--next-fire-until", "garbage"); err == nil {
+		t.Fatal("expected invalid --next-fire-until rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid next-fire-until should not contact daemon")
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidSort(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "bogus"); err == nil {
