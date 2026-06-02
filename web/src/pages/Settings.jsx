@@ -52,6 +52,15 @@ export default function Settings() {
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
   const [untilFilter, setUntilFilter] = useState(searchParams.get('until') || '');
 
+  // Last-delivery time-range filter (5.4.61) — inclusive bounds on the
+  // webhook's `last_delivery_at`. Same datetime-local → RFC3339-UTC
+  // conversion as the created_at range above. Never-delivered webhooks
+  // (zero `last_delivery_at`) are filtered OUT server-side whenever either
+  // bound is set; the "Never delivered" empty-state below points operators
+  // at the existing delivery-status filter when that's what they wanted.
+  const [lastDeliverySinceFilter, setLastDeliverySinceFilter] = useState(searchParams.get('last_delivery_since') || '');
+  const [lastDeliveryUntilFilter, setLastDeliveryUntilFilter] = useState(searchParams.get('last_delivery_until') || '');
+
   // Delivery-status filter (5.4.35) — categorical enum filter on the
   // webhook's most-recent delivery classification. URL round-trip via
   // `?delivery_status=`. Unknown values fall back to '' (no filter) so a
@@ -116,7 +125,7 @@ export default function Settings() {
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -126,19 +135,23 @@ export default function Settings() {
     if (activeFilter) next.set('active', activeFilter); else next.delete('active');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
+    if (lastDeliverySinceFilter) next.set('last_delivery_since', lastDeliverySinceFilter); else next.delete('last_delivery_since');
+    if (lastDeliveryUntilFilter) next.set('last_delivery_until', lastDeliveryUntilFilter); else next.delete('last_delivery_until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
+  const lastDeliverySinceParam = useMemo(() => datetimeLocalToISO(lastDeliverySinceFilter), [lastDeliverySinceFilter]);
+  const lastDeliveryUntilParam = useMemo(() => datetimeLocalToISO(lastDeliveryUntilFilter), [lastDeliveryUntilFilter]);
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, active: activeFilter, since: sinceParam, until: untilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceParam, untilParam, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, active: activeFilter, since: sinceParam, until: untilParam, lastDeliverySince: lastDeliverySinceParam, lastDeliveryUntil: lastDeliveryUntilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceParam, untilParam, lastDeliverySinceParam, lastDeliveryUntilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -371,6 +384,38 @@ export default function Settings() {
             Clear range
           </button>
         )}
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Last delivery since
+          <input
+            type="datetime-local"
+            value={lastDeliverySinceFilter}
+            onChange={(e) => setLastDeliverySinceFilter(e.target.value)}
+            data-testid="webhook-list-last-delivery-since"
+            aria-label="Last delivery since"
+            className="input py-1 text-xs"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Last delivery until
+          <input
+            type="datetime-local"
+            value={lastDeliveryUntilFilter}
+            onChange={(e) => setLastDeliveryUntilFilter(e.target.value)}
+            data-testid="webhook-list-last-delivery-until"
+            aria-label="Last delivery until"
+            className="input py-1 text-xs"
+          />
+        </label>
+        {(lastDeliverySinceFilter || lastDeliveryUntilFilter) && (
+          <button
+            type="button"
+            onClick={() => { setLastDeliverySinceFilter(''); setLastDeliveryUntilFilter(''); }}
+            data-testid="webhook-list-clear-last-delivery-range"
+            className="text-xs text-steel-400 hover:text-steel-200"
+          >
+            Clear last delivery
+          </button>
+        )}
       </div>
 
       {loading && !hookResponse ? (
@@ -404,6 +449,12 @@ export default function Settings() {
                   ? 'No active webhooks. Every registered webhook is currently disabled — check the "Inactive" bucket.'
                   : 'No inactive webhooks. Every registered webhook is currently active — check the "Active" bucket.'
               }
+            />
+          ) : (lastDeliverySinceFilter || lastDeliveryUntilFilter) ? (
+            <EmptyState
+              icon={Search}
+              title="No deliveries in this window"
+              description='No webhooks delivered events in the selected window. Never-delivered webhooks are excluded — use "Last delivery" = Never to find webhooks waiting for their first attempt.'
             />
           ) : searchFilter ? (
             <EmptyState

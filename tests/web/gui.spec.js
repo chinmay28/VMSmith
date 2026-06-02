@@ -3569,6 +3569,92 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("until")).toBeNull();
   });
 
+  // 5.4.61 — last-delivery time-range filter (?last_delivery_since= /
+  // ?last_delivery_until=) on the webhook list. Mirrors the created_at
+  // time-range filter (5.4.32) on the webhook surface. The mock server
+  // accepts `last_delivery_at` directly on POST /webhooks for test
+  // fixturing (the real daemon ignores the field — it's populated by the
+  // background delivery worker). The test seeds three webhooks at
+  // deterministic timestamps so a 2026-05-10 boundary splits them, then
+  // asserts each filter narrows correctly and the URL round-trips.
+  test("last-delivery range filter narrows the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    // Seed three webhooks directly via mock POST so we control last_delivery_at.
+    const seed = async (suffix, lastDeliveryAt) => {
+      const resp = await page.request.post(`${BASE_URL}/api/v1/webhooks`, {
+        data: {
+          url: `https://hook-${suffix}.example.com`,
+          secret: "k",
+          last_delivery_at: lastDeliveryAt,
+          last_status: lastDeliveryAt ? 200 : 0,
+        },
+      });
+      if (!resp.ok()) throw new Error(`seed ${suffix}: HTTP ${resp.status()}`);
+    };
+    await seed("early", "2026-05-01T12:00:00Z");
+    await seed("mid", "2026-05-15T12:00:00Z");
+    await seed("never", ""); // never-delivered
+
+    // Reload so the list picks up the seeded rows.
+    await page.reload();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Apply a since bound of 2026-05-10 — wh-early excluded, wh-mid kept,
+    // wh-never excluded by zero-time rule.
+    await page.getByTestId("webhook-list-last-delivery-since").fill("2026-05-10T00:00");
+    await expect.poll(() =>
+      new URL(page.url()).searchParams.get("last_delivery_since"),
+    ).toContain("2026-05-10");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("hook-mid.example.com");
+
+    // Add an until bound of 2026-05-20 — wh-mid still matches.
+    await page.getByTestId("webhook-list-last-delivery-until").fill("2026-05-20T00:00");
+    await expect.poll(() =>
+      new URL(page.url()).searchParams.get("last_delivery_until"),
+    ).toContain("2026-05-20");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(1);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("hook-mid.example.com");
+
+    // Wide-open range that covers every dated webhook — wh-early + wh-mid
+    // appear; wh-never is still excluded by the zero-time rule.
+    await page.getByTestId("webhook-list-last-delivery-since").fill("2025-01-01T00:00");
+    await page.getByTestId("webhook-list-last-delivery-until").fill("2027-01-01T00:00");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(2);
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("hook-early.example.com");
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toContainText("hook-mid.example.com");
+
+    // Until bound earlier than every delivery — no rows match; the
+    // tailored last-delivery empty-state appears and nudges operators
+    // toward the existing delivery-status filter for never-delivered.
+    await page.getByTestId("webhook-list-last-delivery-since").fill("");
+    await page.getByTestId("webhook-list-last-delivery-until").fill("2025-01-01T00:00");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(0);
+    await expect(page.getByText(/No deliveries in this window/i)).toBeVisible();
+
+    // "Clear last delivery" drops both bounds from the URL in a single
+    // click and restores every row.
+    await page.getByTestId("webhook-list-clear-last-delivery-range").click();
+    await expect.poll(() =>
+      new URL(page.url()).searchParams.get("last_delivery_since"),
+    ).toBeNull();
+    await expect.poll(() =>
+      new URL(page.url()).searchParams.get("last_delivery_until"),
+    ).toBeNull();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+  });
+
   // 5.4.35 — delivery-status filter (?delivery_status=never|healthy|failing)
   // on the webhook list. Seeds three webhooks via the UI: a fresh untested
   // one (→ never), one that we "Test" against a healthy URL (→ healthy), and

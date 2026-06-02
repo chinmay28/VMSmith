@@ -344,8 +344,14 @@ export const webhooks = {
   // `active` is a tristate boolean exact-match on the webhook's active flag:
   // 'true' (only live webhooks), 'false' (only disabled webhooks), '' (no
   // filter). Mirrors the VM list autoStart/locked tristate filters. (5.4.37)
-  list: ({ search = '', tag = '', eventType = '', deliveryStatus = '', active = '', since = '', until = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; deliveryStatus?: 'never' | 'healthy' | 'failing' | ''; active?: 'true' | 'false' | ''; since?: string; until?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, delivery_status: deliveryStatus || undefined, active: active || undefined, since: since || undefined, until: until || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  //
+  // `lastDeliverySince`/`lastDeliveryUntil` form an inclusive time-range
+  // filter on the webhook's `last_delivery_at`. Never-delivered webhooks
+  // (zero `last_delivery_at`) are filtered OUT whenever either bound is
+  // set — use `deliveryStatus: 'never'` when the intent is to find
+  // never-delivered webhooks. Empty/undefined disables the bound. (5.4.61)
+  list: ({ search = '', tag = '', eventType = '', deliveryStatus = '', active = '', since = '', until = '', lastDeliverySince = '', lastDeliveryUntil = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; deliveryStatus?: 'never' | 'healthy' | 'failing' | ''; active?: 'true' | 'false' | ''; since?: string; until?: string; lastDeliverySince?: string; lastDeliveryUntil?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, delivery_status: deliveryStatus || undefined, active: active || undefined, since: since || undefined, until: until || undefined, last_delivery_since: lastDeliverySince || undefined, last_delivery_until: lastDeliveryUntil || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>

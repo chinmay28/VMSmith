@@ -149,6 +149,21 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     time-range filters.
 //   - until=<rfc3339>  keep webhooks with `created_at <= until` (inclusive).
 //     Same shape as since; 400 `invalid_until` on garbage.
+//   - last_delivery_since=<rfc3339>  keep webhooks with
+//     `last_delivery_at >= last_delivery_since` (inclusive). Whitespace
+//     trimmed; empty disables. Invalid values return 400
+//     `invalid_last_delivery_since`. Never-delivered webhooks (zero
+//     `last_delivery_at`) are filtered OUT whenever either
+//     `last_delivery_since` or `last_delivery_until` is set — operators
+//     querying by delivery activity don't want unbounded entries silently
+//     included. Mirrors the `?since=` / `?until=` time-range filter on
+//     `created_at` and the `?next_fire_since=` / `?next_fire_until=`
+//     filter on the schedule list (5.4.60). Use `?delivery_status=never`
+//     when the intent is to *find* never-delivered webhooks. (5.4.61)
+//   - last_delivery_until=<rfc3339>  keep webhooks with
+//     `last_delivery_at <= last_delivery_until` (inclusive). Same shape
+//     as `last_delivery_since`; 400 `invalid_last_delivery_until` on
+//     garbage.
 //   - search=<value>  case-insensitive substring filter applied to `url`,
 //     `description`, `event_types`, and `tags`. Trimmed + lowercased once
 //     before delegating to the shared predicate. Mirrors the symmetric search
@@ -204,6 +219,16 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
+	lastDeliverySince, lastDeliverySinceSet, apiErr := parseTimeRangeParam(q.Get("last_delivery_since"), "last_delivery_since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	lastDeliveryUntil, lastDeliveryUntilSet, apiErr := parseTimeRangeParam(q.Get("last_delivery_until"), "last_delivery_until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
 	deliveryStatusFilter := strings.ToLower(strings.TrimSpace(q.Get("delivery_status")))
 	if deliveryStatusFilter != "" && !types.IsValidWebhookDeliveryStatus(deliveryStatusFilter) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_delivery_status",
@@ -237,6 +262,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !snapshotInTimeRange(h.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {
+			continue
+		}
+		if !snapshotInTimeRange(h.LastDeliveryAt, lastDeliverySince, lastDeliverySinceSet, lastDeliveryUntil, lastDeliveryUntilSet) {
 			continue
 		}
 		if deliveryStatusFilter != "" && types.WebhookDeliveryStatus(h) != deliveryStatusFilter {
