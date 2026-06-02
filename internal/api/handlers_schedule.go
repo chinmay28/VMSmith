@@ -507,13 +507,14 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // id/schedule_id/vm_id/status are intentionally excluded from the haystack to
 // avoid noisy matches on short numeric queries; empty disables).
 //
-// Sorting: sort=id|started_at|finished_at|status (default started_at to
-// preserve the legacy newest-first contract), order=asc|desc (default desc
+// Sorting: sort=id|started_at|finished_at|status|duration (default started_at
+// to preserve the legacy newest-first contract), order=asc|desc (default desc
 // when sort defaults to started_at so still-running runs land at the head;
 // otherwise asc). Unknown values return 400 invalid_sort/invalid_order. All
 // comparators tiebreak on id so paginated requests are deterministic. A nil
 // finished_at sorts after any concrete time in ascending order so still-
-// running runs sink to the tail.
+// running runs sink to the tail; the duration axis applies the same nil-
+// trailing semantics — runs with no known duration sink to the tail.
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -559,7 +560,7 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		sortField = types.ScheduleRunSortStartedAt
 	}
 	if !types.IsValidScheduleRunSort(sortField) {
-		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, started_at, finished_at, status")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, started_at, finished_at, status, duration")
 		return
 	}
 	orderRaw := strings.TrimSpace(q.Get("order"))

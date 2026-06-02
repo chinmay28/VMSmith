@@ -2430,9 +2430,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_finished_until", message: "finished_until must be a valid RFC3339 timestamp" });
     }
     const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
-    const validRunSorts = ["id", "started_at", "finished_at", "status"];
+    const validRunSorts = ["id", "started_at", "finished_at", "status", "duration"];
     if (sortRaw && !validRunSorts.includes(sortRaw)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status, duration" });
     }
     const orderRaw = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (orderRaw && orderRaw !== "asc" && orderRaw !== "desc") {
@@ -2481,6 +2481,18 @@ const server = http.createServer(async (req, res) => {
         else cmp = aFin - bFin;
       } else if (sortField === "status") {
         cmp = String(a.status || "").localeCompare(String(b.status || ""));
+      } else if (sortField === "duration") {
+        const aHas = !!a.finished_at;
+        const bHas = !!b.finished_at;
+        // nil-trailing in asc — matches the Go compareRunDuration helper.
+        if (!aHas && !bHas) cmp = 0;
+        else if (!aHas) cmp = 1;
+        else if (!bHas) cmp = -1;
+        else {
+          const aDur = Date.parse(a.finished_at) - Date.parse(a.started_at);
+          const bDur = Date.parse(b.finished_at) - Date.parse(b.started_at);
+          cmp = aDur - bDur;
+        }
       } else { // id
         cmp = String(a.id || "").localeCompare(String(b.id || ""));
       }

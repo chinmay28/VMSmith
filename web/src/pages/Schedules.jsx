@@ -668,6 +668,7 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   <option value="">Sort: Started (newest first)</option>
                   <option value="started_at">Started</option>
                   <option value="finished_at">Finished</option>
+                  <option value="duration">Duration</option>
                   <option value="status">Status</option>
                   <option value="id">ID</option>
                 </select>

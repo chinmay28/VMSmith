@@ -109,6 +109,59 @@ func TestSortScheduleRuns_ByStatus_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+func TestSortScheduleRuns_ByDuration_AscNilTrailing(t *testing.T) {
+	start := mustParse(t, "2026-05-20T02:00:00Z")
+	// Three concrete durations: 30s, 2m, 1h; plus one still-running.
+	runs := []*ScheduleRun{
+		{ID: "run-long", StartedAt: start, FinishedAt: ptrTime(start.Add(time.Hour))},
+		{ID: "run-running", StartedAt: start, FinishedAt: nil},
+		{ID: "run-short", StartedAt: start, FinishedAt: ptrTime(start.Add(30 * time.Second))},
+		{ID: "run-medium", StartedAt: start, FinishedAt: ptrTime(start.Add(2 * time.Minute))},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortDuration, SortOrderAsc)
+	// Concrete durations ascending; nil-duration sinks to the tail.
+	want := []string{"run-short", "run-medium", "run-long", "run-running"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("duration asc: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_ByDuration_DescNilLeading(t *testing.T) {
+	start := mustParse(t, "2026-05-20T02:00:00Z")
+	runs := []*ScheduleRun{
+		{ID: "run-short", StartedAt: start, FinishedAt: ptrTime(start.Add(30 * time.Second))},
+		{ID: "run-long", StartedAt: start, FinishedAt: ptrTime(start.Add(time.Hour))},
+		{ID: "run-running", StartedAt: start, FinishedAt: nil},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortDuration, SortOrderDesc)
+	// Descending of nil-trailing flips to nil-leading.
+	want := []string{"run-running", "run-long", "run-short"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("duration desc: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_ByDuration_TiebreaksOnID(t *testing.T) {
+	// Three concrete runs sharing the same 1-minute duration but distinct
+	// IDs.  The comparator must tiebreak on ID so paginated requests are
+	// deterministic.
+	start := mustParse(t, "2026-05-20T02:00:00Z")
+	end := start.Add(time.Minute)
+	runs := []*ScheduleRun{
+		{ID: "run-c", StartedAt: start, FinishedAt: ptrTime(end)},
+		{ID: "run-a", StartedAt: start, FinishedAt: ptrTime(end)},
+		{ID: "run-b", StartedAt: start, FinishedAt: ptrTime(end)},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortDuration, SortOrderAsc)
+	if runs[0].ID != "run-a" || runs[1].ID != "run-b" || runs[2].ID != "run-c" {
+		t.Fatalf("duration tiebreak: %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
+	}
+}
+
 func TestSortScheduleRuns_UnknownFieldFallsBackToID(t *testing.T) {
 	runs := []*ScheduleRun{
 		{ID: "run-c"},
@@ -122,12 +175,12 @@ func TestSortScheduleRuns_UnknownFieldFallsBackToID(t *testing.T) {
 }
 
 func TestIsValidScheduleRunSort(t *testing.T) {
-	for _, ok := range []string{"id", "started_at", "finished_at", "status"} {
+	for _, ok := range []string{"id", "started_at", "finished_at", "status", "duration"} {
 		if !IsValidScheduleRunSort(ok) {
 			t.Errorf("expected %q valid", ok)
 		}
 	}
-	for _, bad := range []string{"", "name", "duration", "STARTED_AT", "garbage"} {
+	for _, bad := range []string{"", "name", "memory", "STARTED_AT", "garbage"} {
 		if IsValidScheduleRunSort(bad) {
 			t.Errorf("expected %q invalid", bad)
 		}
