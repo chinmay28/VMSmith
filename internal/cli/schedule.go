@@ -287,12 +287,16 @@ var scheduleShowCmd = &cobra.Command{
 var scheduleRunsCmd = &cobra.Command{
 	Use:   "runs <id>",
 	Short: "List a schedule's run history",
-	Long: `List the run history for a schedule (newest first).  Filter with
---status (running|success|error|skipped), --vm <vm-id> (exact match — useful
-for tag-selector schedules that target many VMs), --search (case-insensitive
-substring across each run's error and skip_reason — handy for triaging "show
-me every run that timed out"), an inclusive RFC3339 --since / --until window
-on each run's started_at, and page with --limit / --page.`,
+	Long: `List the run history for a schedule (newest first by default).
+Filter with --status (running|success|error|skipped), --vm <vm-id> (exact
+match — useful for tag-selector schedules that target many VMs), --search
+(case-insensitive substring across each run's error and skip_reason — handy
+for triaging "show me every run that timed out"), an inclusive RFC3339
+--since / --until window on each run's started_at, and page with --limit /
+--page. Order with --sort (id|started_at|finished_at|status; default
+started_at) and --order (asc|desc; default desc on bare sort to preserve the
+newest-first contract). Still-running runs (nil finished_at) trail an
+ascending finished_at sort and lead a descending one.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -301,6 +305,8 @@ on each run's started_at, and page with --limit / --page.`,
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
 		searchFlag, _ := cmd.Flags().GetString("search")
+		sortFlag, _ := cmd.Flags().GetString("sort")
+		orderFlag, _ := cmd.Flags().GetString("order")
 		limit, _ := cmd.Flags().GetInt("limit")
 		page, _ := cmd.Flags().GetInt("page")
 
@@ -314,6 +320,14 @@ on each run's started_at, and page with --limit / --page.`,
 		}
 		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
 			return err
+		}
+		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
+		if sortField != "" && !types.IsValidScheduleRunSort(sortField) {
+			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status")
+		}
+		order := strings.ToLower(strings.TrimSpace(orderFlag))
+		if order != "" && order != types.SortOrderAsc && order != types.SortOrderDesc {
+			return fmt.Errorf("invalid --order: must be asc or desc")
 		}
 
 		q := url.Values{}
@@ -331,6 +345,12 @@ on each run's started_at, and page with --limit / --page.`,
 		}
 		if v := strings.TrimSpace(searchFlag); v != "" {
 			q.Set("search", v)
+		}
+		if sortField != "" {
+			q.Set("sort", sortField)
+		}
+		if order != "" {
+			q.Set("order", order)
 		}
 		if limit > 0 {
 			q.Set("per_page", strconv.Itoa(limit))
@@ -577,6 +597,8 @@ func init() {
 	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
+	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status (default started_at)")
+	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 

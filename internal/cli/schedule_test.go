@@ -410,3 +410,49 @@ func TestCLI_ScheduleRuns_EmptySearchFlagSendsNothing(t *testing.T) {
 		t.Fatalf("empty --search should not send search query param, got %q", d.lastQuery)
 	}
 }
+
+func TestCLI_ScheduleRuns_ForwardsSortAndOrder(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--sort", "  FINISHED_AT  ", "--order", " DESC "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	// The CLI trims + lowercases sort/order so the daemon sees the canonical
+	// value (matches the API's whitespace-trimmed + case-insensitive contract).
+	if !strings.Contains(d.lastQuery, "sort=finished_at") {
+		t.Fatalf("query missing sort=finished_at: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_EmptySortAndOrderOmitParams(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--sort", "   ", "--order", "  "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "sort=") {
+		t.Fatalf("empty --sort should not send sort query param, got %q", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "order=") {
+		t.Fatalf("empty --order should not send order query param, got %q", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--sort", "duration")
+	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("expected client-side rejection, got err=%v", err)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidOrder(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--order", "sideways")
+	if err == nil || !strings.Contains(err.Error(), "invalid --order") {
+		t.Fatalf("expected client-side rejection, got err=%v", err)
+	}
+}

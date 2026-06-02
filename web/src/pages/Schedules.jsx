@@ -467,6 +467,8 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const [runVMIDDebounced, setRunVMIDDebounced] = useState('');
   const [runSearch, setRunSearch] = useState('');
   const [runSearchDebounced, setRunSearchDebounced] = useState('');
+  const [runSort, setRunSort] = useState('');
+  const [runOrder, setRunOrder] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setRunVMIDDebounced(runVMID.trim()), 250);
@@ -479,8 +481,8 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   }, [runSearch]);
 
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -602,6 +604,30 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   <option value="success">Success</option>
                   <option value="error">Error</option>
                   <option value="skipped">Skipped</option>
+                </select>
+                <select
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runSort}
+                  onChange={(e) => setRunSort(e.target.value)}
+                  data-testid={`schedule-runs-sort-${schedule.id}`}
+                  aria-label="Sort runs"
+                >
+                  <option value="">Sort: Started (newest first)</option>
+                  <option value="started_at">Started</option>
+                  <option value="finished_at">Finished</option>
+                  <option value="status">Status</option>
+                  <option value="id">ID</option>
+                </select>
+                <select
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runOrder}
+                  onChange={(e) => setRunOrder(e.target.value)}
+                  data-testid={`schedule-runs-order-${schedule.id}`}
+                  aria-label="Sort order"
+                >
+                  <option value="">Order: default</option>
+                  <option value="asc">Asc</option>
+                  <option value="desc">Desc</option>
                 </select>
               </div>
             </div>

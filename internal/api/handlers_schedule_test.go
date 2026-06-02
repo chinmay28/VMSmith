@@ -902,3 +902,122 @@ func TestListScheduleRuns_FilterBySearch(t *testing.T) {
 		t.Fatalf("search paginated: %+v total=%d", runs, total)
 	}
 }
+
+func TestListScheduleRuns_Sort(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-sort", Name: "sort", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(id, started, finished string, status types.ScheduleRunStatus) {
+		t.Helper()
+		startAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse started %q: %v", started, err)
+		}
+		run := &types.ScheduleRun{ID: id, VMID: "vm-1", StartedAt: startAt, Status: status}
+		if finished != "" {
+			finAt, err := time.Parse(time.RFC3339, finished)
+			if err != nil {
+				t.Fatalf("parse finished %q: %v", finished, err)
+			}
+			run.FinishedAt = &finAt
+		}
+		if err := s.AppendRun("sched-sort", run); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	mk("run-a", "2026-05-20T02:00:00Z", "2026-05-20T02:00:05Z", types.ScheduleRunStatusError)
+	mk("run-b", "2026-05-21T02:00:00Z", "2026-05-21T02:00:02Z", types.ScheduleRunStatusSuccess)
+	mk("run-c", "2026-05-22T02:00:00Z", "", types.ScheduleRunStatusRunning)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-sort/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	ids := func(runs []*types.ScheduleRun) []string {
+		out := make([]string, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Default (no sort/order) is started_at desc — newest first contract.
+	if runs, total, code := list(""); code != http.StatusOK || total != 3 || !eq(ids(runs), []string{"run-c", "run-b", "run-a"}) {
+		t.Fatalf("default order: code=%d ids=%v total=%d", code, ids(runs), total)
+	}
+
+	// Explicit sort=started_at,order=asc reverses the default.
+	if runs, _, _ := list("?sort=started_at&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
+		t.Fatalf("sort=started_at,asc: %v", ids(runs))
+	}
+
+	// sort=finished_at,asc puts the still-running (nil finished_at) run at the tail.
+	// run-a finished 2026-05-20T02:00:05Z, run-b finished 2026-05-21T02:00:02Z.
+	if runs, _, _ := list("?sort=finished_at&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
+		t.Fatalf("sort=finished_at,asc nil-trailing: %v", ids(runs))
+	}
+
+	// sort=finished_at,desc flips it: nil-finished runs lead.
+	if runs, _, _ := list("?sort=finished_at&order=desc"); !eq(ids(runs), []string{"run-c", "run-b", "run-a"}) {
+		t.Fatalf("sort=finished_at,desc nil-leading: %v", ids(runs))
+	}
+
+	// sort=status,asc orders alphabetically: error < running < success.
+	if runs, _, _ := list("?sort=status&order=asc"); !eq(ids(runs), []string{"run-a", "run-c", "run-b"}) {
+		t.Fatalf("sort=status,asc: %v", ids(runs))
+	}
+
+	// sort=id,asc tiebreaks deterministically.
+	if runs, _, _ := list("?sort=id&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
+		t.Fatalf("sort=id,asc: %v", ids(runs))
+	}
+
+	// Unknown sort returns 400 invalid_sort.
+	if _, _, code := list("?sort=duration"); code != http.StatusBadRequest {
+		t.Fatalf("sort=duration should 400, got %d", code)
+	}
+
+	// Unknown order returns 400 invalid_order.
+	if _, _, code := list("?sort=started_at&order=sideways"); code != http.StatusBadRequest {
+		t.Fatalf("order=sideways should 400, got %d", code)
+	}
+
+	// Whitespace-trimmed and case-insensitive sort.
+	if runs, _, _ := list("?sort=%20STATUS%20&order=ASC"); !eq(ids(runs), []string{"run-a", "run-c", "run-b"}) {
+		t.Fatalf("sort STATUS trimmed: %v", ids(runs))
+	}
+
+	// Sort composes with status filter.
+	if runs, total, _ := list("?status=error&sort=id&order=asc"); total != 1 || !eq(ids(runs), []string{"run-a"}) {
+		t.Fatalf("sort+status compose: %v total=%d", ids(runs), total)
+	}
+
+	// Pagination on sort=started_at,asc still returns the post-filter total.
+	if runs, total, _ := list("?sort=started_at&order=asc&per_page=1"); total != 3 || !eq(ids(runs), []string{"run-a"}) {
+		t.Fatalf("sort + per_page=1: %v total=%d", ids(runs), total)
+	}
+}

@@ -2954,6 +2954,73 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
   });
 
+  test("runs sort + order dropdowns reorder the recent-runs expander", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Default order is started_at desc (newest first):
+    // run-4 (May 24) → run-2 (May 23) → run-1 (May 22) → run-3 (May 21).
+    const orderOf = async () => {
+      const ids = await page
+        .locator('[data-testid^="schedule-run-run-"]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+      return ids;
+    };
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-3",
+    ]);
+
+    // sort=finished_at, order=asc: oldest finish first (run-3 finished May 21).
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("finished_at");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("asc");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-3",
+      "schedule-run-run-1",
+      "schedule-run-run-2",
+      "schedule-run-run-4",
+    ]);
+
+    // sort=status, order=asc: error < success — run-3 (the only error) first,
+    // then the three success runs in id-asc tiebreak (run-1, run-2, run-4).
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("status");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("asc");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-3",
+      "schedule-run-run-1",
+      "schedule-run-run-2",
+      "schedule-run-run-4",
+    ]);
+
+    // sort=id, order=desc: run-4, run-3, run-2, run-1.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("id");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("desc");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-3",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+    ]);
+
+    // Reset to default — original newest-first ordering restored.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("");
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-3",
+    ]);
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

@@ -462,18 +462,27 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ListScheduleRuns handles GET /api/v1/schedules/{id}/runs (reverse-chrono).
+// ListScheduleRuns handles GET /api/v1/schedules/{id}/runs.
 //
-// Filters (applied before pagination so X-Total-Count reflects the post-filter
-// population): status (exact, case-insensitive: running|success|error|skipped;
-// invalid values return 400 invalid_status), vm_id (exact, case-sensitive — VM
-// IDs are opaque vm-<unix-nano> strings; whitespace-trimmed; empty disables
-// the filter), since/until (inclusive RFC3339 bounds on started_at; invalid
-// values return 400 invalid_since/invalid_until; a run with a zero started_at
-// is filtered OUT when any bound is set), search (case-insensitive substring
-// match across the run's error and skip_reason fields — whitespace-trimmed;
+// Filters (applied before sort + pagination so X-Total-Count reflects the
+// post-filter population): status (exact, case-insensitive:
+// running|success|error|skipped; invalid values return 400 invalid_status),
+// vm_id (exact, case-sensitive — VM IDs are opaque vm-<unix-nano> strings;
+// whitespace-trimmed; empty disables the filter), since/until (inclusive
+// RFC3339 bounds on started_at; invalid values return 400
+// invalid_since/invalid_until; a run with a zero started_at is filtered OUT
+// when any bound is set), search (case-insensitive substring match across the
+// run's error and skip_reason fields — whitespace-trimmed;
 // id/schedule_id/vm_id/status are intentionally excluded from the haystack to
 // avoid noisy matches on short numeric queries; empty disables).
+//
+// Sorting: sort=id|started_at|finished_at|status (default started_at to
+// preserve the legacy newest-first contract), order=asc|desc (default desc
+// when sort defaults to started_at so still-running runs land at the head;
+// otherwise asc). Unknown values return 400 invalid_sort/invalid_order. All
+// comparators tiebreak on id so paginated requests are deterministic. A nil
+// finished_at sorts after any concrete time in ascending order so still-
+// running runs sink to the tail.
 func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -503,6 +512,31 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sortFieldRaw := strings.TrimSpace(q.Get("sort"))
+	sortField := strings.ToLower(sortFieldRaw)
+	if sortField == "" {
+		sortField = types.ScheduleRunSortStartedAt
+	}
+	if !types.IsValidScheduleRunSort(sortField) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, started_at, finished_at, status")
+		return
+	}
+	orderRaw := strings.TrimSpace(q.Get("order"))
+	order := strings.ToLower(orderRaw)
+	if order == "" {
+		// Default desc when the sort axis defaults to started_at so the
+		// newest-first contract is preserved on a bare GET.
+		if sortFieldRaw == "" {
+			order = types.SortOrderDesc
+		} else {
+			order = types.SortOrderAsc
+		}
+	}
+	if order != types.SortOrderAsc && order != types.SortOrderDesc {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_order", "order must be 'asc' or 'desc'")
+		return
+	}
+
 	all, err := s.scheduleStore.ListRuns(id, 0)
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "internal_error", "failed to list runs")
@@ -528,6 +562,8 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		runs = append(runs, run)
 	}
+
+	types.SortScheduleRuns(runs, sortField, order)
 
 	total := len(runs)
 	pagination := parsePagination(r)
