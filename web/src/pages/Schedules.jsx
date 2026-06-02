@@ -51,10 +51,12 @@ export default function Schedules() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(searchParams.get('open') === 'create');
   const [editing, setEditing] = useState(null);
-  const prefillSchedule = {
-    vm_id: searchParams.get('prefill_vm_id') || '',
-    name: searchParams.get('prefill_name') || '',
-  };
+  const prefillVmId = searchParams.get('prefill_vm_id') || '';
+  const prefillName = searchParams.get('prefill_name') || '';
+  const prefillSchedule = useMemo(
+    () => ({ vm_id: prefillVmId, name: prefillName }),
+    [prefillVmId, prefillName],
+  );
 
   // Free-text search across name/action/vm_id/tag_selector. `searchInput` is
   // the live value; `searchFilter` is the debounced value that drives the

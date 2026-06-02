@@ -192,7 +192,7 @@ export default function VMDetail() {
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
-  const { data: scheduleResponse, refresh: refreshSchedules } = useFetch(
+  const { data: scheduleResponse } = useFetch(
     () => schedulesApi.list({ perPage: 100, sort: 'next_fire_at', order: 'asc' }),
     [],
     15000,
@@ -718,123 +718,6 @@ export default function VMDetail() {
       <AddPortModal vmId={id} open={showPortModal} onClose={() => setShowPortModal(false)} onCreated={refreshPorts} />
       <ExportImageModal vmId={id} open={showImageModal} onClose={() => setShowImageModal(false)} />
     </div>
-  );
-}
-
-function CreateVMScheduleModal({ vm, open, onClose, onCreated }) {
-  const [name, setName] = useState('');
-  const [action, setAction] = useState('snapshot');
-  const [cronSpec, setCronSpec] = useState('0 0 2 * * *');
-  const [timezone, setTimezone] = useState('');
-  const [enabled, setEnabled] = useState(true);
-  const [catchUpPolicy, setCatchUpPolicy] = useState('skip');
-  const [retentionCount, setRetentionCount] = useState('');
-  const [maxConcurrent, setMaxConcurrent] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(`${vm.name}-schedule`);
-    setAction('snapshot');
-    setCronSpec('0 0 2 * * *');
-    setTimezone('');
-    setEnabled(true);
-    setCatchUpPolicy('skip');
-    setRetentionCount('');
-    setMaxConcurrent('');
-    setSubmitting(false);
-    setError(null);
-  }, [open, vm.name]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      await schedulesApi.create({
-        name: name.trim(),
-        action,
-        vm_id: vm.id,
-        cron_spec: cronSpec.trim(),
-        timezone: timezone.trim() || undefined,
-        enabled,
-        catch_up_policy: catchUpPolicy,
-        retention_count: retentionCount.trim() === '' ? undefined : parseInt(retentionCount, 10),
-        max_concurrent: maxConcurrent.trim() === '' ? undefined : parseInt(maxConcurrent, 10),
-      });
-      onCreated?.();
-      onClose();
-    } catch (err) {
-      setError(err?.message || 'failed to create schedule');
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title={`Add schedule for ${vm.name}`} wide>
-      {open && (
-        <form onSubmit={handleSubmit} className="space-y-3" data-testid="vm-schedule-create-form">
-          <div>
-            <label className="block text-xs font-mono text-steel-400 mb-1">Name</label>
-            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} required maxLength={128} data-testid="schedule-name-input" />
-          </div>
-          <div>
-            <label className="block text-xs font-mono text-steel-400 mb-1">Action</label>
-            <select className="input w-full" value={action} onChange={(e) => setAction(e.target.value)} data-testid="schedule-action-select">
-              <option value="snapshot">snapshot</option>
-              <option value="start">start</option>
-              <option value="stop">stop</option>
-              <option value="restart">restart</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-mono text-steel-400 mb-1">Target VM ID</label>
-            <input className="input w-full bg-steel-900/40 text-steel-500" value={vm.id} readOnly data-testid="schedule-vmid-input" />
-          </div>
-          <div>
-            <label className="block text-xs font-mono text-steel-400 mb-1">Cron spec (6 fields, with seconds)</label>
-            <input className="input w-full" value={cronSpec} onChange={(e) => setCronSpec(e.target.value)} required data-testid="schedule-cron-input" />
-          </div>
-          <div>
-            <label className="block text-xs font-mono text-steel-400 mb-1">Timezone (optional)</label>
-            <input className="input w-full" placeholder="America/Los_Angeles" value={timezone} onChange={(e) => setTimezone(e.target.value)} data-testid="schedule-timezone-input" />
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="block text-xs font-mono text-steel-400 mb-1">Catch-up policy</label>
-              <select className="input w-full" value={catchUpPolicy} onChange={(e) => setCatchUpPolicy(e.target.value)} data-testid="schedule-catchup-select">
-                <option value="skip">skip</option>
-                <option value="run_once">run_once</option>
-                <option value="run_all">run_all</option>
-              </select>
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs font-mono text-steel-400 mb-1">Retention count</label>
-              <input className="input w-full" type="number" min="0" value={retentionCount} onChange={(e) => setRetentionCount(e.target.value)} data-testid="schedule-retention-input" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs font-mono text-steel-400 mb-1">Max concurrent</label>
-              <input className="input w-full" type="number" min="0" value={maxConcurrent} onChange={(e) => setMaxConcurrent(e.target.value)} data-testid="schedule-maxconcurrent-input" />
-            </div>
-          </div>
-          <div>
-            <label className="flex items-center gap-2 text-xs font-mono text-steel-300">
-              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} data-testid="schedule-enabled-input" />
-              Enabled
-            </label>
-          </div>
-          {error && <ErrorBanner message={error} />}
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={submitting} data-testid="vm-schedule-create-submit">
-              {submitting ? <Spinner size={13} /> : null}
-              {submitting ? 'Saving…' : 'Create schedule'}
-            </button>
-          </div>
-        </form>
-      )}
-    </Modal>
   );
 }
 
