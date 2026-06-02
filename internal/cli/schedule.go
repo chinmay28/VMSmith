@@ -308,8 +308,11 @@ match — useful for tag-selector schedules that target many VMs), --search
 for triaging "show me every run that timed out"), an inclusive RFC3339
 --since / --until window on each run's started_at, an inclusive RFC3339
 --finished-since / --finished-until window on each run's finished_at
-(still-running runs are filtered OUT when any finished-* bound is set), and
-page with --limit / --page. Order with --sort
+(still-running runs are filtered OUT when any finished-* bound is set), an
+inclusive --min-duration-ms / --max-duration-ms window on each run's
+finished_at - started_at duration (also excludes still-running runs when
+either bound is set — the symmetric range counterpart to the --sort=duration
+axis), and page with --limit / --page. Order with --sort
 (id|started_at|finished_at|status|duration; default started_at) and --order
 (asc|desc; default desc on bare sort to preserve the newest-first contract).
 Still-running runs (nil finished_at) trail an ascending finished_at sort and
@@ -325,6 +328,8 @@ asc and lead in desc.`,
 		untilFlag, _ := cmd.Flags().GetString("until")
 		finishedSinceFlag, _ := cmd.Flags().GetString("finished-since")
 		finishedUntilFlag, _ := cmd.Flags().GetString("finished-until")
+		minDurationMs, _ := cmd.Flags().GetInt("min-duration-ms")
+		maxDurationMs, _ := cmd.Flags().GetInt("max-duration-ms")
 		searchFlag, _ := cmd.Flags().GetString("search")
 		sortFlag, _ := cmd.Flags().GetString("sort")
 		orderFlag, _ := cmd.Flags().GetString("order")
@@ -347,6 +352,12 @@ asc and lead in desc.`,
 		}
 		if _, _, err := parseCLITimeRange(finishedUntilFlag, "--finished-until"); err != nil {
 			return err
+		}
+		if minDurationMs < 0 {
+			return fmt.Errorf("invalid --min-duration-ms: must be a non-negative integer")
+		}
+		if maxDurationMs < 0 {
+			return fmt.Errorf("invalid --max-duration-ms: must be a non-negative integer")
 		}
 		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
 		if sortField != "" && !types.IsValidScheduleRunSort(sortField) {
@@ -375,6 +386,12 @@ asc and lead in desc.`,
 		}
 		if v := strings.TrimSpace(finishedUntilFlag); v != "" {
 			q.Set("finished_until", v)
+		}
+		if cmd.Flags().Changed("min-duration-ms") {
+			q.Set("min_duration_ms", strconv.Itoa(minDurationMs))
+		}
+		if cmd.Flags().Changed("max-duration-ms") {
+			q.Set("max_duration_ms", strconv.Itoa(maxDurationMs))
 		}
 		if v := strings.TrimSpace(searchFlag); v != "" {
 			q.Set("search", v)
@@ -633,6 +650,8 @@ func init() {
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("finished-since", "", "RFC3339 lower bound (inclusive) on finished_at; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("finished-until", "", "RFC3339 upper bound (inclusive) on finished_at; excludes still-running runs")
+	scheduleRunsCmd.Flags().Int("min-duration-ms", 0, "lower bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
+	scheduleRunsCmd.Flags().Int("max-duration-ms", 0, "upper bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
 	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration (default started_at)")
 	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")
