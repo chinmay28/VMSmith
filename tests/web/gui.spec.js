@@ -3021,6 +3021,54 @@ test.describe("Schedules", () => {
     ]);
   });
 
+  test("duration sort axis orders the recent-runs expander by finish-minus-start", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Seeded durations (finished_at - started_at):
+    //   run-3 = 3s, run-1 = 4s, run-2 = 5s, run-4 = 6s.
+    const orderOf = async () => {
+      const ids = await page
+        .locator('[data-testid^="schedule-run-run-"]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+      return ids;
+    };
+
+    // sort=duration, order=asc: shortest first.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("duration");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("asc");
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-3",
+      "schedule-run-run-1",
+      "schedule-run-run-2",
+      "schedule-run-run-4",
+    ]);
+
+    // sort=duration, order=desc: longest first.
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("desc");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-3",
+    ]);
+
+    // Reset to default — original newest-started-first ordering restored.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("");
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-3",
+    ]);
+  });
+
   test("finished_at range filter narrows the recent-runs expander to runs that finished inside the window", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

@@ -492,9 +492,23 @@ func TestCLI_ScheduleRuns_EmptySortAndOrderOmitParams(t *testing.T) {
 
 func TestCLI_ScheduleRuns_RejectsInvalidSort(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
-	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--sort", "duration")
+	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--sort", "memory")
 	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
 		t.Fatalf("expected client-side rejection, got err=%v", err)
+	}
+}
+
+func TestCLI_ScheduleRuns_ForwardsDurationSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--sort", "  DURATION  ", "--order", "desc"); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=duration") {
+		t.Fatalf("query missing sort=duration: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %s", d.lastQuery)
 	}
 }
 

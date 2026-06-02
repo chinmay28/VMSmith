@@ -1097,8 +1097,8 @@ func TestListScheduleRuns_Sort(t *testing.T) {
 		t.Fatalf("sort=id,asc: %v", ids(runs))
 	}
 
-	if _, _, code := list("?sort=duration"); code != http.StatusBadRequest {
-		t.Fatalf("sort=duration should 400, got %d", code)
+	if _, _, code := list("?sort=memory"); code != http.StatusBadRequest {
+		t.Fatalf("sort=memory should 400, got %d", code)
 	}
 
 	if _, _, code := list("?sort=started_at&order=sideways"); code != http.StatusBadRequest {
@@ -1115,6 +1115,105 @@ func TestListScheduleRuns_Sort(t *testing.T) {
 
 	if runs, total, _ := list("?sort=started_at&order=asc&per_page=1"); total != 3 || !eq(ids(runs), []string{"run-a"}) {
 		t.Fatalf("sort + per_page=1: %v total=%d", ids(runs), total)
+	}
+}
+
+// TestListScheduleRuns_SortByDuration covers the ?sort=duration axis (5.4.63):
+// runs are ordered by (finished_at - started_at). Runs with a nil
+// finished_at have unknown duration and sink to the tail in ascending order
+// (mirroring the finished_at nil-trailing semantics). The 400 invalid_sort
+// message now lists "duration" alongside the other axes.
+func TestListScheduleRuns_SortByDuration(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-dur", Name: "dur", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(id, started string, durationSeconds int, status types.ScheduleRunStatus, running bool) {
+		t.Helper()
+		startedAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		run := &types.ScheduleRun{ID: id, VMID: "vm-1", StartedAt: startedAt, Status: status}
+		if !running {
+			finishedAt := startedAt.Add(time.Duration(durationSeconds) * time.Second)
+			run.FinishedAt = &finishedAt
+		}
+		if err := s.AppendRun("sched-dur", run); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	// Three completed runs with distinct durations (30s, 2m, 1h) and one
+	// still-running run with no finished_at.
+	mk("run-short", "2026-05-20T02:00:00Z", 30, types.ScheduleRunStatusSuccess, false)
+	mk("run-medium", "2026-05-20T02:05:00Z", 120, types.ScheduleRunStatusSuccess, false)
+	mk("run-long", "2026-05-20T02:10:00Z", 3600, types.ScheduleRunStatusError, false)
+	mk("run-running", "2026-05-20T02:15:00Z", 0, types.ScheduleRunStatusRunning, true)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-dur/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	ids := func(runs []*types.ScheduleRun) []string {
+		out := make([]string, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// sort=duration,asc: shortest concrete duration first; still-running sinks to the tail.
+	if runs, _, code := list("?sort=duration&order=asc"); code != http.StatusOK || !eq(ids(runs), []string{"run-short", "run-medium", "run-long", "run-running"}) {
+		t.Fatalf("duration asc: code=%d ids=%v", code, ids(runs))
+	}
+
+	// sort=duration,desc flips: nil-duration leads, then longest concrete.
+	if runs, _, _ := list("?sort=duration&order=desc"); !eq(ids(runs), []string{"run-running", "run-long", "run-medium", "run-short"}) {
+		t.Fatalf("duration desc: %v", ids(runs))
+	}
+
+	// Whitespace + case-insensitive sort=duration.
+	if runs, _, _ := list("?sort=%20DURATION%20&order=asc"); !eq(ids(runs), []string{"run-short", "run-medium", "run-long", "run-running"}) {
+		t.Fatalf("duration uppercase/whitespace: %v", ids(runs))
+	}
+
+	// Composes with status filter — only error/success runs remain, ordered by duration.
+	if runs, total, _ := list("?sort=duration&order=asc&status=success"); total != 2 || !eq(ids(runs), []string{"run-short", "run-medium"}) {
+		t.Fatalf("duration asc + status=success: %v total=%d", ids(runs), total)
+	}
+
+	// Pagination preserves post-filter total count.
+	if runs, total, _ := list("?sort=duration&order=asc&per_page=2"); total != 4 || !eq(ids(runs), []string{"run-short", "run-medium"}) {
+		t.Fatalf("duration asc paginated: %v total=%d", ids(runs), total)
+	}
+
+	// The invalid_sort sentinel must still reject unknown values now that
+	// "duration" is a valid axis.
+	if _, _, code := list("?sort=memory"); code != http.StatusBadRequest {
+		t.Fatalf("sort=memory should 400, got %d", code)
 	}
 }
 

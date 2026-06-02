@@ -310,10 +310,12 @@ for triaging "show me every run that timed out"), an inclusive RFC3339
 --finished-since / --finished-until window on each run's finished_at
 (still-running runs are filtered OUT when any finished-* bound is set), and
 page with --limit / --page. Order with --sort
-(id|started_at|finished_at|status; default started_at) and --order (asc|desc;
-default desc on bare sort to preserve the newest-first contract). Still-
-running runs (nil finished_at) trail an ascending finished_at sort and lead a
-descending one.`,
+(id|started_at|finished_at|status|duration; default started_at) and --order
+(asc|desc; default desc on bare sort to preserve the newest-first contract).
+Still-running runs (nil finished_at) trail an ascending finished_at sort and
+lead a descending one; the duration axis (finished_at - started_at) applies
+the same nil-trailing semantics — still-running runs sink to the tail in
+asc and lead in desc.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -348,7 +350,7 @@ descending one.`,
 		}
 		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
 		if sortField != "" && !types.IsValidScheduleRunSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status")
+			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status, duration")
 		}
 		order := strings.ToLower(strings.TrimSpace(orderFlag))
 		if order != "" && order != types.SortOrderAsc && order != types.SortOrderDesc {
@@ -632,7 +634,7 @@ func init() {
 	scheduleRunsCmd.Flags().String("finished-since", "", "RFC3339 lower bound (inclusive) on finished_at; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("finished-until", "", "RFC3339 upper bound (inclusive) on finished_at; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
-	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status (default started_at)")
+	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration (default started_at)")
 	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
