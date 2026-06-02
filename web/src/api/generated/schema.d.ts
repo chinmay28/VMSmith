@@ -3081,6 +3081,28 @@ export interface paths {
                      */
                     until?: string;
                     /**
+                     * @description Inclusive RFC3339 lower bound on the run's nullable `finished_at`.
+                     *     Whitespace is trimmed; empty disables the bound; invalid values
+                     *     return 400 `invalid_finished_since`. Runs with a nil `finished_at`
+                     *     (typically still-running runs) are filtered OUT whenever either
+                     *     `finished_since` or `finished_until` is set — mirrors the
+                     *     nil-handling for the schedule `next_fire_at` filter. Closes the
+                     *     *"which runs of this schedule completed between X and Y"* triage
+                     *     query that the `since`/`until` filter on `started_at` cannot
+                     *     answer (a run can start inside a window but finish well outside
+                     *     it). Composes additively with every other filter; applied between
+                     *     the `started_at` range and `search`, before pagination so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    finished_since?: string;
+                    /**
+                     * @description Inclusive RFC3339 upper bound on the run's nullable `finished_at`.
+                     *     Same shape as `finished_since`; invalid values return 400
+                     *     `invalid_finished_until`. Runs with a nil `finished_at` are
+                     *     filtered OUT whenever either bound is set.
+                     */
+                    finished_until?: string;
+                    /**
                      * @description Case-insensitive substring match across the run's `error` and
                      *     `skip_reason` fields. Whitespace is trimmed; empty disables the
                      *     filter. The id / schedule_id / vm_id / status fields are

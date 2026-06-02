@@ -497,8 +497,13 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // whitespace-trimmed; empty disables the filter), since/until (inclusive
 // RFC3339 bounds on started_at; invalid values return 400
 // invalid_since/invalid_until; a run with a zero started_at is filtered OUT
-// when any bound is set), search (case-insensitive substring match across the
-// run's error and skip_reason fields — whitespace-trimmed;
+// when any bound is set), finished_since/finished_until (inclusive RFC3339
+// bounds on the run's nullable finished_at; whitespace-trimmed; empty disables;
+// invalid values return 400 invalid_finished_since/invalid_finished_until;
+// runs with a nil finished_at — typically still-running runs — are filtered
+// OUT when any bound is set, mirroring the next_fire_at handling), search
+// (case-insensitive substring match across the run's error and skip_reason
+// fields — whitespace-trimmed;
 // id/schedule_id/vm_id/status are intentionally excluded from the haystack to
 // avoid noisy matches on short numeric queries; empty disables).
 //
@@ -533,6 +538,16 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	untilTime, untilSet, apiErr := parseTimeRangeParam(q.Get("until"), "until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	finishedSinceTime, finishedSinceSet, apiErr := parseTimeRangeParam(q.Get("finished_since"), "finished_since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	finishedUntilTime, finishedUntilSet, apiErr := parseTimeRangeParam(q.Get("finished_until"), "finished_until")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -582,6 +597,14 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		if !snapshotInTimeRange(run.StartedAt, sinceTime, sinceSet, untilTime, untilSet) {
 			continue
+		}
+		if finishedSinceSet || finishedUntilSet {
+			if run.FinishedAt == nil {
+				continue
+			}
+			if !snapshotInTimeRange(*run.FinishedAt, finishedSinceTime, finishedSinceSet, finishedUntilTime, finishedUntilSet) {
+				continue
+			}
 		}
 		if searchFilter != "" && !scheduleRunMatchesSearch(run, searchFilter) {
 			continue

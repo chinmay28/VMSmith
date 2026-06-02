@@ -1073,59 +1073,143 @@ func TestListScheduleRuns_Sort(t *testing.T) {
 		return true
 	}
 
-	// Default (no sort/order) is started_at desc — newest first contract.
 	if runs, total, code := list(""); code != http.StatusOK || total != 3 || !eq(ids(runs), []string{"run-c", "run-b", "run-a"}) {
 		t.Fatalf("default order: code=%d ids=%v total=%d", code, ids(runs), total)
 	}
 
-	// Explicit sort=started_at,order=asc reverses the default.
 	if runs, _, _ := list("?sort=started_at&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
 		t.Fatalf("sort=started_at,asc: %v", ids(runs))
 	}
 
-	// sort=finished_at,asc puts the still-running (nil finished_at) run at the tail.
-	// run-a finished 2026-05-20T02:00:05Z, run-b finished 2026-05-21T02:00:02Z.
 	if runs, _, _ := list("?sort=finished_at&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
 		t.Fatalf("sort=finished_at,asc nil-trailing: %v", ids(runs))
 	}
 
-	// sort=finished_at,desc flips it: nil-finished runs lead.
 	if runs, _, _ := list("?sort=finished_at&order=desc"); !eq(ids(runs), []string{"run-c", "run-b", "run-a"}) {
 		t.Fatalf("sort=finished_at,desc nil-leading: %v", ids(runs))
 	}
 
-	// sort=status,asc orders alphabetically: error < running < success.
 	if runs, _, _ := list("?sort=status&order=asc"); !eq(ids(runs), []string{"run-a", "run-c", "run-b"}) {
 		t.Fatalf("sort=status,asc: %v", ids(runs))
 	}
 
-	// sort=id,asc tiebreaks deterministically.
 	if runs, _, _ := list("?sort=id&order=asc"); !eq(ids(runs), []string{"run-a", "run-b", "run-c"}) {
 		t.Fatalf("sort=id,asc: %v", ids(runs))
 	}
 
-	// Unknown sort returns 400 invalid_sort.
 	if _, _, code := list("?sort=duration"); code != http.StatusBadRequest {
 		t.Fatalf("sort=duration should 400, got %d", code)
 	}
 
-	// Unknown order returns 400 invalid_order.
 	if _, _, code := list("?sort=started_at&order=sideways"); code != http.StatusBadRequest {
 		t.Fatalf("order=sideways should 400, got %d", code)
 	}
 
-	// Whitespace-trimmed and case-insensitive sort.
 	if runs, _, _ := list("?sort=%20STATUS%20&order=ASC"); !eq(ids(runs), []string{"run-a", "run-c", "run-b"}) {
 		t.Fatalf("sort STATUS trimmed: %v", ids(runs))
 	}
 
-	// Sort composes with status filter.
 	if runs, total, _ := list("?status=error&sort=id&order=asc"); total != 1 || !eq(ids(runs), []string{"run-a"}) {
 		t.Fatalf("sort+status compose: %v total=%d", ids(runs), total)
 	}
 
-	// Pagination on sort=started_at,asc still returns the post-filter total.
 	if runs, total, _ := list("?sort=started_at&order=asc&per_page=1"); total != 3 || !eq(ids(runs), []string{"run-a"}) {
 		t.Fatalf("sort + per_page=1: %v total=%d", ids(runs), total)
+	}
+}
+
+// TestListScheduleRuns_FilterByFinishedAt covers the ?finished_since= /
+// ?finished_until= filter (5.4.62): inclusive RFC3339 bounds on the run's
+// nullable FinishedAt. Runs with a nil FinishedAt (still-running) are
+// filtered OUT when either bound is set, mirroring the next_fire_at filter
+// on /schedules.
+func TestListScheduleRuns_FilterByFinishedAt(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-fin", Name: "fin", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started, finished string, status types.ScheduleRunStatus) {
+		t.Helper()
+		startedAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		run := &types.ScheduleRun{VMID: "vm-1", StartedAt: startedAt, Status: status}
+		if finished != "" {
+			finishedAt, err := time.Parse(time.RFC3339, finished)
+			if err != nil {
+				t.Fatalf("parse %q: %v", finished, err)
+			}
+			run.FinishedAt = &finishedAt
+		}
+		if err := s.AppendRun("sched-fin", run); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	mk("2026-05-20T02:00:00Z", "2026-05-20T02:05:00Z", types.ScheduleRunStatusSuccess)
+	mk("2026-05-20T02:01:00Z", "2026-05-20T02:30:00Z", types.ScheduleRunStatusSuccess)
+	mk("2026-05-20T02:02:00Z", "2026-05-20T03:15:00Z", types.ScheduleRunStatusError)
+	mk("2026-05-20T02:03:00Z", "", types.ScheduleRunStatusRunning)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-fin/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	if runs, total, _ := list("?finished_since=2026-05-20T02:10:00Z"); len(runs) != 2 || total != 2 {
+		t.Fatalf("finished_since lower bound wrong: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?finished_until=2026-05-20T03:00:00Z"); len(runs) != 2 || total != 2 {
+		t.Fatalf("finished_until upper bound wrong: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?finished_since=2026-05-20T02:10:00Z&finished_until=2026-05-20T03:00:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("both bounds window wrong: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?finished_since=2000-01-01T00:00:00Z&finished_until=2100-01-01T00:00:00Z"); len(runs) != 3 || total != 3 {
+		t.Fatalf("wide-open should exclude still-running: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?finished_since=&finished_until="); len(runs) != 4 || total != 4 {
+		t.Fatalf("empty disables: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?finished_since=%202026-05-20T02:10:00Z%20"); len(runs) != 2 || total != 2 {
+		t.Fatalf("whitespace-trim: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?status=success&finished_since=2026-05-20T02:10:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("status+finished_since compose: %+v total=%d", runs, total)
+	}
+
+	if runs, total, _ := list("?since=2026-05-20T00:00:00Z&finished_since=2026-05-20T02:10:00Z&finished_until=2026-05-20T03:00:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("started_at+finished compose: %+v total=%d", runs, total)
+	}
+
+	if _, _, code := list("?finished_since=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid finished_since should 400, got %d", code)
+	}
+	if _, _, code := list("?finished_until=nope"); code != http.StatusBadRequest {
+		t.Fatalf("invalid finished_until should 400, got %d", code)
+	}
+
+	if runs, total, _ := list("?finished_since=2026-05-20T02:10:00Z&per_page=1"); len(runs) != 1 || total != 2 {
+		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
 	}
 }

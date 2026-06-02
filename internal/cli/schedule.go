@@ -306,11 +306,14 @@ Filter with --status (running|success|error|skipped), --vm <vm-id> (exact
 match — useful for tag-selector schedules that target many VMs), --search
 (case-insensitive substring across each run's error and skip_reason — handy
 for triaging "show me every run that timed out"), an inclusive RFC3339
---since / --until window on each run's started_at, and page with --limit /
---page. Order with --sort (id|started_at|finished_at|status; default
-started_at) and --order (asc|desc; default desc on bare sort to preserve the
-newest-first contract). Still-running runs (nil finished_at) trail an
-ascending finished_at sort and lead a descending one.`,
+--since / --until window on each run's started_at, an inclusive RFC3339
+--finished-since / --finished-until window on each run's finished_at
+(still-running runs are filtered OUT when any finished-* bound is set), and
+page with --limit / --page. Order with --sort
+(id|started_at|finished_at|status; default started_at) and --order (asc|desc;
+default desc on bare sort to preserve the newest-first contract). Still-
+running runs (nil finished_at) trail an ascending finished_at sort and lead a
+descending one.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -318,6 +321,8 @@ ascending finished_at sort and lead a descending one.`,
 		vmID, _ := cmd.Flags().GetString("vm")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
+		finishedSinceFlag, _ := cmd.Flags().GetString("finished-since")
+		finishedUntilFlag, _ := cmd.Flags().GetString("finished-until")
 		searchFlag, _ := cmd.Flags().GetString("search")
 		sortFlag, _ := cmd.Flags().GetString("sort")
 		orderFlag, _ := cmd.Flags().GetString("order")
@@ -333,6 +338,12 @@ ascending finished_at sort and lead a descending one.`,
 			return err
 		}
 		if _, _, err := parseCLITimeRange(untilFlag, "--until"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(finishedSinceFlag, "--finished-since"); err != nil {
+			return err
+		}
+		if _, _, err := parseCLITimeRange(finishedUntilFlag, "--finished-until"); err != nil {
 			return err
 		}
 		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
@@ -356,6 +367,12 @@ ascending finished_at sort and lead a descending one.`,
 		}
 		if v := strings.TrimSpace(untilFlag); v != "" {
 			q.Set("until", v)
+		}
+		if v := strings.TrimSpace(finishedSinceFlag); v != "" {
+			q.Set("finished_since", v)
+		}
+		if v := strings.TrimSpace(finishedUntilFlag); v != "" {
+			q.Set("finished_until", v)
 		}
 		if v := strings.TrimSpace(searchFlag); v != "" {
 			q.Set("search", v)
@@ -612,6 +629,8 @@ func init() {
 	scheduleRunsCmd.Flags().String("vm", "", "filter by VM id (exact match; useful for tag-selector schedules)")
 	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
+	scheduleRunsCmd.Flags().String("finished-since", "", "RFC3339 lower bound (inclusive) on finished_at; excludes still-running runs")
+	scheduleRunsCmd.Flags().String("finished-until", "", "RFC3339 upper bound (inclusive) on finished_at; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
 	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status (default started_at)")
 	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")

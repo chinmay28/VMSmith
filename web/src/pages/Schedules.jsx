@@ -513,6 +513,8 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const [runSearchDebounced, setRunSearchDebounced] = useState('');
   const [runSort, setRunSort] = useState('');
   const [runOrder, setRunOrder] = useState('');
+  const [runFinishedSince, setRunFinishedSince] = useState('');
+  const [runFinishedUntil, setRunFinishedUntil] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setRunVMIDDebounced(runVMID.trim()), 250);
@@ -524,9 +526,16 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
     return () => clearTimeout(t);
   }, [runSearch]);
 
+  // datetime-local inputs hand back `YYYY-MM-DDTHH:mm`; the API expects
+  // RFC3339, so append `:00Z` when a value is set. Empty stays empty so the
+  // filter is disabled.
+  const toRFC3339 = (v) => (v ? `${v}:00Z` : '');
+  const finishedSinceParam = toRFC3339(runFinishedSince);
+  const finishedUntilParam = toRFC3339(runFinishedUntil);
+
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined, finishedSince: finishedSinceParam || undefined, finishedUntil: finishedUntilParam || undefined }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder, finishedSinceParam, finishedUntilParam],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -673,6 +682,38 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   <option value="asc">Asc</option>
                   <option value="desc">Desc</option>
                 </select>
+                <input
+                  type="datetime-local"
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runFinishedSince}
+                  onChange={(e) => setRunFinishedSince(e.target.value)}
+                  data-testid={`schedule-runs-finished-since-filter-${schedule.id}`}
+                  aria-label="Finished at or after"
+                  title="Finished at or after (excludes still-running runs)"
+                />
+                <input
+                  type="datetime-local"
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runFinishedUntil}
+                  onChange={(e) => setRunFinishedUntil(e.target.value)}
+                  data-testid={`schedule-runs-finished-until-filter-${schedule.id}`}
+                  aria-label="Finished at or before"
+                  title="Finished at or before (excludes still-running runs)"
+                />
+                {(runFinishedSince || runFinishedUntil) && (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm text-[11px] py-0.5"
+                    onClick={() => {
+                      setRunFinishedSince('');
+                      setRunFinishedUntil('');
+                    }}
+                    data-testid={`schedule-runs-finished-clear-${schedule.id}`}
+                    title="Clear finished_at range"
+                  >
+                    Clear finished
+                  </button>
+                )}
               </div>
             </div>
             {runsLoading && !runsResponse ? (
