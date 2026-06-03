@@ -493,6 +493,18 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // Filters (applied before sort + pagination so X-Total-Count reflects the
 // post-filter population): status (exact, case-insensitive:
 // running|success|error|skipped; invalid values return 400 invalid_status),
+// skip_reason (exact, case-insensitive, 5.4.65 — one of vm_not_found,
+// vm_already_stopped, vm_already_running, concurrent_run, catch_up_skipped,
+// queue_full; whitespace-trimmed; empty disables; invalid values return 400
+// invalid_skip_reason. Runs with an empty skip_reason field — every
+// non-skipped run and any skipped run persisted without a reason — are
+// filtered OUT whenever the filter is set, mirroring the nil-finished_at
+// exclusion in the finished_since / finished_until family so the same
+// "only rows where the field is populated" semantics applies. The
+// symmetric categorical counterpart to ?status= for skipped runs: ?status=
+// can narrow to skip but not by reason, and operators want to slice by
+// reason — "show me every run skipped because the queue was full" /
+// "every catch-up skip from yesterday's startup"),
 // vm_id (exact, case-sensitive — VM IDs are opaque vm-<unix-nano> strings;
 // whitespace-trimmed; empty disables the filter), since/until (inclusive
 // RFC3339 bounds on started_at; invalid values return 400
@@ -538,6 +550,11 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	statusFilter := strings.ToLower(strings.TrimSpace(q.Get("status")))
 	if statusFilter != "" && !types.IsValidScheduleRunStatus(types.ScheduleRunStatus(statusFilter)) {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_status", "status must be one of: running, success, error, skipped")
+		return
+	}
+	skipReasonFilter := strings.ToLower(strings.TrimSpace(q.Get("skip_reason")))
+	if skipReasonFilter != "" && !types.IsValidScheduleRunSkipReason(types.ScheduleRunSkipReason(skipReasonFilter)) {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_skip_reason", "skip_reason must be one of: vm_not_found, vm_already_stopped, vm_already_running, concurrent_run, catch_up_skipped, queue_full")
 		return
 	}
 	vmIDFilter := strings.TrimSpace(q.Get("vm_id"))
@@ -610,6 +627,9 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if statusFilter != "" && string(run.Status) != statusFilter {
+			continue
+		}
+		if skipReasonFilter != "" && string(run.SkipReason) != skipReasonFilter {
 			continue
 		}
 		if vmIDFilter != "" && run.VMID != vmIDFilter {

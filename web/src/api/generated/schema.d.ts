@@ -3081,6 +3081,22 @@ export interface paths {
                      */
                     until?: string;
                     /**
+                     * @description Case-insensitive exact-match on the run's `skip_reason` field
+                     *     (5.4.65). Whitespace is trimmed; empty disables the filter;
+                     *     invalid values return 400 `invalid_skip_reason`. Runs with an
+                     *     empty `skip_reason` (every non-skipped run, and any skipped run
+                     *     persisted without a reason) are filtered OUT whenever the
+                     *     filter is set, mirroring the nil-finished_at exclusion in the
+                     *     `finished_since`/`finished_until` family — same "only rows
+                     *     where the field is populated" semantics. The symmetric
+                     *     categorical sub-axis to `status=skipped`: `status=` narrows
+                     *     the visible cohort to the four enum buckets but cannot answer
+                     *     *which* reason a run was skipped. Composes additively with
+                     *     every other run filter; applied right after `status` so the
+                     *     post-filter `X-Total-Count` stays correct.
+                     */
+                    skip_reason?: "vm_not_found" | "vm_already_stopped" | "vm_already_running" | "concurrent_run" | "catch_up_skipped" | "queue_full";
+                    /**
                      * @description Inclusive RFC3339 lower bound on the run's nullable `finished_at`.
                      *     Whitespace is trimmed; empty disables the bound; invalid values
                      *     return 400 `invalid_finished_since`. Runs with a nil `finished_at`

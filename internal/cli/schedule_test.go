@@ -635,3 +635,44 @@ func TestCLI_ScheduleRuns_RejectsNegativeDuration(t *testing.T) {
 		t.Fatal("expected negative --max-duration-ms rejection")
 	}
 }
+
+// TestCLI_ScheduleRuns_ForwardsSkipReason covers the 5.4.65 --skip-reason
+// flag: lowercase + trim is mirrored client-side, the param round-trips
+// through the query string under the same `skip_reason=` key the API uses.
+func TestCLI_ScheduleRuns_ForwardsSkipReason(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-1","started_at":"2026-05-22T02:00:00Z","status":"skipped","skip_reason":"queue_full"}]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--skip-reason", "  QUEUE_FULL  "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if d.lastMeth != http.MethodGet || d.lastPath != "/api/v1/schedules/sched-1/runs" {
+		t.Fatalf("unexpected request: %s %s", d.lastMeth, d.lastPath)
+	}
+	if !strings.Contains(d.lastQuery, "skip_reason=queue_full") {
+		t.Fatalf("query missing skip_reason (lowercase+trim): %s", d.lastQuery)
+	}
+	// Whitespace should not survive the trim.
+	if strings.Contains(d.lastQuery, "skip_reason=%20") || strings.Contains(d.lastQuery, "skip_reason=+") {
+		t.Fatalf("query should not retain whitespace: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_EmptySkipReasonOmitsParam(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--skip-reason", "   "); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "skip_reason=") {
+		t.Fatalf("blank --skip-reason should not send the param, got %q", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsInvalidSkipReason(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--skip-reason", "garbage"); err == nil {
+		t.Fatal("expected invalid --skip-reason rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("invalid skip-reason should not contact the daemon")
+	}
+}

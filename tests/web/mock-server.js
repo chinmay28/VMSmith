@@ -253,6 +253,24 @@ function seed() {
       status: "error",
       error: "libvirt: snapshot failed",
     },
+    {
+      id: "run-5",
+      schedule_id: "sch-1",
+      vm_id: vm1.id,
+      started_at: "2026-05-20T02:00:00Z",
+      finished_at: "2026-05-20T02:00:00Z",
+      status: "skipped",
+      skip_reason: "vm_already_stopped",
+    },
+    {
+      id: "run-6",
+      schedule_id: "sch-1",
+      vm_id: vm1.id,
+      started_at: "2026-05-19T02:00:00Z",
+      finished_at: "2026-05-19T02:00:00Z",
+      status: "skipped",
+      skip_reason: "queue_full",
+    },
   ]);
   scheduleRuns.set("sch-2", []);
 }
@@ -2408,6 +2426,11 @@ const server = http.createServer(async (req, res) => {
     if (statusFilter && !validStatuses.includes(statusFilter)) {
       return json(res, 400, { code: "invalid_status", message: "status must be one of: running, success, error, skipped" });
     }
+    const skipReasonFilter = (url.searchParams.get("skip_reason") || "").trim().toLowerCase();
+    const validSkipReasons = ["vm_not_found", "vm_already_stopped", "vm_already_running", "concurrent_run", "catch_up_skipped", "queue_full"];
+    if (skipReasonFilter && !validSkipReasons.includes(skipReasonFilter)) {
+      return json(res, 400, { code: "invalid_skip_reason", message: "skip_reason must be one of: vm_not_found, vm_already_stopped, vm_already_running, concurrent_run, catch_up_skipped, queue_full" });
+    }
     const vmIDFilter = (url.searchParams.get("vm_id") || "").trim();
     const searchFilter = (url.searchParams.get("search") || "").trim().toLowerCase();
     const since = (url.searchParams.get("since") || "").trim();
@@ -2463,6 +2486,7 @@ const server = http.createServer(async (req, res) => {
     }
     const all = (scheduleRuns.get(m[1]) || []).filter((run) => {
       if (statusFilter && String(run.status).toLowerCase() !== statusFilter) return false;
+      if (skipReasonFilter && String(run.skip_reason || "").toLowerCase() !== skipReasonFilter) return false;
       if (vmIDFilter && String(run.vm_id || "") !== vmIDFilter) return false;
       if (since || until) {
         const startMs = run.started_at ? Date.parse(run.started_at) : NaN;
