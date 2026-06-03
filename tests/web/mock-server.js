@@ -367,6 +367,11 @@ const server = http.createServer(async (req, res) => {
     if (osTypeFilter && osTypeFilter !== "linux" && osTypeFilter !== "windows") {
       return json(res, 400, { code: "invalid_os_type", message: "os_type must be \"linux\" or \"windows\"" });
     }
+    const knownOSVariants = ["windows-10", "windows-11", "windows-server-2019", "windows-server-2022", "windows-server-2025"];
+    const osVariantFilter = (url.searchParams.get("os_variant") || "").trim().toLowerCase();
+    if (osVariantFilter && !knownOSVariants.includes(osVariantFilter)) {
+      return json(res, 400, { code: "invalid_os_variant", message: `os_variant must be one of: ${knownOSVariants.join(", ")}` });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -457,6 +462,14 @@ const server = http.createServer(async (req, res) => {
         const raw = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
         const effective = raw === "windows" ? "windows" : "linux";
         return effective === osTypeFilter;
+      });
+    }
+    if (osVariantFilter) {
+      // 5.4.66 — case-insensitive exact-match on spec.os_variant; empty
+      // stored value excluded (no documented default), mirroring the API.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.os_variant || vm?.os_variant || "").trim().toLowerCase();
+        return raw === osVariantFilter;
       });
     }
     if (networkFilter) {

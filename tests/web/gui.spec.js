@@ -599,6 +599,43 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
   });
 
+  // 5.4.66 — os_variant filter on the VM list. Seed data: win-app is the
+  // only Windows VM, with spec.os_variant="windows-server-2022". The two
+  // Linux VMs (web-server, db-server) have an empty os_variant and must
+  // drop out whenever the filter is set (no documented "default variant",
+  // mirrors the API's parseOSVariantFilter empty-stored-excluded contract).
+  test("os-variant filter narrows the VM list to a single Windows edition and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // Selecting the matching variant narrows to win-app only; Linux VMs
+    // (empty os_variant) are filtered out even though they exist.
+    await page.getByTestId("vm-list-os-variant-filter").selectOption("windows-server-2022");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_variant")).toBe("windows-server-2022");
+
+    // A recognised-but-unmatched variant collapses the cohort to empty —
+    // win-app is windows-server-2022, no VM is windows-11.
+    await page.getByTestId("vm-list-os-variant-filter").selectOption("windows-11");
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_variant")).toBe("windows-11");
+
+    // "All variants" clears the filter and restores every VM, dropping the
+    // URL param.
+    await page.getByTestId("vm-list-os-variant-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("os_variant=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

@@ -729,6 +729,110 @@ func TestCLI_VMList_FilterByOSType_ComposesWithStatus(t *testing.T) {
 	}
 }
 
+// 5.4.66 — `--os-variant` on `vmsmith vm list`. Sub-axis of `--os-type windows`:
+// case-insensitive exact-match against `spec.os_variant`; empty stored value
+// excluded; unknown variant rejected client-side before the manager is
+// contacted.
+
+func TestCLI_VMList_FilterByOSVariant_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11-host", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "srv22", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	out, err := runCLI("vm", "list", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("vm list --os-variant: %v", err)
+	}
+	if !strings.Contains(out, "win11-host") || strings.Contains(out, "srv22") || strings.Contains(out, "linux") {
+		t.Fatalf("expected only win11-host, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSVariant_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "srv22", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+
+	out, err := runCLI("vm", "list", "--os-variant", "WINDOWS-SERVER-2022")
+	if err != nil {
+		t.Fatalf("vm list --os-variant case: %v", err)
+	}
+	if !strings.Contains(out, "srv22") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSVariant_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	out, err := runCLI("vm", "list", "--os-variant", "")
+	if err != nil {
+		t.Fatalf("vm list --os-variant empty: %v", err)
+	}
+	if !strings.Contains(out, "win11") || !strings.Contains(out, "linux") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+// TestCLI_VMList_FilterByOSVariant_ExcludesEmptyStored documents the
+// no-empty-match contract: unlike `--os-type linux` which matches empty-stored,
+// `--os-variant` has no documented default so empty drops out whenever the
+// filter is set.
+func TestCLI_VMList_FilterByOSVariant_ExcludesEmptyStored(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-unset", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("vm list --os-variant: %v", err)
+	}
+	if !strings.Contains(out, "win11") || strings.Contains(out, "win-unset") {
+		t.Fatalf("expected only win11 (empty-stored excluded), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByOSVariant_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+
+	_, err := runCLI("vm", "list", "--os-variant", "windows-12")
+	if err == nil {
+		t.Fatal("expected error for invalid --os-variant, got nil")
+	}
+	if !strings.Contains(err.Error(), "--os-variant") {
+		t.Fatalf("error should reference --os-variant, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByOSVariant_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "a-win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "b-srv22", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "c-win10", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, OSVariant: "windows-10"}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "a-win11") || strings.Contains(out, "b-srv22") || strings.Contains(out, "c-win10") {
+		t.Fatalf("expected only a-win11, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))
