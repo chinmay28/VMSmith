@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -340,4 +341,71 @@ func TestMockManager_SeedConsoleListener_BindsRealSocket(t *testing.T) {
 		t.Fatalf("dial seeded listener at %s: %v", addr, err)
 	}
 	conn.Close()
+}
+
+func TestMockManager_SeedConsoleListener_RejectsExternalInterfaceDial(t *testing.T) {
+	m := NewMockManager()
+	defer m.Close()
+	ctx := context.Background()
+	vm, err := m.Create(ctx, types.VMSpec{Name: "loopback-only", Image: "ubuntu"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	ln, err := m.SeedConsoleListener(vm.ID)
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+
+	endpoint, err := m.GetConsoleEndpoint(ctx, vm.ID, types.ConsoleIntentVNC)
+	if err != nil {
+		t.Fatalf("GetConsoleEndpoint: %v", err)
+	}
+	if endpoint.Host != "127.0.0.1" {
+		t.Fatalf("host = %q, want loopback 127.0.0.1", endpoint.Host)
+	}
+
+	externalIP := firstNonLoopbackIPv4(t)
+	if externalIP == "" {
+		t.Skip("no non-loopback IPv4 interface available on this host")
+	}
+
+	dialer := net.Dialer{Timeout: 250 * time.Millisecond}
+	externalAddr := net.JoinHostPort(externalIP, strconv.Itoa(endpoint.Port))
+	conn, err := dialer.DialContext(ctx, "tcp", externalAddr)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("external dial to %s unexpectedly succeeded; listener should be loopback-only", externalAddr)
+	}
+}
+
+func firstNonLoopbackIPv4(t *testing.T) string {
+	t.Helper()
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatalf("net.Interfaces: %v", err)
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok || ipNet.IP == nil {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	return ""
 }
