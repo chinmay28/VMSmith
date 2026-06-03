@@ -35,6 +35,25 @@ const (
 	ScheduleRunSkipReasonQueueFull        ScheduleRunSkipReason = "queue_full"
 )
 
+// IsValidScheduleRunSkipReason reports whether r is one of the recognized
+// skip reasons (vm_not_found, vm_already_stopped, vm_already_running,
+// concurrent_run, catch_up_skipped, queue_full). Used by the GET
+// /schedules/{id}/runs `?skip_reason=` filter (5.4.65) to reject typos at
+// the API boundary with 400 `invalid_skip_reason`.
+func IsValidScheduleRunSkipReason(r ScheduleRunSkipReason) bool {
+	switch r {
+	case ScheduleRunSkipReasonVMNotFound,
+		ScheduleRunSkipReasonVMAlreadyStopped,
+		ScheduleRunSkipReasonVMAlreadyRunning,
+		ScheduleRunSkipReasonConcurrentRun,
+		ScheduleRunSkipReasonCatchUpSkipped,
+		ScheduleRunSkipReasonQueueFull:
+		return true
+	default:
+		return false
+	}
+}
+
 // ScheduleRun captures one attempted schedule execution for one resolved VM.
 type ScheduleRun struct {
 	ID         string                `json:"id"`

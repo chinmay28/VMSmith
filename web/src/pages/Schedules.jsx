@@ -525,6 +525,7 @@ function RunStatusChip({ status }) {
 function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNow }) {
   const [expanded, setExpanded] = useState(false);
   const [runStatus, setRunStatus] = useState('');
+  const [runSkipReason, setRunSkipReason] = useState('');
   const [runVMID, setRunVMID] = useState('');
   const [runVMIDDebounced, setRunVMIDDebounced] = useState('');
   const [runSearch, setRunSearch] = useState('');
@@ -568,8 +569,8 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const maxDurationMsParam = parsePositiveInt(runMaxDurationMs);
 
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined, finishedSince: finishedSinceParam || undefined, finishedUntil: finishedUntilParam || undefined, minDurationMs: minDurationMsParam, maxDurationMs: maxDurationMsParam }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder, finishedSinceParam, finishedUntilParam, minDurationMsParam, maxDurationMsParam],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, skipReason: runSkipReason || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined, finishedSince: finishedSinceParam || undefined, finishedUntil: finishedUntilParam || undefined, minDurationMs: minDurationMsParam, maxDurationMs: maxDurationMsParam }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runSkipReason, runVMIDDebounced, runSearchDebounced, runSort, runOrder, finishedSinceParam, finishedUntilParam, minDurationMsParam, maxDurationMsParam],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -691,6 +692,22 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   <option value="success">Success</option>
                   <option value="error">Error</option>
                   <option value="skipped">Skipped</option>
+                </select>
+                <select
+                  className="input input-sm text-[11px] py-0.5"
+                  value={runSkipReason}
+                  onChange={(e) => setRunSkipReason(e.target.value)}
+                  data-testid={`schedule-runs-skip-reason-filter-${schedule.id}`}
+                  aria-label="Filter skipped runs by skip reason"
+                  title="Narrows skipped runs to a single skip reason; runs without a skip_reason (every non-skipped run) are excluded when set"
+                >
+                  <option value="">All skip reasons</option>
+                  <option value="vm_not_found">vm_not_found</option>
+                  <option value="vm_already_stopped">vm_already_stopped</option>
+                  <option value="vm_already_running">vm_already_running</option>
+                  <option value="concurrent_run">concurrent_run</option>
+                  <option value="catch_up_skipped">catch_up_skipped</option>
+                  <option value="queue_full">queue_full</option>
                 </select>
                 <select
                   className="input input-sm text-[11px] py-0.5"

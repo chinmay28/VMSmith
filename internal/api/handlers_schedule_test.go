@@ -1427,3 +1427,116 @@ func TestListScheduleRuns_FilterByDuration(t *testing.T) {
 		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
 	}
 }
+
+// TestListScheduleRuns_FilterBySkipReason covers the ?skip_reason= filter
+// (5.4.65): case-insensitive exact-match on the run's skip_reason field.
+// Runs with an empty skip_reason (every non-skipped run, and any skipped
+// run persisted without a reason) are filtered OUT whenever the filter is
+// set — the symmetric categorical sub-axis to ?status=skipped.
+func TestListScheduleRuns_FilterBySkipReason(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-skip", Name: "skip", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started string, status types.ScheduleRunStatus, reason types.ScheduleRunSkipReason) {
+		t.Helper()
+		at, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		if err := s.AppendRun("sched-skip", &types.ScheduleRun{
+			VMID: "vm-1", StartedAt: at, Status: status, SkipReason: reason,
+		}); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	// 5 runs:
+	// - 2 success runs (no skip_reason)
+	// - 1 skipped/queue_full
+	// - 1 skipped/vm_already_stopped
+	// - 1 skipped/concurrent_run
+	mk("2026-05-20T02:00:00Z", types.ScheduleRunStatusSuccess, "")
+	mk("2026-05-21T02:00:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonQueueFull)
+	mk("2026-05-22T02:00:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonVMAlreadyStopped)
+	mk("2026-05-23T02:00:00Z", types.ScheduleRunStatusSuccess, "")
+	mk("2026-05-24T02:00:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonConcurrentRun)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-skip/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: 5 runs, no filter.
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 5 || total != 5 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	// Exact match: queue_full → 1 run.
+	runs, total, _ := list("?skip_reason=queue_full")
+	if len(runs) != 1 || total != 1 || runs[0].SkipReason != types.ScheduleRunSkipReasonQueueFull {
+		t.Fatalf("queue_full: %+v total=%d", runs, total)
+	}
+
+	// vm_already_stopped → 1 run.
+	if runs, total, _ := list("?skip_reason=vm_already_stopped"); len(runs) != 1 || total != 1 || runs[0].SkipReason != types.ScheduleRunSkipReasonVMAlreadyStopped {
+		t.Fatalf("vm_already_stopped: %+v total=%d", runs, total)
+	}
+
+	// Case-insensitive: VM_ALREADY_STOPPED.
+	if runs, total, _ := list("?skip_reason=VM_ALREADY_STOPPED"); len(runs) != 1 || total != 1 {
+		t.Fatalf("case-insensitive: %+v total=%d", runs, total)
+	}
+
+	// Whitespace is trimmed.
+	if runs, total, _ := list("?skip_reason=%20queue_full%20"); len(runs) != 1 || total != 1 {
+		t.Fatalf("whitespace-trim: %+v total=%d", runs, total)
+	}
+
+	// Empty disables the filter — all 5 rows return.
+	if runs, total, _ := list("?skip_reason="); len(runs) != 5 || total != 5 {
+		t.Fatalf("empty disables: %+v total=%d", runs, total)
+	}
+
+	// Recognized-but-unused reason returns 0 (no leak from other reasons).
+	if runs, total, _ := list("?skip_reason=catch_up_skipped"); len(runs) != 0 || total != 0 {
+		t.Fatalf("catch_up_skipped: %+v total=%d", runs, total)
+	}
+
+	// Composes with status: status=skipped + skip_reason=queue_full → 1 run.
+	if runs, total, _ := list("?status=skipped&skip_reason=queue_full"); len(runs) != 1 || total != 1 {
+		t.Fatalf("status+skip_reason compose: %+v total=%d", runs, total)
+	}
+
+	// Composes with status: status=success + skip_reason=queue_full → 0 runs
+	// (success runs have empty skip_reason, so the skip_reason filter excludes them).
+	if runs, total, _ := list("?status=success&skip_reason=queue_full"); len(runs) != 0 || total != 0 {
+		t.Fatalf("status=success+skip_reason should be empty: %+v total=%d", runs, total)
+	}
+
+	// Composes with started_at since: skip_reason=concurrent_run + since 2026-05-23 → 1 run.
+	if runs, total, _ := list("?skip_reason=concurrent_run&since=2026-05-23T00:00:00Z"); len(runs) != 1 || total != 1 {
+		t.Fatalf("skip_reason+since compose: %+v total=%d", runs, total)
+	}
+
+	// Invalid value returns 400 invalid_skip_reason.
+	if _, _, code := list("?skip_reason=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid skip_reason should 400, got %d", code)
+	}
+
+	// Filtered pagination: total reflects the post-filter count.
+	// Seed an extra queue_full skip to exercise the paginated path.
+	mk("2026-05-25T02:00:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonQueueFull)
+	if runs, total, _ := list("?skip_reason=queue_full&per_page=1"); len(runs) != 1 || total != 2 {
+		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
+	}
+}

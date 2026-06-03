@@ -3150,6 +3150,54 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
   });
 
+  // 5.4.65 — skip_reason filter narrows the recent-runs expander to skipped
+  // runs persisted with a specific reason. The seeded sch-1 cohort carries
+  // four non-skipped runs plus run-5 (skipped/vm_already_stopped) and run-6
+  // (skipped/queue_full); the filter excludes every run without a populated
+  // skip_reason whenever it's set.
+  test("skip_reason filter narrows recent runs to one skipped reason at a time", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Baseline: all 6 seeded runs visible.
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-5")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-6")).toBeVisible();
+
+    // queue_full → only run-6 survives; every non-skipped row and run-5 drop.
+    await page.getByTestId("schedule-runs-skip-reason-filter-sch-1").selectOption("queue_full");
+    await expect(page.getByTestId("schedule-run-run-6")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-5")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Switch to vm_already_stopped → only run-5.
+    await page.getByTestId("schedule-runs-skip-reason-filter-sch-1").selectOption("vm_already_stopped");
+    await expect(page.getByTestId("schedule-run-run-5")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-6")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+
+    // Reset to "All skip reasons" restores every row.
+    await page.getByTestId("schedule-runs-skip-reason-filter-sch-1").selectOption("");
+    await expect(page.getByTestId("schedule-run-run-6")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-5")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+
+    // Recognized-but-unused reason yields an empty cohort (every seeded
+    // skip is queue_full or vm_already_stopped).
+    await page.getByTestId("schedule-runs-skip-reason-filter-sch-1").selectOption("concurrent_run");
+    await expect(page.getByTestId("schedule-run-run-6")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-5")).toHaveCount(0);
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

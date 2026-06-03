@@ -302,8 +302,12 @@ var scheduleRunsCmd = &cobra.Command{
 	Use:   "runs <id>",
 	Short: "List a schedule's run history",
 	Long: `List the run history for a schedule (newest first by default).
-Filter with --status (running|success|error|skipped), --vm <vm-id> (exact
-match — useful for tag-selector schedules that target many VMs), --search
+Filter with --status (running|success|error|skipped), --skip-reason
+(vm_not_found|vm_already_stopped|vm_already_running|concurrent_run|
+catch_up_skipped|queue_full — narrows the skipped cohort to a single reason,
+e.g. "show me every run skipped because the queue was full"), --vm <vm-id>
+(exact match — useful for tag-selector schedules that target many VMs),
+--search
 (case-insensitive substring across each run's error and skip_reason — handy
 for triaging "show me every run that timed out"), an inclusive RFC3339
 --since / --until window on each run's started_at, an inclusive RFC3339
@@ -323,6 +327,7 @@ asc and lead in desc.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
 		status, _ := cmd.Flags().GetString("status")
+		skipReason, _ := cmd.Flags().GetString("skip-reason")
 		vmID, _ := cmd.Flags().GetString("vm")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
@@ -339,6 +344,10 @@ asc and lead in desc.`,
 		status = strings.ToLower(strings.TrimSpace(status))
 		if status != "" && !types.IsValidScheduleRunStatus(types.ScheduleRunStatus(status)) {
 			return fmt.Errorf("invalid --status: must be one of running, success, error, skipped")
+		}
+		skipReason = strings.ToLower(strings.TrimSpace(skipReason))
+		if skipReason != "" && !types.IsValidScheduleRunSkipReason(types.ScheduleRunSkipReason(skipReason)) {
+			return fmt.Errorf("invalid --skip-reason: must be one of vm_not_found, vm_already_stopped, vm_already_running, concurrent_run, catch_up_skipped, queue_full")
 		}
 		vmID = strings.TrimSpace(vmID)
 		if _, _, err := parseCLITimeRange(sinceFlag, "--since"); err != nil {
@@ -371,6 +380,9 @@ asc and lead in desc.`,
 		q := url.Values{}
 		if status != "" {
 			q.Set("status", status)
+		}
+		if skipReason != "" {
+			q.Set("skip_reason", skipReason)
 		}
 		if vmID != "" {
 			q.Set("vm_id", vmID)
@@ -645,6 +657,7 @@ func init() {
 	scheduleListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
 
 	scheduleRunsCmd.Flags().String("status", "", "filter by run status: running|success|error|skipped")
+	scheduleRunsCmd.Flags().String("skip-reason", "", "filter by skip reason (only matches skipped runs persisted with this reason): vm_not_found|vm_already_stopped|vm_already_running|concurrent_run|catch_up_skipped|queue_full")
 	scheduleRunsCmd.Flags().String("vm", "", "filter by VM id (exact match; useful for tag-selector schedules)")
 	scheduleRunsCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on started_at")
 	scheduleRunsCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on started_at")
