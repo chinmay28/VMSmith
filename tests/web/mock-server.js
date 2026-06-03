@@ -65,6 +65,7 @@ function seed() {
   const vm2 = createVM({ name: "db-server", image: "rocky-9", cpus: 4, ram_mb: 8192, disk_gb: 100 });
   vm2.state = "stopped";
   vm2.ip = "192.168.100.11";
+  vm2.tags = ["database"];
   vm2.spec.networks = [{ name: "storage-net", mode: "bridge", bridge: "br-storage" }];
   vm2.created_at = "2026-05-15T00:00:00Z";
   vm2.updated_at = "2026-05-15T00:00:00Z";
