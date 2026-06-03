@@ -160,6 +160,26 @@ function seed() {
     created_at: "2026-05-20T12:00:00Z",
     updated_at: "2026-05-20T12:00:00Z",
   });
+  // 5.4.67: a second Windows template with a different variant so the
+  // os_variant filter has a meaningful cohort to slice (windows-server-2022
+  // vs windows-11) and the recognised-but-unmatched case (windows-10) is
+  // observable.
+  templates.set("tmpl-4", {
+    id: "tmpl-4",
+    name: "windows-11-desktop",
+    image: "/images/win11.qcow2",
+    cpus: 4,
+    ram_mb: 4096,
+    disk_gb: 64,
+    description: "Windows 11 desktop template",
+    tags: ["dev", "windows"],
+    default_user: "",
+    os_type: "windows",
+    os_variant: "windows-11",
+    networks: [],
+    created_at: "2026-05-22T12:00:00Z",
+    updated_at: "2026-05-22T12:00:00Z",
+  });
 
   // Seed a couple of schedules so the GUI has rows to render / filter / edit.
   scheduleList.set("sch-1", {
@@ -1429,6 +1449,18 @@ const server = http.createServer(async (req, res) => {
         const effective = raw === "windows" ? "windows" : "linux";
         return effective === tplOsType;
       });
+    }
+    // 5.4.67: case-insensitive exact-match filter on the template's
+    // os_variant; empty stored value excluded (no documented default),
+    // mirroring the VM list filter and the API's parseOSVariantFilter
+    // contract.
+    const tplKnownOSVariants = ["windows-10", "windows-11", "windows-server-2019", "windows-server-2022", "windows-server-2025"];
+    const tplOsVariant = (url.searchParams.get("os_variant") || "").trim().toLowerCase();
+    if (tplOsVariant && !tplKnownOSVariants.includes(tplOsVariant)) {
+      return json(res, 400, { code: "invalid_os_variant", message: `os_variant must be one of: ${tplKnownOSVariants.join(", ")}` });
+    }
+    if (tplOsVariant) {
+      list = list.filter(t => String(t.os_variant || "").trim().toLowerCase() === tplOsVariant);
     }
     // network: case-insensitive exact-match (any-of) against networks[].name.
     const network = (url.searchParams.get("network") || "").trim().toLowerCase();

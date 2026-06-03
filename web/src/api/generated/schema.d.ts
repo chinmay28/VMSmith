@@ -66,13 +66,14 @@ export interface paths {
                     os_type?: components["parameters"]["OSTypeFilter"];
                     /**
                      * @description Case-insensitive exact-match filter on the Windows guest variant
-                     *     (`spec.os_variant`). Accepts one of
+                     *     (the record's `os_variant` field — `spec.os_variant` on `GET /vms`,
+                     *     `os_variant` on `GET /templates`). Accepts one of
                      *     `windows-10`, `windows-11`, `windows-server-2019`,
                      *     `windows-server-2022`, `windows-server-2025` (case-insensitive;
                      *     surrounding whitespace trimmed); empty value disables the filter.
-                     *     Unlike `?os_type=linux` (which matches empty-stored VMs via the
+                     *     Unlike `?os_type=linux` (which matches empty-stored records via the
                      *     documented linux default), `?os_variant=` has NO documented default —
-                     *     an empty stored `spec.os_variant` means "operator did not specify an
+                     *     an empty stored `os_variant` means "operator did not specify an
                      *     edition" and is filtered OUT whenever the filter is set, mirroring
                      *     the webhook `?event_type=` membership semantics. The symmetric
                      *     sub-axis to `?os_type=windows`: `?os_type=` narrows to the OS family,
@@ -1986,6 +1987,25 @@ export interface paths {
                      *     `VMTemplate.ResolvedOSType` for the empty-means-linux fallback.
                      */
                     os_type?: components["parameters"]["OSTypeFilter"];
+                    /**
+                     * @description Case-insensitive exact-match filter on the Windows guest variant
+                     *     (the record's `os_variant` field — `spec.os_variant` on `GET /vms`,
+                     *     `os_variant` on `GET /templates`). Accepts one of
+                     *     `windows-10`, `windows-11`, `windows-server-2019`,
+                     *     `windows-server-2022`, `windows-server-2025` (case-insensitive;
+                     *     surrounding whitespace trimmed); empty value disables the filter.
+                     *     Unlike `?os_type=linux` (which matches empty-stored records via the
+                     *     documented linux default), `?os_variant=` has NO documented default —
+                     *     an empty stored `os_variant` means "operator did not specify an
+                     *     edition" and is filtered OUT whenever the filter is set, mirroring
+                     *     the webhook `?event_type=` membership semantics. The symmetric
+                     *     sub-axis to `?os_type=windows`: `?os_type=` narrows to the OS family,
+                     *     `?os_variant=` slices the Windows cohort by edition. Any value other
+                     *     than the five known variants returns `400 invalid_os_variant`.
+                     *     Composes additively with every other filter; `X-Total-Count` reflects
+                     *     the post-filter population.
+                     */
+                    os_variant?: components["parameters"]["OSVariantFilter"];
                     /**
                      * @description Case-insensitive exact-match filter on the name of any of the
                      *     template's additional network attachments (`networks[].name`). A
@@ -4355,13 +4375,14 @@ export interface components {
         OSTypeFilter: "linux" | "windows";
         /**
          * @description Case-insensitive exact-match filter on the Windows guest variant
-         *     (`spec.os_variant`). Accepts one of
+         *     (the record's `os_variant` field — `spec.os_variant` on `GET /vms`,
+         *     `os_variant` on `GET /templates`). Accepts one of
          *     `windows-10`, `windows-11`, `windows-server-2019`,
          *     `windows-server-2022`, `windows-server-2025` (case-insensitive;
          *     surrounding whitespace trimmed); empty value disables the filter.
-         *     Unlike `?os_type=linux` (which matches empty-stored VMs via the
+         *     Unlike `?os_type=linux` (which matches empty-stored records via the
          *     documented linux default), `?os_variant=` has NO documented default —
-         *     an empty stored `spec.os_variant` means "operator did not specify an
+         *     an empty stored `os_variant` means "operator did not specify an
          *     edition" and is filtered OUT whenever the filter is set, mirroring
          *     the webhook `?event_type=` membership semantics. The symmetric
          *     sub-axis to `?os_type=windows`: `?os_type=` narrows to the OS family,

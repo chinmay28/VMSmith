@@ -1359,6 +1359,7 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/OSTypeFilter'
+        - $ref: '#/components/parameters/OSVariantFilter'
         - in: query
           name: network
           required: false
@@ -2932,13 +2933,14 @@ components:
       in: query
       description: |
         Case-insensitive exact-match filter on the Windows guest variant
-        (`spec.os_variant`). Accepts one of
+        (the record's `os_variant` field — `spec.os_variant` on `GET /vms`,
+        `os_variant` on `GET /templates`). Accepts one of
         `windows-10`, `windows-11`, `windows-server-2019`,
         `windows-server-2022`, `windows-server-2025` (case-insensitive;
         surrounding whitespace trimmed); empty value disables the filter.
-        Unlike `?os_type=linux` (which matches empty-stored VMs via the
+        Unlike `?os_type=linux` (which matches empty-stored records via the
         documented linux default), `?os_variant=` has NO documented default —
-        an empty stored `spec.os_variant` means "operator did not specify an
+        an empty stored `os_variant` means "operator did not specify an
         edition" and is filtered OUT whenever the filter is set, mirroring
         the webhook `?event_type=` membership semantics. The symmetric
         sub-axis to `?os_type=windows`: `?os_type=` narrows to the OS family,

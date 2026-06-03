@@ -6375,6 +6375,137 @@ func TestCLI_TemplateList_FilterByOSType_RejectsInvalidValue(t *testing.T) {
 	}
 }
 
+// --- template list --os-variant (roadmap 5.4.67) ---
+//
+// Mirrors the VM list --os-variant CLI tests on the template cohort:
+// case-insensitive exact-match, whitespace-trim, empty-disables, empty-stored
+// excluded, and a clear --os-variant error on unknown values.
+
+func TestCLI_TemplateList_FilterByOSVariant_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "win11-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "srv22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "linux-tpl", Image: "l.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("template list --os-variant: %v", err)
+	}
+	if !strings.Contains(out, "win11-tpl") || strings.Contains(out, "srv22-tpl") || strings.Contains(out, "linux-tpl") {
+		t.Fatalf("expected only win11-tpl, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSVariant_IsCaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "srv22-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-variant", "WINDOWS-SERVER-2022")
+	if err != nil {
+		t.Fatalf("template list --os-variant case: %v", err)
+	}
+	if !strings.Contains(out, "srv22-tpl") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSVariant_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "win11-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "linux-tpl", Image: "l.qcow2", OSType: types.OSTypeLinux, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-variant", "")
+	if err != nil {
+		t.Fatalf("template list --os-variant empty: %v", err)
+	}
+	if !strings.Contains(out, "win11-tpl") || !strings.Contains(out, "linux-tpl") {
+		t.Fatalf("expected empty filter to return all templates, got %q", out)
+	}
+}
+
+// TestCLI_TemplateList_FilterByOSVariant_ExcludesEmptyStored mirrors the VM
+// no-empty-match contract on the template cohort: unlike `--os-type linux`
+// (which matches empty-stored via the documented linux default),
+// `--os-variant` has no documented default so empty drops out whenever the
+// filter is set.
+func TestCLI_TemplateList_FilterByOSVariant_ExcludesEmptyStored(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "win11-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "win-unset", Image: "w.qcow2", OSType: types.OSTypeWindows, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("template list --os-variant: %v", err)
+	}
+	if !strings.Contains(out, "win11-tpl") || strings.Contains(out, "win-unset") {
+		t.Fatalf("expected only win11-tpl (empty-stored excluded), got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSVariant_RejectsInvalidValue(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "win11-tpl", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := runCLI("template", "list", "--os-variant", "windows-12")
+	if err == nil {
+		t.Fatal("expected error for invalid --os-variant, got nil")
+	}
+	if !strings.Contains(err.Error(), "--os-variant") {
+		t.Fatalf("error should reference --os-variant, got %v", err)
+	}
+}
+
+func TestCLI_TemplateList_FilterByOSVariant_ComposesWithOSType(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "a-win11", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "b-srv22", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "c-win10", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--os-type", "windows", "--os-variant", "windows-11")
+	if err != nil {
+		t.Fatalf("template list compose: %v", err)
+	}
+	if !strings.Contains(out, "a-win11") || strings.Contains(out, "b-srv22") || strings.Contains(out, "c-win10") {
+		t.Fatalf("expected only a-win11, got %q", out)
+	}
+}
+
 // --- template list --network (roadmap 5.4.45) ---
 
 func tmplNet(names ...string) []types.NetworkAttachment {

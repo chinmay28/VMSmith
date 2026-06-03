@@ -249,6 +249,21 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		templates = filtered
 	}
 
+	osVariantFilter, osVariantSet, apiErr := parseOSVariantFilter(q.Get("os_variant"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if osVariantSet {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if strings.EqualFold(tpl.OSVariant, osVariantFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
+	}
+
 	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
 	if networkFilter != "" {
 		filtered := templates[:0]

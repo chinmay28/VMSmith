@@ -20,6 +20,7 @@ export default function TemplateList() {
   const [defaultUserInput, setDefaultUserInput] = useState(searchParams.get('default_user') || '');
   const [defaultUserFilter, setDefaultUserFilter] = useState(searchParams.get('default_user') || '');
   const [osTypeFilter, setOsTypeFilter] = useState(searchParams.get('os_type') || '');
+  const [osVariantFilter, setOsVariantFilter] = useState(searchParams.get('os_variant') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
@@ -44,8 +45,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -58,7 +59,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -132,6 +133,7 @@ export default function TemplateList() {
     if (imageFilter) next.set('image', imageFilter); else next.delete('image');
     if (defaultUserFilter) next.set('default_user', defaultUserFilter); else next.delete('default_user');
     if (osTypeFilter) next.set('os_type', osTypeFilter); else next.delete('os_type');
+    if (osVariantFilter) next.set('os_variant', osVariantFilter); else next.delete('os_variant');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
@@ -142,7 +144,7 @@ export default function TemplateList() {
     if (minDiskGbFilter) next.set('min_disk_gb', minDiskGbFilter); else next.delete('min_disk_gb');
     if (maxDiskGbFilter) next.set('max_disk_gb', maxDiskGbFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -284,6 +286,22 @@ export default function TemplateList() {
             <option value="">All OSes</option>
             <option value="linux">Linux</option>
             <option value="windows">Windows</option>
+          </select>
+        </div>
+        <div className="w-52">
+          <select
+            value={osVariantFilter}
+            onChange={(e) => setOsVariantFilter(e.target.value)}
+            className="input w-full py-1.5 text-sm"
+            data-testid="template-list-os-variant-filter"
+            aria-label="Filter templates by Windows variant"
+          >
+            <option value="">All variants</option>
+            <option value="windows-10">Windows 10</option>
+            <option value="windows-11">Windows 11</option>
+            <option value="windows-server-2019">Windows Server 2019</option>
+            <option value="windows-server-2022">Windows Server 2022</option>
+            <option value="windows-server-2025">Windows Server 2025</option>
           </select>
         </div>
         <div className="relative w-64">
