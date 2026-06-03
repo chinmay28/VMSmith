@@ -3105,6 +3105,51 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
   });
 
+  // --- 5.4.64: min_duration_ms / max_duration_ms range filter on runs ---
+  // Seed durations (finished_at - started_at): run-4 = 6000 ms, run-2 = 5000 ms,
+  // run-1 = 4000 ms, run-3 = 3000 ms. The 4000..5000 ms window splits cleanly.
+  test("duration range filter narrows recent runs by finished_at - started_at duration", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Baseline: all 4 seeded runs visible.
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // min=5000 ms: only run-4 (6s) and run-2 (5s) survive — inclusive lower bound.
+    await page.getByTestId("schedule-runs-min-duration-ms-filter-sch-1").fill("5000");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Add max=5000 ms: window collapses to exactly 5000 ms — only run-2.
+    await page.getByTestId("schedule-runs-max-duration-ms-filter-sch-1").fill("5000");
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-3")).toHaveCount(0);
+
+    // Clear-duration button restores every run.
+    await page.getByTestId("schedule-runs-duration-clear-sch-1").click();
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+
+    // Upper bound only — max=4000 ms keeps run-1 (4s) and run-3 (3s).
+    await page.getByTestId("schedule-runs-max-duration-ms-filter-sch-1").fill("4000");
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-run-run-4")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-run-run-2")).toHaveCount(0);
+  });
+
   test("run-now appends a run for the schedule", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

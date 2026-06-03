@@ -1312,3 +1312,118 @@ func TestListScheduleRuns_FilterByFinishedAt(t *testing.T) {
 		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
 	}
 }
+
+// TestListScheduleRuns_FilterByDuration covers the ?min_duration_ms= /
+// ?max_duration_ms= filter (5.4.64): inclusive non-negative integer bounds
+// on the run's finished_at - started_at duration in milliseconds. Runs with
+// a nil FinishedAt (still-running) are filtered OUT when either bound is set,
+// mirroring the finished_at range filter's nil-handling.
+func TestListScheduleRuns_FilterByDuration(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-dur", Name: "dur", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(started, finished string, status types.ScheduleRunStatus) {
+		t.Helper()
+		startedAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		run := &types.ScheduleRun{VMID: "vm-1", StartedAt: startedAt, Status: status}
+		if finished != "" {
+			finishedAt, err := time.Parse(time.RFC3339, finished)
+			if err != nil {
+				t.Fatalf("parse %q: %v", finished, err)
+			}
+			run.FinishedAt = &finishedAt
+		}
+		if err := s.AppendRun("sched-dur", run); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	// Four runs: 5min, 29min, 73min, and one still-running.
+	mk("2026-05-20T02:00:00Z", "2026-05-20T02:05:00Z", types.ScheduleRunStatusSuccess)
+	mk("2026-05-20T02:01:00Z", "2026-05-20T02:30:00Z", types.ScheduleRunStatusSuccess)
+	mk("2026-05-20T02:02:00Z", "2026-05-20T03:15:00Z", types.ScheduleRunStatusError)
+	mk("2026-05-20T02:03:00Z", "", types.ScheduleRunStatusRunning)
+
+	list := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-dur/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	if runs, total, code := list(""); code != http.StatusOK || len(runs) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(runs), total)
+	}
+
+	// 10 min lower bound: 29min + 73min match, the 5min and still-running are out.
+	if runs, total, _ := list("?min_duration_ms=600000"); len(runs) != 2 || total != 2 {
+		t.Fatalf("min_duration_ms lower bound wrong: %+v total=%d", runs, total)
+	}
+
+	// 30 min upper bound: 5min + 29min match (29min hits inclusive 30min), the 73min and still-running are out.
+	if runs, total, _ := list("?max_duration_ms=1800000"); len(runs) != 2 || total != 2 {
+		t.Fatalf("max_duration_ms upper bound wrong: %+v total=%d", runs, total)
+	}
+
+	// Window 10..60 min: only 29min matches.
+	if runs, total, _ := list("?min_duration_ms=600000&max_duration_ms=3600000"); len(runs) != 1 || total != 1 {
+		t.Fatalf("both bounds window wrong: %+v total=%d", runs, total)
+	}
+
+	// Inclusive boundaries: 5min = 300000ms, exact match included on both sides.
+	if runs, total, _ := list("?min_duration_ms=300000&max_duration_ms=300000"); len(runs) != 1 || total != 1 {
+		t.Fatalf("inclusive boundary wrong: %+v total=%d", runs, total)
+	}
+
+	// Wide-open should exclude the still-running run.
+	if runs, total, _ := list("?min_duration_ms=0&max_duration_ms=2147483647"); len(runs) != 3 || total != 3 {
+		t.Fatalf("wide-open should exclude still-running: %+v total=%d", runs, total)
+	}
+
+	// Empty values disable the filter — all four rows return.
+	if runs, total, _ := list("?min_duration_ms=&max_duration_ms="); len(runs) != 4 || total != 4 {
+		t.Fatalf("empty disables: %+v total=%d", runs, total)
+	}
+
+	// Whitespace is trimmed.
+	if runs, total, _ := list("?min_duration_ms=%20600000%20"); len(runs) != 2 || total != 2 {
+		t.Fatalf("whitespace-trim: %+v total=%d", runs, total)
+	}
+
+	// Composes with status: only the success run with ≥10min duration.
+	if runs, total, _ := list("?status=success&min_duration_ms=600000"); len(runs) != 1 || total != 1 {
+		t.Fatalf("status+min_duration_ms compose: %+v total=%d", runs, total)
+	}
+
+	// Composes with started_at range + finished_at range.
+	if runs, total, _ := list("?since=2026-05-20T00:00:00Z&min_duration_ms=600000&max_duration_ms=3600000"); len(runs) != 1 || total != 1 {
+		t.Fatalf("started_at+duration compose: %+v total=%d", runs, total)
+	}
+
+	// Invalid (non-numeric or negative) returns 400.
+	if _, _, code := list("?min_duration_ms=garbage"); code != http.StatusBadRequest {
+		t.Fatalf("invalid min_duration_ms should 400, got %d", code)
+	}
+	if _, _, code := list("?max_duration_ms=nope"); code != http.StatusBadRequest {
+		t.Fatalf("invalid max_duration_ms should 400, got %d", code)
+	}
+	if _, _, code := list("?min_duration_ms=-1"); code != http.StatusBadRequest {
+		t.Fatalf("negative min_duration_ms should 400, got %d", code)
+	}
+
+	// Filtered pagination: total reflects the post-filter count, not page size.
+	if runs, total, _ := list("?min_duration_ms=600000&per_page=1"); len(runs) != 1 || total != 2 {
+		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
+	}
+}

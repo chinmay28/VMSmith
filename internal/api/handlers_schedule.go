@@ -501,9 +501,18 @@ func (s *Server) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // bounds on the run's nullable finished_at; whitespace-trimmed; empty disables;
 // invalid values return 400 invalid_finished_since/invalid_finished_until;
 // runs with a nil finished_at — typically still-running runs — are filtered
-// OUT when any bound is set, mirroring the next_fire_at handling), search
-// (case-insensitive substring match across the run's error and skip_reason
-// fields — whitespace-trimmed;
+// OUT when any bound is set, mirroring the next_fire_at handling),
+// min_duration_ms/max_duration_ms (inclusive non-negative integer bounds on
+// the run's `finished_at - started_at` duration in milliseconds; 5.4.64;
+// whitespace-trimmed; empty disables; non-numeric or negative values return
+// 400 invalid_min_duration_ms / invalid_max_duration_ms; runs with a nil
+// finished_at — still-running runs have no known duration — are filtered
+// OUT when either bound is set, mirroring the finished_at range filter's
+// nil-handling; closes the "show me every run that took ≥ 5 minutes" / "every
+// run that completed in under a second" triage query the categorical
+// ?status= can't answer; the symmetric range counterpart to the duration
+// sort axis added in 5.4.63), search (case-insensitive substring match
+// across the run's error and skip_reason fields — whitespace-trimmed;
 // id/schedule_id/vm_id/status are intentionally excluded from the haystack to
 // avoid noisy matches on short numeric queries; empty disables).
 //
@@ -549,6 +558,16 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	finishedUntilTime, finishedUntilSet, apiErr := parseTimeRangeParam(q.Get("finished_until"), "finished_until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	minDurationMs, minDurationSet, apiErr := parseCountRangeParam(q.Get("min_duration_ms"), "min_duration_ms")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	maxDurationMs, maxDurationSet, apiErr := parseCountRangeParam(q.Get("max_duration_ms"), "max_duration_ms")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -604,6 +623,18 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !snapshotInTimeRange(*run.FinishedAt, finishedSinceTime, finishedSinceSet, finishedUntilTime, finishedUntilSet) {
+				continue
+			}
+		}
+		if minDurationSet || maxDurationSet {
+			if run.FinishedAt == nil {
+				continue
+			}
+			durationMs := int(run.FinishedAt.Sub(run.StartedAt) / time.Millisecond)
+			if durationMs < 0 {
+				durationMs = 0
+			}
+			if !countInRange(durationMs, minDurationMs, minDurationSet, maxDurationMs, maxDurationSet) {
 				continue
 			}
 		}

@@ -576,3 +576,62 @@ func TestCLI_ScheduleRuns_RejectsInvalidFinishedUntil(t *testing.T) {
 		t.Fatal("invalid finished-until should not contact the daemon")
 	}
 }
+
+// TestCLI_ScheduleRuns_ForwardsDurationRange covers the --min-duration-ms /
+// --max-duration-ms range filter (5.4.64) — both ends round-trip through the
+// query string and the CLI distinguishes "flag not set" from "explicit 0".
+func TestCLI_ScheduleRuns_ForwardsDurationRange(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK,
+		`[{"id":"run-1","schedule_id":"sched-1","vm_id":"vm-1","started_at":"2026-05-22T02:00:00Z","finished_at":"2026-05-22T02:30:00Z","status":"success"}]`)
+
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--min-duration-ms", "600000", "--max-duration-ms", "3600000"); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "min_duration_ms=600000") {
+		t.Fatalf("query missing min_duration_ms: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "max_duration_ms=3600000") {
+		t.Fatalf("query missing max_duration_ms: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleRuns_DurationRangeZeroExplicit confirms that --min-duration-ms=0
+// (explicit zero) IS forwarded, while the unset default is NOT — operators need
+// to be able to lower-bound at zero without the CLI silently dropping the flag.
+func TestCLI_ScheduleRuns_DurationRangeZeroExplicit(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--min-duration-ms", "0"); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "min_duration_ms=0") {
+		t.Fatalf("explicit --min-duration-ms=0 should be forwarded: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_DurationRangeUnsetOmitsParams(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "min_duration_ms=") {
+		t.Fatalf("unset --min-duration-ms should not send the param, got %q", d.lastQuery)
+	}
+	if strings.Contains(d.lastQuery, "max_duration_ms=") {
+		t.Fatalf("unset --max-duration-ms should not send the param, got %q", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleRuns_RejectsNegativeDuration(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--min-duration-ms", "-1"); err == nil {
+		t.Fatal("expected negative --min-duration-ms rejection")
+	}
+	if d.lastPath != "" {
+		t.Fatal("negative duration should not contact the daemon")
+	}
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--max-duration-ms", "-5"); err == nil {
+		t.Fatal("expected negative --max-duration-ms rejection")
+	}
+}

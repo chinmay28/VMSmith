@@ -533,6 +533,8 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const [runOrder, setRunOrder] = useState('');
   const [runFinishedSince, setRunFinishedSince] = useState('');
   const [runFinishedUntil, setRunFinishedUntil] = useState('');
+  const [runMinDurationMs, setRunMinDurationMs] = useState('');
+  const [runMaxDurationMs, setRunMaxDurationMs] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setRunVMIDDebounced(runVMID.trim()), 250);
@@ -551,9 +553,23 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
   const finishedSinceParam = toRFC3339(runFinishedSince);
   const finishedUntilParam = toRFC3339(runFinishedUntil);
 
+  // Number inputs hand back strings; parse to non-negative integers and treat
+  // empty / blank / negative / non-numeric values as "filter disabled" so the
+  // CLI / API contract (only forward when explicitly set to a valid value) is
+  // mirrored client-side.
+  const parsePositiveInt = (raw) => {
+    const trimmed = (raw || '').trim();
+    if (trimmed === '') return undefined;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return undefined;
+    return n;
+  };
+  const minDurationMsParam = parsePositiveInt(runMinDurationMs);
+  const maxDurationMsParam = parsePositiveInt(runMaxDurationMs);
+
   const { data: runsResponse, loading: runsLoading } = useFetch(
-    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined, finishedSince: finishedSinceParam || undefined, finishedUntil: finishedUntilParam || undefined }) : Promise.resolve(null)),
-    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder, finishedSinceParam, finishedUntilParam],
+    () => (expanded ? schedulesApi.runs(schedule.id, { perPage: 5, status: runStatus || undefined, vmId: runVMIDDebounced || undefined, search: runSearchDebounced || undefined, sort: runSort || undefined, order: runOrder || undefined, finishedSince: finishedSinceParam || undefined, finishedUntil: finishedUntilParam || undefined, minDurationMs: minDurationMsParam, maxDurationMs: maxDurationMsParam }) : Promise.resolve(null)),
+    [expanded, schedule.id, runStatus, runVMIDDebounced, runSearchDebounced, runSort, runOrder, finishedSinceParam, finishedUntilParam, minDurationMsParam, maxDurationMsParam],
     null,
   );
   const runs = runsResponse?.data || [];
@@ -731,6 +747,44 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                     title="Clear finished_at range"
                   >
                     Clear finished
+                  </button>
+                )}
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="input input-sm text-[11px] py-0.5 w-28"
+                  placeholder="Min duration ms"
+                  value={runMinDurationMs}
+                  onChange={(e) => setRunMinDurationMs(e.target.value)}
+                  data-testid={`schedule-runs-min-duration-ms-filter-${schedule.id}`}
+                  aria-label="Minimum run duration in milliseconds"
+                  title="Lower bound (inclusive) on finished_at - started_at in milliseconds; excludes still-running runs"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="input input-sm text-[11px] py-0.5 w-28"
+                  placeholder="Max duration ms"
+                  value={runMaxDurationMs}
+                  onChange={(e) => setRunMaxDurationMs(e.target.value)}
+                  data-testid={`schedule-runs-max-duration-ms-filter-${schedule.id}`}
+                  aria-label="Maximum run duration in milliseconds"
+                  title="Upper bound (inclusive) on finished_at - started_at in milliseconds; excludes still-running runs"
+                />
+                {(runMinDurationMs || runMaxDurationMs) && (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm text-[11px] py-0.5"
+                    onClick={() => {
+                      setRunMinDurationMs('');
+                      setRunMaxDurationMs('');
+                    }}
+                    data-testid={`schedule-runs-duration-clear-${schedule.id}`}
+                    title="Clear duration range"
+                  >
+                    Clear duration
                   </button>
                 )}
               </div>

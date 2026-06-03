@@ -3103,6 +3103,31 @@ export interface paths {
                      */
                     finished_until?: string;
                     /**
+                     * @description Inclusive lower bound (non-negative integer) on the run's
+                     *     `finished_at - started_at` duration in milliseconds (5.4.64).
+                     *     Whitespace is trimmed; empty disables the bound; non-numeric or
+                     *     negative values return 400 `invalid_min_duration_ms`. Runs with a
+                     *     nil `finished_at` (still-running runs have no known duration) are
+                     *     filtered OUT whenever either `min_duration_ms` or
+                     *     `max_duration_ms` is set, mirroring the `finished_since`/
+                     *     `finished_until` nil-handling. Closes the *"show me every run
+                     *     that took ≥ 5 minutes"* triage query that the categorical
+                     *     `status` filter cannot answer; the symmetric range counterpart
+                     *     to the `duration` sort axis added in 5.4.63. Composes additively
+                     *     with every other filter; applied between `finished_until` and
+                     *     `search`, before pagination so `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    min_duration_ms?: number;
+                    /**
+                     * @description Inclusive upper bound (non-negative integer) on the run's
+                     *     `finished_at - started_at` duration in milliseconds (5.4.64).
+                     *     Same shape as `min_duration_ms`; invalid values return 400
+                     *     `invalid_max_duration_ms`. Runs with a nil `finished_at` are
+                     *     filtered OUT whenever either bound is set.
+                     */
+                    max_duration_ms?: number;
+                    /**
                      * @description Case-insensitive substring match across the run's `error` and
                      *     `skip_reason` fields. Whitespace is trimmed; empty disables the
                      *     filter. The id / schedule_id / vm_id / status fields are

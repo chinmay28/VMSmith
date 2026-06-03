@@ -2430,6 +2430,28 @@ const server = http.createServer(async (req, res) => {
     if (finishedUntil && isNaN(finishedUntilMs)) {
       return json(res, 400, { code: "invalid_finished_until", message: "finished_until must be a valid RFC3339 timestamp" });
     }
+    const minDurationRaw = (url.searchParams.get("min_duration_ms") || "").trim();
+    const maxDurationRaw = (url.searchParams.get("max_duration_ms") || "").trim();
+    const parseDurationMs = (raw, name) => {
+      if (raw === "") return { value: NaN, set: false, err: null };
+      // Match the Go parser: base-10 non-negative integer only.
+      if (!/^[0-9]+$/.test(raw)) {
+        return { value: NaN, set: false, err: { code: `invalid_${name}`, message: `${name} must be a non-negative integer` } };
+      }
+      const v = parseInt(raw, 10);
+      if (isNaN(v) || v < 0) {
+        return { value: NaN, set: false, err: { code: `invalid_${name}`, message: `${name} must be a non-negative integer` } };
+      }
+      return { value: v, set: true, err: null };
+    };
+    const minDuration = parseDurationMs(minDurationRaw, "min_duration_ms");
+    if (minDuration.err) {
+      return json(res, 400, minDuration.err);
+    }
+    const maxDuration = parseDurationMs(maxDurationRaw, "max_duration_ms");
+    if (maxDuration.err) {
+      return json(res, 400, maxDuration.err);
+    }
     const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
     const validRunSorts = ["id", "started_at", "finished_at", "status", "duration"];
     if (sortRaw && !validRunSorts.includes(sortRaw)) {
@@ -2454,6 +2476,15 @@ const server = http.createServer(async (req, res) => {
         if (isNaN(finishedMs)) return false;
         if (!isNaN(finishedSinceMs) && finishedMs < finishedSinceMs) return false;
         if (!isNaN(finishedUntilMs) && finishedMs > finishedUntilMs) return false;
+      }
+      if (minDuration.set || maxDuration.set) {
+        if (!run.finished_at) return false;
+        const finMs = Date.parse(run.finished_at);
+        const startMsRun = Date.parse(run.started_at || 0);
+        if (isNaN(finMs) || isNaN(startMsRun)) return false;
+        const durMs = Math.max(0, finMs - startMsRun);
+        if (minDuration.set && durMs < minDuration.value) return false;
+        if (maxDuration.set && durMs > maxDuration.value) return false;
       }
       if (searchFilter) {
         const err = String(run.error || "").toLowerCase();
