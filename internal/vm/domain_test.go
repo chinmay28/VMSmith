@@ -36,6 +36,7 @@ func TestGenerateDomainXML_Basic(t *testing.T) {
 		{"virtio model", "type='virtio'"},
 		{"network interface", "vmsmith-net"},
 		{"emulator path", "<emulator>/usr/bin/qemu-system-x86_64</emulator>"},
+		{"vnc loopback", "<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>"},
 	}
 
 	for _, c := range checks {
