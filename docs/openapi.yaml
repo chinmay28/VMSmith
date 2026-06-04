@@ -37,6 +37,7 @@ paths:
         - $ref: '#/components/parameters/DefaultUserFilter'
         - $ref: '#/components/parameters/OSTypeFilter'
         - $ref: '#/components/parameters/OSVariantFilter'
+        - $ref: '#/components/parameters/FirmwareFilter'
         - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
@@ -2956,6 +2957,26 @@ components:
           - windows-server-2019
           - windows-server-2022
           - windows-server-2025
+    FirmwareFilter:
+      name: firmware
+      in: query
+      description: |
+        Case-insensitive exact-match filter on the VM's firmware choice
+        (`spec.firmware`). Accepts one of `bios`, `uefi`, `ovmf`
+        (case-insensitive; surrounding whitespace trimmed); empty value
+        disables the filter. `bios` matches both stored "bios" AND VMs with
+        no firmware override (the SeaBIOS default — mirrors the
+        `?os_type=linux` empty-means-linux contract). `uefi` and `ovmf`
+        strict-match the stored value; they map to the same libvirt
+        `firmware='efi'` attribute at render time, but the operator's
+        stored choice survives the round-trip so the filter exposes it
+        back. Any other value returns `400 invalid_firmware` (matching the
+        create-time validation contract on `POST /vms`). Composes
+        additively with every other filter; `X-Total-Count` reflects the
+        post-filter population.
+      schema:
+        type: string
+        enum: [bios, uefi, ovmf]
     AutoStartFilter:
       name: auto_start
       in: query
