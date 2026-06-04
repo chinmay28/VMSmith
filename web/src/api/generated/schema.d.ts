@@ -100,6 +100,21 @@ export interface paths {
                      */
                     firmware?: components["parameters"]["FirmwareFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's effective disk bus.
+                     *     Accepts one of `virtio`, `sata` (case-insensitive; surrounding
+                     *     whitespace trimmed); empty value disables the filter. Resolution
+                     *     defers to `VMSpec.ResolvedDiskBus`, so empty `spec.disk_bus`
+                     *     matches the OS-family default — Linux VMs match
+                     *     `?disk_bus=virtio`, Windows VMs match `?disk_bus=sata`. Mirrors
+                     *     the empty-means-default contract of `?firmware=bios` (empty
+                     *     defaults to SeaBIOS) and `?os_type=linux` (empty defaults to
+                     *     Linux). Any other value returns `400 invalid_disk_bus` (matching
+                     *     the create-time validation contract on `POST /vms`). Composes
+                     *     additively with every other filter; `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    disk_bus?: components["parameters"]["DiskBusFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4424,6 +4439,21 @@ export interface components {
          *     post-filter population.
          */
         FirmwareFilter: "bios" | "uefi" | "ovmf";
+        /**
+         * @description Case-insensitive exact-match filter on the VM's effective disk bus.
+         *     Accepts one of `virtio`, `sata` (case-insensitive; surrounding
+         *     whitespace trimmed); empty value disables the filter. Resolution
+         *     defers to `VMSpec.ResolvedDiskBus`, so empty `spec.disk_bus`
+         *     matches the OS-family default — Linux VMs match
+         *     `?disk_bus=virtio`, Windows VMs match `?disk_bus=sata`. Mirrors
+         *     the empty-means-default contract of `?firmware=bios` (empty
+         *     defaults to SeaBIOS) and `?os_type=linux` (empty defaults to
+         *     Linux). Any other value returns `400 invalid_disk_bus` (matching
+         *     the create-time validation contract on `POST /vms`). Composes
+         *     additively with every other filter; `X-Total-Count` reflects the
+         *     post-filter population.
+         */
+        DiskBusFilter: "virtio" | "sata";
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

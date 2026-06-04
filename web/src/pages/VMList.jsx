@@ -66,6 +66,7 @@ export default function VMList() {
   const [osTypeFilter, setOsTypeFilter] = useState(searchParams.get('os_type') || '');
   const [osVariantFilter, setOsVariantFilter] = useState(searchParams.get('os_variant') || '');
   const [firmwareFilter, setFirmwareFilter] = useState(searchParams.get('firmware') || '');
+  const [diskBusFilter, setDiskBusFilter] = useState(searchParams.get('disk_bus') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
@@ -93,8 +94,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -127,7 +128,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -215,6 +216,7 @@ export default function VMList() {
     if (osTypeFilter) next.set('os_type', osTypeFilter); else next.delete('os_type');
     if (osVariantFilter) next.set('os_variant', osVariantFilter); else next.delete('os_variant');
     if (firmwareFilter) next.set('firmware', firmwareFilter); else next.delete('firmware');
+    if (diskBusFilter) next.set('disk_bus', diskBusFilter); else next.delete('disk_bus');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
@@ -227,7 +229,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -375,6 +377,19 @@ export default function VMList() {
             <option value="bios">BIOS</option>
             <option value="uefi">UEFI</option>
             <option value="ovmf">OVMF</option>
+          </select>
+        </div>
+        <div className="w-full sm:w-40">
+          <select
+            value={diskBusFilter}
+            onChange={(e) => setDiskBusFilter(e.target.value)}
+            className="input w-full py-1.5 text-sm"
+            data-testid="vm-list-disk-bus-filter"
+            aria-label="Filter by disk bus"
+          >
+            <option value="">All disk buses</option>
+            <option value="virtio">virtio</option>
+            <option value="sata">SATA</option>
           </select>
         </div>
         <div className="relative w-full sm:w-60">

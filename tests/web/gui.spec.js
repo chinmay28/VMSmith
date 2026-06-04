@@ -683,6 +683,44 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("firmware=");
   });
 
+  // 5.4.69 — `disk_bus` filter on the VM list. Seed data: web-server +
+  // db-server leave spec.disk_bus + spec.os_type empty (Linux default →
+  // virtio); win-app is Windows with empty spec.disk_bus (Windows default
+  // → sata). The filter must round-trip through the URL and respect the
+  // OS-family default for empty-stored values.
+  test("disk_bus filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // virtio → the two Linux VMs (empty disk_bus resolves to virtio via the
+    // Linux family default). win-app drops out because it's Windows and its
+    // effective bus is sata.
+    await page.getByTestId("vm-list-disk-bus-filter").selectOption("virtio");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("disk_bus")).toBe("virtio");
+
+    // sata → only win-app (Windows family default; the two Linux VMs collapse
+    // to virtio so they drop out).
+    await page.getByTestId("vm-list-disk-bus-filter").selectOption("sata");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("disk_bus")).toBe("sata");
+
+    // "All disk buses" clears the filter and drops the URL param.
+    await page.getByTestId("vm-list-disk-bus-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("disk_bus=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

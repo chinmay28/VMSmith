@@ -933,6 +933,121 @@ func TestCLI_VMList_FilterByFirmware_ComposesWithOSType(t *testing.T) {
 	}
 }
 
+// 5.4.69 — `--disk-bus` on `vmsmith vm list`. Two-value vocabulary
+// (virtio|sata); resolution defers to VMSpec.ResolvedDiskBus so an empty
+// stored disk_bus matches the OS-family default — Linux VMs match
+// `--disk-bus virtio`, Windows VMs match `--disk-bus sata`.
+
+func TestCLI_VMList_FilterByDiskBus_ExactMatchVirtio(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskBus: types.DiskBusVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "sata-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, DiskBus: types.DiskBusSATA}})
+
+	out, err := runCLI("vm", "list", "--disk-bus", "virtio")
+	if err != nil {
+		t.Fatalf("vm list --disk-bus virtio: %v", err)
+	}
+	if !strings.Contains(out, "virtio-explicit") || strings.Contains(out, "sata-explicit") {
+		t.Fatalf("expected only virtio-explicit, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_VirtioMatchesEmptyLinux(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--disk-bus", "virtio")
+	if err != nil {
+		t.Fatalf("vm list --disk-bus virtio: %v", err)
+	}
+	if !strings.Contains(out, "linux-empty") || strings.Contains(out, "win-empty") {
+		t.Fatalf("expected linux-empty matches default-virtio, no windows; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_SATAMatchesEmptyWindows(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--disk-bus", "sata")
+	if err != nil {
+		t.Fatalf("vm list --disk-bus sata: %v", err)
+	}
+	if !strings.Contains(out, "win-empty") || strings.Contains(out, "linux-empty") {
+		t.Fatalf("expected win-empty matches default-sata, no linux; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskBus: types.DiskBusVirtio}})
+
+	out, err := runCLI("vm", "list", "--disk-bus", "VIRTIO")
+	if err != nil {
+		t.Fatalf("vm list --disk-bus VIRTIO: %v", err)
+	}
+	if !strings.Contains(out, "virtio-vm") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskBus: types.DiskBusVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "sata-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, DiskBus: types.DiskBusSATA}})
+
+	out, err := runCLI("vm", "list", "--disk-bus", "")
+	if err != nil {
+		t.Fatalf("vm list --disk-bus empty: %v", err)
+	}
+	if !strings.Contains(out, "virtio-vm") || !strings.Contains(out, "sata-vm") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskBus: types.DiskBusVirtio}})
+
+	_, err := runCLI("vm", "list", "--disk-bus", "nvme")
+	if err == nil {
+		t.Fatal("expected error for invalid --disk-bus, got nil")
+	}
+	if !strings.Contains(err.Error(), "--disk-bus") {
+		t.Fatalf("error should reference --disk-bus, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByDiskBus_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, DiskBus: types.DiskBusVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, DiskBus: types.DiskBusVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-sata", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, DiskBus: types.DiskBusSATA}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--disk-bus", "virtio")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "win-virtio") || strings.Contains(out, "linux-virtio") || strings.Contains(out, "win-sata") {
+		t.Fatalf("expected only win-virtio, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))
