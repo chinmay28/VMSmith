@@ -81,6 +81,11 @@ function seed() {
   // meaningful cohort to slice (UEFI × 1 vs implicit-BIOS × 2 = web-server +
   // db-server, since they leave spec.firmware empty and empty-defaults-to-BIOS).
   vmWin.spec.firmware = "uefi";
+  // 5.4.71 — Windows server pinned to a non-default machine type so the
+  // `?machine=` filter has a meaningful cohort to slice. web-server +
+  // db-server leave spec.machine empty (resolves to "pc-q35-6.2"); win-app
+  // is the only VM under "pc-q35-rhel9.6.0".
+  vmWin.spec.machine = "pc-q35-rhel9.6.0";
   vmWin.state = "running";
   vmWin.ip = "192.168.100.12";
   vmWin.created_at = "2026-05-20T00:00:00Z";
@@ -420,6 +425,17 @@ const server = http.createServer(async (req, res) => {
     if (nicModelFilter && !knownNICModels.includes(nicModelFilter)) {
       return json(res, 400, { code: "invalid_nic_model", message: `nic_model must be one of: ${knownNICModels.join(", ")}` });
     }
+    // 5.4.71 — `?machine=` filter (free-form, case-sensitive). Resolution
+    // defers to the daemon default ("pc-q35-6.2") for empty stored values so
+    // `?machine=pc-q35-6.2` matches stored value AND VMs with no override.
+    // Garbage failing the libvirt machine-type alphabet returns 400.
+    const machineRe = /^[A-Za-z0-9._-]+$/;
+    const machineFilterRaw = (url.searchParams.get("machine") || "").trim();
+    if (machineFilterRaw && !machineRe.test(machineFilterRaw)) {
+      return json(res, 400, { code: "invalid_machine", message: "machine must match the libvirt machine-type alphabet [A-Za-z0-9._-]+" });
+    }
+    const machineFilter = machineFilterRaw;
+    const machineDefault = "pc-q35-6.2";
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -552,6 +568,15 @@ const server = http.createServer(async (req, res) => {
         const os = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
         const fallback = os === "windows" ? "e1000e" : "virtio";
         return fallback === nicModelFilter;
+      });
+    }
+    if (machineFilter) {
+      // 5.4.71 — case-sensitive exact-match on effective machine type.
+      // Empty stored value resolves to the daemon default ("pc-q35-6.2").
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.machine || vm?.machine || "").trim();
+        const effective = raw === "" ? machineDefault : raw;
+        return effective === machineFilter;
       });
     }
     if (networkFilter) {

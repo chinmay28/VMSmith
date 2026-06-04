@@ -236,10 +236,7 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		}
 	}
 
-	machine := "pc-q35-6.2"
-	if v := strings.TrimSpace(spec.Machine); v != "" {
-		machine = v
-	}
+	machine := spec.ResolvedMachine()
 
 	params := DomainParams{
 		Name:         spec.Name,

@@ -2205,6 +2205,170 @@ func TestListVMs_FilterByNICModel_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestListVMs_FilterByMachine_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "default-machine", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "rhel-machine", Spec: types.VMSpec{Machine: "pc-q35-rhel9.6.0"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "q35-machine", Spec: types.VMSpec{Machine: "q35"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=pc-q35-rhel9.6.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "rhel-machine" {
+		t.Fatalf("expected only rhel-machine, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByMachine_DefaultMatchesEmpty documents the
+// empty-means-daemon-default semantics: an unset spec.machine resolves to
+// types.DefaultMachine ("pc-q35-6.2") at libvirt render time, so the filter
+// must match it under `?machine=pc-q35-6.2`. Mirrors the
+// `?firmware=bios` empty-defaults-to-SeaBIOS contract.
+func TestListVMs_FilterByMachine_DefaultMatchesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "explicit-default", Spec: types.VMSpec{Machine: types.DefaultMachine}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "empty-machine", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "other-machine", Spec: types.VMSpec{Machine: "q35"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=" + types.DefaultMachine)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (explicit-default + empty-machine), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["explicit-default"] || !names["empty-machine"] {
+		t.Fatalf("expected explicit-default and empty-machine in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByMachine_IsCaseSensitive documents that machine types
+// are case-sensitive: libvirt's pc-q35-style names are lowercase, but the
+// alphabet permits letters so the filter preserves operator casing on
+// round-trip. Mirrors the `?timezone=` exact-match contract.
+func TestListVMs_FilterByMachine_IsCaseSensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "lower", Spec: types.VMSpec{Machine: "q35"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=Q35")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected case-sensitive non-match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMachine_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "q35", Spec: types.VMSpec{Machine: "q35"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=%20%20q35%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMachine_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMachine_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	// Contains a slash → outside the [A-Za-z0-9._-]+ alphabet.
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=pc-q35/6.2")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_machine")
+}
+
+func TestListVMs_FilterByMachine_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-q35", Spec: types.VMSpec{OSType: types.OSTypeLinux, Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-q35", Spec: types.VMSpec{OSType: types.OSTypeWindows, Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-default", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&machine=q35")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-q35" {
+		t.Fatalf("expected only win-q35, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByMachine_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		machine := types.DefaultMachine
+		if i%2 == 0 {
+			machine = "q35"
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{Machine: machine},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=q35&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

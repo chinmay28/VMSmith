@@ -1165,6 +1165,108 @@ func TestCLI_VMList_FilterByNICModel_ComposesWithOSType(t *testing.T) {
 	}
 }
 
+// 5.4.71 — `--machine` on `vmsmith vm list`. Free-form value (alphabet
+// `[A-Za-z0-9._-]+`), case-sensitive (libvirt machine names are
+// case-sensitive at the QEMU layer); empty stored spec.machine resolves to
+// types.DefaultMachine via VMSpec.ResolvedMachine, so `--machine pc-q35-6.2`
+// matches both stored "pc-q35-6.2" AND VMs with no override.
+
+func TestCLI_VMList_FilterByMachine_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "q35-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "q35"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "rhel-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "pc-q35-rhel9.6.0"}})
+
+	out, err := runCLI("vm", "list", "--machine", "q35")
+	if err != nil {
+		t.Fatalf("vm list --machine: %v", err)
+	}
+	if !strings.Contains(out, "q35-vm") || strings.Contains(out, "rhel-vm") {
+		t.Fatalf("expected only q35-vm, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMachine_DefaultMatchesEmpty(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "explicit-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: types.DefaultMachine}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "empty-machine", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "other-machine", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "q35"}})
+
+	out, err := runCLI("vm", "list", "--machine", types.DefaultMachine)
+	if err != nil {
+		t.Fatalf("vm list --machine %s: %v", types.DefaultMachine, err)
+	}
+	if !strings.Contains(out, "explicit-default") || !strings.Contains(out, "empty-machine") || strings.Contains(out, "other-machine") {
+		t.Fatalf("expected explicit-default + empty-machine, no other-machine; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMachine_IsCaseSensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "lower", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "q35"}})
+
+	out, err := runCLI("vm", "list", "--machine", "Q35")
+	if err != nil {
+		t.Fatalf("vm list --machine: %v", err)
+	}
+	if strings.Contains(out, "lower") {
+		t.Fatalf("expected case-sensitive non-match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMachine_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "q35-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "q35"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "default-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--machine", "")
+	if err != nil {
+		t.Fatalf("vm list --machine empty: %v", err)
+	}
+	if !strings.Contains(out, "q35-vm") || !strings.Contains(out, "default-vm") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByMachine_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "x", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Machine: "q35"}})
+
+	// Slash isn't in the [A-Za-z0-9._-]+ alphabet.
+	_, err := runCLI("vm", "list", "--machine", "pc-q35/6.2")
+	if err == nil {
+		t.Fatal("expected error for invalid --machine, got nil")
+	}
+	if !strings.Contains(err.Error(), "--machine") {
+		t.Fatalf("error should reference --machine, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByMachine_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-q35", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, Machine: "q35"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-q35", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, Machine: "q35"}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--machine", "q35")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "win-q35") || strings.Contains(out, "linux-q35") || strings.Contains(out, "win-default") {
+		t.Fatalf("expected only win-q35, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))
