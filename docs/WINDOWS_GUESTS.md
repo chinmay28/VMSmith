@@ -103,6 +103,31 @@ base images must be prepared so VMSmith's first-boot datasource takes effect:
 Cloudbase publishes ready-made evaluation qcow2 images that already include
 cloudbase-init and virtio drivers, which are a convenient starting point.
 
+### Preparation helper: cloudbase-init + qemu-ga + sysprep
+
+VMSmith ships `scripts/windows/prepare-base-image.ps1`, a guest-side helper for
+the repetitive parts of Windows image preparation. Run it from an Administrator
+PowerShell prompt *before* you capture the qcow2 as your base image:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+powershell -ExecutionPolicy Bypass -File C:\Temp\prepare-base-image.ps1 `
+  -CloudbaseInitInstaller C:\Users\Administrator\Downloads\CloudbaseInitSetup_Stable_x64.msi `
+  -InstallQemuGA -VirtioDrive E:\ -EnableOpenSSH
+```
+
+What the helper does:
+
+- installs cloudbase-init silently (or reuses the existing install unless `-Force`)
+- copies cloudbase-init's `Unattend.xml` into `C:\Windows\Panther\Unattend\VMSmith-Unattend.xml`
+- optionally installs the QEMU guest agent from the mounted virtio-win ISO and enables its service
+- optionally installs + enables the Windows OpenSSH server capability
+- runs `sysprep /generalize /oobe /shutdown /unattend:...` unless `-SkipSysprep` is set
+
+This does **not** download Microsoft media for you; you still need to supply a
+Windows qcow2 / ISO plus the cloudbase-init installer. The point is to make the
+last-mile guest preparation reproducible once the VM is booted.
+
 ### Install the QEMU guest agent (recommended)
 
 Windows guests boot and get a DHCP lease without `qemu-ga`, but installing the
@@ -115,9 +140,9 @@ QEMU guest agent makes VMSmith noticeably better at three things:
 - **Memory-balloon metrics** — guest-memory availability is only visible when
   the agent is running.
 
-VMSmith ships a helper at `scripts/windows/install-qemu-ga.ps1`. Copy that file
-into the guest (for example `C:\Temp\install-qemu-ga.ps1`) and run it from an
-Administrator PowerShell prompt:
+You can either let `prepare-base-image.ps1 -InstallQemuGA` handle this during
+base-image prep, or run the narrower helper `scripts/windows/install-qemu-ga.ps1`
+inside the guest (for example `C:\Temp\install-qemu-ga.ps1`):
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
@@ -130,14 +155,7 @@ If the ISO is mounted on a non-default drive, pass it explicitly, for example:
 powershell -ExecutionPolicy Bypass -File C:\Temp\install-qemu-ga.ps1 -VirtioDrive E:\ -StartService -EnableStartup
 ```
 
-What the helper does:
-
-- searches the mounted virtio-win media for `guest-agent\\qemu-ga-*.msi`
-- installs it silently with `msiexec`
-- sets the `QEMU-GA` service to automatic startup (when `-EnableStartup` is set)
-- starts the service immediately
-
-Manual fallback if you do not want the helper:
+Manual fallback if you do not want either helper:
 
 ```powershell
 msiexec /i E:\guest-agent\qemu-ga-x86_64.msi /qn /norestart
