@@ -524,7 +524,7 @@ VNC is already configured in domain XML (`internal/vm/domain.go:60` — `<graphi
 - [x] Ticket endpoint requires `Authorization: Bearer`.
 - [x] Ticket is single-use, ≤60s TTL, scoped to VM ID + API key.
 - [ ] Websocket handler rejects requests without a valid ticket with HTTP 401.
-- [ ] VNC port stays bound to `127.0.0.1` — verified by an integration test that asserts external connect refuses.
+- [x] VNC port stays bound to `127.0.0.1` — `internal/vm/console_endpoint_test.go::TestMockManager_SeedConsoleListener_RejectsExternalInterfaceDial` binds a real loopback listener and asserts dialing the host's non-loopback IPv4 address on that port fails.
 - [x] No ticket appears in any access log (the middleware redacts `?ticket=`).
 - [ ] Sessions are forcibly closed on VM stop, VM delete, daemon shutdown, and API-key revocation.
 - [ ] `wss://` is required when TLS is configured (`ws://` rejected with 403 to avoid mixed-content downgrade).
