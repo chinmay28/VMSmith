@@ -1384,6 +1384,167 @@ func TestListVMs_FilterByOSType_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.4.66 — `?os_variant=` on GET /vms. Sub-axis of `?os_type=windows`: case-insensitive
+// exact-match against `spec.os_variant`; empty stored value excluded; unknown
+// values return 400 `invalid_os_variant`; composes additively with every
+// other filter.
+
+func TestListVMs_FilterByOSVariant_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11-host", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "srv22", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=windows-11")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win11-host" {
+		t.Fatalf("expected only win11-host, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSVariant_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "srv22", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=WINDOWS-SERVER-2022")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSVariant_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=%20%20windows-11%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSVariant_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByOSVariant_ExcludesEmptyStored documents the membership
+// semantics: unlike `?os_type=linux` (which matches empty-stored VMs via the
+// linux default), `?os_variant=` requires an explicit stored value — there's
+// no documented "default variant", so empty drops out whenever the filter is
+// set. Mirrors the webhook event_type membership / template default_user
+// no-empty-match semantics.
+func TestListVMs_FilterByOSVariant_ExcludesEmptyStored(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-unset", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=windows-11")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win11" {
+		t.Fatalf("expected only win11 (empty-stored excluded), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSVariant_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=windows-12")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_variant")
+}
+
+func TestListVMs_FilterByOSVariant_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeLinux, OSVariant: "windows-11"}}) // unusual but allowed
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-10"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&os_variant=windows-11")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "a" {
+		t.Fatalf("expected only the win-11 windows VM 'a', got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByOSVariant_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		v := "windows-11"
+		if i%2 == 0 {
+			v = "windows-server-2022"
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: v},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=windows-11&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

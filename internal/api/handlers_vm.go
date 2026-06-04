@@ -332,7 +332,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	osVariantFilter, osVariantSet, apiErr := parseOSVariantFilter(q.Get("os_variant"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -372,6 +377,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if osTypeSet && vm.Spec.ResolvedOSType() != osTypeFilter {
+				continue
+			}
+			if osVariantSet && !strings.EqualFold(vm.Spec.OSVariant, osVariantFilter) {
 				continue
 			}
 			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {

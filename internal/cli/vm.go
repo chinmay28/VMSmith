@@ -175,6 +175,7 @@ var vmListCmd = &cobra.Command{
 		imageFilter, _ := cmd.Flags().GetString("image")
 		defaultUserFilter, _ := cmd.Flags().GetString("default-user")
 		osTypeFilterRaw, _ := cmd.Flags().GetString("os-type")
+		osVariantFilterRaw, _ := cmd.Flags().GetString("os-variant")
 		networkFilter, _ := cmd.Flags().GetString("network")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
@@ -196,6 +197,10 @@ var vmListCmd = &cobra.Command{
 		imageFilter = strings.TrimSpace(strings.ToLower(imageFilter))
 		defaultUserFilter = strings.TrimSpace(strings.ToLower(defaultUserFilter))
 		osTypeFilter, osTypeSet, err := parseCLIOSType(osTypeFilterRaw, "--os-type")
+		if err != nil {
+			return err
+		}
+		osVariantFilter, osVariantSet, err := parseCLIOSVariant(osVariantFilterRaw, "--os-variant")
 		if err != nil {
 			return err
 		}
@@ -277,7 +282,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -317,6 +322,9 @@ var vmListCmd = &cobra.Command{
 					}
 				}
 				if osTypeSet && v.Spec.ResolvedOSType() != osTypeFilter {
+					continue
+				}
+				if osVariantSet && !strings.EqualFold(v.Spec.OSVariant, osVariantFilter) {
 					continue
 				}
 				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
@@ -1188,6 +1196,7 @@ Examples:
 	vmListCmd.Flags().String("image", "", "case-insensitive exact-match filter on the VM's base image")
 	vmListCmd.Flags().String("default-user", "", "filter VMs by default SSH user (case-insensitive exact match; empty matches 'root')")
 	vmListCmd.Flags().String("os-type", "", "filter VMs by guest OS family: 'linux' or 'windows' (case-insensitive; empty spec.os_type is treated as 'linux')")
+	vmListCmd.Flags().String("os-variant", "", "filter VMs by Windows variant (case-insensitive exact match against spec.os_variant; one of windows-10, windows-11, windows-server-2019, windows-server-2022, windows-server-2025; empty spec.os_variant is excluded when the filter is set)")
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
