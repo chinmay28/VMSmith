@@ -11708,6 +11708,135 @@ func TestListTemplates_FilterByOSType_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// --- template list ?os_variant= (roadmap 5.4.67) ---
+//
+// Symmetric sub-axis to ?os_type=windows on the template cohort: ?os_type=
+// narrows to the OS family, ?os_variant= slices the Windows cohort by
+// edition. Mirrors the VM list ?os_variant= filter (5.4.66) — case-insensitive
+// exact-match, whitespace-trimmed, empty-disables, empty-stored excluded, and
+// 400 invalid_os_variant on unknown values.
+
+func TestListTemplates_FilterByOSVariant_ExactMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win11", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "win22", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "linux", Image: "l.qcow2", OSType: types.OSTypeLinux})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=windows-11")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "win11" {
+		t.Errorf("filter = %+v, want only win11", got)
+	}
+	if hdr := resp.Header.Get("X-Total-Count"); hdr != "1" {
+		t.Errorf("X-Total-Count = %q, want 1", hdr)
+	}
+}
+
+func TestListTemplates_FilterByOSVariant_IsCaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win22", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=WINDOWS-SERVER-2022")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 {
+		t.Errorf("filter = %+v, want 1 case-insensitive match", got)
+	}
+}
+
+func TestListTemplates_FilterByOSVariant_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win11", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=%20%20windows-11%20%20")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 {
+		t.Errorf("filter = %+v, want 1 after whitespace trim", got)
+	}
+}
+
+func TestListTemplates_FilterByOSVariant_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "linux", Image: "l.qcow2", OSType: types.OSTypeLinux})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("empty filter should return all templates, got %+v", got)
+	}
+}
+
+// TestListTemplates_FilterByOSVariant_ExcludesEmptyStored documents the
+// membership semantics: unlike `?os_type=linux` (which matches empty-stored
+// templates via the linux default), `?os_variant=` requires an explicit
+// stored value — empty drops out whenever the filter is set. Mirrors the
+// VM `?os_variant=` filter and the webhook `?event_type=` semantics.
+func TestListTemplates_FilterByOSVariant_ExcludesEmptyStored(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "win11", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "win-unset", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "linux", Image: "l.qcow2", OSType: types.OSTypeLinux})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=windows-11")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "win11" {
+		t.Errorf("expected only win11 (empty-stored excluded), got %+v", got)
+	}
+}
+
+func TestListTemplates_FilterByOSVariant_InvalidValueReturns400(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=windows-12")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_os_variant")
+}
+
+func TestListTemplates_FilterByOSVariant_ComposesWithOSType(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+	// Unusual but allowed: a Linux-typed template can still carry an
+	// os_variant string. The compose filter must drop this row because
+	// ?os_type=windows excludes it.
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "l.qcow2", OSType: types.OSTypeLinux, OSVariant: "windows-11"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=windows&os_variant=windows-11")
+	got := decodeTemplateList(t, resp)
+	if len(got) != 1 || got[0].Name != "a" {
+		t.Errorf("compose filter = %+v, want only a", got)
+	}
+}
+
+func TestListTemplates_FilterByOSVariant_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 6; i++ {
+		v := "windows-11"
+		if i%2 == 0 {
+			v = "windows-server-2022"
+		}
+		seedStoredTemplate(t, s, &types.VMTemplate{ID: fmt.Sprintf("tmpl-%d", i), Name: fmt.Sprintf("w-%d", i), Image: "w.qcow2", OSType: types.OSTypeWindows, OSVariant: v})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=windows-11&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
 // --- template list ?network= (roadmap 5.4.45) ---
 
 func tmplWithNet(id, name string, networks ...string) *types.VMTemplate {

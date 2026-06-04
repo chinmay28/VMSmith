@@ -348,7 +348,7 @@ test.describe("VM List", () => {
     await expect(select).toBeVisible();
     // Wait for every template to appear; otherwise the assertion
     // can race the API fetch.
-    await expect(select.locator("option")).toHaveCount(4);
+    await expect(select.locator("option")).toHaveCount(5);
     const options = await select.locator("option").evaluateAll((nodes) =>
       nodes.map((n) => ({ value: n.value, text: n.textContent || "" })),
     );
@@ -356,7 +356,8 @@ test.describe("VM List", () => {
     expect(options[0].value).toBe("");
     expect(options[1].text).toBe("big-rocky");
     expect(options[2].text).toBe("small-ubuntu");
-    expect(options[3].text).toBe("windows-2022");
+    expect(options[3].text).toBe("windows-11-desktop");
+    expect(options[4].text).toBe("windows-2022");
   });
 
   // 5.4.12 — template search filter narrows the Create-VM template dropdown.
@@ -369,7 +370,7 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(4); // placeholder + 3 templates
+    await expect(select.locator("option")).toHaveCount(5); // placeholder + 4 templates
 
     // Search for "rocky" — should reduce the dropdown to big-rocky only.
     await page.getByTestId("template-search-input").fill("rocky");
@@ -378,7 +379,7 @@ test.describe("VM List", () => {
 
     // Clear via the X button and the full list comes back.
     await page.getByTestId("template-search-clear").click();
-    await expect(select.locator("option")).toHaveCount(4);
+    await expect(select.locator("option")).toHaveCount(5);
   });
 
   test("template search filter is case-insensitive and matches description", async ({ page }) => {
@@ -392,7 +393,7 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(4);
+    await expect(select.locator("option")).toHaveCount(5);
 
     await page.getByTestId("template-search-input").fill("UBUNTU");
     await expect(select.locator("option")).toHaveCount(2);
@@ -405,7 +406,7 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     const select = page.getByTestId("input-vm-template");
-    await expect(select.locator("option")).toHaveCount(4);
+    await expect(select.locator("option")).toHaveCount(5);
 
     await page.getByTestId("template-search-input").fill("needle-not-present");
     // Only the placeholder remains; its label is updated to reflect the
@@ -2425,6 +2426,53 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
     await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
     await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
+  });
+
+  // 5.4.67 — os_variant filter on the template list. Seed data: windows-2022
+  // (windows-server-2022) and windows-11-desktop (windows-11) are the two
+  // Windows templates; small-ubuntu and big-rocky have an empty os_variant
+  // and must drop out whenever the filter is set (no documented "default
+  // variant", mirrors the VM list 5.4.66 / API parseOSVariantFilter
+  // empty-stored-excluded contract).
+  test("os-variant filter narrows the template list to a single Windows edition and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-11-desktop")).toBeVisible();
+
+    // Selecting the matching variant narrows to windows-2022 only; the
+    // Linux templates (empty os_variant) and the windows-11 template are
+    // filtered out.
+    await page.getByTestId("template-list-os-variant-filter").selectOption("windows-server-2022");
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-11-desktop")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_variant")).toBe("windows-server-2022");
+
+    // A recognised-but-unmatched variant (windows-10) collapses the cohort
+    // to empty — no template carries this edition.
+    await page.getByTestId("template-list-os-variant-filter").selectOption("windows-10");
+    await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-windows-11-desktop")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("os_variant")).toBe("windows-10");
+
+    // Switching to windows-11 narrows to the desktop template only.
+    await page.getByTestId("template-list-os-variant-filter").selectOption("windows-11");
+    await expect(page.getByTestId("template-row-windows-11-desktop")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
+
+    // "All variants" clears the filter and restores every template,
+    // dropping the URL param.
+    await page.getByTestId("template-list-os-variant-filter").selectOption("");
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-11-desktop")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("os_variant=");
   });
 
   test("network filter narrows the template list and round-trips through the URL", async ({ page }) => {
