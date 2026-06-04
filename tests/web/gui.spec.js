@@ -637,6 +637,52 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("os_variant=");
   });
 
+  // 5.4.68 — firmware filter on the VM list. Seed data: win-app has
+  // spec.firmware="uefi"; web-server and db-server leave spec.firmware empty
+  // and so fall into the implicit-BIOS bucket. `?firmware=bios` matches the
+  // two empty-stored Linux VMs (empty-defaults-to-BIOS contract mirrors
+  // `?os_type=linux` empty-means-linux); `?firmware=uefi` strict-matches
+  // win-app only; `?firmware=ovmf` collapses to empty because no seed VM
+  // explicitly stores "ovmf" (uefi and ovmf are distinct stored values even
+  // though they map to the same libvirt firmware='efi' attribute).
+  test("firmware filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // uefi → only win-app (strict-match on stored value).
+    await page.getByTestId("vm-list-firmware-filter").selectOption("uefi");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("firmware")).toBe("uefi");
+
+    // ovmf → empty cohort (no VM explicitly stores "ovmf"; uefi-stored
+    // win-app does NOT match — they're distinct stored values).
+    await page.getByTestId("vm-list-firmware-filter").selectOption("ovmf");
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("firmware")).toBe("ovmf");
+
+    // bios → the two Linux VMs with empty stored firmware (the SeaBIOS
+    // default). win-app drops out because its stored value is "uefi".
+    await page.getByTestId("vm-list-firmware-filter").selectOption("bios");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("firmware")).toBe("bios");
+
+    // "All firmware" clears the filter and drops the URL param.
+    await page.getByTestId("vm-list-firmware-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("firmware=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

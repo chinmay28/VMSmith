@@ -1545,6 +1545,189 @@ func TestListVMs_FilterByOSVariant_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.4.68 — `?firmware=` on GET /vms. Three-value vocabulary (bios|uefi|ovmf),
+// case-insensitive; `bios` also matches VMs with an empty stored firmware
+// (the SeaBIOS default, mirroring `?os_type=linux` empty-means-linux), while
+// `uefi` and `ovmf` strict-match the stored value so the operator's chosen
+// alias survives the filter round-trip.
+
+func TestListVMs_FilterByFirmware_ExactMatchUEFI(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "legacy", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "ovmf", Spec: types.VMSpec{Firmware: types.FirmwareOVMF}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=uefi")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win11" {
+		t.Fatalf("expected only win11 (uefi strict-match), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_ExactMatchOVMF(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uefi-vm", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "ovmf-vm", Spec: types.VMSpec{Firmware: types.FirmwareOVMF}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=ovmf")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "ovmf-vm" {
+		t.Fatalf("expected only ovmf-vm (ovmf and uefi are distinct stored values), got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByFirmware_BIOSMatchesEmptyStored documents the
+// empty-means-bios semantics: an unset `spec.firmware` resolves to BIOS at
+// libvirt render time (no firmware attribute → SeaBIOS), so the filter must
+// match it under `?firmware=bios` — mirrors the `?os_type=linux` empty
+// match-via-default contract.
+func TestListVMs_FilterByFirmware_BIOSMatchesEmptyStored(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "bios-explicit", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bios-empty", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "uefi-vm", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=bios")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (bios-explicit + bios-empty), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["bios-explicit"] || !names["bios-empty"] {
+		t.Fatalf("expected bios-explicit and bios-empty in result, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=UEFI")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=%20%20uefi%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=coreboot")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_firmware")
+}
+
+func TestListVMs_FilterByFirmware_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-uefi", Spec: types.VMSpec{OSType: types.OSTypeWindows, Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-uefi", Spec: types.VMSpec{OSType: types.OSTypeLinux, Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-bios", Spec: types.VMSpec{OSType: types.OSTypeWindows, Firmware: types.FirmwareBIOS}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&firmware=uefi")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-uefi" {
+		t.Fatalf("expected only the windows + uefi VM, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByFirmware_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		fw := types.FirmwareUEFI
+		if i%2 == 0 {
+			fw = types.FirmwareBIOS
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{Firmware: fw},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=uefi&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

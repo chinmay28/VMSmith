@@ -84,6 +84,22 @@ export interface paths {
                      */
                     os_variant?: components["parameters"]["OSVariantFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's firmware choice
+                     *     (`spec.firmware`). Accepts one of `bios`, `uefi`, `ovmf`
+                     *     (case-insensitive; surrounding whitespace trimmed); empty value
+                     *     disables the filter. `bios` matches both stored "bios" AND VMs with
+                     *     no firmware override (the SeaBIOS default — mirrors the
+                     *     `?os_type=linux` empty-means-linux contract). `uefi` and `ovmf`
+                     *     strict-match the stored value; they map to the same libvirt
+                     *     `firmware='efi'` attribute at render time, but the operator's
+                     *     stored choice survives the round-trip so the filter exposes it
+                     *     back. Any other value returns `400 invalid_firmware` (matching the
+                     *     create-time validation contract on `POST /vms`). Composes
+                     *     additively with every other filter; `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    firmware?: components["parameters"]["FirmwareFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4392,6 +4408,22 @@ export interface components {
          *     the post-filter population.
          */
         OSVariantFilter: "windows-10" | "windows-11" | "windows-server-2019" | "windows-server-2022" | "windows-server-2025";
+        /**
+         * @description Case-insensitive exact-match filter on the VM's firmware choice
+         *     (`spec.firmware`). Accepts one of `bios`, `uefi`, `ovmf`
+         *     (case-insensitive; surrounding whitespace trimmed); empty value
+         *     disables the filter. `bios` matches both stored "bios" AND VMs with
+         *     no firmware override (the SeaBIOS default — mirrors the
+         *     `?os_type=linux` empty-means-linux contract). `uefi` and `ovmf`
+         *     strict-match the stored value; they map to the same libvirt
+         *     `firmware='efi'` attribute at render time, but the operator's
+         *     stored choice survives the round-trip so the filter exposes it
+         *     back. Any other value returns `400 invalid_firmware` (matching the
+         *     create-time validation contract on `POST /vms`). Composes
+         *     additively with every other filter; `X-Total-Count` reflects the
+         *     post-filter population.
+         */
+        FirmwareFilter: "bios" | "uefi" | "ovmf";
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

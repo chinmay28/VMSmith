@@ -833,6 +833,106 @@ func TestCLI_VMList_FilterByOSVariant_ComposesWithOSType(t *testing.T) {
 	}
 }
 
+// 5.4.68 — `--firmware` on `vmsmith vm list`. Three-value vocabulary
+// (bios|uefi|ovmf); `bios` matches stored "" or "bios" (the SeaBIOS default);
+// `uefi` and `ovmf` strict-match the stored value.
+
+func TestCLI_VMList_FilterByFirmware_ExactMatchUEFI(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareUEFI}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "legacy", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Firmware: types.FirmwareBIOS}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "ovmf-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareOVMF}})
+
+	out, err := runCLI("vm", "list", "--firmware", "uefi")
+	if err != nil {
+		t.Fatalf("vm list --firmware: %v", err)
+	}
+	if !strings.Contains(out, "win11") || strings.Contains(out, "legacy") || strings.Contains(out, "ovmf-vm") {
+		t.Fatalf("expected only win11 (uefi strict-match), got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByFirmware_BIOSMatchesEmptyStored(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "bios-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, Firmware: types.FirmwareBIOS}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "bios-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "uefi-vm", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareUEFI}})
+
+	out, err := runCLI("vm", "list", "--firmware", "bios")
+	if err != nil {
+		t.Fatalf("vm list --firmware bios: %v", err)
+	}
+	if !strings.Contains(out, "bios-explicit") || !strings.Contains(out, "bios-empty") || strings.Contains(out, "uefi-vm") {
+		t.Fatalf("expected bios-explicit + bios-empty, no uefi-vm; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByFirmware_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareUEFI}})
+
+	out, err := runCLI("vm", "list", "--firmware", "UEFI")
+	if err != nil {
+		t.Fatalf("vm list --firmware UEFI: %v", err)
+	}
+	if !strings.Contains(out, "win11") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByFirmware_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareUEFI}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "legacy", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--firmware", "")
+	if err != nil {
+		t.Fatalf("vm list --firmware empty: %v", err)
+	}
+	if !strings.Contains(out, "win11") || !strings.Contains(out, "legacy") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByFirmware_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win11", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, Firmware: types.FirmwareUEFI}})
+
+	_, err := runCLI("vm", "list", "--firmware", "coreboot")
+	if err == nil {
+		t.Fatal("expected error for invalid --firmware, got nil")
+	}
+	if !strings.Contains(err.Error(), "--firmware") {
+		t.Fatalf("error should reference --firmware, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByFirmware_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-uefi", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, Firmware: types.FirmwareUEFI}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-uefi", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, Firmware: types.FirmwareUEFI}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-bios", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, Firmware: types.FirmwareBIOS}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--firmware", "uefi")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "win-uefi") || strings.Contains(out, "linux-uefi") || strings.Contains(out, "win-bios") {
+		t.Fatalf("expected only win-uefi, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))

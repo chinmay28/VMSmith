@@ -77,6 +77,10 @@ function seed() {
   const vmWin = createVM({ name: "win-app", image: "win-server-2022.qcow2", cpus: 3, ram_mb: 4096, disk_gb: 64 });
   vmWin.spec.os_type = "windows";
   vmWin.spec.os_variant = "windows-server-2022";
+  // 5.4.68 — Windows server pinned to UEFI so the `?firmware=` filter has a
+  // meaningful cohort to slice (UEFI × 1 vs implicit-BIOS × 2 = web-server +
+  // db-server, since they leave spec.firmware empty and empty-defaults-to-BIOS).
+  vmWin.spec.firmware = "uefi";
   vmWin.state = "running";
   vmWin.ip = "192.168.100.12";
   vmWin.created_at = "2026-05-20T00:00:00Z";
@@ -392,6 +396,13 @@ const server = http.createServer(async (req, res) => {
     if (osVariantFilter && !knownOSVariants.includes(osVariantFilter)) {
       return json(res, 400, { code: "invalid_os_variant", message: `os_variant must be one of: ${knownOSVariants.join(", ")}` });
     }
+    // 5.4.68 — `?firmware=` filter (bios|uefi|ovmf). bios matches empty-stored
+    // too; uefi/ovmf strict-match the stored value.
+    const knownFirmwares = ["bios", "uefi", "ovmf"];
+    const firmwareFilter = (url.searchParams.get("firmware") || "").trim().toLowerCase();
+    if (firmwareFilter && !knownFirmwares.includes(firmwareFilter)) {
+      return json(res, 400, { code: "invalid_firmware", message: `firmware must be one of: ${knownFirmwares.join(", ")}` });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -490,6 +501,15 @@ const server = http.createServer(async (req, res) => {
       list = list.filter(vm => {
         const raw = String(vm?.spec?.os_variant || vm?.os_variant || "").trim().toLowerCase();
         return raw === osVariantFilter;
+      });
+    }
+    if (firmwareFilter) {
+      // 5.4.68 — `bios` matches stored "" or "bios" (the SeaBIOS default);
+      // `uefi` and `ovmf` strict-match the stored value.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.firmware || vm?.firmware || "").trim().toLowerCase();
+        if (firmwareFilter === "bios") return raw === "" || raw === "bios";
+        return raw === firmwareFilter;
       });
     }
     if (networkFilter) {
