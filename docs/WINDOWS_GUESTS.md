@@ -103,6 +103,64 @@ base images must be prepared so VMSmith's first-boot datasource takes effect:
 Cloudbase publishes ready-made evaluation qcow2 images that already include
 cloudbase-init and virtio drivers, which are a convenient starting point.
 
+### Install the QEMU guest agent (recommended)
+
+Windows guests boot and get a DHCP lease without `qemu-ga`, but installing the
+QEMU guest agent makes VMSmith noticeably better at three things:
+
+- **IP reporting** — VMSmith can query the real in-guest address instead of
+  waiting for the DHCP-lease ping fallback.
+- **Graceful shutdown / reboot** — libvirt can ask the guest agent to
+  coordinate in-guest shutdown flows instead of relying purely on ACPI.
+- **Memory-balloon metrics** — guest-memory availability is only visible when
+  the agent is running.
+
+VMSmith ships a helper at `scripts/windows/install-qemu-ga.ps1`. Copy that file
+into the guest (for example `C:\Temp\install-qemu-ga.ps1`) and run it from an
+Administrator PowerShell prompt:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+powershell -ExecutionPolicy Bypass -File C:\Temp\install-qemu-ga.ps1 -StartService -EnableStartup
+```
+
+If the ISO is mounted on a non-default drive, pass it explicitly, for example:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Temp\install-qemu-ga.ps1 -VirtioDrive E:\ -StartService -EnableStartup
+```
+
+What the helper does:
+
+- searches the mounted virtio-win media for `guest-agent\\qemu-ga-*.msi`
+- installs it silently with `msiexec`
+- sets the `QEMU-GA` service to automatic startup (when `-EnableStartup` is set)
+- starts the service immediately
+
+Manual fallback if you do not want the helper:
+
+```powershell
+msiexec /i E:\guest-agent\qemu-ga-x86_64.msi /qn /norestart
+Set-Service -Name QEMU-GA -StartupType Automatic
+Start-Service -Name QEMU-GA
+```
+
+Verify inside the guest:
+
+```powershell
+Get-Service QEMU-GA
+```
+
+After the service is running, check from the host:
+
+```bash
+vmsmith vm list
+vmsmith host stats
+```
+
+The VM's IP should switch to the guest-agent-reported address when available,
+and memory-balloon metrics become eligible to populate.
+
 ---
 
 ## What VMSmith injects at first boot
@@ -162,6 +220,9 @@ re-running cloudbase-init on a live guest, which is out of scope for VMSmith.
   from outside the host.
 - **SSH** — available when you passed `--ssh-key`; log in as the local
   administrator over the Windows OpenSSH server.
+- **QEMU guest agent** — install it from the attached virtio-win ISO (see
+  above) to improve IP discovery, graceful shutdown fidelity, and memory
+  telemetry.
 - **VNC console** — the QXL display + USB tablet make the graphical console
   usable via the standard console-ticket flow.
 
