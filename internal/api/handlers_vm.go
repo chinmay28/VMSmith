@@ -347,7 +347,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	nicModelFilter, nicModelSet, apiErr := parseNICModelFilter(q.Get("nic_model"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -396,6 +401,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if diskBusSet && !vmMatchesDiskBusFilter(vm.Spec, diskBusFilter) {
+				continue
+			}
+			if nicModelSet && !vmMatchesNICModelFilter(vm.Spec, nicModelFilter) {
 				continue
 			}
 			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {

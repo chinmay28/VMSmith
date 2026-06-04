@@ -412,6 +412,14 @@ const server = http.createServer(async (req, res) => {
     if (diskBusFilter && !knownDiskBuses.includes(diskBusFilter)) {
       return json(res, 400, { code: "invalid_disk_bus", message: `disk_bus must be one of: ${knownDiskBuses.join(", ")}` });
     }
+    // 5.4.70 — `?nic_model=` filter (virtio|e1000e). Resolution defers to the
+    // OS-family default for empty stored values: Linux VMs match virtio, Windows
+    // VMs match e1000e; explicit stored value wins (mirrors disk_bus 5.4.69).
+    const knownNICModels = ["virtio", "e1000e"];
+    const nicModelFilter = (url.searchParams.get("nic_model") || "").trim().toLowerCase();
+    if (nicModelFilter && !knownNICModels.includes(nicModelFilter)) {
+      return json(res, 400, { code: "invalid_nic_model", message: `nic_model must be one of: ${knownNICModels.join(", ")}` });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -532,6 +540,18 @@ const server = http.createServer(async (req, res) => {
         const osRaw = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
         const effective = osRaw === "windows" ? "sata" : "virtio";
         return effective === diskBusFilter;
+      });
+    }
+    if (nicModelFilter) {
+      // 5.4.70 — explicit stored value wins; empty stored value resolves to
+      // the OS-family default (virtio on Linux, e1000e on Windows). Mirrors
+      // VMSpec.ResolvedNICModel.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.nic_model || vm?.nic_model || "").trim().toLowerCase();
+        if (raw !== "") return raw === nicModelFilter;
+        const os = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
+        const fallback = os === "windows" ? "e1000e" : "virtio";
+        return fallback === nicModelFilter;
       });
     }
     if (networkFilter) {

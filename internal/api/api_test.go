@@ -1970,6 +1970,241 @@ func TestListVMs_FilterByDiskBus_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.4.70 — `?nic_model=` on GET /vms. Two-value vocabulary (virtio|e1000e),
+// case-insensitive; resolution defers to VMSpec.ResolvedNICModel so an empty
+// stored nic_model matches the OS-family default — Linux VMs match
+// `?nic_model=virtio`, Windows VMs match `?nic_model=e1000e`. An explicit
+// stored value always wins over the family default, so a Windows VM flipped
+// to virtio after the operator installs the virtio-net drivers in-guest
+// (5.6.12) appears under `?nic_model=virtio`.
+
+func TestListVMs_FilterByNICModel_ExactMatchVirtio(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-e1000e", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "linux-virtio" {
+		t.Fatalf("expected only linux-virtio (virtio strict-match), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_ExactMatchE1000e(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-e1000e", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=e1000e")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-e1000e" {
+		t.Fatalf("expected only win-e1000e, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByNICModel_VirtioMatchesEmptyLinux documents the
+// empty-means-OS-family-default semantics for Linux: an unset
+// `spec.nic_model` on a Linux VM resolves to virtio at libvirt render time,
+// so the filter must match it under `?nic_model=virtio`.
+func TestListVMs_FilterByNICModel_VirtioMatchesEmptyLinux(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-explicit", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-e1000e", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (linux-explicit + linux-empty), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["linux-explicit"] || !names["linux-empty"] {
+		t.Fatalf("expected linux-explicit and linux-empty in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByNICModel_E1000eMatchesEmptyWindows documents the
+// empty-means-OS-family-default semantics for Windows: an unset
+// `spec.nic_model` on a Windows VM resolves to e1000e (boot-without-virtio
+// default) so it falls under `?nic_model=e1000e`.
+func TestListVMs_FilterByNICModel_E1000eMatchesEmptyWindows(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-explicit", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-virtio", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=e1000e")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (win-explicit + win-empty), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["win-explicit"] || !names["win-empty"] {
+		t.Fatalf("expected win-explicit and win-empty in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByNICModel_ExplicitOverridesOSFamily documents that an
+// explicit stored nic_model always wins over the OS-family default. A
+// Windows guest migrated to virtio (after the operator installs virtio-net
+// in-guest via 5.6.12) appears under `?nic_model=virtio`, not under the
+// Windows-default `?nic_model=e1000e`.
+func TestListVMs_FilterByNICModel_ExplicitOverridesOSFamily(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-migrated", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-default", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-migrated" {
+		t.Fatalf("expected only win-migrated under ?nic_model=virtio, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=VIRTIO")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=%20%20virtio%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=rtl8139")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_nic_model")
+}
+
+func TestListVMs_FilterByNICModel_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-virtio", Spec: types.VMSpec{OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-e1000e", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&nic_model=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-virtio" {
+		t.Fatalf("expected only the windows + virtio VM, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNICModel_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		nic := types.NICModelVirtio
+		osType := types.OSTypeLinux
+		if i%2 == 0 {
+			nic = types.NICModelE1000e
+			osType = types.OSTypeWindows
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{OSType: osType, NICModel: nic},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=virtio&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

@@ -1048,6 +1048,123 @@ func TestCLI_VMList_FilterByDiskBus_ComposesWithOSType(t *testing.T) {
 	}
 }
 
+// 5.4.70 — `--nic-model` on `vmsmith vm list`. Two-value vocabulary
+// (virtio|e1000e); resolution defers to VMSpec.ResolvedNICModel so an empty
+// stored nic_model matches the OS-family default (virtio on Linux, e1000e
+// on Windows); an explicit stored value always wins.
+
+func TestCLI_VMList_FilterByNICModel_ExactMatchVirtio(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-e1000e", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	out, err := runCLI("vm", "list", "--nic-model", "virtio")
+	if err != nil {
+		t.Fatalf("vm list --nic-model: %v", err)
+	}
+	if !strings.Contains(out, "linux-virtio") || strings.Contains(out, "win-e1000e") {
+		t.Fatalf("expected only linux-virtio, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_VirtioMatchesEmptyLinux(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--nic-model", "virtio")
+	if err != nil {
+		t.Fatalf("vm list --nic-model virtio: %v", err)
+	}
+	if !strings.Contains(out, "linux-explicit") || !strings.Contains(out, "linux-empty") || strings.Contains(out, "win-default") {
+		t.Fatalf("expected linux-explicit + linux-empty, no win-default; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_E1000eMatchesEmptyWindows(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	out, err := runCLI("vm", "list", "--nic-model", "e1000e")
+	if err != nil {
+		t.Fatalf("vm list --nic-model e1000e: %v", err)
+	}
+	if !strings.Contains(out, "win-explicit") || !strings.Contains(out, "win-empty") || strings.Contains(out, "linux-default") {
+		t.Fatalf("expected win-explicit + win-empty, no linux-default; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+
+	out, err := runCLI("vm", "list", "--nic-model", "VIRTIO")
+	if err != nil {
+		t.Fatalf("vm list --nic-model VIRTIO: %v", err)
+	}
+	if !strings.Contains(out, "linux") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-e1000e", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	out, err := runCLI("vm", "list", "--nic-model", "")
+	if err != nil {
+		t.Fatalf("vm list --nic-model empty: %v", err)
+	}
+	if !strings.Contains(out, "linux-virtio") || !strings.Contains(out, "win-e1000e") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+
+	_, err := runCLI("vm", "list", "--nic-model", "rtl8139")
+	if err == nil {
+		t.Fatal("expected error for invalid --nic-model, got nil")
+	}
+	if !strings.Contains(err.Error(), "--nic-model") {
+		t.Fatalf("error should reference --nic-model, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByNICModel_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, NICModel: types.NICModelVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-virtio", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, NICModel: types.NICModelVirtio}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-e1000e", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, NICModel: types.NICModelE1000e}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--nic-model", "virtio")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "win-virtio") || strings.Contains(out, "linux-virtio") || strings.Contains(out, "win-e1000e") {
+		t.Fatalf("expected only win-virtio, got %q", out)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))

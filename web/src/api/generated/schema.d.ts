@@ -115,6 +115,23 @@ export interface paths {
                      */
                     disk_bus?: components["parameters"]["DiskBusFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's effective NIC model
+                     *     (`VMSpec.ResolvedNICModel`). Accepts one of `virtio`, `e1000e`
+                     *     (case-insensitive; surrounding whitespace trimmed); empty value
+                     *     disables the filter. Resolution defers to the OS-family default for
+                     *     empty stored values: a Linux VM with empty `spec.nic_model` matches
+                     *     `?nic_model=virtio` (the historical Linux default), and a Windows
+                     *     VM with empty `spec.nic_model` matches `?nic_model=e1000e` (the
+                     *     boot-without-virtio-drivers default). An explicit `spec.nic_model`
+                     *     always wins over the OS-family default, so a Windows guest flipped
+                     *     to virtio via 5.6.12 after the operator installs the virtio-net
+                     *     drivers in-guest appears under `?nic_model=virtio`. Any other value
+                     *     returns `400 invalid_nic_model` (matching the create-time
+                     *     validation contract on `POST /vms`). Composes additively with every
+                     *     other filter; `X-Total-Count` reflects the post-filter population.
+                     */
+                    nic_model?: components["parameters"]["NICModelFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4454,6 +4471,23 @@ export interface components {
          *     post-filter population.
          */
         DiskBusFilter: "virtio" | "sata";
+        /**
+         * @description Case-insensitive exact-match filter on the VM's effective NIC model
+         *     (`VMSpec.ResolvedNICModel`). Accepts one of `virtio`, `e1000e`
+         *     (case-insensitive; surrounding whitespace trimmed); empty value
+         *     disables the filter. Resolution defers to the OS-family default for
+         *     empty stored values: a Linux VM with empty `spec.nic_model` matches
+         *     `?nic_model=virtio` (the historical Linux default), and a Windows
+         *     VM with empty `spec.nic_model` matches `?nic_model=e1000e` (the
+         *     boot-without-virtio-drivers default). An explicit `spec.nic_model`
+         *     always wins over the OS-family default, so a Windows guest flipped
+         *     to virtio via 5.6.12 after the operator installs the virtio-net
+         *     drivers in-guest appears under `?nic_model=virtio`. Any other value
+         *     returns `400 invalid_nic_model` (matching the create-time
+         *     validation contract on `POST /vms`). Composes additively with every
+         *     other filter; `X-Total-Count` reflects the post-filter population.
+         */
+        NICModelFilter: "virtio" | "e1000e";
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
