@@ -721,6 +721,46 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("disk_bus=");
   });
 
+  // 5.4.70 — NIC model filter on the VM list. Seed data: web-server and
+  // db-server are Linux with empty stored nic_model (fall under virtio via
+  // the OS-family default); win-app is Windows with empty stored nic_model
+  // (falls under e1000e via the Windows default). `?nic_model=virtio`
+  // matches the two empty-stored Linux VMs (empty-defaults-to-virtio on
+  // Linux); `?nic_model=e1000e` matches win-app only (empty-defaults-to-
+  // e1000e on Windows). Mirrors the disk_bus filter (5.4.69) family-default
+  // semantics.
+  test("nic_model filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // virtio → two Linux VMs match via the empty-defaults-to-virtio family
+    // default; win-app drops out because its OS-family default is e1000e.
+    await page.getByTestId("vm-list-nic-model-filter").selectOption("virtio");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("nic_model")).toBe("virtio");
+
+    // e1000e → only win-app matches (Windows empty-defaults-to-e1000e); the
+    // two Linux VMs drop because their family default is virtio.
+    await page.getByTestId("vm-list-nic-model-filter").selectOption("e1000e");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("nic_model")).toBe("e1000e");
+
+    // "All NIC models" clears the filter and drops the URL param.
+    await page.getByTestId("vm-list-nic-model-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("nic_model=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
