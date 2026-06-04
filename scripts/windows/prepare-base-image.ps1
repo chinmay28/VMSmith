@@ -2,7 +2,7 @@ param(
   [string]$CloudbaseInitInstaller = "",
   [string]$VirtioDrive = "",
   [string]$UnattendTemplate = "",
-  [string]$SysprepOutput = "C:\\Windows\\Panther\\Unattend\\VMSmith-Unattend.xml",
+  [string]$SysprepOutput = "C:\Windows\Panther\Unattend\VMSmith-Unattend.xml",
   [switch]$InstallQemuGA,
   [switch]$EnableOpenSSH,
   [switch]$SkipSysprep,
@@ -59,9 +59,9 @@ function Find-QemuGuestAgentInstaller {
 
   foreach ($root in $candidates | Select-Object -Unique) {
     foreach ($relative in @(
-      'guest-agent\\qemu-ga-x86_64.msi',
-      'guest-agent\\qemu-ga.msi',
-      'guest-agent\\qemu-ga-x86.msi'
+      'guest-agent\qemu-ga-x86_64.msi',
+      'guest-agent\qemu-ga.msi',
+      'guest-agent\qemu-ga-x86.msi'
     )) {
       $path = Join-Path $root $relative
       if (Test-Path -LiteralPath $path) {
@@ -70,7 +70,7 @@ function Find-QemuGuestAgentInstaller {
     }
   }
 
-  throw 'Could not find qemu-ga MSI. Mount the virtio-win ISO (or pass -VirtioDrive D:\\) and retry.'
+  throw 'Could not find qemu-ga MSI. Mount the virtio-win ISO (or pass -VirtioDrive D:\) and retry.'
 }
 
 function Install-MSI {
@@ -143,8 +143,8 @@ function Copy-UnattendTemplate {
     $candidateTemplates += $UnattendTemplate
   }
   $candidateTemplates += @(
-    'C:\\Program Files\\Cloudbase Solutions\\Cloudbase-Init\\conf\\Unattend.xml',
-    'C:\\Program Files (x86)\\Cloudbase Solutions\\Cloudbase-Init\\conf\\Unattend.xml'
+    'C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\Unattend.xml',
+    'C:\Program Files (x86)\Cloudbase Solutions\Cloudbase-Init\conf\Unattend.xml'
   )
 
   $template = Resolve-ExistingPath -Explicit '' -Candidates $candidateTemplates -Label 'cloudbase-init Unattend.xml template'
@@ -179,7 +179,7 @@ Write-Host '  - Review the copied unattend file:' $SysprepOutput
 if (-not $SkipSysprep) {
   Write-Host ''
   Write-Host 'Launching sysprep /generalize /oobe /shutdown ...'
-  $sysprep = 'C:\\Windows\\System32\\Sysprep\\sysprep.exe'
+  $sysprep = 'C:\Windows\System32\Sysprep\sysprep.exe'
   $proc = Start-Process -FilePath $sysprep -ArgumentList @('/generalize', '/oobe', '/shutdown', ('/unattend:' + $SysprepOutput)) -Wait -PassThru
   if ($proc.ExitCode -ne 0) {
     throw "sysprep failed with exit code $($proc.ExitCode)"
@@ -187,5 +187,5 @@ if (-not $SkipSysprep) {
 } else {
   Write-Host ''
   Write-Host 'Skipping sysprep. Run this manually when ready:'
-  Write-Host "  C:\\Windows\\System32\\Sysprep\\sysprep.exe /generalize /oobe /shutdown /unattend:$SysprepOutput"
+  Write-Host "  C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /unattend:$SysprepOutput"
 }
