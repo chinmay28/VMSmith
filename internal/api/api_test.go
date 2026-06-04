@@ -1728,6 +1728,248 @@ func TestListVMs_FilterByFirmware_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.4.69 — `?disk_bus=` on GET /vms. Two-value vocabulary (virtio|sata),
+// case-insensitive; resolution defers to VMSpec.ResolvedDiskBus so an empty
+// stored disk_bus matches the OS-family default — Linux VMs match
+// `?disk_bus=virtio`, Windows VMs match `?disk_bus=sata`. This mirrors the
+// `?firmware=bios` empty-matches-default contract for SeaBIOS and the
+// `?os_type=linux` empty-matches-default contract for the Linux family.
+
+func TestListVMs_FilterByDiskBus_ExactMatchVirtio(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-explicit", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "sata-explicit", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "virtio-explicit" {
+		t.Fatalf("expected only virtio-explicit, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_ExactMatchSATA(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-vm", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "sata-vm", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=sata")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "sata-vm" {
+		t.Fatalf("expected only sata-vm, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByDiskBus_VirtioMatchesEmptyLinux documents the
+// empty-stored linux-default contract: an unset spec.disk_bus on a Linux
+// VM (the implicit default) resolves to virtio at libvirt render time, so
+// the filter must match it under `?disk_bus=virtio` — mirrors how
+// `?firmware=bios` matches empty-stored as the SeaBIOS default.
+func TestListVMs_FilterByDiskBus_VirtioMatchesEmptyLinux(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-empty", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-explicit", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (linux-empty + linux-explicit), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["linux-empty"] || !names["linux-explicit"] {
+		t.Fatalf("expected linux-empty and linux-explicit in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByDiskBus_SATAMatchesEmptyWindows mirrors the previous
+// case for the Windows side of the family-default split.
+func TestListVMs_FilterByDiskBus_SATAMatchesEmptyWindows(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-explicit", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusSATA}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=sata")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (win-empty + win-explicit), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["win-empty"] || !names["win-explicit"] {
+		t.Fatalf("expected win-empty and win-explicit in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByDiskBus_ExplicitOverridesOSFamily verifies that an
+// explicitly-stored disk_bus wins over the OS-family default — a Windows VM
+// with disk_bus=virtio (after virtio drivers installed in-guest, the
+// switch-to-virtio path from 5.6.12) appears under `?disk_bus=virtio`, not
+// under `?disk_bus=sata`.
+func TestListVMs_FilterByDiskBus_ExplicitOverridesOSFamily(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", Spec: types.VMSpec{OSType: types.OSTypeLinux, DiskBus: types.DiskBusSATA}})
+
+	respV, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=virtio")
+	if respV.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", respV.StatusCode)
+	}
+	var vmsV []*types.VM
+	decodeJSON(t, respV, &vmsV)
+	if len(vmsV) != 1 || vmsV[0].Name != "win-virtio" {
+		t.Fatalf("expected only win-virtio under disk_bus=virtio, got %+v", vmsV)
+	}
+
+	respS, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=sata")
+	if respS.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", respS.StatusCode)
+	}
+	var vmsS []*types.VM
+	decodeJSON(t, respS, &vmsS)
+	if len(vmsS) != 1 || vmsS[0].Name != "linux-sata" {
+		t.Fatalf("expected only linux-sata under disk_bus=sata, got %+v", vmsS)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "virtio-vm", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=VIRTIO")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "sata-vm", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=%20%20sata%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=nvme")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_disk_bus")
+}
+
+func TestListVMs_FilterByDiskBus_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-virtio", Spec: types.VMSpec{OSType: types.OSTypeLinux, DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-sata", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusSATA}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&disk_bus=virtio")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-virtio" {
+		t.Fatalf("expected only the windows + virtio VM, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByDiskBus_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		bus := types.DiskBusVirtio
+		if i%2 == 0 {
+			bus = types.DiskBusSATA
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{DiskBus: bus},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=virtio&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

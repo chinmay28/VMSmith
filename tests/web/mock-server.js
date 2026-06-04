@@ -403,6 +403,15 @@ const server = http.createServer(async (req, res) => {
     if (firmwareFilter && !knownFirmwares.includes(firmwareFilter)) {
       return json(res, 400, { code: "invalid_firmware", message: `firmware must be one of: ${knownFirmwares.join(", ")}` });
     }
+    // 5.4.69 — `?disk_bus=` filter (virtio|sata). Resolution defers to the
+    // OS-family default for empty stored values: Linux -> virtio,
+    // Windows -> sata. Mirrors the empty-means-default contract of
+    // `?firmware=bios` and `?os_type=linux`.
+    const knownDiskBuses = ["virtio", "sata"];
+    const diskBusFilter = (url.searchParams.get("disk_bus") || "").trim().toLowerCase();
+    if (diskBusFilter && !knownDiskBuses.includes(diskBusFilter)) {
+      return json(res, 400, { code: "invalid_disk_bus", message: `disk_bus must be one of: ${knownDiskBuses.join(", ")}` });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -510,6 +519,19 @@ const server = http.createServer(async (req, res) => {
         const raw = String(vm?.spec?.firmware || vm?.firmware || "").trim().toLowerCase();
         if (firmwareFilter === "bios") return raw === "" || raw === "bios";
         return raw === firmwareFilter;
+      });
+    }
+    if (diskBusFilter) {
+      // 5.4.69 — resolution defers to the OS-family default: a Linux VM
+      // with stored disk_bus="" matches "virtio"; a Windows VM with
+      // stored disk_bus="" matches "sata". An explicit stored value
+      // always wins regardless of OS family.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.disk_bus || vm?.disk_bus || "").trim().toLowerCase();
+        if (raw !== "") return raw === diskBusFilter;
+        const osRaw = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
+        const effective = osRaw === "windows" ? "sata" : "virtio";
+        return effective === diskBusFilter;
       });
     }
     if (networkFilter) {
