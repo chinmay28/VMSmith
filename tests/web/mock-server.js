@@ -1172,6 +1172,13 @@ const server = http.createServer(async (req, res) => {
     if (maxHostPort.set) list = list.filter(pf => (pf.host_port || 0) <= maxHostPort.value);
     if (minGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) >= minGuestPort.value);
     if (maxGuestPort.set) list = list.filter(pf => (pf.guest_port || 0) <= maxGuestPort.value);
+    // guest_ip filter (5.4.73): case-insensitive exact-match, whitespace-trimmed,
+    // empty disables. Closes the multi-NIC audit query the substring `search=`
+    // filter can only fuzzy-match.
+    const guestIPFilter = (url.searchParams.get("guest_ip") || "").trim().toLowerCase();
+    if (guestIPFilter) {
+      list = list.filter(pf => (pf.guest_ip || "").trim().toLowerCase() === guestIPFilter);
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(pf => {

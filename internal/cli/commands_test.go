@@ -5668,6 +5668,138 @@ func TestCLI_PortList_RejectsNegativeMaxGuestPort(t *testing.T) {
 	}
 }
 
+// seedPortListMultiGuestIPFixtures populates four rules on the same VM that
+// land on three distinct guest IPs — the multi-NIC layout the --guest-ip
+// filter is designed to slice. Two rules share 192.168.100.50 so a positive
+// match has to return more than one row.
+func seedPortListMultiGuestIPFixtures(t *testing.T, s *store.Store) {
+	t.Helper()
+	pfs := []*types.PortForward{
+		{ID: "vm-gip/22", VMID: "vm-gip", HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "ssh primary"},
+		{ID: "vm-gip/8080", VMID: "vm-gip", HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "http primary"},
+		{ID: "vm-gip/8443", VMID: "vm-gip", HostPort: 8443, GuestPort: 443, GuestIP: "10.0.0.7", Protocol: types.ProtocolTCP, Description: "https data-net"},
+		{ID: "vm-gip/9090", VMID: "vm-gip", HostPort: 9090, GuestPort: 9090, GuestIP: "10.0.0.8", Protocol: types.ProtocolUDP, Description: "metrics storage-net"},
+	}
+	for _, p := range pfs {
+		if err := s.PutPortForward(p); err != nil {
+			t.Fatalf("seed %s: %v", p.ID, err)
+		}
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_ExactMatch(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListMultiGuestIPFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-gip", "--guest-ip", "192.168.100.50")
+	if err != nil {
+		t.Fatalf("port list --guest-ip: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 3 { // header + 2 matching rows
+		t.Fatalf("expected header + 2 rows, got %d from %q", len(rows), out)
+	}
+	if strings.Contains(out, "10.0.0.7") || strings.Contains(out, "10.0.0.8") {
+		t.Errorf("--guest-ip 192.168.100.50 should exclude data-net/storage-net rules, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_OtherCohort(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListMultiGuestIPFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-gip", "--guest-ip", "10.0.0.7")
+	if err != nil {
+		t.Fatalf("port list --guest-ip: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + 1 matching row
+		t.Fatalf("expected header + 1 row, got %d from %q", len(rows), out)
+	}
+	if !strings.Contains(out, "8443") {
+		t.Errorf("expected the host 8443 / guest 443 rule in output, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	// IPv6 literal so case-insensitive matching is meaningful (IPv4 has no
+	// case axis; IPv6 hex digits are case-irrelevant and operators paste
+	// either form).
+	s.PutPortForward(&types.PortForward{ID: "vm-gip-case/22", VMID: "vm-gip-case", HostPort: 22, GuestPort: 22, GuestIP: "fe80::ABCD", Protocol: types.ProtocolTCP})
+	s.PutPortForward(&types.PortForward{ID: "vm-gip-case/80", VMID: "vm-gip-case", HostPort: 80, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP})
+
+	out, err := runCLI("port", "list", "vm-gip-case", "--guest-ip", "FE80::abcd")
+	if err != nil {
+		t.Fatalf("port list --guest-ip (case-insensitive): %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 2 { // header + 1 matching row
+		t.Fatalf("expected header + 1 row, got %d from %q", len(rows), out)
+	}
+	if !strings.Contains(out, "fe80::ABCD") {
+		t.Errorf("expected the fe80::ABCD row in output, got %q", out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListMultiGuestIPFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-gip", "--guest-ip", "")
+	if err != nil {
+		t.Fatalf("port list --guest-ip='': %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 5 { // header + 4 rules
+		t.Fatalf("empty --guest-ip should be a no-op, got %d rows from %q", len(rows), out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_NoMatch(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListMultiGuestIPFixtures(t, s)
+
+	out, err := runCLI("port", "list", "vm-gip", "--guest-ip", "203.0.113.1")
+	if err != nil {
+		t.Fatalf("port list --guest-ip (no match): %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 1 { // header only
+		t.Fatalf("expected header-only output, got %d rows from %q", len(rows), out)
+	}
+}
+
+func TestCLI_PortList_FilterByGuestIP_ComposesWithProtocol(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	seedPortListMultiGuestIPFixtures(t, s)
+
+	// 192.168.100.50 has 2 rules, both TCP; protocol=udp narrows to 0.
+	out, err := runCLI("port", "list", "vm-gip", "--guest-ip", "192.168.100.50", "--protocol", "udp")
+	if err != nil {
+		t.Fatalf("port list compose: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 1 {
+		t.Fatalf("guest_ip + protocol=udp should be header-only, got %d rows from %q", len(rows), out)
+	}
+	// Re-narrow with TCP brings both rules back.
+	out, err = runCLI("port", "list", "vm-gip", "--guest-ip", "192.168.100.50", "--protocol", "tcp")
+	if err != nil {
+		t.Fatalf("port list compose tcp: %v", err)
+	}
+	rows = tableRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("guest_ip + protocol=tcp = %d rows, want 3 (header + 2) from %q", len(rows), out)
+	}
+}
+
 func TestCLI_PortList_ShowsTagsColumn(t *testing.T) {
 	s, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()

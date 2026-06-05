@@ -137,6 +137,13 @@ func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 //     counterpart to the host-port range (5.4.47): host_port answers the
 //     host-side allocation audit ("which forward listens on host :8080") and
 //     guest_port the guest-side one ("which forwards target the guest's :22").
+//   - guest_ip=<addr>            case-insensitive exact-match on the rule's
+//     guest_ip. Whitespace-trimmed; empty disables. Closes the multi-NIC
+//     audit query "show me every forward landing on 192.168.100.50" that
+//     `?search=` can fuzzy-match against (so 192.168.100.5 also surfaces
+//     when querying for 192.168.100.50). Applied after the guest-port range
+//     and before `search` so it composes additively with every other filter
+//     and `X-Total-Count` reflects the post-filter population.
 //   - search=<needle>            case-insensitive substring filter across
 //     description, protocol, host_port, guest_port, guest_ip, and tags.
 //     Applied before sort.
@@ -236,6 +243,16 @@ func (s *Server) ListPorts(w http.ResponseWriter, r *http.Request) {
 		filtered := ports[:0]
 		for _, pf := range ports {
 			if portInRange(pf.GuestPort, minGuestPort, minGuestPortSet, maxGuestPort, maxGuestPortSet) {
+				filtered = append(filtered, pf)
+			}
+		}
+		ports = filtered
+	}
+
+	if guestIPFilter, ok := parseGuestIPFilter(r.URL.Query().Get("guest_ip")); ok {
+		filtered := ports[:0]
+		for _, pf := range ports {
+			if portMatchesGuestIPFilter(pf, guestIPFilter) {
 				filtered = append(filtered, pf)
 			}
 		}

@@ -535,6 +535,69 @@ async function main() {
       await assertText(p, "vm-detail-locked", "Locked");
     }, page);
 
+    // 5.4.73 — guest_ip filter on the port-forward list. The shared mock-server
+    // seeds two rules with the same guest_ip, which would make the filter a
+    // binary all-or-nothing. Inject a multi-NIC fixture via route interception
+    // on a fresh page so the filter has a meaningful cohort to slice.
+    const guestIPPage = await context.newPage();
+    const guestIPFixture = [
+      { id: "pf-gip-ssh",     vm_id: "vm-1", host_port: 2222, guest_port: 22,  guest_ip: "192.168.100.10", protocol: "tcp", description: "ssh primary" },
+      { id: "pf-gip-http",    vm_id: "vm-1", host_port: 8080, guest_port: 80,  guest_ip: "192.168.100.10", protocol: "tcp", description: "http primary" },
+      { id: "pf-gip-datanet", vm_id: "vm-1", host_port: 8443, guest_port: 443, guest_ip: "10.0.0.7",        protocol: "tcp", description: "https data-net" },
+    ];
+    await guestIPPage.route("**/api/v1/vms/vm-1/ports*", async (route) => {
+      const url = new URL(route.request().url());
+      const gip = (url.searchParams.get("guest_ip") || "").trim().toLowerCase();
+      let body = guestIPFixture;
+      if (gip) {
+        body = guestIPFixture.filter((pf) => (pf.guest_ip || "").trim().toLowerCase() === gip);
+      }
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "X-Total-Count": String(body.length) },
+        body: JSON.stringify(body),
+      });
+    });
+    await guestIPPage.goto(BASE);
+    await guestIPPage.waitForTimeout(500);
+    await guestIPPage.locator('[data-testid="vm-row-web-server"]').click();
+    await guestIPPage.waitForTimeout(500);
+
+    await runTest("guest_ip filter narrows the port-forward list (5.4.73)", async (p) => {
+      // All three synthetic rules visible before typing.
+      await assertVisible(p, "port-row-pf-gip-ssh");
+      await assertVisible(p, "port-row-pf-gip-http");
+      await assertVisible(p, "port-row-pf-gip-datanet");
+      // Filter to 192.168.100.10 keeps the two primary-NIC rules.
+      await p.locator('[data-testid="port-guest-ip-filter"]').fill("192.168.100.10");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "port-row-pf-gip-ssh");
+      await assertVisible(p, "port-row-pf-gip-http");
+      await assertNotVisible(p, "port-row-pf-gip-datanet");
+      const urlAfterFilter = p.url();
+      if (!urlAfterFilter.includes("port_guest_ip=192.168.100.10")) {
+        throw new Error(`URL should round-trip port_guest_ip filter; got ${urlAfterFilter}`);
+      }
+      // Re-type a different cohort: only the data-net rule remains.
+      await p.locator('[data-testid="port-guest-ip-filter"]').fill("10.0.0.7");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "port-row-pf-gip-datanet");
+      await assertNotVisible(p, "port-row-pf-gip-ssh");
+      await assertNotVisible(p, "port-row-pf-gip-http");
+      // Clearing drops the URL param and restores all rows.
+      await p.locator('[data-testid="port-guest-ip-clear"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "port-row-pf-gip-ssh");
+      await assertVisible(p, "port-row-pf-gip-http");
+      await assertVisible(p, "port-row-pf-gip-datanet");
+      const urlAfterClear = p.url();
+      if (urlAfterClear.includes("port_guest_ip=")) {
+        throw new Error(`URL should drop port_guest_ip on clear; got ${urlAfterClear}`);
+      }
+    }, guestIPPage);
+
+    await guestIPPage.close();
+
     let clonePage = await context.newPage();
     await clonePage.goto(BASE);
     await clonePage.waitForTimeout(500);
