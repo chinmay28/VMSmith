@@ -170,7 +170,18 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // disables; invalid values return 400 invalid_next_fire_since /
 // invalid_next_fire_until; schedules with a nil NextFireAt — disabled or
 // otherwise stalled — are filtered OUT when any bound is set, mirroring the
-// zero-created_at handling and the snapshotInTimeRange contract), search
+// zero-created_at handling and the snapshotInTimeRange contract),
+// last_fired_since/last_fired_until (inclusive RFC3339 bounds on
+// last_fired_at — the wall-clock time of the schedule's most recent fire;
+// closes the SRE triage operator queries "which schedules fired during
+// yesterday's maintenance window" / "which schedules haven't fired since the
+// last daemon restart" that the categorical ?enabled= filter and the
+// ?next_fire_since=/?next_fire_until= filter on the *next* fire cannot
+// answer; whitespace-trimmed; empty disables; invalid values return 400
+// invalid_last_fired_since / invalid_last_fired_until; schedules with a nil
+// LastFiredAt — never-fired schedules — are filtered OUT when any bound is
+// set, mirroring the webhook ?last_delivery_since=/?last_delivery_until=
+// nil-handling and the next_fire range nil-exclusion), search
 // (case-insensitive substring across name, action, vm_id, and tag_selector).
 // Sorting: sort=id|name|created_at|next_fire_at (default id), order=asc|desc
 // (default asc). All comparators tiebreak on id.
@@ -218,6 +229,16 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nextFireUntilTime, nextFireUntilSet, apiErr := parseTimeRangeParam(q.Get("next_fire_until"), "next_fire_until")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	lastFiredSinceTime, lastFiredSinceSet, apiErr := parseTimeRangeParam(q.Get("last_fired_since"), "last_fired_since")
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	lastFiredUntilTime, lastFiredUntilSet, apiErr := parseTimeRangeParam(q.Get("last_fired_until"), "last_fired_until")
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
@@ -270,6 +291,14 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !snapshotInTimeRange(*sched.NextFireAt, nextFireSinceTime, nextFireSinceSet, nextFireUntilTime, nextFireUntilSet) {
+				continue
+			}
+		}
+		if lastFiredSinceSet || lastFiredUntilSet {
+			if sched.LastFiredAt == nil {
+				continue
+			}
+			if !snapshotInTimeRange(*sched.LastFiredAt, lastFiredSinceTime, lastFiredSinceSet, lastFiredUntilTime, lastFiredUntilSet) {
 				continue
 			}
 		}

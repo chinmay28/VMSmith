@@ -2983,6 +2983,29 @@ export interface paths {
                      */
                     next_fire_until?: string;
                     /**
+                     * @description Inclusive lower bound (RFC3339) on the schedule's `last_fired_at`
+                     *     — the wall-clock time of the schedule's most recent fire. Closes
+                     *     the SRE triage operator queries *"which schedules fired during
+                     *     yesterday's maintenance window"* / *"which schedules haven't
+                     *     fired since the last daemon restart"* that the categorical
+                     *     `enabled` filter and the `next_fire_since` / `next_fire_until`
+                     *     filter on the *next* fire cannot answer. Whitespace-trimmed;
+                     *     empty disables the bound; invalid values return 400
+                     *     `invalid_last_fired_since`. Schedules with a nil `last_fired_at`
+                     *     (never-fired) are filtered OUT whenever any bound is set,
+                     *     mirroring the webhook `last_delivery_since` / `last_delivery_until`
+                     *     nil-handling and the `next_fire_at` filter nil-exclusion.
+                     *     Composes additively with every other schedule filter;
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    last_fired_since?: string;
+                    /**
+                     * @description Inclusive upper bound (RFC3339) on the schedule's `last_fired_at`.
+                     *     Same shape as `last_fired_since`; invalid values return 400
+                     *     `invalid_last_fired_until`.
+                     */
+                    last_fired_until?: string;
+                    /**
                      * @description Field to sort by. `name` matches case-insensitively;
                      *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
                      *     unscheduled) at the tail of the ascending list. All comparators

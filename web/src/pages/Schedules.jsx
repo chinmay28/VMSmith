@@ -123,6 +123,17 @@ export default function Schedules() {
   const nextFireSinceParam = useMemo(() => datetimeLocalToISO(nextFireSinceFilter), [nextFireSinceFilter]);
   const nextFireUntilParam = useMemo(() => datetimeLocalToISO(nextFireUntilFilter), [nextFireUntilFilter]);
 
+  // last_fired_at range filter (5.4.74): inclusive bounds on each schedule's
+  // most-recent fire timestamp. Closes the SRE triage query "which schedules
+  // fired during yesterday's maintenance window" / "which haven't fired since
+  // the last daemon restart" — never-fired schedules are excluded whenever
+  // either bound is set, mirroring the next-fire range nil-handling and the
+  // webhook last_delivery range.
+  const [lastFiredSinceFilter, setLastFiredSinceFilter] = useState(searchParams.get('last_fired_since') || '');
+  const [lastFiredUntilFilter, setLastFiredUntilFilter] = useState(searchParams.get('last_fired_until') || '');
+  const lastFiredSinceParam = useMemo(() => datetimeLocalToISO(lastFiredSinceFilter), [lastFiredSinceFilter]);
+  const lastFiredUntilParam = useMemo(() => datetimeLocalToISO(lastFiredUntilFilter), [lastFiredUntilFilter]);
+
   const initialPage = (() => {
     const parsed = parseInt(searchParams.get('page') || '', 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -156,7 +167,7 @@ export default function Schedules() {
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, sortField, sortOrder]);
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -170,16 +181,18 @@ export default function Schedules() {
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (nextFireSinceFilter) next.set('next_fire_since', nextFireSinceFilter); else next.delete('next_fire_since');
     if (nextFireUntilFilter) next.set('next_fire_until', nextFireUntilFilter); else next.delete('next_fire_until');
+    if (lastFiredSinceFilter) next.set('last_fired_since', lastFiredSinceFilter); else next.delete('last_fired_since');
+    if (lastFiredUntilFilter) next.set('last_fired_until', lastFiredUntilFilter); else next.delete('last_fired_until');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceFilter, untilFilter, nextFireSinceFilter, nextFireUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceFilter, untilFilter, nextFireSinceFilter, nextFireUntilFilter, lastFiredSinceFilter, lastFiredUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, timezone: timezoneFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, nextFireSince: nextFireSinceParam, nextFireUntil: nextFireUntilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, timezone: timezoneFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, nextFireSince: nextFireSinceParam, nextFireUntil: nextFireUntilParam, lastFiredSince: lastFiredSinceParam, lastFiredUntil: lastFiredUntilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -423,17 +436,50 @@ export default function Schedules() {
             Clear next fire
           </button>
         )}
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Last fired since
+          <input
+            type="datetime-local"
+            value={lastFiredSinceFilter}
+            onChange={(e) => setLastFiredSinceFilter(e.target.value)}
+            className="input py-1 text-xs"
+            data-testid="schedule-list-last-fired-since-filter"
+            aria-label="Filter by last-fired since"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          until
+          <input
+            type="datetime-local"
+            value={lastFiredUntilFilter}
+            onChange={(e) => setLastFiredUntilFilter(e.target.value)}
+            className="input py-1 text-xs"
+            data-testid="schedule-list-last-fired-until-filter"
+            aria-label="Filter by last-fired until"
+          />
+        </label>
+        {(lastFiredSinceFilter || lastFiredUntilFilter) && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => { setLastFiredSinceFilter(''); setLastFiredUntilFilter(''); }}
+            data-testid="schedule-list-last-fired-range-clear"
+            aria-label="Clear last-fired range"
+          >
+            Clear last fired
+          </button>
+        )}
       </div>
 
       {loading && !response ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : items.length === 0 ? (
         <div className="card">
-          {searchFilter || actionFilter || catchUpFilter || timezoneFilter || enabledFilter || sinceFilter || untilFilter || nextFireSinceFilter || nextFireUntilFilter ? (
+          {searchFilter || actionFilter || catchUpFilter || timezoneFilter || enabledFilter || sinceFilter || untilFilter || nextFireSinceFilter || nextFireUntilFilter || lastFiredSinceFilter || lastFiredUntilFilter ? (
             <EmptyState
               icon={Search}
               title="No schedules match your filters"
-              description="Try a different search term, action, catch-up policy, timezone, enabled state, created-at range, or next-fire range."
+              description="Try a different search term, action, catch-up policy, timezone, enabled state, created-at range, next-fire range, or last-fired range."
             />
           ) : (
             <EmptyState
