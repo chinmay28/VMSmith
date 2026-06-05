@@ -40,6 +40,8 @@ type Server struct {
 	hostStatsPath        string
 	quotas               config.QuotasConfig
 	metricsConfig        config.MetricsConfig
+	consoleConfig        config.ConsoleConfig
+	tlsEnabled           bool
 	maxRequestBodyBytes  int64
 	maxUploadBodyBytes   int64
 	maxConcurrentCreates int
@@ -55,6 +57,8 @@ type Server struct {
 	webhookManager       WebhookRegistrar
 	webhookTester        WebhookTester
 	consoleStore         *console.Store
+	consoleSessionsMu    sync.Mutex
+	consoleSessions      map[string]map[*activeConsoleSession]struct{}
 	scheduleStore        ScheduleStore
 	scheduleController   ScheduleController
 }
@@ -116,12 +120,15 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		hostStatsPath:        cfg.Storage.BaseDir,
 		quotas:               cfg.Quotas,
 		metricsConfig:        cfg.Metrics,
+		consoleConfig:        cfg.Daemon.Console,
+		tlsEnabled:           cfg.Daemon.TLSEnabled(),
 		maxRequestBodyBytes:  cfg.Daemon.MaxRequestBodyBytes,
 		maxUploadBodyBytes:   cfg.Daemon.MaxUploadBodyBytes,
 		maxConcurrentCreates: cfg.Daemon.MaxConcurrentCreates,
 		authConfig:           cfg.Daemon.Auth,
 		rateLimiter:          newIPRateLimiter(cfg.Daemon.RateLimitPerSecond, cfg.Daemon.RateLimitBurst),
 		shutdownNotify:       make(chan struct{}),
+		consoleSessions:      make(map[string]map[*activeConsoleSession]struct{}),
 	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
@@ -234,8 +241,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				})
 
 				// Console ticket issuance — single endpoint here; the
-				// websocket itself is registered separately by 5.1.4.
+				// websocket proxy itself is handled on GET /console.
 				r.Post("/console/ticket", s.IssueConsoleTicket)
+				r.Get("/console", s.ProxyConsole)
 			})
 		})
 
