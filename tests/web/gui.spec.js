@@ -1776,6 +1776,59 @@ test.describe("VM Detail", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("port_max_guest")).toBe("50");
   });
 
+  test("guest_ip filter narrows the port-forward list and round-trips through the URL (5.4.73)", async ({ page }) => {
+    // Synthesize a multi-NIC layout so the filter has a meaningful cohort to
+    // slice (the default seed shares a single guest_ip across both rules,
+    // which would make the filter a binary all-or-nothing). Three rules on
+    // vm-1: two on 192.168.100.10 (the seeded VM IP) and one on 10.0.0.7.
+    const fixture = [
+      { id: "pf-gip-ssh",      vm_id: "vm-1", host_port: 2222, guest_port: 22,  guest_ip: "192.168.100.10", protocol: "tcp", description: "ssh primary" },
+      { id: "pf-gip-http",     vm_id: "vm-1", host_port: 8080, guest_port: 80,  guest_ip: "192.168.100.10", protocol: "tcp", description: "http primary" },
+      { id: "pf-gip-datanet",  vm_id: "vm-1", host_port: 8443, guest_port: 443, guest_ip: "10.0.0.7",        protocol: "tcp", description: "https data-net" },
+    ];
+    await page.route("**/api/v1/vms/vm-1/ports*", async (route) => {
+      const url = new URL(route.request().url());
+      const guestIP = (url.searchParams.get("guest_ip") || "").trim().toLowerCase();
+      let body = fixture;
+      if (guestIP) {
+        body = fixture.filter((pf) => (pf.guest_ip || "").trim().toLowerCase() === guestIP);
+      }
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "X-Total-Count": String(body.length) },
+        body: JSON.stringify(body),
+      });
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // All three synthetic rules visible before typing.
+    await expect(page.getByTestId("port-row-pf-gip-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-datanet")).toBeVisible();
+
+    // Filter to 192.168.100.10 keeps the two primary-NIC rules.
+    await page.getByTestId("port-guest-ip-filter").fill("192.168.100.10");
+    await expect(page.getByTestId("port-row-pf-gip-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-datanet")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_guest_ip")).toBe("192.168.100.10");
+
+    // Re-type a different cohort: only the data-net rule remains.
+    await page.getByTestId("port-guest-ip-filter").fill("10.0.0.7");
+    await expect(page.getByTestId("port-row-pf-gip-datanet")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-ssh")).toHaveCount(0);
+    await expect(page.getByTestId("port-row-pf-gip-http")).toHaveCount(0);
+
+    // Clearing drops the URL param and restores all rows.
+    await page.getByTestId("port-guest-ip-clear").click();
+    await expect(page.getByTestId("port-row-pf-gip-ssh")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-http")).toBeVisible();
+    await expect(page.getByTestId("port-row-pf-gip-datanet")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("port_guest_ip")).toBeNull();
+  });
+
   test("protocol filter composes with the existing search filter (5.4.25)", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

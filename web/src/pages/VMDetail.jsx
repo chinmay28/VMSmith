@@ -112,6 +112,14 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_max_guest') || '';
   });
+  const [portGuestIPInput, setPortGuestIPInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_guest_ip') || '';
+  });
+  const [portGuestIP, setPortGuestIP] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('port_guest_ip') || '';
+  });
   const [portPage, setPortPage] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     const raw = Number.parseInt(sp.get('port_page') || '', 10);
@@ -123,15 +131,15 @@ export default function VMDetail() {
     return Number.isFinite(raw) && raw > 0 ? raw : 25;
   });
   const { data: portResponse, refresh: refreshPorts } = useFetch(
-    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, protocol: portProtocol, minHostPort: portMinHostPort, maxHostPort: portMaxHostPort, minGuestPort: portMinGuestPort, maxGuestPort: portMaxGuestPort, page: portPage, perPage: portPerPage }),
-    [id, portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPage, portPerPage],
+    () => ports.list(id, { sort: portSort, order: portOrder, search: portSearch, protocol: portProtocol, minHostPort: portMinHostPort, maxHostPort: portMaxHostPort, minGuestPort: portMinGuestPort, maxGuestPort: portMaxGuestPort, guestIp: portGuestIP, page: portPage, perPage: portPerPage }),
+    [id, portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portGuestIP, portPage, portPerPage],
     10000,
   );
   const portList = portResponse?.data || [];
   const portTotal = portResponse?.meta?.totalCount ?? portList.length;
   // Whenever filter / sort / search changes, snap back to page 1 so the user
   // never lands beyond the post-filter page count.
-  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPerPage]);
+  useEffect(() => { setPortPage(1); }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portGuestIP, portPerPage]);
 
   // Debounce the port-forward search box. `portSearchInput` is what the user
   // types; `portSearch` is the committed query that drives the API call.
@@ -164,6 +172,11 @@ export default function VMDetail() {
     const t = setTimeout(() => setPortMaxGuestPort(trimmed), 250);
     return () => clearTimeout(t);
   }, [portMaxGuestPortInput]);
+  useEffect(() => {
+    const trimmed = portGuestIPInput.trim();
+    const t = setTimeout(() => setPortGuestIP(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [portGuestIPInput]);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -175,6 +188,7 @@ export default function VMDetail() {
     if (portMaxHostPort) sp.set('port_max_host', portMaxHostPort); else sp.delete('port_max_host');
     if (portMinGuestPort) sp.set('port_min_guest', portMinGuestPort); else sp.delete('port_min_guest');
     if (portMaxGuestPort) sp.set('port_max_guest', portMaxGuestPort); else sp.delete('port_max_guest');
+    if (portGuestIP) sp.set('port_guest_ip', portGuestIP); else sp.delete('port_guest_ip');
     if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
     if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
@@ -183,7 +197,7 @@ export default function VMDetail() {
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
+  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portGuestIP, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -681,6 +695,28 @@ export default function VMDetail() {
                   aria-label="Clear guest port range"
                 >
                   <X size={12} /> Clear guest ports
+                </button>
+              )}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="text"
+                value={portGuestIPInput}
+                onChange={(e) => setPortGuestIPInput(e.target.value)}
+                placeholder="Filter by guest IP"
+                className="input w-72 py-1.5 text-xs"
+                data-testid="port-guest-ip-filter"
+                aria-label="Filter port forwards by guest IP"
+              />
+              {portGuestIPInput && (
+                <button
+                  type="button"
+                  className="btn-ghost text-xs"
+                  onClick={() => setPortGuestIPInput('')}
+                  data-testid="port-guest-ip-clear"
+                  aria-label="Clear guest IP filter"
+                >
+                  <X size={12} /> Clear guest IP
                 </button>
               )}
             </div>

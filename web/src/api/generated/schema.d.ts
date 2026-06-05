@@ -1381,6 +1381,16 @@ export interface paths {
                      *     `invalid_max_guest_port`.
                      */
                     max_guest_port?: number;
+                    /**
+                     * @description Case-insensitive exact-match filter on the rule's `guest_ip`.
+                     *     Whitespace-trimmed; empty disables. Closes the multi-NIC audit
+                     *     query *"show me every forward landing on 192.168.100.50"* that
+                     *     `search` can only fuzzy-match (`192.168.100.5` also matches when
+                     *     searching for `192.168.100.50`). Applied after the guest-port
+                     *     range and before `search`; composes additively with every other
+                     *     filter so `X-Total-Count` reflects the post-filter population.
+                     */
+                    guest_ip?: string;
                     page?: components["parameters"]["Page"];
                     per_page?: components["parameters"]["PerPage"];
                 };

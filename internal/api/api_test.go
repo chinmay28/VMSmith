@@ -14297,6 +14297,144 @@ func TestListPorts_FilterByGuestPort_TotalCountReflectsFiltered(t *testing.T) {
 }
 
 // ============================================================
+// Port-forward list guest_ip filter tests (5.4.73)
+// ============================================================
+
+// seedMultiGuestIPPorts populates four port forwards on the same VM that
+// land on three distinct guest IPs — the multi-NIC layout the guest_ip
+// filter is designed to slice. Two rules share 192.168.100.50 so a positive
+// match has to return more than one row.
+func seedMultiGuestIPPorts(t *testing.T, s *store.Store, vmID string) {
+	t.Helper()
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22", VMID: vmID, HostPort: 22, GuestPort: 22, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "ssh primary"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8080", VMID: vmID, HostPort: 8080, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP, Description: "http primary"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/8443", VMID: vmID, HostPort: 8443, GuestPort: 443, GuestIP: "10.0.0.7", Protocol: types.ProtocolTCP, Description: "https data-net"})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/9090", VMID: vmID, HostPort: 9090, GuestPort: 9090, GuestIP: "10.0.0.8", Protocol: types.ProtocolUDP, Description: "metrics storage-net"})
+}
+
+func TestListPorts_FilterByGuestIP_ExactMatch(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-eq")
+
+	got := listPortsWithQuery(t, ts, "vm-gip-eq", "guest_ip=192.168.100.50")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules with guest_ip=192.168.100.50, got %d (%+v)", len(got), got)
+	}
+	for _, p := range got {
+		if p.GuestIP != "192.168.100.50" {
+			t.Errorf("rule %s has guest_ip=%q, want 192.168.100.50", p.ID, p.GuestIP)
+		}
+	}
+}
+
+func TestListPorts_FilterByGuestIP_OtherCohort(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-other")
+
+	got := listPortsWithQuery(t, ts, "vm-gip-other", "guest_ip=10.0.0.7")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 rule with guest_ip=10.0.0.7, got %d (%+v)", len(got), got)
+	}
+	if got[0].HostPort != 8443 {
+		t.Errorf("got host_port=%d, want 8443", got[0].HostPort)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_CaseInsensitive(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	// IPv6 literal so case-insensitive matching is meaningful (IPv4 dotted
+	// quads have no case axis; IPv6 hex digits are case-irrelevant and
+	// operators routinely paste either form).
+	seedPortForward(t, s, &types.PortForward{ID: "vm-gip-case/22", VMID: "vm-gip-case", HostPort: 22, GuestPort: 22, GuestIP: "fe80::ABCD", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: "vm-gip-case/80", VMID: "vm-gip-case", HostPort: 80, GuestPort: 80, GuestIP: "192.168.100.50", Protocol: types.ProtocolTCP})
+
+	got := listPortsWithQuery(t, ts, "vm-gip-case", "guest_ip=FE80::abcd")
+	if len(got) != 1 || got[0].HostPort != 22 {
+		t.Fatalf("case-insensitive match for FE80::abcd returned %+v, want the fe80::ABCD row", got)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_TrimsWhitespace(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-ws")
+
+	got := listPortsWithQuery(t, ts, "vm-gip-ws", "guest_ip=%20192.168.100.50%20")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rules after whitespace trim, got %d (%+v)", len(got), got)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-empty")
+
+	got := listPortsWithQuery(t, ts, "vm-gip-empty", "guest_ip=")
+	if len(got) != 4 {
+		t.Fatalf("empty guest_ip should be a no-op, got %d rules (want 4)", len(got))
+	}
+}
+
+func TestListPorts_FilterByGuestIP_NoMatch(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-miss")
+
+	got := listPortsWithQuery(t, ts, "vm-gip-miss", "guest_ip=203.0.113.1")
+	if len(got) != 0 {
+		t.Fatalf("expected 0 rules, got %d (%+v)", len(got), got)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_ComposesWithProtocol(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-proto")
+
+	// guest_ip=192.168.100.50 → 2 rules (both TCP); narrow to UDP → 0.
+	got := listPortsWithQuery(t, ts, "vm-gip-proto", "guest_ip=192.168.100.50&protocol=udp")
+	if len(got) != 0 {
+		t.Fatalf("guest_ip + protocol=udp should be empty, got %+v", got)
+	}
+	// Same guest_ip narrowed to tcp returns both.
+	got = listPortsWithQuery(t, ts, "vm-gip-proto", "guest_ip=192.168.100.50&protocol=tcp")
+	if len(got) != 2 {
+		t.Fatalf("guest_ip + protocol=tcp = %d, want 2 (%+v)", len(got), got)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_ComposesWithGuestPortRange(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-gpr")
+
+	// 192.168.100.50 cohort has guest_port {22, 80}; min_guest_port=80 keeps the http row.
+	got := listPortsWithQuery(t, ts, "vm-gip-gpr", "guest_ip=192.168.100.50&min_guest_port=80")
+	if len(got) != 1 || got[0].GuestPort != 80 {
+		t.Fatalf("guest_ip + min_guest_port=80 = %+v, want the :80 row", got)
+	}
+}
+
+func TestListPorts_FilterByGuestIP_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	seedMultiGuestIPPorts(t, s, "vm-gip-cnt")
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-gip-cnt/ports?guest_ip=192.168.100.50")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2", got)
+	}
+}
+
+// ============================================================
 // Port-forward list pagination tests (5.4.20)
 // ============================================================
 
