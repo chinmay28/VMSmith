@@ -244,8 +244,8 @@ function seed() {
     params: {},
     created_at: "2026-05-12T00:00:00Z",
     updated_at: "2026-05-12T00:00:00Z",
-    last_fired_at: null,
-    last_result: "",
+    last_fired_at: "2026-05-19T04:30:00Z",
+    last_result: "success",
     next_fire_at: "2026-05-26T04:30:00Z",
   });
   scheduleRuns.set("sch-1", [
@@ -2430,6 +2430,17 @@ const server = http.createServer(async (req, res) => {
     if (nextFireUntil.invalid) {
       return json(res, 400, { code: "invalid_next_fire_until", message: "next_fire_until must be a valid RFC3339 timestamp" });
     }
+    // last_fired_since / last_fired_until (5.4.74): inclusive RFC3339 bounds on
+    // each schedule's LastFiredAt. Schedules with a nil last_fired_at are
+    // filtered OUT when any bound is set, mirroring the API.
+    const lastFiredSince = parseTime("last_fired_since");
+    if (lastFiredSince.invalid) {
+      return json(res, 400, { code: "invalid_last_fired_since", message: "last_fired_since must be a valid RFC3339 timestamp" });
+    }
+    const lastFiredUntil = parseTime("last_fired_until");
+    if (lastFiredUntil.invalid) {
+      return json(res, 400, { code: "invalid_last_fired_until", message: "last_fired_until must be a valid RFC3339 timestamp" });
+    }
 
     let list = [...scheduleList.values()];
     if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
@@ -2460,6 +2471,16 @@ const server = http.createServer(async (req, res) => {
         if (Number.isNaN(t.getTime())) return false;
         if (nextFireSince.set && t < nextFireSince.value) return false;
         if (nextFireUntil.set && t > nextFireUntil.value) return false;
+        return true;
+      });
+    }
+    if (lastFiredSince.set || lastFiredUntil.set) {
+      list = list.filter((s) => {
+        if (!s.last_fired_at) return false;
+        const t = new Date(s.last_fired_at);
+        if (Number.isNaN(t.getTime())) return false;
+        if (lastFiredSince.set && t < lastFiredSince.value) return false;
+        if (lastFiredUntil.set && t > lastFiredUntil.value) return false;
         return true;
       });
     }

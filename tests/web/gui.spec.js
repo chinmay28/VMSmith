@@ -3680,6 +3680,44 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
     await expect.poll(() => new URL(page.url()).searchParams.get("next_fire_until")).toContain("2026-05-25");
   });
+
+  // --- 5.4.74: ?last_fired_since= / ?last_fired_until= filter on last_fired_at ---
+  // Seed data: sch-1 last_fired_at=2026-05-23T02:00:00Z, sch-2 last_fired_at=null
+  // (never fired), sch-3 last_fired_at=2026-05-19T04:30:00Z. The boundary at
+  // 2026-05-21T00:00 cleanly splits sch-1 (after) and sch-3 (before); the
+  // never-fired schedule is always excluded once any bound is set, mirroring
+  // the next_fire range nil-exclusion.
+  test("last_fired range filter narrows the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+
+    // last_fired_since=2026-05-21T00:00 — only sch-1 (fired 2026-05-23T02:00) survives.
+    // sch-3 fired before the bound and sch-2 has a nil last_fired_at (excluded under any bound).
+    await page.getByTestId("schedule-list-last-fired-since-filter").fill("2026-05-21T00:00");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_since")).toContain("2026-05-21");
+
+    // Replace the since bound with an upper-bound only: sch-3 (2026-05-19) survives.
+    await page.getByTestId("schedule-list-last-fired-range-clear").click();
+    await page.getByTestId("schedule-list-last-fired-until-filter").fill("2026-05-20T00:00");
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_until")).toContain("2026-05-20");
+
+    // The Clear last-fired button drops both bounds and restores the unfiltered view.
+    await page.getByTestId("schedule-list-last-fired-range-clear").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_since")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_until")).toBeNull();
+  });
 });
 
 test.describe("Navigation", () => {
