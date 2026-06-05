@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -836,6 +837,39 @@ func TestPrometheusMetrics_Enabled(t *testing.T) {
 	// Check the VM ID label appears somewhere.
 	if !containsStr(body, v.ID) {
 		t.Errorf("expected VM ID %q in Prometheus output, body:\n%s", v.ID, body)
+	}
+}
+
+func TestPrometheusMetrics_EscapesLabelValues(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-\"slash\\\n", "name-\"slash\\\n", types.VMStateRunning)
+	cpu := 12.5
+	m.seed(v.ID, types.MetricSample{Timestamp: time.Now(), CPUPercent: &cpu})
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	body := string(bodyBytes)
+
+	wantLabels := `vm_id="vm-\"slash\\\n",vm_name="name-\"slash\\\n"`
+	if !containsStr(body, wantLabels) {
+		t.Fatalf("expected escaped labels %q in body:\n%s", wantLabels, body)
+	}
+	if containsStr(body, "vm_id=\"vm-\"slash") || containsStr(body, "vm_name=\"name-\"slash") {
+		t.Fatalf("found unescaped quote in Prometheus labels:\n%s", body)
 	}
 }
 
