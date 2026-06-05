@@ -146,6 +146,23 @@ export interface paths {
                      */
                     machine?: components["parameters"]["MachineFilter"];
                     /**
+                     * @description Case-insensitive exact-match filter on the VM's effective libvirt
+                     *     clock offset (`VMSpec.ResolvedClockOffset`). Accepts one of `utc`,
+                     *     `localtime` (case-insensitive; surrounding whitespace trimmed);
+                     *     empty value disables the filter. Resolution defers to the OS-family
+                     *     default for empty stored values: a Linux VM with empty
+                     *     `spec.clock_offset` matches `?clock_offset=utc` (the historical
+                     *     Linux default), and a Windows VM with empty `spec.clock_offset`
+                     *     matches `?clock_offset=localtime` (the Windows RTC convention). An
+                     *     explicit `spec.clock_offset` always wins over the OS-family default,
+                     *     so a Windows guest pinned to `utc` (NTP-synced fleet) appears under
+                     *     `?clock_offset=utc` rather than `?clock_offset=localtime`. Any other
+                     *     value returns `400 invalid_clock_offset` (matching the create-time
+                     *     validation contract on `POST /vms`). Composes additively with every
+                     *     other filter; `X-Total-Count` reflects the post-filter population.
+                     */
+                    clock_offset?: components["parameters"]["ClockOffsetFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4516,6 +4533,23 @@ export interface components {
          *     `X-Total-Count` reflects the post-filter population.
          */
         MachineFilter: string;
+        /**
+         * @description Case-insensitive exact-match filter on the VM's effective libvirt
+         *     clock offset (`VMSpec.ResolvedClockOffset`). Accepts one of `utc`,
+         *     `localtime` (case-insensitive; surrounding whitespace trimmed);
+         *     empty value disables the filter. Resolution defers to the OS-family
+         *     default for empty stored values: a Linux VM with empty
+         *     `spec.clock_offset` matches `?clock_offset=utc` (the historical
+         *     Linux default), and a Windows VM with empty `spec.clock_offset`
+         *     matches `?clock_offset=localtime` (the Windows RTC convention). An
+         *     explicit `spec.clock_offset` always wins over the OS-family default,
+         *     so a Windows guest pinned to `utc` (NTP-synced fleet) appears under
+         *     `?clock_offset=utc` rather than `?clock_offset=localtime`. Any other
+         *     value returns `400 invalid_clock_offset` (matching the create-time
+         *     validation contract on `POST /vms`). Composes additively with every
+         *     other filter; `X-Total-Count` reflects the post-filter population.
+         */
+        ClockOffsetFilter: "utc" | "localtime";
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);

@@ -1235,6 +1235,93 @@ func TestCLI_VMList_FilterByMachine_EmptyOmitsFilter(t *testing.T) {
 	}
 }
 
+// 5.4.72 — `--clock-offset` on `vmsmith vm list`. Two-value vocabulary
+// (utc / localtime), case-insensitive; empty stored spec.clock_offset
+// resolves to the OS-family default via VMSpec.ResolvedClockOffset (utc for
+// Linux, localtime for Windows), so `--clock-offset utc` matches both
+// stored "utc" AND Linux VMs with no override.
+
+func TestCLI_VMList_FilterByClockOffset_ExactMatchUTC(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-utc", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-localtime", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	out, err := runCLI("vm", "list", "--clock-offset", "utc")
+	if err != nil {
+		t.Fatalf("vm list --clock-offset: %v", err)
+	}
+	if !strings.Contains(out, "linux-utc") || strings.Contains(out, "win-localtime") {
+		t.Fatalf("expected only linux-utc, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_UTCMatchesEmptyLinux(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+
+	out, err := runCLI("vm", "list", "--clock-offset", "utc")
+	if err != nil {
+		t.Fatalf("vm list --clock-offset utc: %v", err)
+	}
+	if !strings.Contains(out, "linux-explicit") || !strings.Contains(out, "linux-empty") || strings.Contains(out, "win-default") {
+		t.Fatalf("expected linux-explicit + linux-empty, no win-default; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_LocaltimeMatchesEmptyWindows(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-explicit", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-empty", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-default", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux}})
+
+	out, err := runCLI("vm", "list", "--clock-offset", "localtime")
+	if err != nil {
+		t.Fatalf("vm list --clock-offset localtime: %v", err)
+	}
+	if !strings.Contains(out, "win-explicit") || !strings.Contains(out, "win-empty") || strings.Contains(out, "linux-default") {
+		t.Fatalf("expected win-explicit + win-empty, no linux-default; got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_IsCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+
+	out, err := runCLI("vm", "list", "--clock-offset", "UTC")
+	if err != nil {
+		t.Fatalf("vm list --clock-offset UTC: %v", err)
+	}
+	if !strings.Contains(out, "linux") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-utc", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win-localtime", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	out, err := runCLI("vm", "list", "--clock-offset", "")
+	if err != nil {
+		t.Fatalf("vm list --clock-offset empty: %v", err)
+	}
+	if !strings.Contains(out, "linux-utc") || !strings.Contains(out, "win-localtime") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
 func TestCLI_VMList_FilterByMachine_RejectsInvalidValue(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
@@ -1264,6 +1351,37 @@ func TestCLI_VMList_FilterByMachine_ComposesWithOSType(t *testing.T) {
 	}
 	if !strings.Contains(out, "win-q35") || strings.Contains(out, "linux-q35") || strings.Contains(out, "win-default") {
 		t.Fatalf("expected only win-q35, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+
+	_, err := runCLI("vm", "list", "--clock-offset", "gmt")
+	if err == nil {
+		t.Fatal("expected error for invalid --clock-offset, got nil")
+	}
+	if !strings.Contains(err.Error(), "--clock-offset") {
+		t.Fatalf("error should reference --clock-offset, got %v", err)
+	}
+}
+
+func TestCLI_VMList_FilterByClockOffset_ComposesWithOSType(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-utc", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetUTC}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-utc", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win-localtime", Spec: types.VMSpec{CPUs: 1, RAMMB: 4096, OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	out, err := runCLI("vm", "list", "--os-type", "windows", "--clock-offset", "utc")
+	if err != nil {
+		t.Fatalf("vm list compose: %v", err)
+	}
+	if !strings.Contains(out, "win-utc") || strings.Contains(out, "linux-utc") || strings.Contains(out, "win-localtime") {
+		t.Fatalf("expected only win-utc, got %q", out)
 	}
 }
 

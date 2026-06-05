@@ -70,6 +70,7 @@ export default function VMList() {
   const [nicModelFilter, setNicModelFilter] = useState(searchParams.get('nic_model') || '');
   const [machineInput, setMachineInput] = useState(searchParams.get('machine') || '');
   const [machineFilter, setMachineFilter] = useState(searchParams.get('machine') || '');
+  const [clockOffsetFilter, setClockOffsetFilter] = useState(searchParams.get('clock_offset') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
@@ -97,8 +98,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -131,7 +132,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -232,6 +233,7 @@ export default function VMList() {
     if (diskBusFilter) next.set('disk_bus', diskBusFilter); else next.delete('disk_bus');
     if (nicModelFilter) next.set('nic_model', nicModelFilter); else next.delete('nic_model');
     if (machineFilter) next.set('machine', machineFilter); else next.delete('machine');
+    if (clockOffsetFilter) next.set('clock_offset', clockOffsetFilter); else next.delete('clock_offset');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
@@ -244,7 +246,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -440,6 +442,19 @@ export default function VMList() {
               ×
             </button>
           )}
+        </div>
+        <div className="w-full sm:w-40">
+          <select
+            value={clockOffsetFilter}
+            onChange={(e) => setClockOffsetFilter(e.target.value)}
+            className="input w-full py-1.5 text-sm"
+            data-testid="vm-list-clock-offset-filter"
+            aria-label="Filter by clock offset"
+          >
+            <option value="">All clocks</option>
+            <option value="utc">UTC</option>
+            <option value="localtime">Localtime</option>
+          </select>
         </div>
         <div className="relative w-full sm:w-60">
           <input

@@ -2369,6 +2369,232 @@ func TestListVMs_FilterByMachine_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+func TestListVMs_FilterByClockOffset_ExactMatchUTC(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-utc", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-localtime", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=utc")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "linux-utc" {
+		t.Fatalf("expected only linux-utc (utc strict-match), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_ExactMatchLocaltime(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-utc", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-localtime", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=localtime")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-localtime" {
+		t.Fatalf("expected only win-localtime, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByClockOffset_UTCMatchesEmptyLinux documents the
+// empty-means-OS-family-default semantics for Linux: an unset
+// `spec.clock_offset` on a Linux VM resolves to utc at libvirt render time,
+// so the filter must match it under `?clock_offset=utc`.
+func TestListVMs_FilterByClockOffset_UTCMatchesEmptyLinux(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-explicit", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-localtime", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=utc")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (linux-explicit + linux-empty), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["linux-explicit"] || !names["linux-empty"] {
+		t.Fatalf("expected linux-explicit and linux-empty in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByClockOffset_LocaltimeMatchesEmptyWindows documents the
+// empty-means-OS-family-default semantics for Windows: an unset
+// `spec.clock_offset` on a Windows VM resolves to localtime (matches the
+// Windows RTC convention) so it falls under `?clock_offset=localtime`.
+func TestListVMs_FilterByClockOffset_LocaltimeMatchesEmptyWindows(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-explicit", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-utc", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=localtime")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 vms (win-explicit + win-empty), got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["win-explicit"] || !names["win-empty"] {
+		t.Fatalf("expected win-explicit and win-empty in result, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByClockOffset_ExplicitOverridesOSFamily documents that
+// an explicit stored clock_offset always wins over the OS-family default. A
+// Windows guest pinned to utc (NTP-synced fleet) appears under
+// `?clock_offset=utc`, not under the Windows-default `?clock_offset=localtime`.
+func TestListVMs_FilterByClockOffset_ExplicitOverridesOSFamily(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-utc", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-default", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=utc")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-utc" {
+		t.Fatalf("expected only win-utc under ?clock_offset=utc, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_IsCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=UTC")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=%20%20utc%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=gmt")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_clock_offset")
+}
+
+func TestListVMs_FilterByClockOffset_ComposesWithOSType(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-utc", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-utc", Spec: types.VMSpec{OSType: types.OSTypeLinux, ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-localtime", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetLocaltime}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&clock_offset=utc")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "win-utc" {
+		t.Fatalf("expected only the windows + utc VM, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByClockOffset_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		offset := types.ClockOffsetUTC
+		osType := types.OSTypeLinux
+		if i%2 == 0 {
+			offset = types.ClockOffsetLocaltime
+			osType = types.OSTypeWindows
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{OSType: osType, ClockOffset: offset},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=utc&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
