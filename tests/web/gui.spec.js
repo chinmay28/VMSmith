@@ -797,6 +797,46 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("machine=");
   });
 
+  // 5.4.72 — Clock offset filter on the VM list. Seed data: web-server and
+  // db-server are Linux with empty stored clock_offset (fall under utc via
+  // the OS-family default); win-app is Windows with empty stored clock_offset
+  // (falls under localtime via the Windows default). `?clock_offset=utc`
+  // matches the two empty-stored Linux VMs (empty-defaults-to-utc on Linux);
+  // `?clock_offset=localtime` matches win-app only (empty-defaults-to-
+  // localtime on Windows). Mirrors the nic_model filter (5.4.70) family-default
+  // semantics.
+  test("clock_offset filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // utc → two Linux VMs match via the empty-defaults-to-utc family
+    // default; win-app drops out because its OS-family default is localtime.
+    await page.getByTestId("vm-list-clock-offset-filter").selectOption("utc");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("clock_offset")).toBe("utc");
+
+    // localtime → only win-app matches (Windows empty-defaults-to-localtime);
+    // the two Linux VMs drop because their family default is utc.
+    await page.getByTestId("vm-list-clock-offset-filter").selectOption("localtime");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("clock_offset")).toBe("localtime");
+
+    // "All clocks" clears the filter and drops the URL param.
+    await page.getByTestId("vm-list-clock-offset-filter").selectOption("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("clock_offset=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

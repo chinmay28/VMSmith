@@ -436,6 +436,14 @@ const server = http.createServer(async (req, res) => {
     }
     const machineFilter = machineFilterRaw;
     const machineDefault = "pc-q35-6.2";
+    // 5.4.72 — `?clock_offset=` filter (utc|localtime). Resolution defers to the
+    // OS-family default for empty stored values: Linux VMs match utc, Windows
+    // VMs match localtime; explicit stored value wins (mirrors nic_model 5.4.70).
+    const knownClockOffsets = ["utc", "localtime"];
+    const clockOffsetFilter = (url.searchParams.get("clock_offset") || "").trim().toLowerCase();
+    if (clockOffsetFilter && !knownClockOffsets.includes(clockOffsetFilter)) {
+      return json(res, 400, { code: "invalid_clock_offset", message: `clock_offset must be one of: ${knownClockOffsets.join(", ")}` });
+    }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
@@ -577,6 +585,18 @@ const server = http.createServer(async (req, res) => {
         const raw = String(vm?.spec?.machine || vm?.machine || "").trim();
         const effective = raw === "" ? machineDefault : raw;
         return effective === machineFilter;
+      });
+    }
+    if (clockOffsetFilter) {
+      // 5.4.72 — explicit stored value wins; empty stored value resolves to
+      // the OS-family default (utc on Linux, localtime on Windows). Mirrors
+      // VMSpec.ResolvedClockOffset.
+      list = list.filter(vm => {
+        const raw = String(vm?.spec?.clock_offset || vm?.clock_offset || "").trim().toLowerCase();
+        if (raw !== "") return raw === clockOffsetFilter;
+        const os = String(vm?.spec?.os_type || vm?.os_type || "").trim().toLowerCase();
+        const fallback = os === "windows" ? "localtime" : "utc";
+        return fallback === clockOffsetFilter;
       });
     }
     if (networkFilter) {

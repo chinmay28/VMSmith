@@ -357,7 +357,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	clockOffsetFilter, clockOffsetSet, apiErr := parseClockOffsetFilter(q.Get("clock_offset"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -412,6 +417,9 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if machineSet && !vmMatchesMachineFilter(vm.Spec, machineFilter) {
+				continue
+			}
+			if clockOffsetSet && !vmMatchesClockOffsetFilter(vm.Spec, clockOffsetFilter) {
 				continue
 			}
 			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {

@@ -41,6 +41,7 @@ paths:
         - $ref: '#/components/parameters/DiskBusFilter'
         - $ref: '#/components/parameters/NICModelFilter'
         - $ref: '#/components/parameters/MachineFilter'
+        - $ref: '#/components/parameters/ClockOffsetFilter'
         - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
@@ -3037,6 +3038,27 @@ components:
         `X-Total-Count` reflects the post-filter population.
       schema:
         type: string
+    ClockOffsetFilter:
+      name: clock_offset
+      in: query
+      description: |
+        Case-insensitive exact-match filter on the VM's effective libvirt
+        clock offset (`VMSpec.ResolvedClockOffset`). Accepts one of `utc`,
+        `localtime` (case-insensitive; surrounding whitespace trimmed);
+        empty value disables the filter. Resolution defers to the OS-family
+        default for empty stored values: a Linux VM with empty
+        `spec.clock_offset` matches `?clock_offset=utc` (the historical
+        Linux default), and a Windows VM with empty `spec.clock_offset`
+        matches `?clock_offset=localtime` (the Windows RTC convention). An
+        explicit `spec.clock_offset` always wins over the OS-family default,
+        so a Windows guest pinned to `utc` (NTP-synced fleet) appears under
+        `?clock_offset=utc` rather than `?clock_offset=localtime`. Any other
+        value returns `400 invalid_clock_offset` (matching the create-time
+        validation contract on `POST /vms`). Composes additively with every
+        other filter; `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
+        enum: [utc, localtime]
     AutoStartFilter:
       name: auto_start
       in: query
