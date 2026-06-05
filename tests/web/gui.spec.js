@@ -1461,6 +1461,33 @@ test.describe("VM Detail", () => {
     await expect(page.getByText(/No snapshots match "needle-not-present"/)).toBeVisible();
   });
 
+  // 5.4.75 — snapshot prefix filter. Case-sensitive HasPrefix; closes the
+  // "preview the cohort before bulk-deleting" operator query by mirroring
+  // the `--prefix` selector on the bulk_delete API.
+  test("snapshot prefix filter narrows to matching names and round-trips through URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // Baseline: all three seeded snapshots visible.
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+
+    // `auto-` prefix should leave only the two auto-* rows.
+    await page.getByTestId("snap-list-prefix").fill("auto-");
+    await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
+    await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
+    await expect(page.getByTestId("snap-before-deploy")).toHaveCount(0);
+
+    // Round-trips through the URL.
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_prefix")).toBe("auto-");
+
+    // Clearing restores all three.
+    await page.getByTestId("snap-list-prefix-clear").click();
+    await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("snap_prefix")).toBeNull();
+  });
+
   // --- Snapshot time-range filter (roadmap 5.4.28) ---
 
   test("snapshot ?since= filter narrows the list by created_at and round-trips through the URL", async ({ page }) => {

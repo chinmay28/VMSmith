@@ -92,7 +92,7 @@ export const vms = {
 export const snapshots = {
   list: (
     vmId: string,
-    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc'; search?: string; tag?: string; since?: string; until?: string } = {},
+    opts: { sort?: 'id' | 'name' | 'created_at'; order?: 'asc' | 'desc'; search?: string; tag?: string; prefix?: string; since?: string; until?: string } = {},
   ) =>
     unwrap(
       apiClient.GET('/vms/{vmID}/snapshots', {
@@ -103,6 +103,7 @@ export const snapshots = {
             order: opts.order,
             search: opts.search || undefined,
             tag: opts.tag || undefined,
+            prefix: opts.prefix || undefined,
             since: opts.since || undefined,
             until: opts.until || undefined,
           } as any,

@@ -8621,6 +8621,62 @@ func TestCLI_SnapshotList_EmptySinceOmitsFilter(t *testing.T) {
 	}
 }
 
+// 5.4.75 — `--prefix` on `vmsmith snapshot list`. Case-sensitive HasPrefix
+// against snap.Name; mirrors the `--prefix` selector on `snapshot delete`.
+func TestCLI_SnapshotList_FilterByPrefix_Match(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-prefix"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "auto-nightly-1"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "auto-nightly-2"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "manual-rollback"})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-prefix", "--prefix", "auto-nightly-")
+	if err != nil {
+		t.Fatalf("snapshot list --prefix: %v", err)
+	}
+	if !strings.Contains(out, "auto-nightly-1") || !strings.Contains(out, "auto-nightly-2") {
+		t.Fatalf("expected both auto-nightly-* in output, got %q", out)
+	}
+	if strings.Contains(out, "manual-rollback") {
+		t.Fatalf("manual-rollback should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-prefix-case"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-case", Name: "Auto-Daily"})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-prefix-case", "--prefix", "auto-daily")
+	if err != nil {
+		t.Fatalf("snapshot list --prefix auto-daily: %v", err)
+	}
+	if strings.Contains(out, "Auto-Daily") {
+		t.Fatalf("case-sensitive non-match should exclude Auto-Daily, got %q", out)
+	}
+}
+
+func TestCLI_SnapshotList_FilterByPrefix_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-snap-prefix-empty"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-empty", Name: "snap-a"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-empty", Name: "snap-b"})
+
+	out, err := runCLI("snapshot", "list", "vm-snap-prefix-empty", "--prefix", "  ")
+	if err != nil {
+		t.Fatalf("snapshot list --prefix '  ': %v", err)
+	}
+	if !strings.Contains(out, "snap-a") || !strings.Contains(out, "snap-b") {
+		t.Fatalf("whitespace --prefix should be no-op, got %q", out)
+	}
+}
+
 // --- webhook list pagination flag forwarding (roadmap 5.4.19) ---
 
 func TestCLI_WebhookList_ForwardsLimit(t *testing.T) {

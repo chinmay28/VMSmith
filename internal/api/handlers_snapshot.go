@@ -151,6 +151,22 @@ func (s *Server) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		snaps = filtered
 	}
 
+	// Prefix filter: case-sensitive `HasPrefix(snap.Name, prefix)` to mirror the
+	// `prefix` selector on POST /vms/{vmID}/snapshots/bulk_delete, so the same
+	// query an operator runs to inspect (`?prefix=auto-nightly-`) round-trips
+	// 1:1 with the request body they then send to bulk_delete. Slotted between
+	// tag and time-range so the post-filter X-Total-Count stays correct.
+	prefixFilter := strings.TrimSpace(q.Get("prefix"))
+	if prefixFilter != "" {
+		filtered := snaps[:0]
+		for _, snap := range snaps {
+			if strings.HasPrefix(snap.Name, prefixFilter) {
+				filtered = append(filtered, snap)
+			}
+		}
+		snaps = filtered
+	}
+
 	if sinceSet || untilSet {
 		filtered := snaps[:0]
 		for _, snap := range snaps {

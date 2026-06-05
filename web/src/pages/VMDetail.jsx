@@ -47,9 +47,17 @@ export default function VMDetail() {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('snap_until') || '';
   });
+  const [snapPrefixInput, setSnapPrefixInput] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_prefix') || '';
+  });
+  const [snapPrefix, setSnapPrefix] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('snap_prefix') || '';
+  });
   const { data: snapList, refresh: refreshSnaps } = useFetch(
-    () => snapshots.list(id, { sort: snapSort, order: snapOrder, search: snapSearch, since: snapSince, until: snapUntil }),
-    [id, snapSort, snapOrder, snapSearch, snapSince, snapUntil],
+    () => snapshots.list(id, { sort: snapSort, order: snapOrder, search: snapSearch, prefix: snapPrefix, since: snapSince, until: snapUntil }),
+    [id, snapSort, snapOrder, snapSearch, snapPrefix, snapSince, snapUntil],
     10000,
   );
 
@@ -60,6 +68,14 @@ export default function VMDetail() {
     const t = setTimeout(() => setSnapSearch(trimmed), 250);
     return () => clearTimeout(t);
   }, [snapSearchInput]);
+
+  // Same debounce shape for the snapshot prefix input. Case-sensitive
+  // HasPrefix on the API side, so we preserve input case but trim.
+  useEffect(() => {
+    const trimmed = snapPrefixInput.trim();
+    const t = setTimeout(() => setSnapPrefix(trimmed), 250);
+    return () => clearTimeout(t);
+  }, [snapPrefixInput]);
   const [portSort, setPortSort] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('port_sort') || 'id';
@@ -192,12 +208,13 @@ export default function VMDetail() {
     if (portPage > 1) sp.set('port_page', String(portPage)); else sp.delete('port_page');
     if (portPerPage !== 25) sp.set('port_per_page', String(portPerPage)); else sp.delete('port_per_page');
     if (snapSearch) sp.set('snap_search', snapSearch); else sp.delete('snap_search');
+    if (snapPrefix) sp.set('snap_prefix', snapPrefix); else sp.delete('snap_prefix');
     if (snapSince) sp.set('snap_since', snapSince); else sp.delete('snap_since');
     if (snapUntil) sp.set('snap_until', snapUntil); else sp.delete('snap_until');
     const qs = sp.toString();
     const next = window.location.pathname + (qs ? `?${qs}` : '');
     window.history.replaceState(null, '', next);
-  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portGuestIP, portPage, portPerPage, snapSearch, snapSince, snapUntil]);
+  }, [portSort, portOrder, portSearch, portProtocol, portMinHostPort, portMaxHostPort, portMinGuestPort, portMaxGuestPort, portGuestIP, portPage, portPerPage, snapSearch, snapPrefix, snapSince, snapUntil]);
 
   const [showSnapModal, setShowSnapModal] = useState(false);
   const [showPortModal, setShowPortModal] = useState(false);
@@ -515,6 +532,28 @@ export default function VMDetail() {
                   onClick={() => setSnapSearchInput('')}
                   data-testid="snap-list-search-clear"
                   aria-label="Clear snapshot search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <div className="relative mt-2">
+              <input
+                type="search"
+                value={snapPrefixInput}
+                onChange={(e) => setSnapPrefixInput(e.target.value)}
+                placeholder="Filter by name prefix (e.g. auto-nightly-)…"
+                className="input w-full pr-7 py-1.5 text-xs"
+                data-testid="snap-list-prefix"
+                aria-label="Filter snapshots by name prefix"
+              />
+              {snapPrefixInput && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+                  onClick={() => setSnapPrefixInput('')}
+                  data-testid="snap-list-prefix-clear"
+                  aria-label="Clear snapshot prefix filter"
                 >
                   <X size={12} />
                 </button>
