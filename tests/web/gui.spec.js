@@ -761,6 +761,42 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("nic_model=");
   });
 
+  // 5.4.71 — Machine filter on the VM list. Seed data: win-app is pinned to
+  // `pc-q35-rhel9.6.0` while web-server / db-server leave spec.machine empty
+  // (effective `pc-q35-6.2` via the daemon default). `?machine=pc-q35-6.2`
+  // matches the two empty-stored Linux VMs (default-matches-empty);
+  // `?machine=pc-q35-rhel9.6.0` strict-matches win-app only.
+  test("machine filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // pc-q35-rhel9.6.0 strict-match → only win-app.
+    await page.getByTestId("vm-list-machine-filter").fill("pc-q35-rhel9.6.0");
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("machine")).toBe("pc-q35-rhel9.6.0");
+
+    // pc-q35-6.2 → two Linux VMs match via the empty-defaults-to-daemon-
+    // default contract; win-app drops out because its explicit machine wins.
+    await page.getByTestId("vm-list-machine-filter").fill("pc-q35-6.2");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("machine")).toBe("pc-q35-6.2");
+
+    // Clearing the input restores every VM and drops the URL param.
+    await page.getByTestId("vm-list-machine-filter").fill("");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("machine=");
+  });
+
   test("network filter matches no VMs when query has no hits", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

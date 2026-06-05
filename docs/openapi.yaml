@@ -40,6 +40,7 @@ paths:
         - $ref: '#/components/parameters/FirmwareFilter'
         - $ref: '#/components/parameters/DiskBusFilter'
         - $ref: '#/components/parameters/NICModelFilter'
+        - $ref: '#/components/parameters/MachineFilter'
         - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
@@ -3019,6 +3020,23 @@ components:
       schema:
         type: string
         enum: [virtio, e1000e]
+    MachineFilter:
+      name: machine
+      in: query
+      description: |
+        Case-sensitive exact-match filter on the VM's effective libvirt
+        machine type (`VMSpec.ResolvedMachine`). Free-form value bounded
+        by the libvirt machine-type alphabet `[A-Za-z0-9._-]+` (e.g.
+        `pc-q35-6.2`, `pc-q35-rhel9.6.0`, `q35`, `virt-7.2`); surrounding
+        whitespace is trimmed; empty value disables the filter. Resolution
+        defers to the daemon default (`pc-q35-6.2`) for empty stored values,
+        so `?machine=pc-q35-6.2` matches both stored `pc-q35-6.2` AND VMs
+        with no override — mirrors the `?firmware=bios` empty-defaults-to-
+        SeaBIOS contract. Garbage failing the alphabet check returns
+        `400 invalid_machine`. Composes additively with every other filter;
+        `X-Total-Count` reflects the post-filter population.
+      schema:
+        type: string
     AutoStartFilter:
       name: auto_start
       in: query

@@ -179,6 +179,7 @@ var vmListCmd = &cobra.Command{
 		firmwareFilterRaw, _ := cmd.Flags().GetString("firmware")
 		diskBusFilterRaw, _ := cmd.Flags().GetString("disk-bus")
 		nicModelFilterRaw, _ := cmd.Flags().GetString("nic-model")
+		machineFilterRaw, _ := cmd.Flags().GetString("machine")
 		networkFilter, _ := cmd.Flags().GetString("network")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
@@ -216,6 +217,10 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 		nicModelFilter, nicModelSet, err := parseCLINICModel(nicModelFilterRaw, "--nic-model")
+		if err != nil {
+			return err
+		}
+		machineFilter, machineSet, err := parseCLIMachine(machineFilterRaw, "--machine")
 		if err != nil {
 			return err
 		}
@@ -297,7 +302,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -349,6 +354,9 @@ var vmListCmd = &cobra.Command{
 					continue
 				}
 				if nicModelSet && !cliVMMatchesNICModelFilter(v.Spec, nicModelFilter) {
+					continue
+				}
+				if machineSet && !cliVMMatchesMachineFilter(v.Spec, machineFilter) {
 					continue
 				}
 				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
@@ -1224,6 +1232,7 @@ Examples:
 	vmListCmd.Flags().String("firmware", "", "filter VMs by firmware: bios, uefi, or ovmf (case-insensitive; 'bios' also matches VMs with no firmware override since empty defaults to SeaBIOS; 'uefi' and 'ovmf' strict-match the stored value)")
 	vmListCmd.Flags().String("disk-bus", "", "filter VMs by disk bus: virtio or sata (case-insensitive; empty spec.disk_bus resolves to the OS-family default — virtio for Linux, sata for Windows — so the filter narrows by the effective bus, not by the stored override alone)")
 	vmListCmd.Flags().String("nic-model", "", "filter VMs by effective NIC model: virtio or e1000e (case-insensitive; 'virtio' also matches Linux VMs with no nic_model override since empty defaults to virtio; 'e1000e' also matches Windows VMs with no nic_model override since empty defaults to e1000e)")
+	vmListCmd.Flags().String("machine", "", "filter VMs by effective libvirt machine type (case-sensitive, free-form; empty spec.machine resolves to the daemon default 'pc-q35-6.2' so --machine pc-q35-6.2 matches both stored value and VMs with no override)")
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")

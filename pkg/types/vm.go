@@ -318,6 +318,23 @@ func (s VMSpec) ResolvedNICModel() string {
 	return NICModelVirtio
 }
 
+// DefaultMachine is the libvirt machine type vmsmith pins when VMSpec.Machine
+// is empty. Matches the value the domain XML generator uses in domain.go.
+const DefaultMachine = "pc-q35-6.2"
+
+// ResolvedMachine returns the effective libvirt machine type for this spec.
+// An explicit Machine (whitespace-trimmed) always wins; empty falls back to
+// DefaultMachine. Matching is intentionally case-sensitive — libvirt machine
+// names (e.g. "pc-q35-6.2", "q35", "virt-7.2") are case-sensitive at the
+// QEMU layer, so the resolved value preserves the operator's chosen casing
+// for round-trip filter equality.
+func (s VMSpec) ResolvedMachine() string {
+	if v := strings.TrimSpace(s.Machine); v != "" {
+		return v
+	}
+	return DefaultMachine
+}
+
 // ResolvedFirmwareAttr returns the libvirt <os firmware='...'> attribute
 // value for this spec, or empty for "no firmware attribute" (BIOS /
 // SeaBIOS default). "uefi" and "ovmf" both resolve to libvirt's "efi"

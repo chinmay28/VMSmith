@@ -45,6 +45,27 @@ func TestVMSpecResolvedNICModel(t *testing.T) {
 	}
 }
 
+func TestVMSpecResolvedMachine(t *testing.T) {
+	cases := []struct {
+		name string
+		spec VMSpec
+		want string
+	}{
+		{"empty -> daemon default", VMSpec{}, DefaultMachine},
+		{"explicit override", VMSpec{Machine: "pc-q35-rhel9.6.0"}, "pc-q35-rhel9.6.0"},
+		{"whitespace stripped", VMSpec{Machine: "  q35  "}, "q35"},
+		{"case preserved (case-sensitive)", VMSpec{Machine: "Virt-7.2"}, "Virt-7.2"},
+		{"only whitespace -> default", VMSpec{Machine: "   "}, DefaultMachine},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.spec.ResolvedMachine(); got != c.want {
+				t.Errorf("ResolvedMachine() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestVMSpecResolvedFirmwareAttr(t *testing.T) {
 	cases := []struct {
 		name string

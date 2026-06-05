@@ -132,6 +132,20 @@ export interface paths {
                      */
                     nic_model?: components["parameters"]["NICModelFilter"];
                     /**
+                     * @description Case-sensitive exact-match filter on the VM's effective libvirt
+                     *     machine type (`VMSpec.ResolvedMachine`). Free-form value bounded
+                     *     by the libvirt machine-type alphabet `[A-Za-z0-9._-]+` (e.g.
+                     *     `pc-q35-6.2`, `pc-q35-rhel9.6.0`, `q35`, `virt-7.2`); surrounding
+                     *     whitespace is trimmed; empty value disables the filter. Resolution
+                     *     defers to the daemon default (`pc-q35-6.2`) for empty stored values,
+                     *     so `?machine=pc-q35-6.2` matches both stored `pc-q35-6.2` AND VMs
+                     *     with no override — mirrors the `?firmware=bios` empty-defaults-to-
+                     *     SeaBIOS contract. Garbage failing the alphabet check returns
+                     *     `400 invalid_machine`. Composes additively with every other filter;
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    machine?: components["parameters"]["MachineFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4488,6 +4502,20 @@ export interface components {
          *     other filter; `X-Total-Count` reflects the post-filter population.
          */
         NICModelFilter: "virtio" | "e1000e";
+        /**
+         * @description Case-sensitive exact-match filter on the VM's effective libvirt
+         *     machine type (`VMSpec.ResolvedMachine`). Free-form value bounded
+         *     by the libvirt machine-type alphabet `[A-Za-z0-9._-]+` (e.g.
+         *     `pc-q35-6.2`, `pc-q35-rhel9.6.0`, `q35`, `virt-7.2`); surrounding
+         *     whitespace is trimmed; empty value disables the filter. Resolution
+         *     defers to the daemon default (`pc-q35-6.2`) for empty stored values,
+         *     so `?machine=pc-q35-6.2` matches both stored `pc-q35-6.2` AND VMs
+         *     with no override — mirrors the `?firmware=bios` empty-defaults-to-
+         *     SeaBIOS contract. Garbage failing the alphabet check returns
+         *     `400 invalid_machine`. Composes additively with every other filter;
+         *     `X-Total-Count` reflects the post-filter population.
+         */
+        MachineFilter: string;
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
