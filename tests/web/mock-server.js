@@ -1424,6 +1424,12 @@ const server = http.createServer(async (req, res) => {
         return true;
       });
     }
+    // prefix (5.4.77): case-sensitive HasPrefix on img.name; mirrors the
+    // snapshot list / VM list prefix filters; whitespace-trimmed.
+    const prefixFilter = (url.searchParams.get("prefix") || "").trim();
+    if (prefixFilter) {
+      list = list.filter(img => (img.name || "").startsWith(prefixFilter));
+    }
     const search = (url.searchParams.get("search") || "").trim().toLowerCase();
     if (search) {
       list = list.filter(img => {

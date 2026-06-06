@@ -2602,6 +2602,31 @@ test.describe("Images", () => {
     await expect(page.getByTestId("image-row-rocky-experimental")).not.toBeVisible();
     await expect(page.getByText("No images fall within the selected size range.")).toBeVisible();
   });
+
+  // 5.4.77: name-prefix filter on the image list.
+  test("name-prefix filter narrows the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+
+    // prefix=rocky- keeps only the rocky cohort and writes ?prefix= to the URL.
+    await page.getByTestId("image-list-prefix-filter").fill("rocky-");
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("rocky-");
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toHaveCount(0);
+
+    // Case-sensitive: `Rocky-` matches nothing under the seeded lowercase names.
+    await page.getByTestId("image-list-prefix-filter").fill("Rocky-");
+    await expect(page.getByTestId("image-row-rocky-experimental")).toHaveCount(0);
+    await expect(page.getByTestId("image-row-ubuntu-base")).toHaveCount(0);
+
+    // Clearing the prefix drops the URL param and restores every image.
+    await page.getByTestId("image-list-prefix-filter-clear").click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBeNull();
+    await expect(page.getByTestId("image-row-ubuntu-base")).toBeVisible();
+    await expect(page.getByTestId("image-row-rocky-experimental")).toBeVisible();
+  });
 });
 
 // ============================================================

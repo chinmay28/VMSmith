@@ -103,6 +103,11 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 //     negative values return 400 `invalid_min_size`.
 //   - max_size=<bytes>                keep images with size_bytes <= max_size
 //     (inclusive). Same shape as min_size; 400 `invalid_max_size` on garbage.
+//   - prefix=<value>                  case-sensitive HasPrefix(img.Name, prefix).
+//     Whitespace trimmed; empty disables. Mirrors the snapshot list `prefix`
+//     selector (5.4.75) and the VM list `prefix` selector (5.4.76) so the
+//     same fleet-audit query (`?prefix=rocky-`) round-trips 1:1 across the
+//     three name-prefix axes operators use most.
 //   - since=<rfc3339>                 keep images with created_at >= since
 //     (inclusive). Whitespace trimmed; empty disables. Invalid values
 //     return 400 `invalid_since`.
@@ -173,6 +178,22 @@ func (s *Server) ListImages(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			filtered = append(filtered, img)
+		}
+		imgs = filtered
+	}
+
+	// Prefix filter (5.4.77): case-sensitive `HasPrefix(img.Name, prefix)` to
+	// mirror the snapshot list `prefix` selector (5.4.75) and the VM list
+	// `prefix` selector (5.4.76). Slotted between the size-range filter and
+	// the time-range filter so the post-filter X-Total-Count stays correct
+	// and the filter composes additively with every other image filter.
+	prefixFilter := strings.TrimSpace(q.Get("prefix"))
+	if prefixFilter != "" {
+		filtered := imgs[:0]
+		for _, img := range imgs {
+			if strings.HasPrefix(img.Name, prefixFilter) {
+				filtered = append(filtered, img)
+			}
 		}
 		imgs = filtered
 	}
