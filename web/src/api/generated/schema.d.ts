@@ -177,6 +177,15 @@ export interface paths {
                      */
                     network?: components["parameters"]["NetworkFilter"];
                     /**
+                     * @description Case-sensitive `HasPrefix(vm.name, prefix)` filter. A VM matches
+                     *     when its `name` starts with this value verbatim. Whitespace is
+                     *     trimmed; empty disables the filter. Mirrors the 5.4.75 snapshot
+                     *     `?prefix=` selector and the case-sensitive `vmsmith` VM-name
+                     *     alphabet (`[A-Za-z0-9-]`). Composes additively with every other
+                     *     VM filter; `X-Total-Count` reflects the post-filter population.
+                     */
+                    prefix?: string;
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is

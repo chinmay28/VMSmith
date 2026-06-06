@@ -327,6 +327,11 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	imageFilter := strings.TrimSpace(strings.ToLower(q.Get("image")))
 	defaultUserFilter := strings.TrimSpace(strings.ToLower(q.Get("default_user")))
 	networkFilter := strings.TrimSpace(strings.ToLower(q.Get("network")))
+	// Case-sensitive `HasPrefix(vm.Name, prefix)` mirrors the 5.4.75 snapshot
+	// prefix selector and the case-sensitive `vmsmith` VM-name alphabet
+	// ([A-Za-z0-9-]) — operators distinguishing `web-prod-1` from `Web-prod-1`
+	// expect strict-match semantics. Whitespace-trimmed; empty disables.
+	prefixFilter := strings.TrimSpace(q.Get("prefix"))
 	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -362,7 +367,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -429,6 +434,14 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if networkFilter != "" && !types.VMMatchesNetwork(vm, networkFilter) {
+				continue
+			}
+			// Prefix filter applied between network and time-range so it
+			// composes additively with every other VM filter; X-Total-Count
+			// reflects the post-filter population. Case-sensitive HasPrefix
+			// mirrors `strings.HasPrefix` semantics and the 5.4.75 snapshot
+			// prefix contract.
+			if prefixFilter != "" && !strings.HasPrefix(vm.Name, prefixFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

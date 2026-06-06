@@ -15247,3 +15247,157 @@ func TestListSnapshots_FilterByPrefix_ComposesWithTag(t *testing.T) {
 		t.Fatalf("expected only auto-nightly-1, got %+v", listed)
 	}
 }
+
+// --- 5.4.76 — Name-prefix filter on the VM list ---
+
+func TestListVMs_FilterByPrefix_Match(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-1"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-prod-2"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-prod-1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=web-prod-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 web-prod- vms, got %+v", vms)
+	}
+	names := map[string]bool{vms[0].Name: true, vms[1].Name: true}
+	if !names["web-prod-1"] || !names["web-prod-2"] {
+		t.Fatalf("expected web-prod-1 and web-prod-2, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByPrefix_IsCaseSensitive documents that the prefix filter
+// is case-sensitive — mirrors `strings.HasPrefix` and the 5.4.75 snapshot
+// prefix contract. VM names are case-sensitive identifiers under the
+// `[A-Za-z0-9-]` alphabet.
+func TestListVMs_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "Web-Prod-1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=web-prod-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected case-sensitive non-match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByPrefix_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=%20%20web-prod-%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByPrefix_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByPrefix_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=db-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected no match, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByPrefix_ComposesWithStatus verifies that the prefix
+// filter is applied additively with `?status=`, so the post-filter
+// `X-Total-Count` stays correct when both filters are active.
+func TestListVMs_FilterByPrefix_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-1", State: types.VMStateRunning})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "web-prod-2", State: types.VMStateStopped})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "db-prod-1", State: types.VMStateRunning})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=web-prod-&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "web-prod-1" {
+		t.Fatalf("expected only web-prod-1, got %+v", vms)
+	}
+}
+
+// TestListVMs_FilterByPrefix_TotalCountReflectsFiltered verifies that
+// `X-Total-Count` reports the post-filter / pre-pagination population.
+func TestListVMs_FilterByPrefix_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		name := fmt.Sprintf("web-prod-%d", i)
+		if i%2 == 0 {
+			name = fmt.Sprintf("db-prod-%d", i)
+		}
+		mockMgr.SeedVM(&types.VM{ID: fmt.Sprintf("vm-%d", i), Name: name})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?prefix=web-prod-&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
