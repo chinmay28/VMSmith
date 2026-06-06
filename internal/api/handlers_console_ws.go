@@ -113,8 +113,12 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 	wsConn.SetReadLimit(1 << 20)
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- proxyConsoleWebSocketToTCP(wsConn, targetConn, time.Duration(s.consoleConfig.IdleTimeoutSeconds)*time.Second) }()
-	go func() { errCh <- proxyConsoleTCPToWebSocket(targetConn, wsConn, time.Duration(s.consoleConfig.IdleTimeoutSeconds)*time.Second) }()
+	go func() {
+		errCh <- proxyConsoleWebSocketToTCP(wsConn, targetConn, time.Duration(s.consoleConfig.IdleTimeoutSeconds)*time.Second)
+	}()
+	go func() {
+		errCh <- proxyConsoleTCPToWebSocket(targetConn, wsConn, time.Duration(s.consoleConfig.IdleTimeoutSeconds)*time.Second)
+	}()
 
 	var maxSession <-chan time.Time
 	if s.consoleConfig.MaxSessionSeconds > 0 {
