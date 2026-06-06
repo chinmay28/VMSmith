@@ -6,7 +6,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,12 +22,9 @@ import (
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 )
 
-func consoleWebSocketTestServer(t *testing.T, mutator func(*config.Config), ttl time.Duration) (*httptest.Server, *vm.MockManager, *console.Store, func()) {
+func consoleWebSocketTestServer(t *testing.T, mutator func(*config.Config), ttl time.Duration) (*httptest.Server, *Server, *vm.MockManager, *console.Store, func()) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -57,7 +57,7 @@ func consoleWebSocketTestServer(t *testing.T, mutator func(*config.Config), ttl 
 		consoleStore.Close()
 		s.Close()
 	}
-	return ts, mockMgr, consoleStore, cleanup
+	return ts, apiServer, mockMgr, consoleStore, cleanup
 }
 
 func issueConsoleTicket(t *testing.T, ts *httptest.Server, vmID string) types.ConsoleTicket {
@@ -89,7 +89,7 @@ func wsURLFromHTTP(raw string, pathAndQuery string) string {
 }
 
 func TestProxyConsole_ProxiesBinaryTraffic(t *testing.T) {
-	ts, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
@@ -148,7 +148,7 @@ func TestProxyConsole_ProxiesBinaryTraffic(t *testing.T) {
 }
 
 func TestProxyConsole_RejectsTicketReuse(t *testing.T) {
-	ts, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
@@ -188,7 +188,7 @@ func TestProxyConsole_RejectsTicketReuse(t *testing.T) {
 }
 
 func TestProxyConsole_RejectsExpiredTicket(t *testing.T) {
-	ts, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, 25*time.Millisecond)
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, 25*time.Millisecond)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
@@ -217,7 +217,7 @@ func TestProxyConsole_RejectsExpiredTicket(t *testing.T) {
 }
 
 func TestProxyConsole_DialFailureReturns502(t *testing.T) {
-	ts, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
@@ -244,7 +244,7 @@ func TestProxyConsole_DialFailureReturns502(t *testing.T) {
 }
 
 func TestProxyConsole_RejectsInsecureWebsocketWhenTLSConfigured(t *testing.T) {
-	ts, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
 		cfg.Daemon.TLS.CertFile = "/tmp/test.crt"
 		cfg.Daemon.TLS.KeyFile = "/tmp/test.key"
 	}, time.Minute)
@@ -269,7 +269,7 @@ func TestProxyConsole_RejectsInsecureWebsocketWhenTLSConfigured(t *testing.T) {
 }
 
 func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
-	ts, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
@@ -300,15 +300,13 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	backend := <-accepted
 	defer backend.Close()
 
-	// Reach into the server by closing the backend connection; this should
-	// unwind the websocket proxy and make the client read fail promptly.
-	_ = backend.Close()
+	apiServer.BeginShutdown()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatal("websocket stayed open after backend close")
+			t.Fatal("websocket stayed open after shutdown signal")
 		default:
 			_, _, err := conn.ReadMessage()
 			if err != nil {
@@ -317,4 +315,144 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestProxyConsole_NoStoreReturns503(t *testing.T) {
+	ts, apiServer, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+	apiServer.SetConsoleStore(nil)
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-running/console?ticket=fake")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+}
+
+func TestProxyConsole_HonorsForwardedProtoForTLSDeployments(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
+		cfg.Daemon.TLS.CertFile = "/tmp/test.crt"
+		cfg.Daemon.TLS.KeyFile = "/tmp/test.key"
+	}, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			defer conn.Close()
+			buf := make([]byte, 16)
+			_, _ = conn.Read(buf)
+		}
+	}()
+
+	ticket := issueConsoleTicket(t, ts, "vm-running")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	headers := http.Header{"X-Forwarded-Proto": []string{"https"}}
+	conn, resp, err := dialer.Dial(wsURLFromHTTP(ts.URL, ticket.WebsocketURL), headers)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("Dial = %v (status=%d)", err, status)
+	}
+	_ = conn.Close()
+}
+
+func TestProxyConsole_RejectsWhenSessionLimitReached(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
+		cfg.Daemon.Console.MaxConcurrentSessions = 1
+	}, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	first := issueConsoleTicket(t, ts, "vm-running")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	firstConn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, first.WebsocketURL), nil)
+	if err != nil {
+		t.Fatalf("first Dial: %v", err)
+	}
+	defer firstConn.Close()
+	backend := <-accepted
+	defer backend.Close()
+
+	second := issueConsoleTicket(t, ts, "vm-running")
+	_, resp, err := dialer.Dial(wsURLFromHTTP(ts.URL, second.WebsocketURL), nil)
+	if err == nil {
+		t.Fatal("second dial succeeded, want 429")
+	}
+	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("status = %d, want 429", status)
+	}
+}
+
+func TestProxyConsole_ClosesWhenMaxSessionDeadlineExpires(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
+		cfg.Daemon.Console.MaxSessionSeconds = 1
+	}, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	ticket := issueConsoleTicket(t, ts, "vm-running")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	conn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, ticket.WebsocketURL), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	backend := <-accepted
+	defer backend.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+	}
+	t.Fatal("websocket stayed open after max session deadline")
 }

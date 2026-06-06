@@ -1060,6 +1060,46 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/console:
+    get:
+      tags: [Console]
+      summary: Proxy the live VM VNC console over websocket
+      description: |
+        Upgrades the request to a websocket and proxies raw VNC/RFB bytes for a
+        running VM. Call `POST /vms/{vmID}/console/ticket` first, then connect
+        with the returned short-lived single-use `ticket` query parameter.
+
+        The server negotiates the `binary` websocket subprotocol and bridges
+        websocket binary frames to the VM's loopback-only VNC listener. When
+        daemon TLS is enabled, callers must use `wss://`; reverse-proxy
+        deployments may forward that fact with `X-Forwarded-Proto: https`.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - in: query
+          name: ticket
+          required: true
+          schema:
+            type: string
+          description: Single-use console ticket issued by `POST /vms/{vmID}/console/ticket`.
+      responses:
+        '101':
+          description: Switching Protocols — websocket proxy established.
+        '401':
+          $ref: '#/components/responses/APIError'
+        '403':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        '429':
+          $ref: '#/components/responses/APIError'
+        '502':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /images:
     get:
       tags: [Images]

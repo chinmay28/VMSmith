@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,9 +18,10 @@ import (
 const consoleWriteWait = 10 * time.Second
 
 type activeConsoleSession struct {
-	vmID string
-	ws   *websocket.Conn
-	once sync.Once
+	vmID   string
+	apiKey string
+	ws     *websocket.Conn
+	once   sync.Once
 }
 
 func (s *activeConsoleSession) close() {
@@ -32,6 +34,9 @@ func (s *activeConsoleSession) close() {
 
 var consoleUpgrader = websocket.Upgrader{
 	Subprotocols: []string{"binary"},
+	// Console websocket requests authenticate with a short-lived single-use
+	// bearer ticket in the query string, so the origin check deliberately stays
+	// open here. Reverse proxies and logs must still treat `ticket=` as a secret.
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
@@ -48,7 +53,7 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, types.NewAPIError("service_unavailable", "console subsystem is not enabled on this daemon"))
 		return
 	}
-	if s.tlsEnabled && r.TLS == nil {
+	if s.tlsEnabled && !consoleRequestUsedTLS(r) {
 		writeAPIError(w, http.StatusForbidden, types.NewAPIError("mixed_content_blocked", "console websocket requires wss when TLS is enabled"))
 		return
 	}
@@ -69,7 +74,6 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusUnauthorized, sanitizeConsoleTicketError(err))
 		return
 	}
-	_ = apiKey
 
 	endpoint, err := s.vmManager.GetConsoleEndpoint(r.Context(), vmID, types.ConsoleIntentVNC)
 	if err != nil {
@@ -100,7 +104,7 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := &activeConsoleSession{vmID: vmID, ws: wsConn}
+	session := &activeConsoleSession{vmID: vmID, apiKey: apiKey, ws: wsConn}
 	s.registerConsoleSession(session)
 	defer s.unregisterConsoleSession(session)
 	defer session.close()
@@ -176,11 +180,16 @@ func proxyConsoleTCPToWebSocket(targetConn net.Conn, wsConn *websocket.Conn, idl
 			if errors.Is(err, io.EOF) {
 				return err
 			}
-			if n == 0 {
-				return err
-			}
+			return err
 		}
 	}
+}
+
+func consoleRequestUsedTLS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func (s *Server) registerConsoleSession(session *activeConsoleSession) {

@@ -793,6 +793,12 @@ not a directly exposed VNC port:
 6. Daemon bridges websocket frames to the resolved local endpoint.
 7. Daemon registers the session in an active-session map so VM stop/delete and daemon shutdown can force-close it.
 
+The websocket upgrader intentionally accepts any `Origin`: the security boundary
+is the short-lived single-use console ticket, not browser origin matching.
+That keeps the proxy compatible with same-origin UI, reverse proxies, and
+operator tooling, but it means every layer that might capture raw URLs must
+treat `ticket=` as a bearer secret.
+
 That shape keeps three important invariants in place:
 
 1. the host's VNC socket stays private on `127.0.0.1`
