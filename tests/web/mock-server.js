@@ -989,6 +989,12 @@ const server = http.createServer(async (req, res) => {
     if (tagFilter) {
       list = list.filter(s => (s.tags || []).some(t => String(t).toLowerCase() === tagFilter));
     }
+    // prefix: case-sensitive HasPrefix on snap.name; mirrors the `prefix`
+    // selector on POST /snapshots/bulk_delete and the API list filter.
+    const prefixFilter = (url.searchParams.get("prefix") || "").trim();
+    if (prefixFilter) {
+      list = list.filter(s => (s.name || "").startsWith(prefixFilter));
+    }
     // since / until: inclusive RFC3339 time-range filter on created_at;
     // invalid value → 400; whitespace-only disables; zero/missing
     // created_at filtered OUT whenever any bound is set (mirrors the API).

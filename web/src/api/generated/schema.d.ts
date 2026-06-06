@@ -1044,6 +1044,19 @@ export interface paths {
                      */
                     tag?: string;
                     /**
+                     * @description Case-sensitive `HasPrefix(snap.name, prefix)` filter. A
+                     *     snapshot matches when its `name` starts with this value
+                     *     literally. Whitespace is trimmed; empty disables the filter.
+                     *     Mirrors the `prefix` selector on
+                     *     `POST /vms/{vmID}/snapshots/bulk_delete` so the same query
+                     *     an operator runs to inspect (`?prefix=auto-nightly-`)
+                     *     round-trips 1:1 with the request body they then send to
+                     *     bulk_delete — preview the cohort before deleting it. Applied
+                     *     between `tag` and the time-range filter so the post-filter
+                     *     `X-Total-Count` stays correct.
+                     */
+                    prefix?: string;
+                    /**
                      * @description RFC3339 timestamp lower bound (inclusive) on the snapshot's
                      *     `created_at`. Snapshots created before this instant are
                      *     filtered out. Whitespace is trimmed; empty disables the
@@ -1051,8 +1064,8 @@ export interface paths {
                      *     with a zero / unknown `created_at` is filtered OUT whenever
                      *     any bound is set — operators querying a time window don't
                      *     want unbounded entries silently included. Composes additively
-                     *     with `tag`, `search`, and pagination so `X-Total-Count`
-                     *     reflects the post-filter population.
+                     *     with `tag`, `prefix`, `search`, and pagination so
+                     *     `X-Total-Count` reflects the post-filter population.
                      */
                     since?: string;
                     /**

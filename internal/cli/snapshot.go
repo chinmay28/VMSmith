@@ -99,10 +99,12 @@ var snapListCmd = &cobra.Command{
 		order, _ := cmd.Flags().GetString("order")
 		searchFilter, _ := cmd.Flags().GetString("search")
 		tagFilter, _ := cmd.Flags().GetString("tag")
+		prefixFilter, _ := cmd.Flags().GetString("prefix")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
 		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
 		tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
+		prefixFilter = strings.TrimSpace(prefixFilter)
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
 		if err != nil {
 			return err
@@ -153,6 +155,19 @@ var snapListCmd = &cobra.Command{
 						filtered = append(filtered, snap)
 						break
 					}
+				}
+			}
+			snaps = filtered
+		}
+		// Prefix filter: case-sensitive HasPrefix on snap.Name to mirror the
+		// `prefix` selector on `snapshot delete --prefix` (same semantics as
+		// the bulk_delete API request body), so the operator can preview
+		// exactly what the bulk-delete would target before running it.
+		if prefixFilter != "" {
+			filtered := snaps[:0]
+			for _, snap := range snaps {
+				if strings.HasPrefix(snap.Name, prefixFilter) {
+					filtered = append(filtered, snap)
 				}
 			}
 			snaps = filtered
@@ -370,6 +385,7 @@ func init() {
 	snapListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	snapListCmd.Flags().String("search", "", "case-insensitive substring filter on snapshot name, description, and tags")
 	snapListCmd.Flags().String("tag", "", "case-insensitive exact-match tag filter (applied before --search)")
+	snapListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on snapshot name (e.g. 'auto-nightly-' to preview the cohort `snapshot delete --prefix` would target)")
 	snapListCmd.Flags().String("since", "", "keep snapshots created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	snapListCmd.Flags().String("until", "", "keep snapshots created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 

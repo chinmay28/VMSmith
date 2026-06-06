@@ -15135,3 +15135,115 @@ func TestListSnapshots_FilterBySince_ComposesWithTagAndSearch(t *testing.T) {
 		t.Fatalf("expected only pre-deploy-new, got %+v", listed)
 	}
 }
+
+// 5.4.75 — `?prefix=` on `GET /vms/{vmID}/snapshots`. Case-sensitive
+// HasPrefix against snap.Name; mirrors the `prefix` selector on the
+// `POST /vms/{vmID}/snapshots/bulk_delete` request body so an operator can
+// preview the cohort before bulk-deleting it.
+func TestListSnapshots_FilterByPrefix_Match(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "auto-nightly-2026-05-23"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "auto-nightly-2026-05-24"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix", Name: "manual-rollback"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix/snapshots?prefix=auto-nightly-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter)", got)
+	}
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 snapshots, got %+v", listed)
+	}
+	for _, s := range listed {
+		if !strings.HasPrefix(s.Name, "auto-nightly-") {
+			t.Fatalf("expected only auto-nightly-* snapshots, got %s", s.Name)
+		}
+	}
+}
+
+func TestListSnapshots_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix-case"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-case", Name: "Auto-Daily-001"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix-case/snapshots?prefix=auto-daily")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0 (case-sensitive non-match)", got)
+	}
+}
+
+func TestListSnapshots_FilterByPrefix_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix-trim"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-trim", Name: "auto-x"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-trim", Name: "manual"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix-trim/snapshots?prefix=%20%20auto-%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (whitespace-trim)", got)
+	}
+}
+
+func TestListSnapshots_FilterByPrefix_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix-empty"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-empty", Name: "a"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-empty", Name: "b"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix-empty/snapshots?prefix=")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (empty disables)", got)
+	}
+}
+
+func TestListSnapshots_FilterByPrefix_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix-none"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-none", Name: "manual-1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix-none/snapshots?prefix=auto-")
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestListSnapshots_FilterByPrefix_ComposesWithTag(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-prefix-compose"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-compose", Name: "auto-nightly-1", Tags: []string{"prod"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-compose", Name: "auto-nightly-2", Tags: []string{"staging"}})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-prefix-compose", Name: "manual-rollback", Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-prefix-compose/snapshots?prefix=auto-nightly-&tag=prod")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.Snapshot
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "auto-nightly-1" {
+		t.Fatalf("expected only auto-nightly-1, got %+v", listed)
+	}
+}
