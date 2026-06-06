@@ -109,6 +109,13 @@ func (s *Server) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 //     the implicit primary NAT network is not represented in the template's
 //     networks list, so this only scopes to explicitly-attached extra
 //     networks. Whitespace trimmed; empty disables.
+//   - prefix=<value>         case-sensitive `HasPrefix(tpl.Name, prefix)`
+//     filter (5.4.78). Mirrors the 5.4.75 snapshot, 5.4.76 VM, and 5.4.77
+//     image prefix selectors so the same fleet-audit query (`rocky9-base-`,
+//     `web-prod-`, `auto-nightly-`) round-trips 1:1 across all four
+//     name-prefix axes. Whitespace-trimmed; empty disables. Applied between
+//     `network` and the time-range so it composes additively with every
+//     other template filter.
 //   - since=<rfc3339>        keep templates with created_at >= since
 //     (inclusive). Whitespace trimmed; empty disables. Invalid values
 //     return 400 `invalid_since`.
@@ -269,6 +276,26 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		filtered := templates[:0]
 		for _, tpl := range templates {
 			if types.TemplateMatchesNetwork(tpl, networkFilter) {
+				filtered = append(filtered, tpl)
+			}
+		}
+		templates = filtered
+	}
+
+	// Prefix filter (5.4.78): case-sensitive `HasPrefix(tpl.Name, prefix)`
+	// mirrors the 5.4.75 snapshot, 5.4.76 VM, and 5.4.77 image prefix
+	// selectors. Operators routinely import successive template revisions
+	// under a deterministic naming scheme (`rocky9-base-v1`, `rocky9-base-v2`,
+	// `web-prod-`) and need exact-prefix discrimination that `?search=`
+	// (case-insensitive substring) cannot provide. Whitespace-trimmed; empty
+	// disables. Applied between `network` and the time-range so it composes
+	// additively with every other template filter; X-Total-Count reflects the
+	// post-filter population.
+	prefixFilter := strings.TrimSpace(q.Get("prefix"))
+	if prefixFilter != "" {
+		filtered := templates[:0]
+		for _, tpl := range templates {
+			if strings.HasPrefix(tpl.Name, prefixFilter) {
 				filtered = append(filtered, tpl)
 			}
 		}
