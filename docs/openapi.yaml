@@ -43,23 +43,7 @@ paths:
         - $ref: '#/components/parameters/MachineFilter'
         - $ref: '#/components/parameters/ClockOffsetFilter'
         - $ref: '#/components/parameters/NetworkFilter'
-        - name: prefix
-          in: query
-          required: false
-          description: |
-            Case-sensitive `HasPrefix(vm.name, prefix)` filter. A VM
-            matches when its `name` starts with this value verbatim.
-            Whitespace is trimmed; empty disables the filter. Mirrors
-            the 5.4.75 snapshot `?prefix=` selector and the
-            case-sensitive `vmsmith` VM-name alphabet (`[A-Za-z0-9-]`)
-            — operators routinely cohort their fleet by name prefix
-            (`web-prod-`, `db-prod-`, `web-staging-`) and need exact
-            prefix discrimination before running fan-out actions.
-            Applied between `network` and the `since` / `until` time
-            range so the post-filter `X-Total-Count` stays correct, and
-            composes additively with every other VM filter.
-          schema:
-            type: string
+        - $ref: '#/components/parameters/PrefixFilter'
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
@@ -3030,6 +3014,27 @@ components:
         `status`, `search`, `image`, `default_user`, and the sort +
         pagination params; `X-Total-Count` reflects the post-filter /
         pre-pagination population.
+      schema:
+        type: string
+    PrefixFilter:
+      name: prefix
+      in: query
+      description: |
+        Case-sensitive `HasPrefix(vm.name, prefix)` filter. A VM matches
+        when its `name` starts with this value verbatim. Whitespace is
+        trimmed before comparison; an empty value disables the filter.
+        Mirrors the 5.4.75 snapshot `?prefix=` selector and the
+        case-sensitive `vmsmith` VM-name alphabet (`[A-Za-z0-9-]`) —
+        operators routinely cohort their fleet by name prefix
+        (`web-prod-`, `db-prod-`, `web-staging-`) and need exact-prefix
+        discrimination before running fan-out actions. Closes the
+        cohort-discrimination operator query that `?search=`
+        (case-insensitive substring) cannot answer cleanly — searching
+        for `web-prod-` also surfaces `legacy-web-prod-2024-bak`
+        because of substring matching. Applied between `network` and
+        the `since` / `until` time range so the post-filter
+        `X-Total-Count` stays correct, and composes additively with
+        every other VM filter.
       schema:
         type: string
     OSTypeFilter:

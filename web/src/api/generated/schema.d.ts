@@ -184,7 +184,7 @@ export interface paths {
                      *     alphabet (`[A-Za-z0-9-]`). Composes additively with every other
                      *     VM filter; `X-Total-Count` reflects the post-filter population.
                      */
-                    prefix?: string;
+                    prefix?: components["parameters"]["PrefixFilter"];
                     /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
@@ -4493,6 +4493,20 @@ export interface components {
          *     pre-pagination population.
          */
         NetworkFilter: string;
+        /**
+         * @description Case-sensitive `HasPrefix(vm.name, prefix)` filter. A VM matches
+         *     when its `name` starts with this value verbatim. Whitespace is
+         *     trimmed before comparison; an empty value disables the filter.
+         *     Mirrors the 5.4.75 snapshot `?prefix=` selector and the
+         *     case-sensitive `vmsmith` VM-name alphabet (`[A-Za-z0-9-]`) —
+         *     operators routinely cohort their fleet by name prefix
+         *     (`web-prod-`, `db-prod-`, `web-staging-`) and need exact-prefix
+         *     discrimination before running fan-out actions. Applied between
+         *     `network` and the `since` / `until` time range so the
+         *     post-filter `X-Total-Count` stays correct, and composes
+         *     additively with every other VM filter.
+         */
+        PrefixFilter: string;
         /**
          * @description Case-insensitive exact-match filter on the guest OS family. Accepts
          *     `linux` or `windows` (case-insensitive; surrounding whitespace
