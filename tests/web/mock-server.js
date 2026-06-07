@@ -59,6 +59,11 @@ function seed() {
   // both as CIDR and IP-only; db-server / win-app leave nat_static_ip empty
   // so the DHCP-excluded path is exercised).
   vm1.spec.nat_static_ip = "192.168.100.10/24";
+  // 5.4.80 — Pin web-server's NAT gateway so the `?nat_gateway=` filter has
+  // a meaningful cohort to slice (web-server matches `192.168.100.1`;
+  // db-server / win-app leave nat_gateway empty so the excluded path is
+  // exercised).
+  vm1.spec.nat_gateway = "192.168.100.1";
   vm1.tags = ["dev"];
   // Named network attachments power the 5.4.36 ?network= filter tests.
   vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
@@ -456,6 +461,9 @@ const server = http.createServer(async (req, res) => {
     // nat_static_ip: case-insensitive exact match against stored CIDR or its
     // IP portion. Empty disables; DHCP-assigned VMs drop out. Mirrors 5.4.79.
     const natStaticIPFilter = (url.searchParams.get("nat_static_ip") || "").trim().toLowerCase();
+    // 5.4.80 — nat_gateway: case-insensitive exact match on stored gateway IP.
+    // Empty disables; VMs with no nat_gateway override drop out.
+    const natGatewayFilter = (url.searchParams.get("nat_gateway") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -629,6 +637,15 @@ const server = http.createServer(async (req, res) => {
         if (stored === natStaticIPFilter) return true;
         const i = stored.indexOf("/");
         return i >= 0 && stored.slice(0, i) === natStaticIPFilter;
+      });
+    }
+    if (natGatewayFilter) {
+      // 5.4.80 — case-insensitive exact match on spec.nat_gateway
+      // (plain IP, no CIDR dual-form). Empty stored values drop out.
+      list = list.filter(vm => {
+        const stored = String((vm.spec && vm.spec.nat_gateway) || "").trim().toLowerCase();
+        if (!stored) return false;
+        return stored === natGatewayFilter;
       });
     }
     if (autoStart.set) {

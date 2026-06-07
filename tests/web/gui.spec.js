@@ -919,6 +919,39 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("nat_static_ip=");
   });
 
+  // 5.4.80 — NAT gateway filter on the VM list. Seed: only web-server has
+  // spec.nat_gateway pinned (`192.168.100.1`). Exercises exact-match,
+  // empty-stored exclusion (db-server / win-app drop out), and the Clear
+  // button.
+  test("nat_gateway filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // Exact-match narrows to web-server (VMs with no gateway override drop out).
+    await page.getByTestId("vm-list-nat-gateway-filter").fill("192.168.100.1");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("nat_gateway")).toBe("192.168.100.1");
+
+    // A non-matching IP excludes every VM.
+    await page.getByTestId("vm-list-nat-gateway-filter").fill("10.0.0.99");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+
+    // The Clear button drops the URL param and restores every VM.
+    await page.getByTestId("vm-list-nat-gateway-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("nat_gateway=");
+  });
+
   // 5.4.44 — vCPU range filter on the VM list. Seed data: web-server has 2
   // vCPUs, db-server has 4. 250 ms-debounced number inputs with URL round-trip
   // via ?min_cpus= / ?max_cpus=.
