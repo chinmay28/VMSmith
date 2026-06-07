@@ -952,6 +952,41 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).not.toContain("nat_gateway=");
   });
 
+  // 5.4.81 — Runtime IP filter on the VM list. Seed data: web-server is at
+  // 192.168.100.10, db-server at 192.168.100.11, win-app at 192.168.100.12.
+  // Exercises exact-match narrowing on the runtime-discovered vm.ip field
+  // (the value displayed in the IP column) and the Clear button. The
+  // empty-stored-excludes path (VMs with no IP — stopped, no lease) is
+  // covered by the API and CLI integration tests.
+  test("ip filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // Exact-match narrows to web-server only.
+    await page.getByTestId("vm-list-ip-filter").fill("192.168.100.10");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("ip")).toBe("192.168.100.10");
+
+    // A non-matching IP excludes every VM.
+    await page.getByTestId("vm-list-ip-filter").fill("10.0.0.99");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+
+    // The Clear button drops the URL param and restores every VM.
+    await page.getByTestId("vm-list-ip-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("ip=");
+  });
+
   // 5.4.44 — vCPU range filter on the VM list. Seed data: web-server has 2
   // vCPUs, db-server has 4. 250 ms-debounced number inputs with URL round-trip
   // via ?min_cpus= / ?max_cpus=.

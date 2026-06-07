@@ -89,6 +89,11 @@ export default function VMList() {
   // 250 ms debounce; URL round-trip via `?nat_gateway=`.
   const [natGatewayInput, setNatGatewayInput] = useState(searchParams.get('nat_gateway') || '');
   const [natGatewayFilter, setNatGatewayFilter] = useState(searchParams.get('nat_gateway') || '');
+  // 5.4.81 — `?ip=` exact-match filter on the runtime-discovered vm.IP
+  // (the value shown in the table's IP column). Covers DHCP-assigned VMs
+  // that `?nat_static_ip=` cannot. 250 ms debounce; URL round-trip via `?ip=`.
+  const [ipInput, setIpInput] = useState(searchParams.get('ip') || '');
+  const [ipFilter, setIpFilter] = useState(searchParams.get('ip') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
@@ -114,8 +119,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, prefix: prefixFilter, natStaticIp: natStaticIpFilter, natGateway: natGatewayFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, prefix: prefixFilter, natStaticIp: natStaticIpFilter, natGateway: natGatewayFilter, ip: ipFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -148,7 +153,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -228,6 +233,17 @@ export default function VMList() {
     return () => clearTimeout(handle);
   }, [natGatewayInput]);
 
+  // 5.4.81 — Same debounce shape for the IP filter input. The API
+  // comparison is case-insensitive so casing here is preserved on round-trip
+  // but ignored for matching.
+  useEffect(() => {
+    const trimmed = ipInput.trim();
+    const handle = setTimeout(() => {
+      setIpFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [ipInput]);
+
   // Debounce the vCPU range inputs — the committed filters drive useFetch.
   useEffect(() => {
     const trimmed = minCpusInput.trim();
@@ -285,6 +301,7 @@ export default function VMList() {
     if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (natStaticIpFilter) next.set('nat_static_ip', natStaticIpFilter); else next.delete('nat_static_ip');
     if (natGatewayFilter) next.set('nat_gateway', natGatewayFilter); else next.delete('nat_gateway');
+    if (ipFilter) next.set('ip', ipFilter); else next.delete('ip');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
@@ -296,7 +313,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -589,6 +606,28 @@ export default function VMList() {
               onClick={() => setNatGatewayInput('')}
               data-testid="vm-list-nat-gateway-filter-clear"
               aria-label="Clear NAT gateway filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-full sm:w-60">
+          <input
+            type="search"
+            value={ipInput}
+            onChange={(e) => setIpInput(e.target.value)}
+            placeholder="Filter by IP…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="vm-list-ip-filter"
+            aria-label="Filter by runtime IP"
+          />
+          {ipInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setIpInput('')}
+              data-testid="vm-list-ip-filter-clear"
+              aria-label="Clear IP filter"
             >
               <X size={13} />
             </button>
