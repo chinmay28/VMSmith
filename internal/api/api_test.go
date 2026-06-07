@@ -11242,6 +11242,144 @@ func TestListImages_FilterBySize_ComposesWithTagAndSearch(t *testing.T) {
 	}
 }
 
+// 5.4.77: image list ?prefix= — case-sensitive HasPrefix(img.Name, prefix).
+// Mirrors the snapshot list ?prefix= (5.4.75) and the VM list ?prefix=
+// (5.4.76) so the operator's cohort query round-trips 1:1 across the three
+// name-prefix axes.
+
+func TestListImages_FilterByPrefix_Match(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-rocky-base", "rocky-base", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-rocky-gold", "rocky-gold", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-ubuntu", "ubuntu-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=rocky-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter)", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	names := map[string]bool{}
+	for _, img := range listed {
+		names[img.Name] = true
+	}
+	if !names["rocky-base"] || !names["rocky-gold"] || names["ubuntu-base"] {
+		t.Fatalf("expected rocky-* only, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "rocky-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=Rocky-")
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0 (case-sensitive non-match)", got)
+	}
+}
+
+func TestListImages_FilterByPrefix_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "rocky-base", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-2", "ubuntu-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=%20rocky-%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (whitespace trimmed)", got)
+	}
+}
+
+func TestListImages_FilterByPrefix_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "rocky-base", 1<<30, t0)
+	seedStoredImageFull(t, s, "img-2", "ubuntu-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=%20%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (empty prefix is no-op)", got)
+	}
+}
+
+func TestListImages_FilterByPrefix_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	seedStoredImageFull(t, s, "img-1", "rocky-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=nope-")
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 0 {
+		t.Fatalf("expected empty list, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByPrefix_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	put := func(id, name string, tags []string) {
+		img := &types.Image{ID: id, Name: name, Path: "/tmp/" + name + ".qcow2", SizeBytes: 1 << 30, Format: "qcow2", Tags: tags, CreatedAt: t0, UpdatedAt: t0}
+		if err := s.PutImage(img); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
+	}
+	put("img-1", "rocky-prod", []string{"prod"})     // matches both
+	put("img-2", "rocky-staging", []string{"stage"}) // tag excludes
+	put("img-3", "ubuntu-prod", []string{"prod"})    // prefix excludes
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=rocky-&tag=prod")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 1 || listed[0].Name != "rocky-prod" {
+		t.Fatalf("expected only rocky-prod, got %+v", listed)
+	}
+}
+
+func TestListImages_FilterByPrefix_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		seedStoredImageFull(t, s, fmt.Sprintf("img-rocky-%d", i), fmt.Sprintf("rocky-base-%d", i), 1<<30, t0)
+	}
+	seedStoredImageFull(t, s, "img-ubuntu", "ubuntu-base", 1<<30, t0)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?prefix=rocky-&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "4" {
+		t.Fatalf("X-Total-Count = %q, want 4 (post-filter, pre-pagination)", got)
+	}
+	var listed []*types.Image
+	decodeJSON(t, resp, &listed)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 paginated results, got %d", len(listed))
+	}
+}
+
 func TestUploadImage_PersistsDescriptionAndTags(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

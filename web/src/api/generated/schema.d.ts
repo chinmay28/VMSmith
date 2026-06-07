@@ -1746,6 +1746,18 @@ export interface paths {
                      *     as `min_size`.
                      */
                     max_size?: number;
+                    /**
+                     * @description Case-sensitive `HasPrefix(img.Name, prefix)` filter on the image
+                     *     list. Whitespace is trimmed; empty disables the filter. Mirrors
+                     *     the snapshot list `prefix` selector (5.4.75) and the VM list
+                     *     `prefix` selector (5.4.76) so the same fleet-audit query
+                     *     (`?prefix=rocky-`) round-trips 1:1 across the three name-prefix
+                     *     axes operators use most. Composes additively with `tag`,
+                     *     `source_vm`, `search`, the byte-range bounds, the time-range
+                     *     bounds, `sort`, and pagination so `X-Total-Count` reflects the
+                     *     post-filter population.
+                     */
+                    prefix?: string;
                 };
                 header?: never;
                 path?: never;

@@ -3790,6 +3790,62 @@ func TestCLI_ImageList_RejectsNegativeMaxSize(t *testing.T) {
 	}
 }
 
+// --- image list --prefix (5.4.77) ---
+
+func seedPrefixImages(t *testing.T, s interface {
+	PutImage(*types.Image) error
+}) {
+	t.Helper()
+	now := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+	for _, name := range []string{"rocky-base", "rocky-gold", "ubuntu-base"} {
+		if err := s.PutImage(&types.Image{ID: "img-" + name, Name: name, Path: "/tmp/" + name + ".qcow2", SizeBytes: 1 << 30, Format: "qcow2", CreatedAt: now}); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
+	}
+}
+
+func TestCLI_ImageList_FilterByPrefix_Match(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedPrefixImages(t, s)
+
+	out, err := runCLI("image", "list", "--prefix", "rocky-")
+	if err != nil {
+		t.Fatalf("image list --prefix: %v", err)
+	}
+	if !strings.Contains(out, "rocky-base") || !strings.Contains(out, "rocky-gold") || strings.Contains(out, "ubuntu-base") {
+		t.Fatalf("expected only rocky-* images, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedPrefixImages(t, s)
+
+	out, err := runCLI("image", "list", "--prefix", "Rocky-")
+	if err != nil {
+		t.Fatalf("image list --prefix Rocky-: %v", err)
+	}
+	if strings.Contains(out, "rocky-base") || strings.Contains(out, "rocky-gold") {
+		t.Fatalf("expected case-sensitive non-match, got %q", out)
+	}
+}
+
+func TestCLI_ImageList_FilterByPrefix_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+	seedPrefixImages(t, s)
+
+	out, err := runCLI("image", "list", "--prefix", "   ")
+	if err != nil {
+		t.Fatalf("image list --prefix '   ': %v", err)
+	}
+	if !strings.Contains(out, "rocky-base") || !strings.Contains(out, "rocky-gold") || !strings.Contains(out, "ubuntu-base") {
+		t.Fatalf("expected every image when prefix is whitespace-only, got %q", out)
+	}
+}
+
 // --- VM list --min-cpus / --max-cpus (5.4.44) ---
 
 func seedCPUVMs(mock interface {

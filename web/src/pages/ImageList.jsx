@@ -16,6 +16,8 @@ export default function ImageList() {
   const [searchFilter, setSearchFilter] = useState(searchParams.get('search') || '');
   const [sourceVMInput, setSourceVMInput] = useState(searchParams.get('source_vm') || '');
   const [sourceVMFilter, setSourceVMFilter] = useState(searchParams.get('source_vm') || '');
+  const [prefixInput, setPrefixInput] = useState(searchParams.get('prefix') || '');
+  const [prefixFilter, setPrefixFilter] = useState(searchParams.get('prefix') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
   const [minSizeInput, setMinSizeInput] = useState(searchParams.get('min_size') || '');
@@ -29,8 +31,8 @@ export default function ImageList() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const { data: imageResponse, loading, error, refresh } = useFetch(
-    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, since, until, minSize: minSizeFilter, maxSize: maxSizeFilter, sort, order }),
-    [page, perPage, tagFilter, sourceVMFilter, searchFilter, since, until, minSizeFilter, maxSizeFilter, sort, order],
+    () => imagesApi.list({ page, perPage, tag: tagFilter, sourceVM: sourceVMFilter, search: searchFilter, prefix: prefixFilter, since, until, minSize: minSizeFilter, maxSize: maxSizeFilter, sort, order }),
+    [page, perPage, tagFilter, sourceVMFilter, searchFilter, prefixFilter, since, until, minSizeFilter, maxSizeFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(imagesApi.delete);
@@ -42,7 +44,7 @@ export default function ImageList() {
     [imageList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, since, until, minSizeFilter, maxSizeFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, sourceVMFilter, prefixFilter, since, until, minSizeFilter, maxSizeFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -61,6 +63,17 @@ export default function ImageList() {
     }, 250);
     return () => clearTimeout(id);
   }, [sourceVMInput]);
+
+  // Debounce the case-sensitive prefix box (5.4.77). No `.toLowerCase()` —
+  // the API contract is HasPrefix(img.Name, prefix) and image names are
+  // case-sensitive, mirroring the snapshot/VM prefix filter contracts.
+  useEffect(() => {
+    const trimmed = prefixInput.trim();
+    const id = setTimeout(() => {
+      setPrefixFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [prefixInput]);
 
   // Debounce the byte-count size-range boxes the same way as the search box so
   // typing a multi-digit value doesn't refetch on every keystroke.
@@ -82,12 +95,13 @@ export default function ImageList() {
     if (order && order !== 'asc') next.set('order', order); else next.delete('order');
     if (searchFilter) next.set('search', searchFilter); else next.delete('search');
     if (sourceVMFilter) next.set('source_vm', sourceVMFilter); else next.delete('source_vm');
+    if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
     if (minSizeFilter) next.set('min_size', minSizeFilter); else next.delete('min_size');
     if (maxSizeFilter) next.set('max_size', maxSizeFilter); else next.delete('max_size');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, sourceVMFilter, since, until, minSizeFilter, maxSizeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, sourceVMFilter, prefixFilter, since, until, minSizeFilter, maxSizeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -197,6 +211,28 @@ export default function ImageList() {
               onClick={() => setSourceVMInput('')}
               data-testid="image-list-source-vm-clear"
               aria-label="Clear source VM filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative min-w-[200px] max-w-xs">
+          <input
+            type="search"
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            placeholder="Name prefix (case-sensitive)…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="image-list-prefix-filter"
+            aria-label="Filter by image name prefix"
+          />
+          {prefixInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setPrefixInput('')}
+              data-testid="image-list-prefix-filter-clear"
+              aria-label="Clear image name prefix filter"
             >
               <X size={13} />
             </button>

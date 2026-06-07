@@ -34,6 +34,8 @@ var imageListCmd = &cobra.Command{
 		sourceVMFilter = strings.ToLower(strings.TrimSpace(sourceVMFilter))
 		searchFilter, _ := cmd.Flags().GetString("search")
 		searchFilter = strings.ToLower(strings.TrimSpace(searchFilter))
+		prefixFilter, _ := cmd.Flags().GetString("prefix")
+		prefixFilter = strings.TrimSpace(prefixFilter)
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
 		sinceTime, sinceSet, err := parseCLITimeRange(sinceRaw, "--since")
@@ -78,7 +80,7 @@ var imageListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger.Info("cli", "image list", "tag", tagFilter, "source_vm", sourceVMFilter, "search", searchFilter, "sort", sortField, "order", order)
+		logger.Info("cli", "image list", "tag", tagFilter, "source_vm", sourceVMFilter, "search", searchFilter, "prefix", prefixFilter, "sort", sortField, "order", order)
 		mgr, cleanup, err := newStorageManager()
 		if err != nil {
 			logger.Error("cli", "image list: failed to init storage manager", "error", err.Error())
@@ -110,6 +112,19 @@ var imageListCmd = &cobra.Command{
 					continue
 				}
 				filtered = append(filtered, img)
+			}
+			imgs = filtered
+		}
+		// Prefix filter (5.4.77): case-sensitive HasPrefix on img.Name to
+		// mirror the snapshot list `--prefix` (5.4.75) and the VM list
+		// `--prefix` (5.4.76) so the same `?prefix=rocky-` cohort query
+		// round-trips 1:1 across the three name-prefix axes.
+		if prefixFilter != "" {
+			filtered := imgs[:0]
+			for _, img := range imgs {
+				if strings.HasPrefix(img.Name, prefixFilter) {
+					filtered = append(filtered, img)
+				}
 			}
 			imgs = filtered
 		}
@@ -404,6 +419,7 @@ func init() {
 	imageListCmd.Flags().String("tag", "", "filter to images carrying this tag")
 	imageListCmd.Flags().String("source-vm", "", "filter to images exported from this source VM ID (case-insensitive exact match)")
 	imageListCmd.Flags().String("search", "", "case-insensitive substring filter on name, description, and tags")
+	imageListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on image name (e.g. 'rocky-' to slice to every Rocky cohort image)")
 	imageListCmd.Flags().String("since", "", "keep images created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	imageListCmd.Flags().String("until", "", "keep images created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	imageListCmd.Flags().String("min-size", "", "keep images whose size in bytes is at least this value (inclusive)")
