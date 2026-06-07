@@ -179,12 +179,37 @@ export interface paths {
                     /**
                      * @description Case-sensitive `HasPrefix(vm.name, prefix)` filter. A VM matches
                      *     when its `name` starts with this value verbatim. Whitespace is
-                     *     trimmed; empty disables the filter. Mirrors the 5.4.75 snapshot
-                     *     `?prefix=` selector and the case-sensitive `vmsmith` VM-name
-                     *     alphabet (`[A-Za-z0-9-]`). Composes additively with every other
-                     *     VM filter; `X-Total-Count` reflects the post-filter population.
+                     *     trimmed before comparison; an empty value disables the filter.
+                     *     Mirrors the 5.4.75 snapshot `?prefix=` selector and the
+                     *     case-sensitive `vmsmith` VM-name alphabet (`[A-Za-z0-9-]`) —
+                     *     operators routinely cohort their fleet by name prefix
+                     *     (`web-prod-`, `db-prod-`, `web-staging-`) and need exact-prefix
+                     *     discrimination before running fan-out actions. Closes the
+                     *     cohort-discrimination operator query that `?search=`
+                     *     (case-insensitive substring) cannot answer cleanly — searching
+                     *     for `web-prod-` also surfaces `legacy-web-prod-2024-bak`
+                     *     because of substring matching. Applied between `network` and
+                     *     the `since` / `until` time range so the post-filter
+                     *     `X-Total-Count` stays correct, and composes additively with
+                     *     every other VM filter.
                      */
                     prefix?: components["parameters"]["PrefixFilter"];
+                    /**
+                     * @description Case-insensitive exact-match on the VM's
+                     *     `spec.nat_static_ip`. Matches when the filter equals the
+                     *     stored CIDR (e.g. `192.168.100.50/24`) or the IP portion
+                     *     alone (e.g. `192.168.100.50`). Whitespace is trimmed; empty
+                     *     disables the filter. VMs with an empty `nat_static_ip`
+                     *     (DHCP-assigned) drop out whenever the filter is set —
+                     *     mirrors the empty-stored exclusion contract on the
+                     *     port-forward `?guest_ip=` filter (5.4.73). No validation
+                     *     rejection: `nat_static_ip` is a free-form value operators
+                     *     paste verbatim and garbage simply matches no VMs. Applied
+                     *     between `prefix` and `since`/`until` so it composes
+                     *     additively with every other VM filter; `X-Total-Count`
+                     *     reflects the post-filter population.
+                     */
+                    nat_static_ip?: string;
                     /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
@@ -1658,6 +1683,63 @@ export interface paths {
                 default: components["responses"]["APIError"];
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Proxy the live VM VNC console over websocket
+         * @description Upgrades the request to a websocket and proxies raw VNC/RFB bytes for a
+         *     running VM. Call `POST /vms/{vmID}/console/ticket` first, then connect
+         *     with the returned short-lived single-use `ticket` query parameter.
+         *
+         *     The server negotiates the `binary` websocket subprotocol and bridges
+         *     websocket binary frames to the VM's loopback-only VNC listener. When
+         *     daemon TLS is enabled, callers must use `wss://`; reverse-proxy
+         *     deployments may forward that fact with `X-Forwarded-Proto: https`.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Single-use console ticket issued by `POST /vms/{vmID}/console/ticket`. */
+                    ticket: string;
+                };
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Switching Protocols — websocket proxy established. */
+                101: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["APIError"];
+                403: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                429: components["responses"]["APIError"];
+                502: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4533,10 +4615,14 @@ export interface components {
          *     case-sensitive `vmsmith` VM-name alphabet (`[A-Za-z0-9-]`) —
          *     operators routinely cohort their fleet by name prefix
          *     (`web-prod-`, `db-prod-`, `web-staging-`) and need exact-prefix
-         *     discrimination before running fan-out actions. Applied between
-         *     `network` and the `since` / `until` time range so the
-         *     post-filter `X-Total-Count` stays correct, and composes
-         *     additively with every other VM filter.
+         *     discrimination before running fan-out actions. Closes the
+         *     cohort-discrimination operator query that `?search=`
+         *     (case-insensitive substring) cannot answer cleanly — searching
+         *     for `web-prod-` also surfaces `legacy-web-prod-2024-bak`
+         *     because of substring matching. Applied between `network` and
+         *     the `since` / `until` time range so the post-filter
+         *     `X-Total-Count` stays correct, and composes additively with
+         *     every other VM filter.
          */
         PrefixFilter: string;
         /**

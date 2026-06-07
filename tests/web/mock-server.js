@@ -54,6 +54,11 @@ const scheduleRuns = new Map();
 function seed() {
   const vm1 = createVM({ name: "web-server", image: "ubuntu-22.04", cpus: 2, ram_mb: 4096, disk_gb: 40 });
   vm1.ip = "192.168.100.10";
+  // 5.4.79 — Pin web-server's NAT static IP so the `?nat_static_ip=` filter
+  // has a meaningful cohort to slice (web-server matches `192.168.100.10`
+  // both as CIDR and IP-only; db-server / win-app leave nat_static_ip empty
+  // so the DHCP-excluded path is exercised).
+  vm1.spec.nat_static_ip = "192.168.100.10/24";
   vm1.tags = ["dev"];
   // Named network attachments power the 5.4.36 ?network= filter tests.
   vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
@@ -448,6 +453,9 @@ const server = http.createServer(async (req, res) => {
     // 5.4.76 — case-sensitive HasPrefix on vm.name; whitespace-trimmed; empty
     // disables. Mirrors the 5.4.75 snapshot prefix selector.
     const prefixFilter = (url.searchParams.get("prefix") || "").trim();
+    // nat_static_ip: case-insensitive exact match against stored CIDR or its
+    // IP portion. Empty disables; DHCP-assigned VMs drop out. Mirrors 5.4.79.
+    const natStaticIPFilter = (url.searchParams.get("nat_static_ip") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -611,6 +619,17 @@ const server = http.createServer(async (req, res) => {
     if (prefixFilter) {
       // 5.4.76 — case-sensitive HasPrefix on vm.name.
       list = list.filter(vm => String(vm.name || "").startsWith(prefixFilter));
+    }
+    if (natStaticIPFilter) {
+      // 5.4.79 — case-insensitive exact match on spec.nat_static_ip
+      // (CIDR or IP portion). Empty stored values drop out.
+      list = list.filter(vm => {
+        const stored = String((vm.spec && vm.spec.nat_static_ip) || "").trim().toLowerCase();
+        if (!stored) return false;
+        if (stored === natStaticIPFilter) return true;
+        const i = stored.indexOf("/");
+        return i >= 0 && stored.slice(0, i) === natStaticIPFilter;
+      });
     }
     if (autoStart.set) {
       list = list.filter(vm => !!(vm.spec && vm.spec.auto_start) === autoStart.value);
