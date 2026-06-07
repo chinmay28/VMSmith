@@ -1952,6 +1952,27 @@ paths:
             with every other webhook list filter so `X-Total-Count`
             reflects the post-filter population.
         - in: query
+          name: url_prefix
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-insensitive `HasPrefix(wh.URL, value)` filter (5.4.83).
+            Whitespace-trimmed; empty disables. Closes the receiver-cohort
+            operator queries *"which webhooks point to my Slack
+            workspace?"* / *"which receivers fire into our test
+            environment?"* that `search` (case-insensitive substring
+            across URL + description + event_types + tags) can answer
+            only with noisy fuzzy matches. Case-insensitive because URL
+            schemes and hosts are case-insensitive per RFC 3986; matches
+            the existing URL haystack in `WebhookMatchesSearch`.
+            Diverges from the case-sensitive name-prefix family
+            (snapshots 5.4.75, VMs 5.4.76, images 5.4.77, templates
+            5.4.78, schedules 5.4.82) because URLs are not free-form
+            name alphabets. Applied between `active` and `search` so it
+            composes additively with every other webhook list filter
+            and `X-Total-Count` reflects the post-filter population.
+        - in: query
           name: sort
           required: false
           schema:

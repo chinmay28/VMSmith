@@ -153,6 +153,21 @@ Optional filters and ordering:
                         rejected client-side.  Mirrors the VM list
                         --auto-start / --locked tristate filters.
 
+  --url-prefix <value>  Case-insensitive HasPrefix(wh.URL, value) filter
+                        applied between --active and --search.  Whitespace
+                        trimmed and lowercased before being forwarded to the
+                        daemon.  Empty disables.  Closes the receiver-cohort
+                        operator queries "which webhooks point to my Slack
+                        workspace?" / "which receivers fire into our test
+                        environment?" that --search (case-insensitive
+                        substring across URL + description + event_types +
+                        tags) can answer only with noisy fuzzy matches.
+                        Case-insensitive because URL schemes and hosts are
+                        case-insensitive per RFC 3986; matches the existing
+                        URL haystack in --search.  Diverges from the
+                        case-sensitive name-prefix family (snapshots, VMs,
+                        images, templates, schedules). (5.4.83)
+
   --since <rfc3339>     Keep webhooks with created_at >= <rfc3339> (inclusive).
                         Whitespace-trimmed; empty disables.  Invalid values
                         are rejected client-side before contacting the daemon.
@@ -201,6 +216,7 @@ Optional filters and ordering:
 		eventType, _ := cmd.Flags().GetString("event-type")
 		deliveryStatus, _ := cmd.Flags().GetString("delivery-status")
 		activeFlag, _ := cmd.Flags().GetString("active")
+		urlPrefix, _ := cmd.Flags().GetString("url-prefix")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		untilFlag, _ := cmd.Flags().GetString("until")
 		lastDeliverySinceFlag, _ := cmd.Flags().GetString("last-delivery-since")
@@ -268,6 +284,9 @@ Optional filters and ordering:
 		}
 		if activeSet {
 			q.Set("active", strconv.FormatBool(activeVal))
+		}
+		if v := strings.ToLower(strings.TrimSpace(urlPrefix)); v != "" {
+			q.Set("url_prefix", v)
 		}
 		if v := strings.TrimSpace(sinceFlag); v != "" {
 			q.Set("since", v)
@@ -743,6 +762,7 @@ func init() {
 	webhookListCmd.Flags().String("event-type", "", "filter by explicit event_types membership (case-insensitive exact match; catch-alls excluded)")
 	webhookListCmd.Flags().String("delivery-status", "", "filter by delivery classification: never|healthy|failing")
 	webhookListCmd.Flags().String("active", "", "filter by active flag: true|false (empty disables)")
+	webhookListCmd.Flags().String("url-prefix", "", "case-insensitive HasPrefix filter on webhook URL (empty disables; lowercased before forwarding)")
 	webhookListCmd.Flags().String("since", "", "RFC3339 lower bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("last-delivery-since", "", "RFC3339 lower bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
