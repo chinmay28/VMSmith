@@ -251,15 +251,16 @@ func (m *MockManager) Stop(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	vm, ok := m.vms[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("vms/%s: not found", id)
 	}
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
+	m.mu.Unlock()
+
 	m.notifyConsoleTermination(id, "vm_stopped")
 	return nil
 }
@@ -270,18 +271,20 @@ func (m *MockManager) ForceStop(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	vm, ok := m.vms[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("vms/%s: not found", id)
 	}
 	if vm.State == types.VMStateStopped {
+		m.mu.Unlock()
 		return types.NewAPIError("vm_already_stopped", "vm is already stopped")
 	}
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
+	m.mu.Unlock()
+
 	m.notifyConsoleTermination(id, "vm_force_stopped")
 	return nil
 }
@@ -375,17 +378,19 @@ func (m *MockManager) Delete(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	vm, ok := m.vms[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("vms/%s: not found", id)
 	}
 	if vm.Spec.Locked {
+		m.mu.Unlock()
 		return types.NewAPIError("vm_locked", "vm is locked; unlock it before deleting")
 	}
 	delete(m.vms, id)
 	delete(m.snapshots, id)
+	m.mu.Unlock()
+
 	m.notifyConsoleTermination(id, "vm_deleted")
 	return nil
 }

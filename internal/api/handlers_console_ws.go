@@ -214,12 +214,12 @@ func (s *Server) unregisterConsoleSession(session *activeConsoleSession) {
 	}
 }
 
-func (s *Server) closeConsoleSessionsForVM(vmID, reason string) int {
+func (s *Server) closeConsoleSessionsForVM(vmID, reason string) {
 	s.consoleSessionsMu.Lock()
 	sessions := s.consoleSessions[vmID]
 	if len(sessions) == 0 {
 		s.consoleSessionsMu.Unlock()
-		return 0
+		return
 	}
 	copySessions := make([]*activeConsoleSession, 0, len(sessions))
 	for session := range sessions {
@@ -235,7 +235,6 @@ func (s *Server) closeConsoleSessionsForVM(vmID, reason string) int {
 		"reason":   reason,
 		"sessions": itoa(len(copySessions)),
 	})
-	return len(copySessions)
 }
 
 func (s *Server) consoleSessionCount() int {
