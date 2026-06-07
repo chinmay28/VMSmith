@@ -17,12 +17,20 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/console"
+	"github.com/vmsmith/vmsmith/internal/events"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/storage"
 	"github.com/vmsmith/vmsmith/internal/store"
 	"github.com/vmsmith/vmsmith/internal/vm"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
+
+type testEventStore struct{ seq uint64 }
+
+func (s *testEventStore) AppendEvent(evt *types.Event) (uint64, error) {
+	s.seq++
+	return s.seq, nil
+}
 
 func consoleWebSocketTestServer(t *testing.T, mutator func(*config.Config), ttl time.Duration) (*httptest.Server, *Server, *vm.MockManager, *console.Store, func()) {
 	t.Helper()
@@ -314,6 +322,84 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 				return
 			}
 		}
+	}
+}
+
+func TestProxyConsole_ClosesOnDirectManagerLifecycleActions(t *testing.T) {
+	tests := []struct {
+		name   string
+		action func(context.Context, *vm.MockManager, string) error
+	}{
+		{name: "stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Stop(ctx, id) }},
+		{name: "force-stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.ForceStop(ctx, id) }},
+		{name: "delete", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Delete(ctx, id) }},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+			defer cleanup()
+
+			bus := events.New(&testEventStore{})
+			bus.Start()
+			defer bus.Stop()
+			ch, cancelEvents := bus.Subscribe("test")
+			defer cancelEvents()
+			apiServer.SetEventBus(bus)
+
+			mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+			ln, err := mockMgr.SeedConsoleListener("vm-running")
+			if err != nil {
+				t.Fatalf("SeedConsoleListener: %v", err)
+			}
+			defer ln.Close()
+			accepted := make(chan net.Conn, 1)
+			go func() {
+				conn, err := ln.Accept()
+				if err == nil {
+					accepted <- conn
+				}
+			}()
+
+			ticket, _, err := store.IssueTicket("vm-running", "")
+			if err != nil {
+				t.Fatalf("IssueTicket: %v", err)
+			}
+			dialer := *websocket.DefaultDialer
+			dialer.Subprotocols = []string{"binary"}
+			conn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console?ticket="+ticket), nil)
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			backend := <-accepted
+			defer backend.Close()
+
+			if err := tc.action(context.Background(), mockMgr, "vm-running"); err != nil {
+				t.Fatalf("manager action: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			for {
+				select {
+				case <-ctx.Done():
+					t.Fatal("websocket stayed open after direct manager lifecycle action")
+				default:
+					_, _, err := conn.ReadMessage()
+					if err != nil {
+						_ = conn.Close()
+						events := drainEvents(t, ch, 1)
+						if len(events) != 1 || events[0].Type != "console.session_terminated" {
+							t.Fatalf("expected console.session_terminated event, got %+v", events)
+						}
+						if events[0].VMID != "vm-running" {
+							t.Fatalf("event VMID = %q, want vm-running", events[0].VMID)
+						}
+						return
+					}
+				}
+			}
+		})
 	}
 }
 

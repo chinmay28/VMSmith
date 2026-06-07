@@ -42,3 +42,17 @@ type Manager interface {
 	// Connection management
 	Close() error
 }
+
+// ConsoleSessionTerminator is an optional hook used by the API layer to force
+// close active console websocket sessions when lifecycle actions like stop,
+// force-stop, or delete succeed outside the HTTP handler path (for example via
+// direct manager calls from the CLI, scheduler, or tests). Restart is not
+// wired explicitly because it is implemented as stop+start and the stop path
+// already handles console teardown.
+type ConsoleSessionTerminator func(vmID, reason string)
+
+// ConsoleSessionTerminatorSetter is implemented by managers that can notify a
+// console-proxy owner after lifecycle actions complete.
+type ConsoleSessionTerminatorSetter interface {
+	SetConsoleSessionTerminator(ConsoleSessionTerminator)
+}

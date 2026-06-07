@@ -23,6 +23,12 @@ type quotaManager struct {
 	quotas config.QuotasConfig
 }
 
+func (m *quotaManager) SetConsoleSessionTerminator(fn ConsoleSessionTerminator) {
+	if setter, ok := m.base.(ConsoleSessionTerminatorSetter); ok {
+		setter.SetConsoleSessionTerminator(fn)
+	}
+}
+
 func (m *quotaManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM, error) {
 	if err := m.ensureCreateWithinQuota(ctx, spec); err != nil {
 		return nil, err

@@ -214,6 +214,29 @@ func (s *Server) unregisterConsoleSession(session *activeConsoleSession) {
 	}
 }
 
+func (s *Server) closeConsoleSessionsForVM(vmID, reason string) {
+	s.consoleSessionsMu.Lock()
+	sessions := s.consoleSessions[vmID]
+	if len(sessions) == 0 {
+		s.consoleSessionsMu.Unlock()
+		return
+	}
+	copySessions := make([]*activeConsoleSession, 0, len(sessions))
+	for session := range sessions {
+		copySessions = append(copySessions, session)
+	}
+	s.consoleSessionsMu.Unlock()
+
+	for _, session := range copySessions {
+		session.close()
+	}
+
+	s.publishAppEvent("console.session_terminated", vmID, "console sessions terminated for VM "+vmID, map[string]string{
+		"reason":   reason,
+		"sessions": itoa(len(copySessions)),
+	})
+}
+
 func (s *Server) consoleSessionCount() int {
 	s.consoleSessionsMu.Lock()
 	defer s.consoleSessionsMu.Unlock()

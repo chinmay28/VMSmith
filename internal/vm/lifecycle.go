@@ -31,6 +31,7 @@ type LibvirtManager struct {
 	lifecycleRegistered bool
 	lifecycleStopCh     chan struct{}
 	eventBus            *events.EventBus
+	consoleTerminator   ConsoleSessionTerminator
 }
 
 // SetEventBus wires an event bus so the manager can emit system events for
@@ -39,6 +40,20 @@ type LibvirtManager struct {
 // treated as "no bus configured" and no events are emitted.
 func (m *LibvirtManager) SetEventBus(bus *events.EventBus) {
 	m.eventBus = bus
+}
+
+// SetConsoleSessionTerminator wires an optional callback that is invoked after
+// successful stop / force-stop / delete operations so active websocket console
+// sessions can be closed even when the lifecycle action did not originate from
+// an API handler.
+func (m *LibvirtManager) SetConsoleSessionTerminator(fn ConsoleSessionTerminator) {
+	m.consoleTerminator = fn
+}
+
+func (m *LibvirtManager) notifyConsoleTermination(vmID, reason string) {
+	if m.consoleTerminator != nil {
+		m.consoleTerminator(vmID, reason)
+	}
 }
 
 // emitDHCPExhausted publishes a `dhcp.exhausted` system event when the NAT
@@ -457,7 +472,11 @@ func (m *LibvirtManager) Stop(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+	m.notifyConsoleTermination(id, "vm_stopped")
+	return nil
 }
 
 // ForceStop immediately destroys the running domain without sending an ACPI
@@ -492,7 +511,11 @@ func (m *LibvirtManager) ForceStop(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+	m.notifyConsoleTermination(id, "vm_force_stopped")
+	return nil
 }
 
 // Restart performs a graceful stop followed by a start.  When the VM is already
@@ -697,7 +720,11 @@ func (m *LibvirtManager) Delete(ctx context.Context, id string) error {
 	vmDir := filepath.Dir(vm.DiskPath)
 	os.RemoveAll(vmDir)
 
-	return m.store.DeleteVM(id)
+	if err := m.store.DeleteVM(id); err != nil {
+		return err
+	}
+	m.notifyConsoleTermination(id, "vm_deleted")
+	return nil
 }
 
 // forceUndefineDomain tears a libvirt domain down completely so its name is
