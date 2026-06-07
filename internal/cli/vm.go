@@ -182,6 +182,7 @@ var vmListCmd = &cobra.Command{
 		machineFilterRaw, _ := cmd.Flags().GetString("machine")
 		clockOffsetFilterRaw, _ := cmd.Flags().GetString("clock-offset")
 		networkFilter, _ := cmd.Flags().GetString("network")
+		prefixFilter, _ := cmd.Flags().GetString("prefix")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -230,6 +231,10 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 		networkFilter = strings.TrimSpace(strings.ToLower(networkFilter))
+		// Case-sensitive HasPrefix mirrors the 5.4.75 snapshot --prefix contract
+		// and the case-sensitive `vmsmith` VM-name alphabet; trim whitespace but
+		// preserve operator casing on round-trip.
+		prefixFilter = strings.TrimSpace(prefixFilter)
 		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
 		if err != nil {
 			return err
@@ -307,7 +312,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -368,6 +373,12 @@ var vmListCmd = &cobra.Command{
 					continue
 				}
 				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
+					continue
+				}
+				// Case-sensitive HasPrefix on v.Name (mirrors `vmsmith snapshot
+				// list --prefix` from 5.4.75). Applied between network and
+				// auto-start so the order matches the API handler exactly.
+				if prefixFilter != "" && !strings.HasPrefix(v.Name, prefixFilter) {
 					continue
 				}
 				if autoStartSet && v.Spec.AutoStart != autoStartVal {
@@ -1243,6 +1254,7 @@ Examples:
 	vmListCmd.Flags().String("machine", "", "filter VMs by effective libvirt machine type (case-sensitive, free-form; empty spec.machine resolves to the daemon default 'pc-q35-6.2' so --machine pc-q35-6.2 matches both stored value and VMs with no override)")
 	vmListCmd.Flags().String("clock-offset", "", "filter VMs by effective libvirt clock offset: utc or localtime (case-insensitive; 'utc' also matches Linux VMs with no clock_offset override since empty defaults to utc; 'localtime' also matches Windows VMs with no clock_offset override since empty defaults to localtime)")
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
+	vmListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on VM name (e.g. 'web-prod-' to preview every production web cohort VM)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb")

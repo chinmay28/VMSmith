@@ -846,6 +846,40 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.76 — Name-prefix filter on the VM list. Seed data: web-server,
+  // db-server, win-app. `?prefix=web-` matches only web-server;
+  // `?prefix=Web-` (case-sensitive) matches nothing (no `Web-*` VMs); the
+  // Clear button drops the URL param and restores every VM.
+  test("name-prefix filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+
+    // `web-` prefix narrows to web-server only.
+    await page.getByTestId("vm-list-prefix-filter").fill("web-");
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("web-");
+
+    // Case-sensitive: `Web-` matches nothing because seed names are lowercase.
+    await page.getByTestId("vm-list-prefix-filter").fill("Web-");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("Web-");
+
+    // The Clear button drops the URL param and restores every VM.
+    await page.getByTestId("vm-list-prefix-filter-clear").click();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-win-app")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("prefix=");
+  });
+
   // 5.4.44 — vCPU range filter on the VM list. Seed data: web-server has 2
   // vCPUs, db-server has 4. 250 ms-debounced number inputs with URL round-trip
   // via ?min_cpus= / ?max_cpus=.

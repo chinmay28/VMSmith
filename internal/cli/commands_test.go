@@ -8741,3 +8741,57 @@ func TestCLI_WebhookList_LimitComposesWithFilters(t *testing.T) {
 		}
 	}
 }
+
+// --- 5.4.76 — `--prefix` on `vmsmith vm list`. Case-sensitive HasPrefix on
+// vm.Name; mirrors the 5.4.75 snapshot list --prefix selector.
+
+func TestCLI_VMList_FilterByPrefix_Match(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "web-prod-1", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "web-prod-2", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "db-prod-1", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--prefix", "web-prod-")
+	if err != nil {
+		t.Fatalf("vm list --prefix: %v", err)
+	}
+	if !strings.Contains(out, "web-prod-1") || !strings.Contains(out, "web-prod-2") {
+		t.Fatalf("expected both web-prod-* in output, got %q", out)
+	}
+	if strings.Contains(out, "db-prod-1") {
+		t.Fatalf("db-prod-1 should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "Web-Prod-1", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--prefix", "web-prod-")
+	if err != nil {
+		t.Fatalf("vm list --prefix: %v", err)
+	}
+	if strings.Contains(out, "Web-Prod-1") {
+		t.Fatalf("case-sensitive non-match should exclude Web-Prod-1, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByPrefix_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "vm-a", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "vm-b", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--prefix", "  ")
+	if err != nil {
+		t.Fatalf("vm list --prefix '  ': %v", err)
+	}
+	if !strings.Contains(out, "vm-a") || !strings.Contains(out, "vm-b") {
+		t.Fatalf("whitespace --prefix should be no-op, got %q", out)
+	}
+}

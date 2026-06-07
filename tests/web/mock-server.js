@@ -445,6 +445,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_clock_offset", message: `clock_offset must be one of: ${knownClockOffsets.join(", ")}` });
     }
     const networkFilter = (url.searchParams.get("network") || "").trim().toLowerCase();
+    // 5.4.76 — case-sensitive HasPrefix on vm.name; whitespace-trimmed; empty
+    // disables. Mirrors the 5.4.75 snapshot prefix selector.
+    const prefixFilter = (url.searchParams.get("prefix") || "").trim();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -604,6 +607,10 @@ const server = http.createServer(async (req, res) => {
         const nets = Array.isArray(vm?.spec?.networks) ? vm.spec.networks : [];
         return nets.some(n => String(n?.name || "").toLowerCase() === networkFilter);
       });
+    }
+    if (prefixFilter) {
+      // 5.4.76 — case-sensitive HasPrefix on vm.name.
+      list = list.filter(vm => String(vm.name || "").startsWith(prefixFilter));
     }
     if (autoStart.set) {
       list = list.filter(vm => !!(vm.spec && vm.spec.auto_start) === autoStart.value);

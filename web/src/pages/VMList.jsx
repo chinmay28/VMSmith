@@ -73,6 +73,11 @@ export default function VMList() {
   const [clockOffsetFilter, setClockOffsetFilter] = useState(searchParams.get('clock_offset') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
+  // 5.4.76 — `?prefix=` case-sensitive HasPrefix filter on vm.name. The
+  // raw input drives a 250 ms debounce; the committed value drives useFetch
+  // and round-trips through the URL via `?prefix=`.
+  const [prefixInput, setPrefixInput] = useState(searchParams.get('prefix') || '');
+  const [prefixFilter, setPrefixFilter] = useState(searchParams.get('prefix') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
@@ -98,8 +103,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, prefix: prefixFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -132,7 +137,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -180,6 +185,17 @@ export default function VMList() {
     }, 250);
     return () => clearTimeout(handle);
   }, [networkInput]);
+
+  // 5.4.76 — Same debounce shape for the prefix-filter input. The trim is
+  // case-preserving so operators distinguishing `web-prod-` from
+  // `Web-Prod-` get exact matches on the round-trip.
+  useEffect(() => {
+    const trimmed = prefixInput.trim();
+    const handle = setTimeout(() => {
+      setPrefixFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [prefixInput]);
 
   // Debounce the vCPU range inputs — the committed filters drive useFetch.
   useEffect(() => {
@@ -235,6 +251,7 @@ export default function VMList() {
     if (machineFilter) next.set('machine', machineFilter); else next.delete('machine');
     if (clockOffsetFilter) next.set('clock_offset', clockOffsetFilter); else next.delete('clock_offset');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
+    if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (autoStartFilter) next.set('auto_start', autoStartFilter); else next.delete('auto_start');
     if (lockedFilter) next.set('locked', lockedFilter); else next.delete('locked');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
@@ -246,7 +263,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -473,6 +490,28 @@ export default function VMList() {
               onClick={() => setNetworkInput('')}
               data-testid="vm-list-network-filter-clear"
               aria-label="Clear network filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-full sm:w-60">
+          <input
+            type="search"
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            placeholder="Filter by name prefix…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="vm-list-prefix-filter"
+            aria-label="Filter by VM name prefix (case-sensitive)"
+          />
+          {prefixInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setPrefixInput('')}
+              data-testid="vm-list-prefix-filter-clear"
+              aria-label="Clear name-prefix filter"
             >
               <X size={13} />
             </button>
