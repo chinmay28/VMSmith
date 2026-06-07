@@ -13,12 +13,13 @@ import (
 
 // MockManager implements Manager for testing without libvirt.
 type MockManager struct {
-	mu               sync.RWMutex
-	vms              map[string]*types.VM
-	snapshots        map[string][]*types.Snapshot // vmID -> snapshots
-	consoleEndpoints map[string]*types.ConsoleEndpoint
-	consoleListeners map[string]net.Listener
-	nextID           int
+	mu                sync.RWMutex
+	vms               map[string]*types.VM
+	snapshots         map[string][]*types.Snapshot // vmID -> snapshots
+	consoleEndpoints  map[string]*types.ConsoleEndpoint
+	consoleListeners  map[string]net.Listener
+	nextID            int
+	consoleTerminator ConsoleSessionTerminator
 
 	// Hooks for injecting errors in tests
 	CreateErr             error
@@ -49,6 +50,16 @@ func NewMockManager() *MockManager {
 		snapshots:        make(map[string][]*types.Snapshot),
 		consoleEndpoints: make(map[string]*types.ConsoleEndpoint),
 		consoleListeners: make(map[string]net.Listener),
+	}
+}
+
+func (m *MockManager) SetConsoleSessionTerminator(fn ConsoleSessionTerminator) {
+	m.consoleTerminator = fn
+}
+
+func (m *MockManager) notifyConsoleTermination(vmID, reason string) {
+	if m.consoleTerminator != nil {
+		m.consoleTerminator(vmID, reason)
 	}
 }
 
@@ -249,6 +260,7 @@ func (m *MockManager) Stop(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
+	m.notifyConsoleTermination(id, "vm_stopped")
 	return nil
 }
 
@@ -270,6 +282,7 @@ func (m *MockManager) ForceStop(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateStopped
 	vm.UpdatedAt = time.Now()
+	m.notifyConsoleTermination(id, "vm_force_stopped")
 	return nil
 }
 
@@ -373,6 +386,7 @@ func (m *MockManager) Delete(ctx context.Context, id string) error {
 	}
 	delete(m.vms, id)
 	delete(m.snapshots, id)
+	m.notifyConsoleTermination(id, "vm_deleted")
 	return nil
 }
 

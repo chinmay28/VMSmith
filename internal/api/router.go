@@ -130,6 +130,9 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		shutdownNotify:       make(chan struct{}),
 		consoleSessions:      make(map[string]map[*activeConsoleSession]struct{}),
 	}
+	if setter, ok := vmMgr.(vm.ConsoleSessionTerminatorSetter); ok {
+		setter.SetConsoleSessionTerminator(s.closeConsoleSessionsForVM)
+	}
 	if s.maxConcurrentCreates > 0 {
 		s.createTokens = make(chan struct{}, s.maxConcurrentCreates)
 		for i := 0; i < s.maxConcurrentCreates; i++ {
