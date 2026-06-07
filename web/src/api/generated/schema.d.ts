@@ -3178,6 +3178,21 @@ export interface paths {
                      */
                     last_fired_until?: string;
                     /**
+                     * @description Case-sensitive `HasPrefix(sched.Name, prefix)` filter (5.4.82).
+                     *     Whitespace-trimmed; empty disables the filter. The fifth and
+                     *     final member of the name-prefix filter family alongside snapshots
+                     *     (5.4.75), VMs (5.4.76), images (5.4.77), and templates (5.4.78)
+                     *     so the same cohort-discrimination query (`?prefix=nightly-`,
+                     *     `?prefix=backup-`, `?prefix=auto-`) round-trips 1:1 across every
+                     *     name-prefix axis operators reach for most. Case-sensitive because
+                     *     schedule names share the same case-sensitive free-form alphabet
+                     *     as VM / template names. Applied after the time-range filters and
+                     *     before `search` so it composes additively with every other
+                     *     schedule filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    prefix?: string;
+                    /**
                      * @description Field to sort by. `name` matches case-insensitively;
                      *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
                      *     unscheduled) at the tail of the ascending list. All comparators

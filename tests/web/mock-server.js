@@ -2518,6 +2518,10 @@ const server = http.createServer(async (req, res) => {
     if (lastFiredUntil.invalid) {
       return json(res, 400, { code: "invalid_last_fired_until", message: "last_fired_until must be a valid RFC3339 timestamp" });
     }
+    // prefix (5.4.82): case-sensitive HasPrefix on schedule name; mirrors
+    // the snapshot / VM / image / template prefix-filter family;
+    // whitespace-trimmed; empty disables.
+    const prefixFilter = (url.searchParams.get("prefix") || "").trim();
 
     let list = [...scheduleList.values()];
     if (vmIdFilter) list = list.filter((s) => (s.vm_id || "") === vmIdFilter);
@@ -2560,6 +2564,9 @@ const server = http.createServer(async (req, res) => {
         if (lastFiredUntil.set && t > lastFiredUntil.value) return false;
         return true;
       });
+    }
+    if (prefixFilter) {
+      list = list.filter((s) => typeof s.name === "string" && s.name.startsWith(prefixFilter));
     }
     if (needle) {
       list = list.filter((s) => {

@@ -1648,3 +1648,111 @@ func TestListScheduleRuns_FilterBySkipReason(t *testing.T) {
 		t.Fatalf("filtered pagination: %+v total=%d", runs, total)
 	}
 }
+
+// TestListSchedules_FilterByPrefix covers the ?prefix= filter (5.4.82): the
+// fifth and final name-prefix axis after snapshots (5.4.75), VMs (5.4.76),
+// images (5.4.77), and templates (5.4.78). Case-sensitive HasPrefix on the
+// schedule name; whitespace-trimmed; empty disables; composes additively with
+// every other schedule filter and reflects correctly in X-Total-Count under
+// pagination.
+func TestListSchedules_FilterByPrefix(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id, name string, enabled bool) {
+		t.Helper()
+		sched := &types.Schedule{
+			ID:        id,
+			Name:      name,
+			Action:    types.ScheduleActionSnapshot,
+			CronSpec:  "0 0 2 * * *",
+			Enabled:   enabled,
+			CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		}
+		if err := s.PutSchedule(sched); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	mk("sched-1", "nightly-snapshot", true)
+	mk("sched-2", "nightly-restart", true)
+	mk("sched-3", "weekly-backup", false)
+	mk("sched-4", "Nightly-Audit", true) // capital-N — must NOT match `nightly-`
+
+	list := func(q string) ([]*types.Schedule, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		if resp.StatusCode == http.StatusOK {
+			json.Unmarshal(data, &out)
+		}
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	// Baseline: no filter returns all four.
+	if out, total, code := list(""); code != http.StatusOK || len(out) != 4 || total != 4 {
+		t.Fatalf("baseline: code=%d len=%d total=%d", code, len(out), total)
+	}
+
+	// Prefix matches the two `nightly-` schedules. Capital-N is excluded
+	// (case-sensitive).
+	if out, total, _ := list("?prefix=nightly-"); len(out) != 2 || total != 2 {
+		t.Fatalf("prefix=nightly-: %+v total=%d", out, total)
+	}
+	// Verify capital-N is not in the matched set.
+	for _, sched := range func() []*types.Schedule {
+		out, _, _ := list("?prefix=nightly-")
+		return out
+	}() {
+		if sched.Name == "Nightly-Audit" {
+			t.Fatalf("case-sensitive prefix must not match capital-N")
+		}
+	}
+
+	// Case-sensitive: capital prefix only matches the capital-N schedule.
+	if out, total, _ := list("?prefix=Nightly-"); len(out) != 1 || total != 1 || out[0].Name != "Nightly-Audit" {
+		t.Fatalf("prefix=Nightly-: %+v total=%d", out, total)
+	}
+
+	// Empty value is a no-op (returns all).
+	if out, total, _ := list("?prefix="); len(out) != 4 || total != 4 {
+		t.Fatalf("empty prefix should be no-op: %+v total=%d", out, total)
+	}
+
+	// Whitespace-trimmed: " nightly-" matches the same set as "nightly-".
+	if out, total, _ := list("?prefix=%20nightly-%20"); len(out) != 2 || total != 2 {
+		t.Fatalf("whitespace-trim wrong: %+v total=%d", out, total)
+	}
+
+	// Substring-only matches are excluded (HasPrefix, not Contains).
+	// "snapshot" is in the middle of "nightly-snapshot" but not a prefix.
+	if out, total, _ := list("?prefix=snapshot"); len(out) != 0 || total != 0 {
+		t.Fatalf("prefix=snapshot should match none: %+v total=%d", out, total)
+	}
+
+	// No match returns an empty list with zero total (not 404).
+	if out, total, code := list("?prefix=zzz"); code != http.StatusOK || len(out) != 0 || total != 0 {
+		t.Fatalf("no-match: code=%d %+v total=%d", code, out, total)
+	}
+
+	// Composes additively with ?enabled= (only nightly-snapshot + nightly-restart
+	// are enabled and start with `nightly-`).
+	if out, total, _ := list("?prefix=nightly-&enabled=true"); len(out) != 2 || total != 2 {
+		t.Fatalf("prefix+enabled compose: %+v total=%d", out, total)
+	}
+	if out, total, _ := list("?prefix=nightly-&enabled=false"); len(out) != 0 || total != 0 {
+		t.Fatalf("prefix+enabled=false compose: %+v total=%d", out, total)
+	}
+
+	// Composes additively with ?search= (search is substring + lowercased; the
+	// combined filter must intersect — `prefix=nightly-` AND `search=restart`
+	// (which hits only the name) leaves only the nightly-restart schedule).
+	if out, total, _ := list("?prefix=nightly-&search=restart"); len(out) != 1 || total != 1 || out[0].Name != "nightly-restart" {
+		t.Fatalf("prefix+search compose: %+v total=%d", out, total)
+	}
+
+	// Filtered pagination: X-Total-Count reflects the post-filter count.
+	if out, total, _ := list("?prefix=nightly-&per_page=1"); len(out) != 1 || total != 2 {
+		t.Fatalf("paginated post-filter total wrong: len=%d total=%d", len(out), total)
+	}
+}

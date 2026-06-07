@@ -70,6 +70,13 @@ export default function Schedules() {
   const [tagSelectorInput, setTagSelectorInput] = useState(searchParams.get('tag_selector') || '');
   const [tagSelectorFilter, setTagSelectorFilter] = useState(searchParams.get('tag_selector') || '');
 
+  // Name-prefix filter (5.4.82): case-sensitive HasPrefix on schedule name.
+  // Debounced like `search`; round-trips through `?prefix=`. The fifth and
+  // final member of the cohort-discrimination name-prefix family alongside
+  // snapshots / VMs / images / templates.
+  const [prefixInput, setPrefixInput] = useState(searchParams.get('prefix') || '');
+  const [prefixFilter, setPrefixFilter] = useState(searchParams.get('prefix') || '');
+
   const VALID_ACTIONS = ['', ...ACTIONS];
   const initialAction = (() => {
     const raw = (searchParams.get('action') || '').toLowerCase();
@@ -163,11 +170,20 @@ export default function Schedules() {
     return () => clearTimeout(id);
   }, [timezoneInput]);
 
+  useEffect(() => {
+    // No trim: the prefix filter is case-sensitive AND space-sensitive at the
+    // request boundary, but the backend whitespace-trims so leading/trailing
+    // spaces don't reach the predicate. Trim before debouncing to match.
+    const trimmed = prefixInput.trim();
+    const id = setTimeout(() => setPrefixFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [prefixInput]);
+
   // Reset to page 1 on any filter / sort change so the user doesn't land on
   // an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, sortField, sortOrder]);
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, prefixFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -183,16 +199,17 @@ export default function Schedules() {
     if (nextFireUntilFilter) next.set('next_fire_until', nextFireUntilFilter); else next.delete('next_fire_until');
     if (lastFiredSinceFilter) next.set('last_fired_since', lastFiredSinceFilter); else next.delete('last_fired_since');
     if (lastFiredUntilFilter) next.set('last_fired_until', lastFiredUntilFilter); else next.delete('last_fired_until');
+    if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (sortField) next.set('sort', sortField); else next.delete('sort');
     if (sortOrder) next.set('order', sortOrder); else next.delete('order');
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_SCHEDULE_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceFilter, untilFilter, nextFireSinceFilter, nextFireUntilFilter, lastFiredSinceFilter, lastFiredUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceFilter, untilFilter, nextFireSinceFilter, nextFireUntilFilter, lastFiredSinceFilter, lastFiredUntilFilter, prefixFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, timezone: timezoneFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, nextFireSince: nextFireSinceParam, nextFireUntil: nextFireUntilParam, lastFiredSince: lastFiredSinceParam, lastFiredUntil: lastFiredUntilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, sortField, sortOrder, page, perPage],
+    () => schedulesApi.list({ search: searchFilter, tagSelector: tagSelectorFilter, action: actionFilter, catchUpPolicy: catchUpFilter, timezone: timezoneFilter, enabled: enabledFilter, since: sinceParam, until: untilParam, nextFireSince: nextFireSinceParam, nextFireUntil: nextFireUntilParam, lastFiredSince: lastFiredSinceParam, lastFiredUntil: lastFiredUntilParam, prefix: prefixFilter, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, tagSelectorFilter, actionFilter, catchUpFilter, timezoneFilter, enabledFilter, sinceParam, untilParam, nextFireSinceParam, nextFireUntilParam, lastFiredSinceParam, lastFiredUntilParam, prefixFilter, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(schedulesApi.delete);
@@ -286,6 +303,18 @@ export default function Schedules() {
             className="input py-1 text-xs w-32"
             data-testid="schedule-tag-selector-filter"
             aria-label="Filter by tag selector"
+          />
+        </label>
+        <label className="text-xs text-steel-400 flex items-center gap-1.5">
+          Name prefix
+          <input
+            type="search"
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            placeholder="nightly-, backup-…"
+            className="input py-1 text-xs w-32"
+            data-testid="schedule-list-prefix-filter"
+            aria-label="Filter by schedule name prefix"
           />
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
@@ -475,11 +504,11 @@ export default function Schedules() {
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
       ) : items.length === 0 ? (
         <div className="card">
-          {searchFilter || actionFilter || catchUpFilter || timezoneFilter || enabledFilter || sinceFilter || untilFilter || nextFireSinceFilter || nextFireUntilFilter || lastFiredSinceFilter || lastFiredUntilFilter ? (
+          {searchFilter || actionFilter || catchUpFilter || timezoneFilter || enabledFilter || sinceFilter || untilFilter || nextFireSinceFilter || nextFireUntilFilter || lastFiredSinceFilter || lastFiredUntilFilter || prefixFilter ? (
             <EmptyState
               icon={Search}
               title="No schedules match your filters"
-              description="Try a different search term, action, catch-up policy, timezone, enabled state, created-at range, next-fire range, or last-fired range."
+              description="Try a different search term, action, catch-up policy, timezone, enabled state, name prefix, created-at range, next-fire range, or last-fired range."
             />
           ) : (
             <EmptyState

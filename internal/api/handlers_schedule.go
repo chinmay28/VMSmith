@@ -181,7 +181,16 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // invalid_last_fired_since / invalid_last_fired_until; schedules with a nil
 // LastFiredAt — never-fired schedules — are filtered OUT when any bound is
 // set, mirroring the webhook ?last_delivery_since=/?last_delivery_until=
-// nil-handling and the next_fire range nil-exclusion), search
+// nil-handling and the next_fire range nil-exclusion), prefix (5.4.82 —
+// case-sensitive `HasPrefix(sched.Name, prefix)` filter; whitespace-trimmed;
+// empty disables; the fifth and final member of the name-prefix filter
+// family alongside snapshots (5.4.75), VMs (5.4.76), images (5.4.77), and
+// templates (5.4.78) so the same cohort-discrimination query
+// (?prefix=nightly-, ?prefix=auto-, ?prefix=backup-) round-trips 1:1 across
+// every name-prefix axis; case-sensitive because schedule names share the
+// same case-sensitive free-form alphabet as VM / template names; applied
+// right after the time-range filters and before ?search= so it composes
+// additively with every other schedule filter), search
 // (case-insensitive substring across name, action, vm_id, and tag_selector).
 // Sorting: sort=id|name|created_at|next_fire_at (default id), order=asc|desc
 // (default asc). All comparators tiebreak on id.
@@ -252,6 +261,7 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	timezoneFilter := strings.TrimSpace(q.Get("timezone"))
+	prefixFilter := strings.TrimSpace(q.Get("prefix"))
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
 	all, err := s.scheduleStore.ListSchedules()
@@ -301,6 +311,9 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 			if !snapshotInTimeRange(*sched.LastFiredAt, lastFiredSinceTime, lastFiredSinceSet, lastFiredUntilTime, lastFiredUntilSet) {
 				continue
 			}
+		}
+		if prefixFilter != "" && !strings.HasPrefix(sched.Name, prefixFilter) {
+			continue
 		}
 		if searchFilter != "" && !scheduleMatchesSearch(sched, searchFilter) {
 			continue
