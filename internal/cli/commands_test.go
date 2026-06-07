@@ -8990,3 +8990,74 @@ func TestCLI_VMList_FilterByNATStaticIP_EmptyOmitsFilter(t *testing.T) {
 		t.Fatalf("whitespace --nat-static-ip should be no-op, got %q", out)
 	}
 }
+
+// 5.4.80 — NAT gateway filter on CLI vm list.
+
+func TestCLI_VMList_FilterByNATGateway_Match(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, NatGateway: "192.168.100.1"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, NatGateway: "10.0.0.1"}})
+
+	out, err := runCLI("vm", "list", "--nat-gateway", "192.168.100.1")
+	if err != nil {
+		t.Fatalf("vm list --nat-gateway: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected alpha in output, got %q", out)
+	}
+	if strings.Contains(out, "beta") {
+		t.Fatalf("beta should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNATGateway_ExcludesEmpty(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, NatGateway: "192.168.100.1"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--nat-gateway", "192.168.100.1")
+	if err != nil {
+		t.Fatalf("vm list --nat-gateway: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected alpha in output, got %q", out)
+	}
+	if strings.Contains(out, "beta") {
+		t.Fatalf("VM with empty NatGateway beta should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNATGateway_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, NatGateway: "FE80::1"}})
+
+	out, err := runCLI("vm", "list", "--nat-gateway", "fe80::1")
+	if err != nil {
+		t.Fatalf("vm list --nat-gateway: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByNATGateway_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, NatGateway: "192.168.100.1"}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--nat-gateway", "  ")
+	if err != nil {
+		t.Fatalf("vm list --nat-gateway '  ': %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("whitespace --nat-gateway should be no-op, got %q", out)
+	}
+}

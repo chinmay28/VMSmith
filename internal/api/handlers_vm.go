@@ -333,6 +333,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	// expect strict-match semantics. Whitespace-trimmed; empty disables.
 	prefixFilter := strings.TrimSpace(q.Get("prefix"))
 	natStaticIPFilter, natStaticIPSet := parseNATStaticIPFilter(q.Get("nat_static_ip"))
+	natGatewayFilter, natGatewaySet := parseNATGatewayFilter(q.Get("nat_gateway"))
 	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -368,7 +369,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -451,6 +452,13 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 			// without round-tripping `?search=`. Empty stored values
 			// (DHCP-assigned VMs) drop out when the filter is set.
 			if natStaticIPSet && !vmMatchesNATStaticIPFilter(vm, natStaticIPFilter) {
+				continue
+			}
+			// NAT gateway filter (5.4.80): case-insensitive exact-match
+			// on `spec.nat_gateway` (a plain IP — no CIDR dual-form).
+			// VMs with an empty NatGateway drop out when set, mirroring
+			// the empty-stored-excludes contract on `?nat_static_ip=`.
+			if natGatewaySet && !vmMatchesNATGatewayFilter(vm, natGatewayFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

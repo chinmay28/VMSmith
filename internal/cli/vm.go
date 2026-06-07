@@ -184,6 +184,7 @@ var vmListCmd = &cobra.Command{
 		networkFilter, _ := cmd.Flags().GetString("network")
 		prefixFilter, _ := cmd.Flags().GetString("prefix")
 		natStaticIPRaw, _ := cmd.Flags().GetString("nat-static-ip")
+		natGatewayRaw, _ := cmd.Flags().GetString("nat-gateway")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -237,6 +238,7 @@ var vmListCmd = &cobra.Command{
 		// preserve operator casing on round-trip.
 		prefixFilter = strings.TrimSpace(prefixFilter)
 		natStaticIPFilter, natStaticIPSet := parseCLINATStaticIP(natStaticIPRaw)
+		natGatewayFilter, natGatewaySet := parseCLINATGateway(natGatewayRaw)
 		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
 		if err != nil {
 			return err
@@ -314,7 +316,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -387,6 +389,11 @@ var vmListCmd = &cobra.Command{
 				// against the stored CIDR or the IP portion. Mirrors the API
 				// handler placement (right after prefix, before auto-start).
 				if natStaticIPSet && !cliVMMatchesNATStaticIPFilter(v, natStaticIPFilter) {
+					continue
+				}
+				// NAT gateway filter (5.4.80): case-insensitive exact match
+				// against the stored gateway IP. Empty stored values drop out.
+				if natGatewaySet && !cliVMMatchesNATGatewayFilter(v, natGatewayFilter) {
 					continue
 				}
 				if autoStartSet && v.Spec.AutoStart != autoStartVal {
@@ -1264,6 +1271,7 @@ Examples:
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on VM name (e.g. 'web-prod-' to preview every production web cohort VM)")
 	vmListCmd.Flags().String("nat-static-ip", "", "filter VMs by nat_static_ip (case-insensitive exact match against the stored CIDR or the IP portion; empty disables; DHCP-assigned VMs drop out when the filter is set)")
+	vmListCmd.Flags().String("nat-gateway", "", "filter VMs by nat_gateway (case-insensitive exact match against the stored gateway IP; empty disables; VMs with no nat_gateway override drop out when the filter is set)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb")

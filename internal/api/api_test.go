@@ -15826,3 +15826,178 @@ func TestListVMs_FilterByNATStaticIP_TotalCountReflectsFiltered(t *testing.T) {
 		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
 	}
 }
+
+// 5.4.80 — NAT gateway filter tests.
+
+func TestListVMs_FilterByNATGateway_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{NatGateway: "10.0.0.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=192.168.100.1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected vm-1, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_ExcludesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"}) // empty NatGateway
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=192.168.100.1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only vm-1 (empty NatGateway excluded), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "FE80::1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=fe80::1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=%20%20192.168.100.1%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=10.0.0.1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected no match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=192.168.100.1&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only vm-1, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_ComposesWithNATStaticIP(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{NatStaticIP: "192.168.100.50/24", NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{NatStaticIP: "192.168.100.50/24", NatGateway: "192.168.100.254"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_static_ip=192.168.100.50&nat_gateway=192.168.100.254")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-2" {
+		t.Fatalf("expected only vm-2 (matching both filters), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByNATGateway_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		gw := "192.168.100.1"
+		if i%2 == 0 {
+			gw = "10.0.0.1"
+		}
+		mockMgr.SeedVM(&types.VM{ID: fmt.Sprintf("vm-%d", i), Name: fmt.Sprintf("vm-%d", i), Spec: types.VMSpec{NatGateway: gw}})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=192.168.100.1&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}

@@ -211,6 +211,22 @@ export interface paths {
                      */
                     nat_static_ip?: string;
                     /**
+                     * @description Case-insensitive exact-match on the VM's
+                     *     `spec.nat_gateway` (the plain gateway IP — no CIDR
+                     *     dual-form, since gateways are always stored as bare IPs).
+                     *     Whitespace is trimmed; empty disables the filter. VMs with
+                     *     an empty `nat_gateway` (no explicit gateway override) drop
+                     *     out whenever the filter is set — mirrors the
+                     *     empty-stored-excludes contract on `?nat_static_ip=`
+                     *     (5.4.79). No validation rejection: `nat_gateway` is a
+                     *     free-form value operators paste verbatim and garbage simply
+                     *     matches no VMs. Applied right after `nat_static_ip` and
+                     *     before `since`/`until` so it composes additively with every
+                     *     other VM filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    nat_gateway?: string;
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is
