@@ -2847,6 +2847,33 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
   });
 
+  // 5.4.78 — name-prefix filter on the template list. Case-sensitive
+  // HasPrefix; mirrors snapshot/VM/image prefix filters.
+  test("name-prefix filter narrows the template list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    // "windows-" matches windows-2022 + windows-11-desktop, excludes the
+    // two Linux templates.
+    await page.getByTestId("template-list-prefix-filter").fill("windows-");
+    await expect(page.getByTestId("template-row-windows-2022")).toBeVisible();
+    await expect(page.getByTestId("template-row-windows-11-desktop")).toBeVisible();
+    await expect(page.getByTestId("template-row-small-ubuntu")).not.toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).not.toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("windows-");
+
+    // Case-sensitivity: "Windows-" matches nothing because stored names
+    // are lowercased.
+    await page.getByTestId("template-list-prefix-filter").fill("Windows-");
+    await expect(page.getByTestId("template-row-windows-2022")).not.toBeVisible();
+
+    // Clear restores every template + drops the URL param.
+    await page.getByTestId("template-list-prefix-filter-clear").click();
+    await expect(page.getByTestId("template-row-small-ubuntu")).toBeVisible();
+    await expect(page.getByTestId("template-row-big-rocky")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("prefix=");
+  });
+
   test("sort dropdowns reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

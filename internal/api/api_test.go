@@ -13169,6 +13169,118 @@ func TestListTemplates_FilterByNetwork_TotalCountReflectsFiltered(t *testing.T) 
 	}
 }
 
+// 5.4.78 — `?prefix=` on `GET /templates`. Case-sensitive HasPrefix against
+// `tpl.Name`; the fourth and final member of the name-prefix filter family
+// alongside snapshots (5.4.75), VMs (5.4.76), and images (5.4.77).
+func TestListTemplates_FilterByPrefix_Match(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base-v1", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky9-base-v2", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-22", Image: "ubuntu.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=rocky9-base-")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter)", got)
+	}
+	listed := decodeTemplateList(t, resp)
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 templates, got %+v", listed)
+	}
+	for _, tpl := range listed {
+		if !strings.HasPrefix(tpl.Name, "rocky9-base-") {
+			t.Fatalf("expected only rocky9-base-* templates, got %s", tpl.Name)
+		}
+	}
+}
+
+func TestListTemplates_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "Rocky9-Base", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=rocky9-base")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0 (case-sensitive non-match)", got)
+	}
+}
+
+func TestListTemplates_FilterByPrefix_TrimsWhitespace(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky-9", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "ubuntu-22", Image: "ubuntu.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=%20%20rocky-%20%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (whitespace-trim)", got)
+	}
+}
+
+func TestListTemplates_FilterByPrefix_EmptyIsNoOp(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "alpha", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "bravo", Image: "ubuntu.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=%20%20")
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (whitespace-only disables filter)", got)
+	}
+}
+
+func TestListTemplates_FilterByPrefix_NoMatch(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "manual-1", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=auto-")
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestListTemplates_FilterByPrefix_ComposesWithTag(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "rocky9-prod", Image: "rocky9.qcow2", Tags: []string{"prod"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "rocky9-qa", Image: "rocky9.qcow2", Tags: []string{"qa"}})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-prod", Image: "ubuntu.qcow2", Tags: []string{"prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=rocky9-&tag=prod")
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	listed := decodeTemplateList(t, resp)
+	if len(listed) != 1 || listed[0].Name != "rocky9-prod" {
+		t.Fatalf("expected only rocky9-prod, got %+v", listed)
+	}
+}
+
+func TestListTemplates_FilterByPrefix_TotalCountReflectsFiltered(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	for i := 0; i < 5; i++ {
+		seedStoredTemplate(t, s, &types.VMTemplate{ID: fmt.Sprintf("tmpl-%d", i), Name: fmt.Sprintf("rocky9-base-%d", i), Image: "rocky9.qcow2"})
+	}
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-u", Name: "ubuntu-22", Image: "ubuntu.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?prefix=rocky9-base-&per_page=2&page=1")
+	if got := resp.Header.Get("X-Total-Count"); got != "5" {
+		t.Errorf("X-Total-Count = %q, want 5 (post-filter population)", got)
+	}
+	got := decodeTemplateList(t, resp)
+	if len(got) != 2 {
+		t.Errorf("page len = %d, want 2", len(got))
+	}
+}
+
 func TestListTemplates_FilterBySince(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()

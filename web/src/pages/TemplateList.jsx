@@ -23,6 +23,8 @@ export default function TemplateList() {
   const [osVariantFilter, setOsVariantFilter] = useState(searchParams.get('os_variant') || '');
   const [networkInput, setNetworkInput] = useState(searchParams.get('network') || '');
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
+  const [prefixInput, setPrefixInput] = useState(searchParams.get('prefix') || '');
+  const [prefixFilter, setPrefixFilter] = useState(searchParams.get('prefix') || '');
   const [since, setSince] = useState(searchParams.get('since') || '');
   const [until, setUntil] = useState(searchParams.get('until') || '');
   const [minCpusInput, setMinCpusInput] = useState(searchParams.get('min_cpus') || '');
@@ -45,8 +47,8 @@ export default function TemplateList() {
   const [bulkResult, setBulkResult] = useState(null);
 
   const { data: response, loading, error, refresh } = useFetch(
-    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, network: networkFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
-    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
+    () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, network: networkFilter, prefix: prefixFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
+    [page, perPage, tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, prefixFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order],
     10000,
   );
   const deleteMut = useMutation(templatesApi.delete);
@@ -59,7 +61,7 @@ export default function TemplateList() {
     [templateList],
   );
 
-  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
+  useEffect(() => { setPage(1); }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, prefixFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter, sort, order]);
 
   // Debounce the free-text search box.
   useEffect(() => {
@@ -88,6 +90,14 @@ export default function TemplateList() {
     const id = setTimeout(() => setNetworkFilter(trimmed), 250);
     return () => clearTimeout(id);
   }, [networkInput]);
+
+  // Debounce the name-prefix filter input (5.4.78). No `.toLowerCase()` —
+  // matches the case-sensitive `strings.HasPrefix` semantics on the API.
+  useEffect(() => {
+    const trimmed = prefixInput.trim();
+    const id = setTimeout(() => setPrefixFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [prefixInput]);
 
   // Debounce the min-cpus / max-cpus inputs (5.4.51).
   useEffect(() => {
@@ -135,6 +145,7 @@ export default function TemplateList() {
     if (osTypeFilter) next.set('os_type', osTypeFilter); else next.delete('os_type');
     if (osVariantFilter) next.set('os_variant', osVariantFilter); else next.delete('os_variant');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
+    if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (since) next.set('since', since); else next.delete('since');
     if (until) next.set('until', until); else next.delete('until');
     if (minCpusFilter) next.set('min_cpus', minCpusFilter); else next.delete('min_cpus');
@@ -144,7 +155,7 @@ export default function TemplateList() {
     if (minDiskGbFilter) next.set('min_disk_gb', minDiskGbFilter); else next.delete('min_disk_gb');
     if (maxDiskGbFilter) next.set('max_disk_gb', maxDiskGbFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, networkFilter, prefixFilter, since, until, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskGbFilter, maxDiskGbFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop selections that are no longer visible (page/filter/refresh churn).
   useEffect(() => {
@@ -321,6 +332,28 @@ export default function TemplateList() {
               onClick={() => setNetworkInput('')}
               data-testid="template-list-network-filter-clear"
               aria-label="Clear network filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative w-64">
+          <input
+            type="text"
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            placeholder="Filter by name prefix…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="template-list-prefix-filter"
+            aria-label="Filter templates by name prefix (case-sensitive)"
+          />
+          {prefixInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setPrefixInput('')}
+              data-testid="template-list-prefix-filter-clear"
+              aria-label="Clear name prefix filter"
             >
               <X size={13} />
             </button>
@@ -536,6 +569,8 @@ export default function TemplateList() {
                 ? `No templates use default user "${defaultUserFilter}".`
                 : networkFilter
                 ? `No templates attach network "${networkFilter}".`
+                : prefixFilter
+                ? `No templates start with "${prefixFilter}".`
                 : (since || until)
                 ? 'No templates were created in the selected time range.'
                 : (minCpusFilter || maxCpusFilter)
@@ -549,7 +584,7 @@ export default function TemplateList() {
                 : 'Create a template to save reusable VM defaults.'
             }
             action={
-              !searchFilter && !imageFilter && !defaultUserFilter && !networkFilter && !since && !until &&
+              !searchFilter && !imageFilter && !defaultUserFilter && !networkFilter && !prefixFilter && !since && !until &&
               !minCpusFilter && !maxCpusFilter && !minRamFilter && !maxRamFilter && !minDiskGbFilter && !maxDiskGbFilter && !tagFilter ? (
                 <button className="btn-primary" onClick={() => setShowCreate(true)} data-testid="btn-new-template-empty">
                   <Plus size={15} /> New Template

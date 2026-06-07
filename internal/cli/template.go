@@ -124,6 +124,7 @@ var templateListCmd = &cobra.Command{
 		osTypeFilterRaw, _ := cmd.Flags().GetString("os-type")
 		osVariantFilterRaw, _ := cmd.Flags().GetString("os-variant")
 		networkFilter, _ := cmd.Flags().GetString("network")
+		prefixFilter, _ := cmd.Flags().GetString("prefix")
 		sinceRaw, _ := cmd.Flags().GetString("since")
 		untilRaw, _ := cmd.Flags().GetString("until")
 		minCPUsRaw, _ := cmd.Flags().GetString("min-cpus")
@@ -253,6 +254,18 @@ var templateListCmd = &cobra.Command{
 			filtered := templates[:0]
 			for _, tpl := range templates {
 				if types.TemplateMatchesNetwork(tpl, networkQuery) {
+					filtered = append(filtered, tpl)
+				}
+			}
+			templates = filtered
+		}
+		// Prefix filter (5.4.78): case-sensitive HasPrefix on tpl.Name, mirroring
+		// the 5.4.75 / 5.4.76 / 5.4.77 prefix-filter family. Whitespace-trimmed
+		// only — no ToLower so case-sensitivity is preserved through the wire.
+		if prefixQuery := strings.TrimSpace(prefixFilter); prefixQuery != "" {
+			filtered := templates[:0]
+			for _, tpl := range templates {
+				if strings.HasPrefix(tpl.Name, prefixQuery) {
 					filtered = append(filtered, tpl)
 				}
 			}
@@ -514,6 +527,7 @@ func init() {
 	templateListCmd.Flags().String("os-type", "", "filter templates by guest OS family: 'linux' or 'windows' (case-insensitive; empty stored os_type is treated as 'linux')")
 	templateListCmd.Flags().String("os-variant", "", "filter templates by Windows variant (case-insensitive exact match against os_variant; one of windows-10, windows-11, windows-server-2019, windows-server-2022, windows-server-2025; empty os_variant is excluded when the filter is set)")
 	templateListCmd.Flags().String("network", "", "filter templates attached to a named network (case-insensitive exact match against networks names)")
+	templateListCmd.Flags().String("prefix", "", "filter templates whose name starts with this value (case-sensitive HasPrefix; mirrors snapshot/VM/image --prefix)")
 	templateListCmd.Flags().String("since", "", "keep templates created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	templateListCmd.Flags().String("until", "", "keep templates created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	templateListCmd.Flags().String("min-cpus", "", "keep templates with at least this many vCPUs (inclusive; non-negative integer)")

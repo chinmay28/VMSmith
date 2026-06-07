@@ -2146,6 +2146,26 @@ export interface paths {
                      */
                     network?: string;
                     /**
+                     * @description Case-sensitive `HasPrefix(tpl.name, prefix)` filter (5.4.78).
+                     *     A template matches when its `name` starts with this value
+                     *     verbatim. Whitespace is trimmed before comparison; an empty
+                     *     value disables the filter. The fourth and final member of the
+                     *     name-prefix filter family alongside snapshots (5.4.75), VMs
+                     *     (5.4.76), and images (5.4.77) so the same cohort-discrimination
+                     *     query (`?prefix=rocky9-base-`, `?prefix=web-prod-`,
+                     *     `?prefix=auto-nightly-`) round-trips 1:1 across all four
+                     *     name-prefix axes operators reach for most. Case-sensitive
+                     *     mirrors `strings.HasPrefix` semantics — template names share
+                     *     the case-sensitive `[A-Za-z0-9-]` alphabet with VM names.
+                     *     Composes additively with `?tag=`, `?image=`, `?default_user=`,
+                     *     `?os_type=`, `?os_variant=`, `?network=`, `?search=`,
+                     *     `?since=`, `?until=`, `?min_cpus=` / `?max_cpus=`,
+                     *     `?min_ram_mb=` / `?max_ram_mb=`, `?min_disk_gb=` /
+                     *     `?max_disk_gb=`, `?sort=`, `?order=`, and pagination so
+                     *     `X-Total-Count` reflects the post-filter population.
+                     */
+                    prefix?: string;
+                    /**
                      * @description RFC3339 timestamp lower bound (inclusive) on the template's
                      *     `created_at`. Templates created before this instant are
                      *     filtered out. Whitespace is trimmed; empty disables the

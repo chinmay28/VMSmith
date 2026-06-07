@@ -7713,6 +7713,74 @@ func TestCLI_TemplateList_RejectsNegativeMaxDisk(t *testing.T) {
 	}
 }
 
+// 5.4.78 — `--prefix` on `vmsmith template list`. Case-sensitive HasPrefix
+// against tpl.Name; mirrors snapshot/VM/image --prefix.
+func TestCLI_TemplateList_FilterByPrefix_Match(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rocky9-base-v1", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "rocky9-base-v2", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "ubuntu-22", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--prefix", "rocky9-base-")
+	if err != nil {
+		t.Fatalf("template list --prefix: %v", err)
+	}
+	if !strings.Contains(out, "rocky9-base-v1") || !strings.Contains(out, "rocky9-base-v2") {
+		t.Fatalf("expected both rocky9-base-* in output, got %q", out)
+	}
+	if strings.Contains(out, "ubuntu-22") {
+		t.Fatalf("ubuntu-22 should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByPrefix_IsCaseSensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "Rocky9-Base", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--prefix", "rocky9-base")
+	if err != nil {
+		t.Fatalf("template list --prefix rocky9-base: %v", err)
+	}
+	if strings.Contains(out, "Rocky9-Base") {
+		t.Fatalf("case-sensitive non-match should exclude Rocky9-Base, got %q", out)
+	}
+}
+
+func TestCLI_TemplateList_FilterByPrefix_EmptyOmitsFilter(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-a", Name: "alpha", Image: "rocky9.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-b", Name: "bravo", Image: "ubuntu.qcow2", CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--prefix", "  ")
+	if err != nil {
+		t.Fatalf("template list --prefix '  ': %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "bravo") {
+		t.Fatalf("whitespace --prefix should be no-op, got %q", out)
+	}
+}
+
 // =====================================================
 // webhook list --search tests
 // =====================================================

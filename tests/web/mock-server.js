@@ -1600,6 +1600,14 @@ const server = http.createServer(async (req, res) => {
     if (network) {
       list = list.filter(t => Array.isArray(t.networks) && t.networks.some(n => String(n.name || "").toLowerCase() === network));
     }
+    // prefix (5.4.78): case-sensitive HasPrefix on tpl.name. Mirrors the
+    // 5.4.75 snapshot, 5.4.76 VM, and 5.4.77 image prefix-filter family.
+    // Whitespace-trimmed only — no toLowerCase so case-sensitivity is
+    // preserved through the wire.
+    const tplPrefix = (url.searchParams.get("prefix") || "").trim();
+    if (tplPrefix) {
+      list = list.filter(t => String(t.name || "").startsWith(tplPrefix));
+    }
     // since / until: inclusive RFC3339 time-range filter on created_at;
     // invalid value → 400; whitespace-only disables; zero/missing
     // created_at filtered OUT whenever any bound is set (mirrors the API).
