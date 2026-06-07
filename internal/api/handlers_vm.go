@@ -332,6 +332,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	// ([A-Za-z0-9-]) — operators distinguishing `web-prod-1` from `Web-prod-1`
 	// expect strict-match semantics. Whitespace-trimmed; empty disables.
 	prefixFilter := strings.TrimSpace(q.Get("prefix"))
+	natStaticIPFilter, natStaticIPSet := parseNATStaticIPFilter(q.Get("nat_static_ip"))
 	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -367,7 +368,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -442,6 +443,14 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 			// mirrors `strings.HasPrefix` semantics and the 5.4.75 snapshot
 			// prefix contract.
 			if prefixFilter != "" && !strings.HasPrefix(vm.Name, prefixFilter) {
+				continue
+			}
+			// NAT static IP filter (5.4.79): exact-match on the VM's CIDR
+			// `spec.nat_static_ip` (or the IP portion of the CIDR), so
+			// operators can answer *"which VM lives at 192.168.100.50?"*
+			// without round-tripping `?search=`. Empty stored values
+			// (DHCP-assigned VMs) drop out when the filter is set.
+			if natStaticIPSet && !vmMatchesNATStaticIPFilter(vm, natStaticIPFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

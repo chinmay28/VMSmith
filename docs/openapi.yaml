@@ -44,6 +44,25 @@ paths:
         - $ref: '#/components/parameters/ClockOffsetFilter'
         - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/PrefixFilter'
+        - name: nat_static_ip
+          in: query
+          required: false
+          description: |
+            Case-insensitive exact-match on the VM's
+            `spec.nat_static_ip`. Matches when the filter equals the
+            stored CIDR (e.g. `192.168.100.50/24`) or the IP portion
+            alone (e.g. `192.168.100.50`). Whitespace is trimmed; empty
+            disables the filter. VMs with an empty `nat_static_ip`
+            (DHCP-assigned) drop out whenever the filter is set —
+            mirrors the empty-stored exclusion contract on the
+            port-forward `?guest_ip=` filter (5.4.73). No validation
+            rejection: `nat_static_ip` is a free-form value operators
+            paste verbatim and garbage simply matches no VMs. Applied
+            between `prefix` and `since`/`until` so it composes
+            additively with every other VM filter; `X-Total-Count`
+            reflects the post-filter population.
+          schema:
+            type: string
         - $ref: '#/components/parameters/AutoStartFilter'
         - $ref: '#/components/parameters/LockedFilter'
         - $ref: '#/components/parameters/VMSort'
