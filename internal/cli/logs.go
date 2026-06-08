@@ -124,8 +124,8 @@ var logsListCmd = &cobra.Command{
 		if limit < 0 {
 			return fmt.Errorf("--limit must be >= 0 (0 = daemon default)")
 		}
-		if page < 0 {
-			return fmt.Errorf("--page must be >= 0 (0/1 = first page)")
+		if page < 1 {
+			return fmt.Errorf("--page must be >= 1")
 		}
 
 		resolved := resolveAPIURL(apiURL)
@@ -158,7 +158,7 @@ var logsListCmd = &cobra.Command{
 		if limit > 0 {
 			q.Set("per_page", fmt.Sprintf("%d", limit))
 		}
-		if page > 0 {
+		if page > 1 {
 			q.Set("page", fmt.Sprintf("%d", page))
 		}
 		if encoded := q.Encode(); encoded != "" {
@@ -308,7 +308,7 @@ func init() {
 	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source (empty = daemon default = timestamp)")
 	logsListCmd.Flags().String("order", "", "sort order: asc|desc (empty = daemon default = asc)")
 	logsListCmd.Flags().Int("limit", 0, "max rows per page (0 = daemon default of 200; capped at 2000)")
-	logsListCmd.Flags().Int("page", 0, "1-indexed page number (0 = first page)")
+	logsListCmd.Flags().Int("page", 1, "1-indexed page number")
 	logsListCmd.Flags().Bool("fields", false, "include the structured fields map as a trailing column")
 	logsListCmd.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 	logsListCmd.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
