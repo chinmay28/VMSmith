@@ -2814,7 +2814,7 @@ const server = http.createServer(async (req, res) => {
       } else if (sortField === "finished_at") {
         const aFin = a.finished_at ? Date.parse(a.finished_at) : NaN;
         const bFin = b.finished_at ? Date.parse(b.finished_at) : NaN;
-        // nil-trailing in ascending order (matches the Go compareNextFire helper).
+        // nil-trailing in ascending order (matches the Go compareNullableTime helper).
         if (isNaN(aFin) && isNaN(bFin)) cmp = 0;
         else if (isNaN(aFin)) cmp = 1;
         else if (isNaN(bFin)) cmp = -1;
