@@ -3341,6 +3341,34 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
   });
 
+  test("name-prefix filter narrows the list and round-trips to the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // sch-1 is "nightly-snapshot", sch-2 is "weekend-shutdown", sch-3 is
+    // "weekly-health-check". `nightly-` prefix matches only sch-1.
+    await page.getByTestId("schedule-list-prefix-filter").fill("nightly-");
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("nightly-");
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-3")).toHaveCount(0);
+
+    // `weekly-` matches only sch-3 (not sch-2 which is `weekend-`).
+    await page.getByTestId("schedule-list-prefix-filter").fill("weekly-");
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBe("weekly-");
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-1")).toHaveCount(0);
+    await expect(page.getByTestId("schedule-row-sch-2")).toHaveCount(0);
+
+    // Clearing the prefix brings every schedule back.
+    await page.getByTestId("schedule-list-prefix-filter").fill("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("prefix")).toBeNull();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-2")).toBeVisible();
+    await expect(page.getByTestId("schedule-row-sch-3")).toBeVisible();
+  });
+
   test("catch-up filter narrows the list and round-trips to the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

@@ -297,6 +297,41 @@ func TestCLI_ScheduleList_RejectsInvalidLastFiredUntil(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsPrefix covers the --prefix flag (5.4.82):
+// case-sensitive HasPrefix on schedule name, whitespace-trim, empty omits.
+func TestCLI_ScheduleList_ForwardsPrefix(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--prefix", "  nightly-  "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "prefix=nightly-") {
+		t.Fatalf("query missing prefix=nightly-: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_PrefixPreservesCase asserts the CLI forwards the
+// prefix verbatim (no lowercasing) so the case-sensitive backend contract
+// is preserved end-to-end.
+func TestCLI_ScheduleList_PrefixPreservesCase(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--prefix", "Nightly-"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "prefix=Nightly-") {
+		t.Fatalf("query lost case: %s", d.lastQuery)
+	}
+}
+
+func TestCLI_ScheduleList_EmptyPrefixOmitsParam(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--prefix", "   "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if strings.Contains(d.lastQuery, "prefix=") {
+		t.Fatalf("whitespace-only prefix should not send the param: %s", d.lastQuery)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidSort(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "bogus"); err == nil {
