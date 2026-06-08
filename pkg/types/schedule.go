@@ -48,16 +48,17 @@ func IsValidCatchUpPolicy(p ScheduleCatchUpPolicy) bool {
 
 // Schedule list sort fields.
 const (
-	ScheduleSortID        = "id"
-	ScheduleSortName      = "name"
-	ScheduleSortCreatedAt = "created_at"
-	ScheduleSortNextFire  = "next_fire_at"
+	ScheduleSortID          = "id"
+	ScheduleSortName        = "name"
+	ScheduleSortCreatedAt   = "created_at"
+	ScheduleSortNextFire    = "next_fire_at"
+	ScheduleSortLastFiredAt = "last_fired_at"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt:
 		return true
 	default:
 		return false
@@ -137,7 +138,9 @@ func SortSchedules(items []*Schedule, field, order string) {
 		case ScheduleSortCreatedAt:
 			cmp = compareTime(a.CreatedAt, b.CreatedAt)
 		case ScheduleSortNextFire:
-			cmp = compareNextFire(a.NextFireAt, b.NextFireAt)
+			cmp = compareNullableTime(a.NextFireAt, b.NextFireAt)
+		case ScheduleSortLastFiredAt:
+			cmp = compareNullableTime(a.LastFiredAt, b.LastFiredAt)
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}
@@ -163,10 +166,12 @@ func compareTime(a, b time.Time) int {
 	}
 }
 
-// compareNextFire orders schedules by their cached next-fire timestamp. A nil
-// (unscheduled / disabled) next-fire sorts after any concrete time in
-// ascending order so disabled schedules sink to the tail.
-func compareNextFire(a, b *time.Time) int {
+// compareNullableTime orders schedules by an optional timestamp pointer. A nil
+// pointer sorts after any concrete time in ascending order so the absent value
+// sinks to the tail — used by both the next_fire_at and last_fired_at sort
+// axes (a nil NextFireAt means "disabled / unscheduled"; a nil LastFiredAt
+// means "never fired"). Either way nil sorts last in asc / first in desc.
+func compareNullableTime(a, b *time.Time) int {
 	switch {
 	case a == nil && b == nil:
 		return 0

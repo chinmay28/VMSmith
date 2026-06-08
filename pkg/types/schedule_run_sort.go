@@ -69,7 +69,7 @@ func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
 		case ScheduleRunSortStartedAt:
 			cmp = compareTime(a.StartedAt, b.StartedAt)
 		case ScheduleRunSortFinishedAt:
-			cmp = compareNextFire(a.FinishedAt, b.FinishedAt)
+			cmp = compareNullableTime(a.FinishedAt, b.FinishedAt)
 		case ScheduleRunSortStatus:
 			cmp = strings.Compare(string(a.Status), string(b.Status))
 		case ScheduleRunSortDuration:

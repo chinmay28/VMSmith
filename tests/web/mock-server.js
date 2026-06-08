@@ -2474,13 +2474,13 @@ const server = http.createServer(async (req, res) => {
       else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
       else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
     }
-    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at"]);
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2618,6 +2618,18 @@ const server = http.createServer(async (req, res) => {
           if (az !== bz) { cmp = az ? 1 : -1; break; }
           const at = a.next_fire_at ? new Date(a.next_fire_at).getTime() : 0;
           const bt = b.next_fire_at ? new Date(b.next_fire_at).getTime() : 0;
+          cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "last_fired_at": {
+          // null last_fired_at (never-fired) sorts last in asc, first in desc —
+          // mirrors the next_fire_at nil-handling and the API contract.
+          const az = !a.last_fired_at;
+          const bz = !b.last_fired_at;
+          if (az !== bz) { cmp = az ? 1 : -1; break; }
+          const at = a.last_fired_at ? new Date(a.last_fired_at).getTime() : 0;
+          const bt = b.last_fired_at ? new Date(b.last_fired_at).getTime() : 0;
           cmp = at - bt;
           if (cmp === 0) cmp = cmpID;
           break;

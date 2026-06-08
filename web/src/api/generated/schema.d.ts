@@ -3213,10 +3213,15 @@ export interface paths {
                     /**
                      * @description Field to sort by. `name` matches case-insensitively;
                      *     `next_fire_at` sorts schedules with no scheduled fire (disabled /
-                     *     unscheduled) at the tail of the ascending list. All comparators
-                     *     tiebreak on `id` so repeated requests return a deterministic order.
+                     *     unscheduled) at the tail of the ascending list and the head of the
+                     *     descending list. `last_fired_at` (5.4.84) is the symmetric
+                     *     backward-looking sort axis to the existing `next_fire_at` —
+                     *     schedules with a nil `last_fired_at` (never-fired) also sort at
+                     *     the tail in `asc` / head in `desc`, mirroring the webhook
+                     *     `last_delivery_at` sort axis. All comparators tiebreak on `id` so
+                     *     repeated requests return a deterministic order.
                      */
-                    sort?: "id" | "name" | "created_at" | "next_fire_at";
+                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**
