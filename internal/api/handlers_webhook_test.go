@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2746,6 +2747,185 @@ func TestListWebhooks_FilterByActive_Invalid(t *testing.T) {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	assertAPIErrorCode(t, resp, "invalid_active")
+}
+
+// =====================================================
+// url_prefix filter tests (5.4.83)
+//
+// Case-insensitive HasPrefix(wh.URL, value) filter. Whitespace-trimmed;
+// empty disables. Mirrors the case-insensitive URL haystack in
+// WebhookMatchesSearch — operators paste mixed-case URLs verbatim from
+// the address bar and expect a match per RFC 3986 (scheme/host are
+// case-insensitive).
+// =====================================================
+
+// seedURLPrefixWebhooks seeds four receivers spanning two distinct
+// receiver hosts so the prefix filter has something to narrow.
+func seedURLPrefixWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	hooks := []*types.Webhook{
+		{ID: "wh-slack-1", URL: "https://hooks.slack.com/services/T01/B01/abc", Secret: "k", Active: true},
+		{ID: "wh-slack-2", URL: "https://hooks.slack.com/services/T02/B02/def", Secret: "k", Active: true},
+		{ID: "wh-pd-1", URL: "https://events.pagerduty.com/v2/enqueue", Secret: "k", Active: true},
+		{ID: "wh-test-1", URL: "http://test.internal/hook", Secret: "k", Active: false},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed %s: %v", h.ID, err)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_Match(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=https://hooks.slack.com/")
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 Slack receivers, got %d: %+v", len(hooks), hooks)
+	}
+	for _, h := range hooks {
+		if !strings.HasPrefix(strings.ToLower(h.URL), "https://hooks.slack.com/") {
+			t.Fatalf("non-matching URL leaked into result: %s", h.URL)
+		}
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_CaseInsensitive(t *testing.T) {
+	// Mirrors the case-insensitive URL haystack in WebhookMatchesSearch and
+	// the RFC 3986 contract that scheme + host are case-insensitive. An
+	// operator pasting `HTTPS://HOOKS.SLACK.COM/` from the address bar must
+	// match the two `https://hooks.slack.com/...` receivers seeded above.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=HTTPS://HOOKS.SLACK.COM/")
+	if len(hooks) != 2 {
+		t.Fatalf("expected case-insensitive match (2 Slack receivers), got %d: %+v", len(hooks), hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_TrimsWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=%20https://events.pagerduty.com%20")
+	if len(hooks) != 1 || hooks[0].ID != "wh-pd-1" {
+		t.Fatalf("expected whitespace-trimmed match (wh-pd-1), got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_EmptyIsNoOp(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=")
+	if len(hooks) != 4 {
+		t.Fatalf("expected all 4 webhooks (empty filter no-op), got %d", len(hooks))
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_NoMatch(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=https://unknown.example.com/")
+	if len(hooks) != 0 {
+		t.Fatalf("expected no matches, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_SubstringExcluded(t *testing.T) {
+	// The filter is HasPrefix, not Contains. A receiver path appearing as a
+	// substring deeper in the URL must NOT match — that's what `?search=` is
+	// for. Closes the operator query that `?search=hooks.slack.com` cannot
+	// answer cleanly because a description mentioning Slack also matches.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-relay", URL: "https://relay.example.com/forward?to=hooks.slack.com", Secret: "k", Active: true}); err != nil {
+		t.Fatalf("seed wh-relay: %v", err)
+	}
+	if err := fake.PutWebhook(&types.Webhook{ID: "wh-slack", URL: "https://hooks.slack.com/services/T1/B1/x", Secret: "k", Active: true}); err != nil {
+		t.Fatalf("seed wh-slack: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "url_prefix=https://hooks.slack.com/")
+	if len(hooks) != 1 || hooks[0].ID != "wh-slack" {
+		t.Fatalf("expected only wh-slack (substring on relay must not match), got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_ComposesWithActive(t *testing.T) {
+	// `?url_prefix=` is applied right after `?active=`. The two filters
+	// compose additively — `?url_prefix=http://test.internal/&active=true`
+	// must drop the inactive `wh-test-1`. Mirrors the well-tested
+	// `?active=true&tag=production` pattern from the active filter (5.4.37).
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?url_prefix=http://test.internal/&active=true")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "0" {
+		t.Fatalf("X-Total-Count = %q, want 0 (active=true filter drops wh-test-1)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 0 {
+		t.Fatalf("expected 0 webhooks (active filter drops the only test.internal receiver), got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_ComposesWithSearch(t *testing.T) {
+	// `?url_prefix=` runs before `?search=` so the post-filter `X-Total-Count`
+	// reflects the intersection. Both Slack receivers above match the prefix;
+	// the search needle `B02` then narrows to wh-slack-2.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?url_prefix=https://hooks.slack.com/&search=B02")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (intersection)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 || hooks[0].ID != "wh-slack-2" {
+		t.Fatalf("expected only wh-slack-2, got %+v", hooks)
+	}
+}
+
+func TestListWebhooks_FilterByURLPrefix_TotalCountReflectsFiltered(t *testing.T) {
+	// X-Total-Count must reflect the post-filter / pre-pagination population.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedURLPrefixWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?url_prefix=https://hooks.slack.com/&per_page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-Total-Count"); got != "2" {
+		t.Fatalf("X-Total-Count = %q, want 2 (post-filter; 2 Slack receivers)", got)
+	}
+	var hooks []*types.Webhook
+	decodeJSON(t, resp, &hooks)
+	if len(hooks) != 1 {
+		t.Fatalf("expected single page of 1, got %d", len(hooks))
+	}
 }
 
 func TestListWebhooks_FilterByActive_ComposesWithTag(t *testing.T) {

@@ -2771,6 +2771,24 @@ export interface paths {
                      */
                     active?: "true" | "false";
                     /**
+                     * @description Case-insensitive `HasPrefix(wh.URL, value)` filter (5.4.83).
+                     *     Whitespace-trimmed; empty disables. Closes the receiver-cohort
+                     *     operator queries *"which webhooks point to my Slack
+                     *     workspace?"* / *"which receivers fire into our test
+                     *     environment?"* that `search` (case-insensitive substring
+                     *     across URL + description + event_types + tags) can answer
+                     *     only with noisy fuzzy matches. Case-insensitive because URL
+                     *     schemes and hosts are case-insensitive per RFC 3986; matches
+                     *     the existing URL haystack in `WebhookMatchesSearch`.
+                     *     Diverges from the case-sensitive name-prefix family
+                     *     (snapshots 5.4.75, VMs 5.4.76, images 5.4.77, templates
+                     *     5.4.78, schedules 5.4.82) because URLs are not free-form
+                     *     name alphabets. Applied between `active` and `search` so it
+                     *     composes additively with every other webhook list filter
+                     *     and `X-Total-Count` reflects the post-filter population.
+                     */
+                    url_prefix?: string;
+                    /**
                      * @description Field to sort by. `url` matches case-insensitively.
                      *     `last_delivery_at` sorts never-delivered webhooks
                      *     (zero timestamp) at the tail of the ascending list and the

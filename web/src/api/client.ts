@@ -352,8 +352,13 @@ export const webhooks = {
   // (zero `last_delivery_at`) are filtered OUT whenever either bound is
   // set — use `deliveryStatus: 'never'` when the intent is to find
   // never-delivered webhooks. Empty/undefined disables the bound. (5.4.61)
-  list: ({ search = '', tag = '', eventType = '', deliveryStatus = '', active = '', since = '', until = '', lastDeliverySince = '', lastDeliveryUntil = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; deliveryStatus?: 'never' | 'healthy' | 'failing' | ''; active?: 'true' | 'false' | ''; since?: string; until?: string; lastDeliverySince?: string; lastDeliveryUntil?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
-    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, delivery_status: deliveryStatus || undefined, active: active || undefined, since: since || undefined, until: until || undefined, last_delivery_since: lastDeliverySince || undefined, last_delivery_until: lastDeliveryUntil || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
+  //
+  // `urlPrefix` is a case-insensitive HasPrefix(wh.URL, value) filter.
+  // Empty/undefined omits the param. Closes the receiver-cohort operator
+  // queries that `search` (substring across URL + description + event_types
+  // + tags) can answer only with noisy fuzzy matches. (5.4.83)
+  list: ({ search = '', tag = '', eventType = '', deliveryStatus = '', active = '', urlPrefix = '', since = '', until = '', lastDeliverySince = '', lastDeliveryUntil = '', sort = '', order = '', page, perPage }: { search?: string; tag?: string; eventType?: string; deliveryStatus?: 'never' | 'healthy' | 'failing' | ''; active?: 'true' | 'false' | ''; urlPrefix?: string; since?: string; until?: string; lastDeliverySince?: string; lastDeliveryUntil?: string; sort?: 'id' | 'url' | 'created_at' | 'last_delivery_at' | ''; order?: 'asc' | 'desc' | ''; page?: number; perPage?: number } = {}) =>
+    unwrap(apiClient.GET('/webhooks', { params: { query: { search: search || undefined, tag: tag || undefined, event_type: eventType || undefined, delivery_status: deliveryStatus || undefined, active: active || undefined, url_prefix: urlPrefix || undefined, since: since || undefined, until: until || undefined, last_delivery_since: lastDeliverySince || undefined, last_delivery_until: lastDeliveryUntil || undefined, sort: sort || undefined, order: order || undefined, page, per_page: perPage } as any } }), { withMeta: true }),
   create: (spec: paths['/webhooks']['post']['requestBody']['content']['application/json']) =>
     unwrap(apiClient.POST('/webhooks', { body: spec })),
   update: (id: string, spec: paths['/webhooks/{webhookID}']['patch']['requestBody']['content']['application/json']) =>

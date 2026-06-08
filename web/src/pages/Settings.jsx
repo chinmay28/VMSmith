@@ -82,6 +82,12 @@ export default function Settings() {
   })();
   const [activeFilter, setActiveFilter] = useState(initialActive);
 
+  // URL-prefix filter (5.4.83) — case-insensitive HasPrefix(wh.URL, value).
+  // Live input is debounced into the filter value so typing doesn't thrash
+  // the request loop. URL round-trip via `?url_prefix=`.
+  const [urlPrefixInput, setUrlPrefixInput] = useState(searchParams.get('url_prefix') || '');
+  const [urlPrefixFilter, setUrlPrefixFilter] = useState(searchParams.get('url_prefix') || '');
+
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
   // snapshots, templates, port forwards). Empty == "use the daemon default".
@@ -121,11 +127,17 @@ export default function Settings() {
     return () => clearTimeout(id);
   }, [eventTypeInput]);
 
+  useEffect(() => {
+    const trimmed = urlPrefixInput.trim();
+    const id = setTimeout(() => setUrlPrefixFilter(trimmed), 250);
+    return () => clearTimeout(id);
+  }, [urlPrefixInput]);
+
   // Whenever the filter / sort changes, reset to page 1 so the user doesn't
   // land on an empty page beyond the post-filter population.
   useEffect(() => {
     setPage(1);
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder]);
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, urlPrefixFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -133,6 +145,7 @@ export default function Settings() {
     if (eventTypeFilter) next.set('event_type', eventTypeFilter); else next.delete('event_type');
     if (deliveryStatusFilter) next.set('delivery_status', deliveryStatusFilter); else next.delete('delivery_status');
     if (activeFilter) next.set('active', activeFilter); else next.delete('active');
+    if (urlPrefixFilter) next.set('url_prefix', urlPrefixFilter); else next.delete('url_prefix');
     if (sinceFilter) next.set('since', sinceFilter); else next.delete('since');
     if (untilFilter) next.set('until', untilFilter); else next.delete('until');
     if (lastDeliverySinceFilter) next.set('last_delivery_since', lastDeliverySinceFilter); else next.delete('last_delivery_since');
@@ -142,7 +155,7 @@ export default function Settings() {
     if (page > 1) next.set('page', String(page)); else next.delete('page');
     if (perPage !== DEFAULT_WEBHOOK_PER_PAGE) next.set('per_page', String(perPage)); else next.delete('per_page');
     setSearchParams(next, { replace: true });
-  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, urlPrefixFilter, sinceFilter, untilFilter, lastDeliverySinceFilter, lastDeliveryUntilFilter, sortField, sortOrder, page, perPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
@@ -150,8 +163,8 @@ export default function Settings() {
   const lastDeliveryUntilParam = useMemo(() => datetimeLocalToISO(lastDeliveryUntilFilter), [lastDeliveryUntilFilter]);
 
   const { data: hookResponse, loading, error, refresh } = useFetch(
-    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, active: activeFilter, since: sinceParam, until: untilParam, lastDeliverySince: lastDeliverySinceParam, lastDeliveryUntil: lastDeliveryUntilParam, sort: sortField, order: sortOrder, page, perPage }),
-    [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, sinceParam, untilParam, lastDeliverySinceParam, lastDeliveryUntilParam, sortField, sortOrder, page, perPage],
+    () => webhooksApi.list({ search: searchFilter, eventType: eventTypeFilter, deliveryStatus: deliveryStatusFilter, active: activeFilter, urlPrefix: urlPrefixFilter, since: sinceParam, until: untilParam, lastDeliverySince: lastDeliverySinceParam, lastDeliveryUntil: lastDeliveryUntilParam, sort: sortField, order: sortOrder, page, perPage }),
+    [searchFilter, eventTypeFilter, deliveryStatusFilter, activeFilter, urlPrefixFilter, sinceParam, untilParam, lastDeliverySinceParam, lastDeliveryUntilParam, sortField, sortOrder, page, perPage],
     15000,
   );
   const deleteMut = useMutation(webhooksApi.delete);
@@ -288,6 +301,28 @@ export default function Settings() {
               onClick={() => setEventTypeInput('')}
               data-testid="webhook-list-event-type-filter-clear"
               aria-label="Clear event-type filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative min-w-[180px]">
+          <input
+            type="search"
+            value={urlPrefixInput}
+            onChange={(e) => setUrlPrefixInput(e.target.value)}
+            placeholder="Filter by URL prefix…"
+            className="input w-full pl-2.5 pr-8 py-1.5 text-sm"
+            data-testid="webhook-list-url-prefix"
+            aria-label="Filter by URL prefix"
+          />
+          {urlPrefixInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setUrlPrefixInput('')}
+              data-testid="webhook-list-url-prefix-clear"
+              aria-label="Clear URL prefix filter"
             >
               <X size={13} />
             </button>

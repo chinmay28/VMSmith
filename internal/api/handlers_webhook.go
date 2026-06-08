@@ -187,6 +187,21 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     "show me only live webhooks" operator queries that `?delivery_status=`
 //     (runtime health) and `?event_type=` (subscription) can't answer.
 //     Mirrors the VM `?auto_start=` / `?locked=` tristate filters.
+//   - url_prefix=<value>  case-insensitive `HasPrefix(wh.URL, value)` filter.
+//     Whitespace-trimmed; empty disables. Closes the receiver-cohort operator
+//     queries *"which webhooks point to my Slack workspace?"* / *"which
+//     receivers fire into our test environment?"* that `?search=`
+//     (case-insensitive substring across URL + description + event_types +
+//     tags) can answer only with noisy fuzzy matches — `hooks.slack.com`
+//     also surfaces a description that name-drops Slack. Case-insensitive
+//     because URL schemes and hosts are case-insensitive per RFC 3986
+//     and operators routinely paste `HTTPS://...` from the address bar;
+//     this also matches the existing `WebhookMatchesSearch` URL-haystack
+//     contract. Diverges from the case-sensitive name-prefix family
+//     (snapshots / VMs / images / templates / schedules) because URLs are
+//     not free-form name alphabets. Applied between `?active=` and
+//     `?search=` so it composes additively with every other webhook list
+//     filter and `X-Total-Count` reflects the post-filter population. (5.4.83)
 //   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
 //     Default `id`. Unknown values return 400 `invalid_sort`.
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
@@ -251,6 +266,13 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 
 	tagFilter := strings.ToLower(strings.TrimSpace(q.Get("tag")))
 	eventTypeFilter := strings.ToLower(strings.TrimSpace(q.Get("event_type")))
+	// URL prefix filter (5.4.83). Case-insensitive because URL schemes and
+	// hosts are case-insensitive per RFC 3986 and operators paste mixed-case
+	// URLs verbatim from the address bar. Mirrors the existing case-insensitive
+	// URL haystack in `WebhookMatchesSearch`. Diverges from the case-sensitive
+	// name-prefix family (snapshots/VMs/images/templates/schedules) which use
+	// free-form name alphabets — URLs are not names.
+	urlPrefixFilter := strings.ToLower(strings.TrimSpace(q.Get("url_prefix")))
 	searchFilter := strings.ToLower(strings.TrimSpace(q.Get("search")))
 
 	out := make([]*types.Webhook, 0, len(hooks))
@@ -271,6 +293,9 @@ func (s *Server) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if activeSet && h.Active != activeFilter {
+			continue
+		}
+		if urlPrefixFilter != "" && !strings.HasPrefix(strings.ToLower(h.URL), urlPrefixFilter) {
 			continue
 		}
 		if searchFilter != "" && !types.WebhookMatchesSearch(h, searchFilter) {

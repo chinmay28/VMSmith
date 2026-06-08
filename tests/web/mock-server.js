@@ -2193,6 +2193,14 @@ const server = http.createServer(async (req, res) => {
     if (activeFilter !== null) {
       hooks = hooks.filter((wh) => Boolean(wh.active) === activeFilter);
     }
+    // URL prefix filter (5.4.83) — case-insensitive HasPrefix(wh.url, value).
+    // Whitespace-trimmed; empty disables. Mirrors the daemon contract and
+    // the case-insensitive URL haystack in WebhookMatchesSearch.
+    const urlPrefixFilter = (url.searchParams.get("url_prefix") || "").trim().toLowerCase();
+    if (urlPrefixFilter) {
+      hooks = hooks.filter((wh) => typeof wh.url === "string"
+        && wh.url.toLowerCase().startsWith(urlPrefixFilter));
+    }
     if (needle) {
       // Mirror pkg/types.WebhookMatchesSearch: URL + description + event_types
       // + tags. Secret, ID, and last_error are intentionally excluded from

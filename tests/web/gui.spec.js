@@ -4400,6 +4400,55 @@ test.describe("Settings — Webhooks", () => {
     await expect(page.getByText(/No webhooks explicitly subscribe/i)).toBeVisible();
   });
 
+  // 5.4.83 — case-insensitive URL-prefix filter on the webhook list.
+  // Diverges from the case-sensitive name-prefix family (snapshots/VMs/
+  // images/templates/schedules) because URLs are case-insensitive per
+  // RFC 3986. Seeds two receivers on hooks.slack.com and one on
+  // events.pagerduty.com; the prefix `https://hooks.slack.com/` must
+  // narrow the list to the Slack pair, and `HTTPS://HOOKS.SLACK.COM/`
+  // (mixed case) must do the same — closes the operator query that
+  // ?search= can answer only with noisy fuzzy matches.
+  test("url-prefix filter narrows the webhook list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    const seed = async (url) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://hooks.slack.com/services/T01/B01/abc");
+    await seed("https://hooks.slack.com/services/T02/B02/def");
+    await seed("https://events.pagerduty.com/v2/enqueue");
+
+    // All three rows render initially.
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Prefix filter narrows to the two Slack receivers.
+    await page.getByTestId("webhook-list-url-prefix").fill("https://hooks.slack.com/");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(2);
+
+    // URL round-trip — `?url_prefix=` is reflected in the address bar.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("url_prefix")).toBe("https://hooks.slack.com/");
+
+    // Case-insensitive matching: mixed-case URL must still match
+    // (RFC 3986 scheme/host case-insensitivity).
+    await page.getByTestId("webhook-list-url-prefix").fill("HTTPS://HOOKS.SLACK.COM/");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(2);
+
+    // Clear button restores the unfiltered view.
+    await page.getByTestId("webhook-list-url-prefix-clear").click();
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+    await expect.poll(async () => new URL(page.url()).searchParams.get("url_prefix")).toBe(null);
+  });
+
   // 5.4.32 — time-range filter (?since= / ?until=) on the webhook list.
   // Mirrors the snapshot (5.4.28), image (5.4.29), VM (5.4.30), and template
   // (5.4.31) time-range filters. Webhooks created via the modal get

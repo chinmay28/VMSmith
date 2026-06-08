@@ -8072,6 +8072,55 @@ func TestCLI_WebhookList_ShowsTagsColumn(t *testing.T) {
 }
 
 // =====================================================
+// webhook list --url-prefix tests (5.4.83)
+// =====================================================
+
+func TestCLI_WebhookList_ForwardsURLPrefix(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--url-prefix", "https://hooks.slack.com/"); err != nil {
+		t.Fatalf("webhook list --url-prefix: %v", err)
+	}
+	// strings.Contains the URL-encoded form is annoying; check after decoding.
+	if !strings.Contains(state.lastQuery, "url_prefix=") {
+		t.Fatalf("query missing url_prefix=: %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "hooks.slack.com") {
+		t.Fatalf("query missing host substring: %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_LowercasesURLPrefix(t *testing.T) {
+	// The CLI lowercases the value so the daemon receives a canonical needle
+	// regardless of shell quoting noise. Matches the case-insensitive URL
+	// haystack in WebhookMatchesSearch.
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--url-prefix", "  HTTPS://HOOKS.SLACK.COM/  "); err != nil {
+		t.Fatalf("webhook list --url-prefix: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "https") || strings.Contains(state.lastQuery, "HTTPS") {
+		t.Fatalf("expected lowercased url_prefix in query, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "hooks.slack.com") {
+		t.Fatalf("expected hooks.slack.com host in query, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_WebhookList_EmptyURLPrefixOmitsParam(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL, "--url-prefix", ""); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "url_prefix=") {
+		t.Fatalf("empty url-prefix must not be forwarded: %q", state.lastQuery)
+	}
+}
+
+// =====================================================
 // webhook list --since / --until tests
 // =====================================================
 
