@@ -464,6 +464,11 @@ const server = http.createServer(async (req, res) => {
     // 5.4.80 — nat_gateway: case-insensitive exact match on stored gateway IP.
     // Empty disables; VMs with no nat_gateway override drop out.
     const natGatewayFilter = (url.searchParams.get("nat_gateway") || "").trim().toLowerCase();
+    // 5.4.81 — ip: case-insensitive exact match on the runtime-discovered
+    // vm.ip (the IP shown in the VM table). Empty disables; VMs with no IP
+    // (stopped, no lease) drop out. Covers DHCP-assigned VMs that
+    // nat_static_ip cannot.
+    const ipFilter = (url.searchParams.get("ip") || "").trim().toLowerCase();
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -646,6 +651,15 @@ const server = http.createServer(async (req, res) => {
         const stored = String((vm.spec && vm.spec.nat_gateway) || "").trim().toLowerCase();
         if (!stored) return false;
         return stored === natGatewayFilter;
+      });
+    }
+    if (ipFilter) {
+      // 5.4.81 — case-insensitive exact match on the runtime-discovered
+      // vm.ip. Empty stored values (stopped, no lease) drop out.
+      list = list.filter(vm => {
+        const stored = String(vm.ip || "").trim().toLowerCase();
+        if (!stored) return false;
+        return stored === ipFilter;
       });
     }
     if (autoStart.set) {

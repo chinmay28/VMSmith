@@ -334,6 +334,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	prefixFilter := strings.TrimSpace(q.Get("prefix"))
 	natStaticIPFilter, natStaticIPSet := parseNATStaticIPFilter(q.Get("nat_static_ip"))
 	natGatewayFilter, natGatewaySet := parseNATGatewayFilter(q.Get("nat_gateway"))
+	ipFilter, ipSet := parseIPFilter(q.Get("ip"))
 	osTypeFilter, osTypeSet, apiErr := parseOSTypeFilter(q.Get("os_type"))
 	if apiErr != nil {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
@@ -369,7 +370,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -459,6 +460,17 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 			// VMs with an empty NatGateway drop out when set, mirroring
 			// the empty-stored-excludes contract on `?nat_static_ip=`.
 			if natGatewaySet && !vmMatchesNATGatewayFilter(vm, natGatewayFilter) {
+				continue
+			}
+			// IP filter (5.4.81): case-insensitive exact-match on the
+			// VM's runtime-discovered `vm.IP` (the value shown in the
+			// list table, populated by the libvirt DHCP lease lookup
+			// with fallback to the IP portion of `spec.nat_static_ip`
+			// for static-IP VMs). Covers DHCP-assigned VMs that
+			// `?nat_static_ip=` (5.4.79) cannot, since DHCP VMs have an
+			// empty `spec.nat_static_ip`. VMs with an empty IP
+			// (stopped, no lease yet) drop out when the filter is set.
+			if ipSet && !vmMatchesIPFilter(vm, ipFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

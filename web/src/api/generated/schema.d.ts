@@ -227,6 +227,26 @@ export interface paths {
                      */
                     nat_gateway?: string;
                     /**
+                     * @description Case-insensitive exact-match on the VM's runtime-discovered
+                     *     IP (`vm.ip` — the value displayed in the VM table, populated
+                     *     by the libvirt DHCP lease lookup with fallback to the IP
+                     *     portion of `spec.nat_static_ip` for static-IP VMs). Closes
+                     *     the operator query *"which VM is at 192.168.100.42 right
+                     *     now?"* that `?nat_static_ip=` (5.4.79) cannot answer for
+                     *     DHCP-assigned VMs because those VMs have an empty
+                     *     `spec.nat_static_ip`. Whitespace is trimmed; empty disables
+                     *     the filter. VMs with an empty IP (stopped, no lease yet, no
+                     *     static IP) drop out whenever the filter is set, mirroring
+                     *     the empty-stored-excludes contract on `?nat_static_ip=` and
+                     *     `?nat_gateway=`. No validation rejection: `ip` is a
+                     *     free-form value operators paste verbatim and garbage simply
+                     *     matches no VMs. Applied right after `nat_gateway` and before
+                     *     `since`/`until` so it composes additively with every other
+                     *     VM filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    ip?: string;
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is

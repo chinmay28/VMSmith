@@ -16001,3 +16001,216 @@ func TestListVMs_FilterByNATGateway_TotalCountReflectsFiltered(t *testing.T) {
 		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
 	}
 }
+
+// 5.4.81 — Runtime IP filter tests. Mirrors the NAT gateway shape but on
+// the runtime-discovered vm.IP field (the value displayed in the VM table),
+// closing the operator query "which VM is at 192.168.100.42 right now?"
+// that ?nat_static_ip= cannot answer for DHCP-assigned VMs.
+
+func TestListVMs_FilterByIP_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", IP: "192.168.100.99"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected vm-1, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_ExcludesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"}) // stopped: empty IP
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only vm-1 (empty IP excluded), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "FE80::42"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=fe80::42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected case-insensitive match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=%20%20192.168.100.42%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_NoMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=10.0.0.99")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 0 {
+		t.Fatalf("expected no match, got %+v", vms)
+	}
+}
+
+// DHCP-assigned VM has empty spec.nat_static_ip but non-empty runtime IP;
+// the ?ip= filter finds it, ?nat_static_ip= does not. This is the key
+// motivating use-case for the filter.
+func TestListVMs_FilterByIP_MatchesDHCPVM(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	// vm-1 is DHCP-assigned: no nat_static_ip, but a runtime-discovered IP.
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42", Spec: types.VMSpec{}})
+	// vm-2 has a static IP at a different address.
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", IP: "192.168.100.50", Spec: types.VMSpec{NatStaticIP: "192.168.100.50/24"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected DHCP-assigned vm-1, got %+v", vms)
+	}
+
+	// ?nat_static_ip=192.168.100.42 returns NOTHING because vm-1 has no
+	// static IP. ?ip= is the only way to find a DHCP VM by address.
+	resp2, _ := http.Get(ts.URL + "/api/v1/vms?nat_static_ip=192.168.100.42")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp2.StatusCode)
+	}
+	var vms2 []*types.VM
+	decodeJSON(t, resp2, &vms2)
+	if len(vms2) != 0 {
+		t.Fatalf("?nat_static_ip= should miss DHCP VM, got %+v", vms2)
+	}
+}
+
+func TestListVMs_FilterByIP_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, IP: "192.168.100.42"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", State: types.VMStateStopped, IP: "192.168.100.42"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1 (post-filter)", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only vm-1, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_ComposesWithNATGateway(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "beta", IP: "192.168.100.42", Spec: types.VMSpec{NatGateway: "192.168.100.254"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42&nat_gateway=192.168.100.254")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-2" {
+		t.Fatalf("expected only vm-2 (matching both filters), got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByIP_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		ip := "192.168.100.42"
+		if i%2 == 0 {
+			ip = "10.0.0.42"
+		}
+		mockMgr.SeedVM(&types.VM{ID: fmt.Sprintf("vm-%d", i), Name: fmt.Sprintf("vm-%d", i), IP: ip})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?ip=192.168.100.42&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}

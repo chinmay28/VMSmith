@@ -9061,3 +9061,76 @@ func TestCLI_VMList_FilterByNATGateway_EmptyOmitsFilter(t *testing.T) {
 		t.Fatalf("whitespace --nat-gateway should be no-op, got %q", out)
 	}
 }
+
+// 5.4.81 — Runtime IP filter on CLI vm list. Mirrors the NAT gateway shape
+// but matches the discovered v.IP field (the value printed in the table's
+// IP column), covering DHCP-assigned VMs that --nat-static-ip cannot.
+
+func TestCLI_VMList_FilterByIP_Match(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", IP: "192.168.100.99", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--ip", "192.168.100.42")
+	if err != nil {
+		t.Fatalf("vm list --ip: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected alpha in output, got %q", out)
+	}
+	if strings.Contains(out, "beta") {
+		t.Fatalf("beta should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByIP_ExcludesEmpty(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}}) // empty IP
+
+	out, err := runCLI("vm", "list", "--ip", "192.168.100.42")
+	if err != nil {
+		t.Fatalf("vm list --ip: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected alpha in output, got %q", out)
+	}
+	if strings.Contains(out, "beta") {
+		t.Fatalf("VM with empty IP beta should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByIP_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "FE80::42", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--ip", "fe80::42")
+	if err != nil {
+		t.Fatalf("vm list --ip: %v", err)
+	}
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected case-insensitive match, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByIP_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", IP: "192.168.100.42", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "beta", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--ip", "  ")
+	if err != nil {
+		t.Fatalf("vm list --ip '  ': %v", err)
+	}
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
+		t.Fatalf("whitespace --ip should be no-op, got %q", out)
+	}
+}
