@@ -881,10 +881,15 @@ paths:
           name: sort
           schema:
             type: string
-            enum: [id, host_port, guest_port, protocol, description]
+            enum: [id, host_port, guest_port, protocol, description, guest_ip]
             default: id
           required: false
-          description: Field to sort by.
+          description: |
+            Field to sort by. `guest_ip` uses numeric IP comparison
+            (`192.168.100.2` sorts before `192.168.100.10`); rules with an
+            empty or unparseable `guest_ip` sink to the tail in `asc` and
+            the head in `desc`, mirroring the VM list `ip` sort axis and
+            the schedule `last_fired_at` / `next_fire_at` axes.
         - in: query
           name: order
           schema:

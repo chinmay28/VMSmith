@@ -618,6 +618,7 @@ export default function VMDetail() {
                 <option value="guest_port">Guest port</option>
                 <option value="protocol">Protocol</option>
                 <option value="description">Description</option>
+                <option value="guest_ip">Guest IP</option>
               </select>
               <select
                 className="form-select text-xs"

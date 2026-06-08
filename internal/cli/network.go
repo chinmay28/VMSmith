@@ -148,14 +148,8 @@ var portListCmd = &cobra.Command{
 		if sortField == "" {
 			sortField = types.PortForwardSortID
 		}
-		switch sortField {
-		case types.PortForwardSortID,
-			types.PortForwardSortHostPort,
-			types.PortForwardSortGuestPort,
-			types.PortForwardSortProtocol,
-			types.PortForwardSortDescription:
-		default:
-			return fmt.Errorf("invalid --sort %q: must be one of id, host_port, guest_port, protocol, description", sortField)
+		if !types.IsValidPortForwardSort(sortField) {
+			return fmt.Errorf("invalid --sort %q: must be one of id, host_port, guest_port, protocol, description, guest_ip", sortField)
 		}
 		if order == "" {
 			order = types.SortOrderAsc
@@ -463,7 +457,7 @@ func init() {
 	portAddCmd.MarkFlagRequired("host")
 	portAddCmd.MarkFlagRequired("guest")
 
-	portListCmd.Flags().String("sort", types.PortForwardSortID, "sort field: id, host_port, guest_port, protocol, description")
+	portListCmd.Flags().String("sort", types.PortForwardSortID, "sort field: id, host_port, guest_port, protocol, description, guest_ip")
 	portListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	portListCmd.Flags().String("search", "", "case-insensitive substring filter across description, protocol, host_port, guest_port, guest_ip, and tags")
 	portListCmd.Flags().String("tag", "", "filter by a single tag (case-insensitive exact match)")

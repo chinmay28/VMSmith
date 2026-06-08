@@ -14000,7 +14000,7 @@ func TestListPorts_RejectsInvalidSort(t *testing.T) {
 	ts, _, _, _, cleanup := testServerWithPortFwd(t)
 	defer cleanup()
 
-	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-x/ports?sort=guest_ip")
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-x/ports?sort=definitely-not-a-field")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -14014,6 +14014,80 @@ func TestListPorts_RejectsInvalidSort(t *testing.T) {
 	}
 	if body.Code != "invalid_sort" {
 		t.Errorf("code = %q, want invalid_sort", body.Code)
+	}
+	// Error message must advertise the new guest_ip axis so callers see
+	// `guest_ip` in the help string the moment they hit a typo (5.4.86).
+	if !strings.Contains(body.Message, "guest_ip") {
+		t.Errorf("message = %q, want it to mention guest_ip", body.Message)
+	}
+}
+
+// TestListPorts_SortByGuestIP_Numeric exercises the 5.4.86 guest_ip sort axis,
+// the symmetric sort counterpart to the 5.4.73 ?guest_ip= exact-match filter.
+// guest_ip comparison must be numeric, not lexicographic, so 192.168.100.2
+// sorts before 192.168.100.10. Empty / unparseable guest_ip values sink to
+// the tail of asc and the head of desc, mirroring the VM IP sort axis
+// (5.4.85) and the schedule last_fired_at sort axis (5.4.84).
+func TestListPorts_SortByGuestIP_NumericAsc(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	vmID := "vm-ipsort"
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22001", VMID: vmID, HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22002", VMID: vmID, HostPort: 22002, GuestPort: 22, GuestIP: "192.168.100.2", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22003", VMID: vmID, HostPort: 22003, GuestPort: 22, GuestIP: "", Protocol: types.ProtocolTCP})
+
+	got := listPortsWithQuery(t, ts, vmID, "sort=guest_ip")
+	// Numeric: 192.168.100.2 < 192.168.100.10; empty trails.
+	wantHost := []int{22002, 22001, 22003}
+	if len(got) != len(wantHost) {
+		t.Fatalf("len = %d, want %d", len(got), len(wantHost))
+	}
+	for i, hp := range wantHost {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: host_port = %d, want %d (full guest_ips: %v)",
+				i, got[i].HostPort, hp, []string{got[0].GuestIP, got[1].GuestIP, got[2].GuestIP})
+		}
+	}
+}
+
+func TestListPorts_SortByGuestIP_DescEmptyLeading(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	vmID := "vm-ipsort"
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22001", VMID: vmID, HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22002", VMID: vmID, HostPort: 22002, GuestPort: 22, GuestIP: "192.168.100.2", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22003", VMID: vmID, HostPort: 22003, GuestPort: 22, GuestIP: "", Protocol: types.ProtocolTCP})
+
+	got := listPortsWithQuery(t, ts, vmID, "sort=guest_ip&order=desc")
+	wantHost := []int{22003, 22001, 22002}
+	if len(got) != len(wantHost) {
+		t.Fatalf("len = %d, want %d", len(got), len(wantHost))
+	}
+	for i, hp := range wantHost {
+		if got[i].HostPort != hp {
+			t.Errorf("idx %d: host_port = %d, want %d", i, got[i].HostPort, hp)
+		}
+	}
+}
+
+func TestListPorts_SortByGuestIP_TiebreaksOnID(t *testing.T) {
+	ts, _, s, _, cleanup := testServerWithPortFwd(t)
+	defer cleanup()
+	vmID := "vm-ipsort"
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22003", VMID: vmID, HostPort: 22003, GuestPort: 22, GuestIP: "192.168.100.5", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22001", VMID: vmID, HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.5", Protocol: types.ProtocolTCP})
+	seedPortForward(t, s, &types.PortForward{ID: vmID + "/22002", VMID: vmID, HostPort: 22002, GuestPort: 22, GuestIP: "192.168.100.5", Protocol: types.ProtocolTCP})
+
+	got := listPortsWithQuery(t, ts, vmID, "sort=guest_ip")
+	// All equal-IP — must tiebreak on id so pagination is deterministic.
+	wantIDs := []string{vmID + "/22001", vmID + "/22002", vmID + "/22003"}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("len = %d, want %d", len(got), len(wantIDs))
+	}
+	for i, id := range wantIDs {
+		if got[i].ID != id {
+			t.Errorf("idx %d: id = %q, want %q", i, got[i].ID, id)
+		}
 	}
 }
 

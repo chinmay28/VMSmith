@@ -4860,12 +4860,52 @@ func TestCLI_PortList_RejectsInvalidSort(t *testing.T) {
 	_, _, cleanup := withTestPortForwarder(t)
 	defer cleanup()
 
-	_, err := runCLI("port", "list", "vm-s", "--sort", "guest_ip")
+	_, err := runCLI("port", "list", "vm-s", "--sort", "definitely-not-a-field")
 	if err == nil {
 		t.Fatalf("expected error for invalid --sort")
 	}
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Errorf("err = %v, want 'invalid --sort'", err)
+	}
+	// Error message must advertise the new guest_ip axis so callers see
+	// it in the help string the moment they hit a typo (5.4.86).
+	if !strings.Contains(err.Error(), "guest_ip") {
+		t.Errorf("err = %v, want it to mention guest_ip", err)
+	}
+}
+
+// TestCLI_PortList_SortByGuestIP exercises the 5.4.86 guest_ip sort axis
+// through the CLI. Numeric IP comparison + empty trails in asc, mirroring the
+// type-layer SortPortForwards test suite.
+func TestCLI_PortList_SortByGuestIP(t *testing.T) {
+	s, _, cleanup := withTestPortForwarder(t)
+	defer cleanup()
+	vmID := "vm-ips"
+	seedPFs := []*types.PortForward{
+		{ID: vmID + "/22001", VMID: vmID, HostPort: 22001, GuestPort: 22, GuestIP: "192.168.100.10", Protocol: types.ProtocolTCP},
+		{ID: vmID + "/22002", VMID: vmID, HostPort: 22002, GuestPort: 22, GuestIP: "192.168.100.2", Protocol: types.ProtocolTCP},
+		{ID: vmID + "/22003", VMID: vmID, HostPort: 22003, GuestPort: 22, GuestIP: "", Protocol: types.ProtocolTCP},
+	}
+	for _, p := range seedPFs {
+		if err := s.PutPortForward(p); err != nil {
+			t.Fatalf("seed %s: %v", p.ID, err)
+		}
+	}
+
+	out, err := runCLI("port", "list", vmID, "--sort", "guest_ip")
+	if err != nil {
+		t.Fatalf("port list: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) != 4 {
+		t.Fatalf("expected header + 3 rows, got %d rows from %q", len(rows), out)
+	}
+	// Numeric: 192.168.100.2 < 192.168.100.10; empty trails in asc.
+	wantHostPorts := []string{"22002", "22001", "22003"}
+	for i, hp := range wantHostPorts {
+		if rows[i+1][1] != hp {
+			t.Errorf("row %d host_port = %q, want %q (full: %v)", i, rows[i+1][1], hp, rows[i+1])
+		}
 	}
 }
 
