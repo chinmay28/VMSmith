@@ -3966,6 +3966,83 @@ func TestListVMs_SortByDiskGB(t *testing.T) {
 	}
 }
 
+func TestListVMs_SortByIP_NumericAsc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-ten", IP: "192.168.100.10"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "stopped", IP: ""})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-two", IP: "192.168.100.2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=ip")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// Numeric sort: 192.168.100.2 < 192.168.100.10 (lex would invert).
+	// Empty IP sinks to the tail in ascending order.
+	want := []string{"small-two", "big-ten", "stopped"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByIPDesc_EmptyLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "big-ten", IP: "192.168.100.10"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "stopped", IP: ""})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "small-two", IP: "192.168.100.2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=ip&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"stopped", "big-ten", "small-two"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByIP_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", IP: "10.0.0.1"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", IP: "10.0.0.1"})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", IP: "10.0.0.1"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=ip")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByIP_400InvalidSortMentionsIP(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=address")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "ip") {
+		t.Errorf("message = %q, expected to advertise 'ip' as a valid sort axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

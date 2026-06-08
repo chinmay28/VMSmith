@@ -1131,6 +1131,27 @@ test.describe("VM List", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("sort=disk_gb");
   });
 
+  test("ip sort axis reorders the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed: web-server 192.168.100.10, db-server 192.168.100.11, win-app 192.168.100.12.
+    // Numeric asc puts web-server first (.10), then db-server (.11), then win-app (.12).
+    await page.getByTestId("vm-list-sort-field").selectOption("ip");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=ip");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+
+    // Descending flips the order. The unit test in pkg/types asserts the
+    // numeric-vs-lexicographic contract (192.168.100.2 < 192.168.100.10);
+    // the Playwright case verifies the dropdown <-> URL <-> API plumbing.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

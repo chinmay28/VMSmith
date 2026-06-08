@@ -524,8 +524,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -702,6 +702,41 @@ const server = http.createServer(async (req, res) => {
         return true;
       });
     }
+    // Convert an IP string to a numeric-comparable key. IPv4 dotted quads
+    // become 32-bit big-endian numbers (in BigInt for safety); IPv6 are
+    // expanded to 8 hextets and packed similarly. Anything unparseable
+    // becomes BigInt(-1) so it sorts BEFORE any concrete address — but the
+    // ascending order then flips that to the tail because we treat -1 as
+    // "missing" and bump it to a value larger than any real IP.
+    const ipKey = (ip) => {
+      if (!ip) return null;
+      const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+      if (v4) {
+        const parts = v4.slice(1).map(Number);
+        if (parts.some(p => p < 0 || p > 255)) return null;
+        // IPv4-mapped form: 80 leading zero bits + 0x00 0x00 0xFF 0xFF + the four octets.
+        return (BigInt(0xFFFF) << 32n) | (BigInt(parts[0]) << 24n) | (BigInt(parts[1]) << 16n) | (BigInt(parts[2]) << 8n) | BigInt(parts[3]);
+      }
+      if (ip.includes(":")) {
+        // Reject anything not a hex/colon literal so 'fe80::xyz' falls to null.
+        if (!/^[0-9a-f:]+$/i.test(ip)) return null;
+        const parts = ip.split("::", 2);
+        const head = parts[0] ? parts[0].split(":") : [];
+        const tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+        const fill = 8 - head.length - tail.length;
+        if (fill < 0) return null;
+        const groups = [...head, ...Array(fill).fill("0"), ...tail];
+        if (groups.length !== 8) return null;
+        let k = 0n;
+        for (const g of groups) {
+          const n = parseInt(g, 16);
+          if (Number.isNaN(n) || n < 0 || n > 0xFFFF) return null;
+          k = (k << 16n) | BigInt(n);
+        }
+        return k;
+      }
+      return null;
+    };
     const cmp = (a, b) => {
       let l;
       const num = (x) => (typeof x === "number" && !Number.isNaN(x) ? x : 0);
@@ -712,6 +747,17 @@ const server = http.createServer(async (req, res) => {
         case "cpus":       l = num(a?.spec?.cpus) - num(b?.spec?.cpus); break;
         case "ram_mb":     l = num(a?.spec?.ram_mb) - num(b?.spec?.ram_mb); break;
         case "disk_gb":    l = num(a?.spec?.disk_gb) - num(b?.spec?.disk_gb); break;
+        case "ip": {
+          // Numeric IP sort: nil/unparseable trails in asc (matches the Go
+          // compareVMIP nil-trailing contract). Order flip in the wrapper
+          // below brings nil to the head in desc.
+          const ka = ipKey(a.ip), kb = ipKey(b.ip);
+          if (ka === null && kb === null) l = 0;
+          else if (ka === null) l = 1;
+          else if (kb === null) l = -1;
+          else l = ka < kb ? -1 : ka > kb ? 1 : 0;
+          break;
+        }
         default:           l = 0;
       }
       if (l === 0) l = a.id.localeCompare(b.id); // tiebreak on id
