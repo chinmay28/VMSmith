@@ -3966,6 +3966,42 @@ test.describe("Schedules", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_since")).toBeNull();
     await expect.poll(() => new URL(page.url()).searchParams.get("last_fired_until")).toBeNull();
   });
+
+  // --- 5.4.84: last_fired_at sort axis on the schedule list ---
+  // Seed data: sch-1 last_fired_at=2026-05-23T02:00:00Z (most recent concrete),
+  // sch-2 last_fired_at=null (never fired), sch-3 last_fired_at=2026-05-19T04:30:00Z
+  // (earliest concrete). The new sort axis pushes nil last_fired_at to the tail
+  // in asc and the head in desc, mirroring the next_fire_at nil-handling and
+  // the webhook last_delivery_at sort axis.
+  test("last_fired_at sort dropdown reorders the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // asc: earliest concrete last_fired first (sch-3 → sch-1), never-fired sinks to tail (sch-2).
+    await page.getByTestId("schedule-list-sort-field").selectOption("last_fired_at");
+    await page.getByTestId("schedule-list-sort-order").selectOption("asc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-3", "schedule-row-sch-1", "schedule-row-sch-2"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("last_fired_at");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // desc: never-fired surfaces first (sch-2), then concrete last_fired newest → oldest (sch-1 → sch-3).
+    await page.getByTestId("schedule-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-2", "schedule-row-sch-1", "schedule-row-sch-3"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("desc");
+
+    // Reset to default — sort param drops from the URL, default id-asc returns.
+    await page.getByTestId("schedule-list-sort-field").selectOption("");
+    await page.getByTestId("schedule-list-sort-order").selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBeNull();
+  });
 });
 
 test.describe("Navigation", () => {

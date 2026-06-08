@@ -192,8 +192,11 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 // right after the time-range filters and before ?search= so it composes
 // additively with every other schedule filter), search
 // (case-insensitive substring across name, action, vm_id, and tag_selector).
-// Sorting: sort=id|name|created_at|next_fire_at (default id), order=asc|desc
-// (default asc). All comparators tiebreak on id.
+// Sorting: sort=id|name|created_at|next_fire_at|last_fired_at (default id),
+// order=asc|desc (default asc). Both nullable axes (next_fire_at /
+// last_fired_at) sort schedules with a nil timestamp at the tail of the
+// ascending list and the head of the descending list. All comparators
+// tiebreak on id.
 func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	if !s.requireScheduleSubsystem(w) {
 		return
@@ -205,7 +208,7 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		sortField = types.ScheduleSortID
 	}
 	if !types.IsValidScheduleSort(sortField) {
-		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, name, created_at, next_fire_at")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, name, created_at, next_fire_at, last_fired_at")
 		return
 	}
 	order := strings.ToLower(strings.TrimSpace(q.Get("order")))

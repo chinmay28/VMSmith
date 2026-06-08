@@ -342,6 +342,37 @@ func TestCLI_ScheduleList_RejectsInvalidSort(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsLastFiredAtSort asserts the 5.4.84 sort axis
+// passes through end-to-end. Mixed-case + whitespace are normalised on the
+// CLI side so the daemon always sees the lowercase canonical form.
+func TestCLI_ScheduleList_ForwardsLastFiredAtSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--sort", "  LAST_FIRED_AT  ", "--order", " DESC "); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=last_fired_at") {
+		t.Fatalf("query missing sort=last_fired_at: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_RejectsInvalidSort_LastFiredAtMentioned makes sure the
+// CLI-side rejection message advertises the new sort key in the supported set
+// so operators see it on a typo.
+func TestCLI_ScheduleList_RejectsInvalidSort_LastFiredAtMentioned(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "memory")
+	if err == nil {
+		t.Fatal("expected invalid --sort rejection")
+	}
+	if !strings.Contains(err.Error(), "last_fired_at") {
+		t.Fatalf("CLI error should mention last_fired_at, got: %v", err)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidEnabled(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--enabled", "maybe"); err == nil {

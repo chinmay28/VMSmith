@@ -806,6 +806,153 @@ func TestListSchedules_FilterByLastFired(t *testing.T) {
 	}
 }
 
+// TestListSchedules_SortByLastFired covers the 5.4.84 sort axis: ascending puts
+// the earliest concrete LastFiredAt first and pushes never-fired schedules to
+// the tail; descending flips that — never-fired schedules come first, then
+// concrete last-fires from newest to oldest. All comparators tiebreak on ID
+// for deterministic pagination. Mirrors the next_fire_at sort axis exactly.
+func TestListSchedules_SortByLastFired(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id, name, lastFired string) {
+		t.Helper()
+		sched := &types.Schedule{
+			ID:        id,
+			Name:      name,
+			Action:    types.ScheduleActionSnapshot,
+			CronSpec:  "0 0 2 * * *",
+			Enabled:   true,
+			CreatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		}
+		if lastFired != "" {
+			parsed, err := time.Parse(time.RFC3339, lastFired)
+			if err != nil {
+				t.Fatalf("parse %q: %v", lastFired, err)
+			}
+			sched.LastFiredAt = &parsed
+		}
+		if err := s.PutSchedule(sched); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	mk("sched-1", "early", "2026-06-01T12:00:00Z")
+	mk("sched-2", "mid", "2026-06-01T15:00:00Z")
+	mk("sched-3", "late", "2026-06-01T20:00:00Z")
+	mk("sched-4", "neverfired", "")
+
+	list := func(q string) ([]*types.Schedule, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list%s: HTTP %d: %s", q, resp.StatusCode, data)
+		}
+		var out []*types.Schedule
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total
+	}
+	ids := func(items []*types.Schedule) []string {
+		out := make([]string, 0, len(items))
+		for _, s := range items {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	eq := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// asc — earliest concrete last_fired first, never-fired sinks to tail.
+	if out, total := list("?sort=last_fired_at&order=asc"); !eq(ids(out), []string{"sched-1", "sched-2", "sched-3", "sched-4"}) || total != 4 {
+		t.Fatalf("last_fired_at asc nil-trailing wrong: %v total=%d", ids(out), total)
+	}
+
+	// desc — never-fired surfaces first, concrete last_fires newest first.
+	if out, total := list("?sort=last_fired_at&order=desc"); !eq(ids(out), []string{"sched-4", "sched-3", "sched-2", "sched-1"}) || total != 4 {
+		t.Fatalf("last_fired_at desc nil-leading wrong: %v total=%d", ids(out), total)
+	}
+
+	// Default order is asc — matches the schedule list contract.
+	if out, _ := list("?sort=last_fired_at"); !eq(ids(out), []string{"sched-1", "sched-2", "sched-3", "sched-4"}) {
+		t.Fatalf("last_fired_at default-order wrong: %v", ids(out))
+	}
+
+	// Composes with the existing last_fired range filter: narrow to two
+	// concrete-fire schedules, then sort within the cohort.
+	if out, total := list("?last_fired_since=2026-06-01T13:00:00Z&sort=last_fired_at&order=asc"); !eq(ids(out), []string{"sched-2", "sched-3"}) || total != 2 {
+		t.Fatalf("filter+sort compose wrong: %v total=%d", ids(out), total)
+	}
+}
+
+// TestListSchedules_SortByLastFired_TiebreakOnID asserts the deterministic id
+// tiebreak holds when multiple schedules share the same LastFiredAt — the same
+// paginated-determinism contract every other sort axis upholds.
+func TestListSchedules_SortByLastFired_TiebreakOnID(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	stamp := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"sched-z", "sched-a", "sched-m"} {
+		sched := &types.Schedule{
+			ID:          id,
+			Name:        id,
+			Action:      types.ScheduleActionSnapshot,
+			CronSpec:    "0 0 2 * * *",
+			Enabled:     true,
+			CreatedAt:   time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			LastFiredAt: &stamp,
+		}
+		if err := s.PutSchedule(sched); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=last_fired_at&order=asc", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP %d: %s", resp.StatusCode, data)
+	}
+	var out []*types.Schedule
+	json.Unmarshal(data, &out)
+	wantOrder := []string{"sched-a", "sched-m", "sched-z"}
+	for i, w := range wantOrder {
+		if out[i].ID != w {
+			t.Fatalf("equal-keys tiebreak: idx %d got %s, want %s; full=%+v", i, out[i].ID, w, out)
+		}
+	}
+}
+
+// TestListSchedules_SortByLastFired_400InvalidSortRejected verifies the new
+// sort axis is wired through the existing 400 path. The error message must
+// also enumerate last_fired_at so clients see the supported set.
+func TestListSchedules_SortByLastFired_400InvalidSortRejected(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=nope", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid sort should 400, got %d", resp.StatusCode)
+	}
+	var er errorResponse
+	json.Unmarshal(data, &er)
+	if er.Code != "invalid_sort" {
+		t.Fatalf("expected invalid_sort, got %q", er.Code)
+	}
+	// The error message must include last_fired_at so clients learn the
+	// full supported set on rejection.
+	if !bytes.Contains(data, []byte("last_fired_at")) {
+		t.Fatalf("error message should advertise last_fired_at, got: %s", data)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

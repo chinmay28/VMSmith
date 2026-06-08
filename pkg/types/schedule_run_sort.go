@@ -55,7 +55,7 @@ func compareRunDuration(a, b *ScheduleRun) int {
 
 // SortScheduleRuns sorts runs in place by the requested field and order.
 // A nil finished_at sorts after any concrete time in ascending order so
-// still-running runs sink to the tail (consistent with compareNextFire's
+// still-running runs sink to the tail (consistent with compareNullableTime's
 // nil-trailing semantics). The duration axis treats still-running runs
 // (nil finished_at) as unknown-duration and applies the same nil-trailing
 // semantics. All comparators tiebreak on ID so paginated requests are
@@ -69,7 +69,7 @@ func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
 		case ScheduleRunSortStartedAt:
 			cmp = compareTime(a.StartedAt, b.StartedAt)
 		case ScheduleRunSortFinishedAt:
-			cmp = compareNextFire(a.FinishedAt, b.FinishedAt)
+			cmp = compareNullableTime(a.FinishedAt, b.FinishedAt)
 		case ScheduleRunSortStatus:
 			cmp = strings.Compare(string(a.Status), string(b.Status))
 		case ScheduleRunSortDuration:
