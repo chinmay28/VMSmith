@@ -542,3 +542,44 @@ func TestProxyConsole_ClosesWhenMaxSessionDeadlineExpires(t *testing.T) {
 	}
 	t.Fatal("websocket stayed open after max session deadline")
 }
+
+func TestProxyConsole_ClosesWhenIdleTimeoutExpires(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, func(cfg *config.Config) {
+		cfg.Daemon.Console.IdleTimeoutSeconds = 1
+	}, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	ticket := issueConsoleTicket(t, ts, "vm-running")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	conn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, ticket.WebsocketURL), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	backend := <-accepted
+	defer backend.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+	}
+	t.Fatal("websocket stayed open after idle timeout")
+}
