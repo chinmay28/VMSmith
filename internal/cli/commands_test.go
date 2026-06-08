@@ -1926,6 +1926,47 @@ func TestCLI_VMList_RejectsInvalidOrder(t *testing.T) {
 	}
 }
 
+func TestCLI_VMList_SortByIPNumeric(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "big-ten", State: types.VMStateRunning, IP: "192.168.100.10", Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "stopped", State: types.VMStateStopped, IP: "", Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "small-two", State: types.VMStateRunning, IP: "192.168.100.2", Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "ip")
+	if err != nil {
+		t.Fatalf("vm list --sort ip: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	// Numeric sort: 192.168.100.2 first (not 192.168.100.10 — lex would invert).
+	// Empty IP sinks to the tail in ascending order.
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"small-two", "big-ten", "stopped"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_RejectsInvalidSort_IPMentioned(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "address")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "invalid --sort") || !strings.Contains(msg, "ip") {
+		t.Errorf("error %q should mention 'invalid --sort' and advertise 'ip' as a valid axis", msg)
+	}
+}
+
 func TestCLI_VMList_InvalidOffset(t *testing.T) {
 	_, cleanup := withMockVM(t)
 	defer cleanup()

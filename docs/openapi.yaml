@@ -3360,11 +3360,20 @@ components:
         desc = largest first); they complement the matching `?min_cpus=` /
         `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
         `?max_disk_gb=` range filters so the same capacity-audit query can
-        be sorted as well as filtered. All comparators tiebreak on `id`
+        be sorted as well as filtered. `ip` is a numeric IP-address sort on
+        the runtime `vm.ip` field — parsed as `net.IP` and compared
+        byte-wise on the canonical 16-byte form so `192.168.100.2` sorts
+        before `192.168.100.10` rather than lexicographically; VMs with an
+        empty or unparseable IP (stopped, no DHCP lease, no static IP) sink
+        to the tail in ascending order and the head in descending order,
+        mirroring the nil-trailing semantics on the schedule
+        `last_fired_at` / `next_fire_at` sort axes. It is the symmetric
+        sort counterpart to the `?ip=` filter so the same runtime-IP cohort
+        can be both sorted and narrowed. All comparators tiebreak on `id`
         so pagination is deterministic across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip]
         default: id
     ImageSort:
       name: sort

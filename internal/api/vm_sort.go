@@ -19,13 +19,10 @@ func parseVMSort(r *http.Request) (sortField, order string, err error) {
 	if sortField == "" {
 		sortField = types.VMSortID
 	}
-	switch sortField {
-	case types.VMSortID, types.VMSortName, types.VMSortCreatedAt, types.VMSortState,
-		types.VMSortCPUs, types.VMSortRAMMB, types.VMSortDiskGB:
-	default:
+	if !types.IsValidVMSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb",
+			"sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip",
 		)
 	}
 

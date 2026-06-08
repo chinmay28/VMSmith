@@ -173,3 +173,118 @@ func TestSortVMs_StablePagination(t *testing.T) {
 		}
 	}
 }
+
+func TestSortVMs_ByIP_Numeric_AscEmptyTrailing(t *testing.T) {
+	// 192.168.100.10 must sort after 192.168.100.2 by numeric comparison —
+	// a lexicographic compare would place "10" before "2" because "1" < "2".
+	// Empty IPs (stopped or no-lease VMs) sink to the tail in ascending order
+	// so a paginated by-IP view groups the live cohort first.
+	vms := []*VM{
+		{ID: "vm-1", IP: "192.168.100.10"},
+		{ID: "vm-2", IP: ""},
+		{ID: "vm-3", IP: "192.168.100.2"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderAsc)
+	want := []string{"vm-3", "vm-1", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q ip=%q, want %q", i, v.ID, v.IP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByIP_DescEmptyLeading(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", IP: "192.168.100.10"},
+		{ID: "vm-2", IP: ""},
+		{ID: "vm-3", IP: "192.168.100.2"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderDesc)
+	// Empty leads in descending; concrete addresses follow newest-numeric-first.
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q ip=%q, want %q", i, v.ID, v.IP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByIP_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", IP: "10.0.0.1"},
+		{ID: "vm-1", IP: "10.0.0.1"},
+		{ID: "vm-2", IP: "10.0.0.1"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByIP_AllEmpty_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByIP_IPv4AndIPv6Interleave(t *testing.T) {
+	// IPv4 in canonical 16-byte form has a leading run of zero bytes followed
+	// by 0x00 0x00 0xff 0xff, so an IPv4-mapped address sorts numerically
+	// against arbitrary IPv6 literals. Asserts that the compare is bytes.Compare
+	// on To16() rather than a string compare.
+	vms := []*VM{
+		{ID: "vm-1", IP: "fe80::1"},
+		{ID: "vm-2", IP: "192.168.100.5"},
+		{ID: "vm-3", IP: "::1"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderAsc)
+	want := []string{"vm-3", "vm-2", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q ip=%q, want %q", i, v.ID, v.IP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByIP_GarbageSortsAsEmpty(t *testing.T) {
+	// Unparseable strings are treated like empty — they sink to the tail
+	// in ascending order. Matches the contract on the runtime-IP filter
+	// (5.4.81), which simply matches no VMs on garbage input.
+	vms := []*VM{
+		{ID: "vm-1", IP: "10.0.0.5"},
+		{ID: "vm-2", IP: "not-an-ip"},
+		{ID: "vm-3", IP: "10.0.0.1"},
+	}
+	SortVMs(vms, VMSortIP, SortOrderAsc)
+	want := []string{"vm-3", "vm-1", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q ip=%q, want %q", i, v.ID, v.IP, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsIP(t *testing.T) {
+	for _, axis := range []string{"id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip"} {
+		if !IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = false, want true", axis)
+		}
+	}
+	for _, axis := range []string{"", "memory", "IP", "address"} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false", axis)
+		}
+	}
+}

@@ -1,6 +1,8 @@
 package types
 
 import (
+	"bytes"
+	"net"
 	"sort"
 	"strings"
 )
@@ -15,10 +17,42 @@ const (
 	VMSortCPUs      = "cpus"
 	VMSortRAMMB     = "ram_mb"
 	VMSortDiskGB    = "disk_gb"
+	VMSortIP        = "ip"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
 )
+
+// IsValidVMSort reports whether s is an accepted VM list sort field. Used by
+// the API and CLI parsers to reject unknown values uniformly.
+func IsValidVMSort(s string) bool {
+	switch s {
+	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
+		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP:
+		return true
+	}
+	return false
+}
+
+// compareVMIP returns -1/0/+1 comparing two VM runtime IPs numerically.
+// IPs that fail to parse (empty or garbage) sort after any concrete address —
+// stopped or DHCP-pending VMs sink to the tail of an ascending list, mirroring
+// the nil-trailing semantics on time-valued sort axes (last_fired_at,
+// next_fire_at). The compare is byte-wise on the canonical 16-byte form so
+// IPv4 dotted-quads order numerically (10.0.0.2 < 10.0.0.10) instead of
+// lexicographically.
+func compareVMIP(a, b string) int {
+	ai, bi := net.ParseIP(a), net.ParseIP(b)
+	switch {
+	case ai == nil && bi == nil:
+		return 0
+	case ai == nil:
+		return 1
+	case bi == nil:
+		return -1
+	}
+	return bytes.Compare(ai.To16(), bi.To16())
+}
 
 // SortVMs sorts the given VMs in place by the requested field and order.
 // All comparators tiebreak on `id` so pagination is deterministic across
@@ -69,6 +103,13 @@ func SortVMs(vms []*VM, sortField, order string) {
 		case VMSortDiskGB:
 			if ai.Spec.DiskGB != aj.Spec.DiskGB {
 				less = ai.Spec.DiskGB < aj.Spec.DiskGB
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortIP:
+			cmp := compareVMIP(ai.IP, aj.IP)
+			if cmp != 0 {
+				less = cmp < 0
 				break
 			}
 			less = ai.ID < aj.ID
