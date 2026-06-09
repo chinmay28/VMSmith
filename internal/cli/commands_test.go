@@ -6714,7 +6714,7 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	_, _, cleanup := withTestStorage(t)
 	defer cleanup()
 
-	// `ram_mb` is now a valid template sort axis (5.4.57); use a sentinel
+	// `image` is now a valid template sort axis (5.4.89); use a sentinel
 	// that's still unsupported so the error path is exercised.
 	_, err := runCLI("template", "list", "--sort", "memory")
 	if err == nil {
@@ -6722,6 +6722,69 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Errorf("error = %v, want it to mention 'invalid --sort'", err)
+	}
+	// CLI rejection message must advertise the new `image` axis so the
+	// help text mirrors the API surface (5.4.89).
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("error = %v, want it to mention `image`", err)
+	}
+}
+
+func TestCLI_TemplateList_SortByImage_AscEmptyTrailing(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "no-img", Image: ""}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "ubuntu", Image: "ubuntu-22.04.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "rocky", Image: "rocky9.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "image")
+	if err != nil {
+		t.Fatalf("template list --sort image: %v", err)
+	}
+	rows := tableRows(t, out)
+	// rocky9 < ubuntu; empty trails in asc.
+	want := []string{"rocky", "ubuntu", "no-img"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByImage_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	// Operator pastes verbatim from a directory where case varies; the
+	// case-insensitive sort must collate both into the same cohort.
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "RockyUpper", Image: "Rocky9.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rockyLower", Image: "rocky9.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "alpine", Image: "alpine.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "image")
+	if err != nil {
+		t.Fatalf("template list --sort image: %v", err)
+	}
+	rows := tableRows(t, out)
+	// alpine < rocky9 (case-folded); rocky tie tiebreaks on id (tmpl-1 before tmpl-3).
+	want := []string{"alpine", "rockyLower", "RockyUpper"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
 	}
 }
 

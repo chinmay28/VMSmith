@@ -152,6 +152,104 @@ func TestSortTemplates_ByDiskGB_DescTiebreaksOnID(t *testing.T) {
 	}
 }
 
+func TestSortTemplates_ByImage_AscEmptyTrailing(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", Image: ""},
+		{ID: "tpl-1", Name: "a", Image: "ubuntu-22.04.qcow2"},
+		{ID: "tpl-2", Name: "b", Image: "rocky9.qcow2"},
+	}
+	SortTemplates(templates, TemplateSortImage, SortOrderAsc)
+	// rocky9 < ubuntu-22.04 lex; empty trails in asc.
+	want := []string{"tpl-2", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByImage_DescEmptyLeading(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", Name: "a", Image: "ubuntu-22.04.qcow2"},
+		{ID: "tpl-3", Name: "c", Image: ""},
+		{ID: "tpl-2", Name: "b", Image: "rocky9.qcow2"},
+	}
+	SortTemplates(templates, TemplateSortImage, SortOrderDesc)
+	// Desc inverts the asc result: empty leads, then ubuntu, then rocky.
+	want := []string{"tpl-3", "tpl-1", "tpl-2"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByImage_CaseInsensitive(t *testing.T) {
+	// Operators paste base-image names verbatim from the images directory and
+	// case shouldn't split the cohort.
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", Image: "Rocky9.qcow2"},
+		{ID: "tpl-1", Name: "a", Image: "rocky9.qcow2"}, // same as tpl-3 case-folded
+		{ID: "tpl-2", Name: "b", Image: "alpine.qcow2"},
+	}
+	SortTemplates(templates, TemplateSortImage, SortOrderAsc)
+	// alpine < rocky9 < rocky9 (tie tiebroken on id: tpl-1 < tpl-3).
+	want := []string{"tpl-2", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByImage_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", Image: "rocky9.qcow2"},
+		{ID: "tpl-1", Name: "a", Image: "rocky9.qcow2"},
+		{ID: "tpl-2", Name: "b", Image: "rocky9.qcow2"},
+	}
+	SortTemplates(templates, TemplateSortImage, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3",
+			templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+func TestSortTemplates_ByImage_AllEmpty_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3"},
+		{ID: "tpl-1"},
+		{ID: "tpl-2"},
+	}
+	SortTemplates(templates, TemplateSortImage, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3 — empty/empty pair must tiebreak on id",
+			templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+func TestIsValidTemplateSort_AcceptsImage(t *testing.T) {
+	cases := []struct {
+		field string
+		want  bool
+	}{
+		{TemplateSortID, true},
+		{TemplateSortName, true},
+		{TemplateSortCreatedAt, true},
+		{TemplateSortCPUs, true},
+		{TemplateSortRAMMB, true},
+		{TemplateSortDiskGB, true},
+		{TemplateSortImage, true},
+		{"bogus", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := IsValidTemplateSort(tc.field); got != tc.want {
+			t.Errorf("IsValidTemplateSort(%q) = %v, want %v", tc.field, got, tc.want)
+		}
+	}
+}
+
 func TestSortTemplates_StablePagination(t *testing.T) {
 	// Two independent SortTemplates invocations on the same equal-name
 	// input must agree so page-1 + page-2 fetches see a deterministic

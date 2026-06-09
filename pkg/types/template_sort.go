@@ -14,7 +14,20 @@ const (
 	TemplateSortCPUs      = "cpus"
 	TemplateSortRAMMB     = "ram_mb"
 	TemplateSortDiskGB    = "disk_gb"
+	TemplateSortImage     = "image"
 )
+
+// IsValidTemplateSort reports whether s is an accepted template list sort
+// field. Used by the API and CLI parsers to reject unknown values uniformly.
+func IsValidTemplateSort(s string) bool {
+	switch s {
+	case TemplateSortID, TemplateSortName, TemplateSortCreatedAt,
+		TemplateSortCPUs, TemplateSortRAMMB, TemplateSortDiskGB,
+		TemplateSortImage:
+		return true
+	}
+	return false
+}
 
 // SortTemplates sorts the given templates in place by the requested field
 // and order. All comparators tiebreak on `id` so paginated requests return
@@ -61,6 +74,27 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case TemplateSortImage:
+			// Case-insensitive compare mirrors the case-insensitive
+			// `?image=` exact-match filter contract so the filter and sort
+			// agree on the same column. Templates with an empty `Image`
+			// sink to the tail of asc / head of desc — mirrors the
+			// nil-trailing semantics on every other nullable sort axis
+			// (ip, guest_ip, last_fired_at, last_delivery_at, actor) and
+			// the VM list `image` axis (5.4.88).
+			aiImg, ajImg := strings.ToLower(ai.Image), strings.ToLower(aj.Image)
+			switch {
+			case aiImg == "" && ajImg == "":
+				less = ai.ID < aj.ID
+			case aiImg == "":
+				less = false
+			case ajImg == "":
+				less = true
+			case aiImg != ajImg:
+				less = aiImg < ajImg
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // TemplateSortID
 			less = ai.ID < aj.ID
 		}
