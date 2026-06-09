@@ -773,6 +773,7 @@ export default function VMList() {
           <option value="ram_mb">RAM (MB)</option>
           <option value="disk_gb">Disk (GB)</option>
           <option value="ip">IP</option>
+          <option value="image">Image</option>
         </select>
         <select
           value={order}

@@ -559,8 +559,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -756,6 +756,17 @@ const server = http.createServer(async (req, res) => {
           else if (ka === null) l = 1;
           else if (kb === null) l = -1;
           else l = ka < kb ? -1 : ka > kb ? 1 : 0;
+          break;
+        }
+        case "image": {
+          // Case-insensitive sort on spec.image; empty trails in asc /
+          // leads in desc, mirroring the Go SortVMs nil-trailing contract.
+          const ia = (a?.spec?.image || "").toLowerCase();
+          const ib = (b?.spec?.image || "").toLowerCase();
+          if (ia === "" && ib === "") l = 0;
+          else if (ia === "") l = 1;
+          else if (ib === "") l = -1;
+          else l = ia < ib ? -1 : ia > ib ? 1 : 0;
           break;
         }
         default:           l = 0;

@@ -4041,6 +4041,102 @@ func TestListVMs_SortByIP_400InvalidSortMentionsIP(t *testing.T) {
 	if !strings.Contains(apiErr.Message, "ip") {
 		t.Errorf("message = %q, expected to advertise 'ip' as a valid sort axis", apiErr.Message)
 	}
+	// 5.4.88 — the error message must also advertise `image` now that the
+	// VM list whitelist includes it.
+	if !strings.Contains(apiErr.Message, "image") {
+		t.Errorf("message = %q, expected to advertise 'image' as a valid sort axis", apiErr.Message)
+	}
+}
+
+// ============================================================
+// VM list `image` sort axis (5.4.88)
+// ============================================================
+
+func TestListVMs_SortByImage_AscEmptyTrailing(t *testing.T) {
+	// Concrete images sort case-insensitively (alpine < rocky9). The
+	// empty-image VM sinks to the tail in ascending order, mirroring the
+	// nil-trailing semantics on every other nullable sort axis (ip,
+	// guest_ip, last_fired_at, last_delivery_at, actor).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "rocky-prod", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-image", Spec: types.VMSpec{Image: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "alpine-bastion", Spec: types.VMSpec{Image: "alpine.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=image")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"alpine-bastion", "rocky-prod", "no-image"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByImageDesc_EmptyLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "rocky-prod", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-image", Spec: types.VMSpec{Image: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "alpine-bastion", Spec: types.VMSpec{Image: "alpine.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=image&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// Empty leads in descending; concrete images then sort reverse alpha
+	// (rocky9 > alpine).
+	want := []string{"no-image", "rocky-prod", "alpine-bastion"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByImage_CaseInsensitive(t *testing.T) {
+	// `Rocky9.qcow2` and `rocky9.qcow2` must collate as identical so the
+	// sort agrees with the case-insensitive `?image=` exact-match filter
+	// (5.4.22) on the same column.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{Image: "Rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "alpine", Spec: types.VMSpec{Image: "alpine.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=image&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// alpine.qcow2 < rocky9.qcow2 (case-folded). Equal-image cohort tiebreaks
+	// on id ascending so vm-1 precedes vm-3.
+	want := []string{"alpine", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByImage_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=image")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
 }
 
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {

@@ -271,8 +271,25 @@ export interface paths {
                      *     desc = largest first); they complement the matching `?min_cpus=` /
                      *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
                      *     `?max_disk_gb=` range filters so the same capacity-audit query can
-                     *     be sorted as well as filtered. All comparators tiebreak on `id`
-                     *     so pagination is deterministic across backends.
+                     *     be sorted as well as filtered. `ip` is a numeric IP-address sort on
+                     *     the runtime `vm.ip` field — parsed as `net.IP` and compared
+                     *     byte-wise on the canonical 16-byte form so `192.168.100.2` sorts
+                     *     before `192.168.100.10` rather than lexicographically; VMs with an
+                     *     empty or unparseable IP (stopped, no DHCP lease, no static IP) sink
+                     *     to the tail in ascending order and the head in descending order,
+                     *     mirroring the nil-trailing semantics on the schedule
+                     *     `last_fired_at` / `next_fire_at` sort axes. It is the symmetric
+                     *     sort counterpart to the `?ip=` filter so the same runtime-IP cohort
+                     *     can be both sorted and narrowed. `image` (5.4.88) is a
+                     *     case-insensitive sort on `spec.image` mirroring the
+                     *     case-insensitive `?image=` exact-match filter contract (5.4.22) so
+                     *     the same base-image cohort can be both filtered and sorted on the
+                     *     same column; VMs with an empty `spec.image` sink to the tail in
+                     *     ascending order and the head in descending order, mirroring the
+                     *     nil-trailing semantics on every other nullable sort axis (ip,
+                     *     guest_ip, last_fired_at, last_delivery_at, actor). All
+                     *     comparators tiebreak on `id` so pagination is deterministic
+                     *     across backends.
                      */
                     sort?: components["parameters"]["VMSort"];
                     /**
@@ -1413,8 +1430,14 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Field to sort by. */
-                    sort?: "id" | "host_port" | "guest_port" | "protocol" | "description";
+                    /**
+                     * @description Field to sort by. `guest_ip` uses numeric IP comparison
+                     *     (`192.168.100.2` sorts before `192.168.100.10`); rules with an
+                     *     empty or unparseable `guest_ip` sink to the tail in `asc` and
+                     *     the head in `desc`, mirroring the VM list `ip` sort axis and
+                     *     the schedule `last_fired_at` / `next_fire_at` axes.
+                     */
+                    sort?: "id" | "host_port" | "guest_port" | "protocol" | "description" | "guest_ip";
                     /** @description Sort direction. */
                     order?: "asc" | "desc";
                     /**
@@ -4843,10 +4866,27 @@ export interface components {
          *     desc = largest first); they complement the matching `?min_cpus=` /
          *     `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
          *     `?max_disk_gb=` range filters so the same capacity-audit query can
-         *     be sorted as well as filtered. All comparators tiebreak on `id`
-         *     so pagination is deterministic across backends.
+         *     be sorted as well as filtered. `ip` is a numeric IP-address sort on
+         *     the runtime `vm.ip` field — parsed as `net.IP` and compared
+         *     byte-wise on the canonical 16-byte form so `192.168.100.2` sorts
+         *     before `192.168.100.10` rather than lexicographically; VMs with an
+         *     empty or unparseable IP (stopped, no DHCP lease, no static IP) sink
+         *     to the tail in ascending order and the head in descending order,
+         *     mirroring the nil-trailing semantics on the schedule
+         *     `last_fired_at` / `next_fire_at` sort axes. It is the symmetric
+         *     sort counterpart to the `?ip=` filter so the same runtime-IP cohort
+         *     can be both sorted and narrowed. `image` (5.4.88) is a
+         *     case-insensitive sort on `spec.image` mirroring the
+         *     case-insensitive `?image=` exact-match filter contract (5.4.22) so
+         *     the same base-image cohort can be both filtered and sorted on the
+         *     same column; VMs with an empty `spec.image` sink to the tail in
+         *     ascending order and the head in descending order, mirroring the
+         *     nil-trailing semantics on every other nullable sort axis (ip,
+         *     guest_ip, last_fired_at, last_delivery_at, actor). All
+         *     comparators tiebreak on `id` so pagination is deterministic
+         *     across backends.
          */
-        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip";
+        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image";
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

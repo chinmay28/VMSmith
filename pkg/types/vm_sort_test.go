@@ -288,3 +288,104 @@ func TestIsValidVMSort_AcceptsIP(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// `image` sort axis (5.4.88)
+// ============================================================
+
+func TestSortVMs_ByImage_AscEmptyTrailing(t *testing.T) {
+	// Concrete images sort case-insensitively; the empty-image VM sinks to
+	// the tail in ascending order, mirroring the nil-trailing contract on
+	// every other nullable sort axis (ip / guest_ip / last_fired_at / actor).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Image: "rocky9.qcow2"}},
+		{ID: "vm-2", Spec: VMSpec{Image: ""}},
+		{ID: "vm-3", Spec: VMSpec{Image: "alpine.qcow2"}},
+	}
+	SortVMs(vms, VMSortImage, SortOrderAsc)
+	want := []string{"vm-3", "vm-1", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q image=%q, want %q", i, v.ID, v.Spec.Image, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByImage_DescEmptyLeading(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Image: "rocky9.qcow2"}},
+		{ID: "vm-2", Spec: VMSpec{Image: ""}},
+		{ID: "vm-3", Spec: VMSpec{Image: "alpine.qcow2"}},
+	}
+	SortVMs(vms, VMSortImage, SortOrderDesc)
+	// Empty leads in descending; concrete images then sort reverse-alphabetic.
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q image=%q, want %q", i, v.ID, v.Spec.Image, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByImage_CaseInsensitive(t *testing.T) {
+	// Mixed-case base image names — `Rocky9.qcow2` and `rocky9.qcow2`
+	// must collate as identical so the sort agrees with the
+	// case-insensitive `?image=` filter (5.4.22). Without lowering, the
+	// uppercase `R` (0x52) would sort before lowercase `a` (0x61) and split
+	// the rocky cohort apart, breaking the cohort-discovery operator query.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Image: "Rocky9.qcow2"}},
+		{ID: "vm-2", Spec: VMSpec{Image: "alpine.qcow2"}},
+		{ID: "vm-3", Spec: VMSpec{Image: "rocky9.qcow2"}},
+	}
+	SortVMs(vms, VMSortImage, SortOrderAsc)
+	// asc: alpine < rocky9 (case-folded). The two rocky9 entries tiebreak
+	// on id ascending (vm-1 before vm-3).
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q image=%q, want %q", i, v.ID, v.Spec.Image, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByImage_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{Image: "rocky9.qcow2"}},
+		{ID: "vm-1", Spec: VMSpec{Image: "rocky9.qcow2"}},
+		{ID: "vm-2", Spec: VMSpec{Image: "rocky9.qcow2"}},
+	}
+	SortVMs(vms, VMSortImage, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByImage_AllEmpty_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortImage, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsImage(t *testing.T) {
+	if !IsValidVMSort(VMSortImage) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortImage)
+	}
+	// Case sensitivity at the parse layer: the API/CLI lower-case the value
+	// before calling IsValidVMSort, so `Image` is rejected at this layer.
+	if IsValidVMSort("Image") {
+		t.Errorf("IsValidVMSort(%q) = true, want false", "Image")
+	}
+}
