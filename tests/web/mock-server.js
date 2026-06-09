@@ -2016,13 +2016,13 @@ const server = http.createServer(async (req, res) => {
       { id: "evt-0", type: "vm_template_synced", source: "app", severity: "info", message: "Daily template sync completed", created_at: new Date(Date.now() - 180_000).toISOString() },
     ];
     // Sort whitelist mirrors internal/api/event_sort.go.
-    const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity"]);
+    const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity", "actor"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, occurred_at, type, source, severity" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, occurred_at, type, source, severity, actor" });
     }
     if (order === "") order = "desc";
     else if (!allowedOrder.has(order)) {
@@ -2115,6 +2115,23 @@ const server = http.createServer(async (req, res) => {
           const bs = (b.severity || "").toLowerCase();
           cmp = as < bs ? -1 : as > bs ? 1 : 0;
           if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "actor": {
+          // Case-sensitive (mirrors the API contract and the `?actor=`
+          // exact-match filter). Empty actors sink to tail-asc / head-desc.
+          const aa = a.actor || "";
+          const ba = b.actor || "";
+          if (aa === "" && ba === "") {
+            cmp = cmpID;
+          } else if (aa === "") {
+            cmp = 1;
+          } else if (ba === "") {
+            cmp = -1;
+          } else {
+            cmp = aa < ba ? -1 : aa > ba ? 1 : 0;
+            if (cmp === 0) cmp = cmpID;
+          }
           break;
         }
         default: // "id"

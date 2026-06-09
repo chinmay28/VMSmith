@@ -10226,12 +10226,109 @@ func TestListEvents_RejectsInvalidSort(t *testing.T) {
 	defer cleanup()
 	seedSortableEvents(t, s)
 
-	resp, err := http.Get(ts.URL + "/api/v1/events?sort=attributes")
+	// Use a clearly-unknown sort field; `attributes` was the historical
+	// canary but actor is now a real axis so the test would otherwise
+	// regress.
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=attribute_keys")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// Error message must advertise the full supported set so operators
+	// don't have to guess what landed in the whitelist; the 5.4.87 sweep
+	// added `actor`.
+	if !strings.Contains(string(body), "actor") {
+		t.Errorf("400 body must advertise actor: %s", string(body))
+	}
+}
+
+// ============================================================
+// Events `actor` sort axis (5.4.87)
+// ============================================================
+
+// seedActorSortableEvents writes a small set of events with distinct actor
+// strings (plus one empty-actor event) so the ?sort=actor tests can assert
+// exact orderings without depending on insertion order or fighting the
+// shared seedSortableEvents helper used by every other sort assertion.
+func seedActorSortableEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	seeds := []*types.Event{
+		// Insertion order is intentionally not actor-sorted so a regression
+		// to "default insert order" surfaces.
+		{Type: "vm.started", Source: types.EventSourceLibvirt, Severity: types.EventSeverityInfo, Message: "started", Actor: "system", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "vm.created", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "created", Actor: "", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "vm.stopped", Source: types.EventSourceLibvirt, Severity: types.EventSeverityWarn, Message: "stopped", Actor: "app", OccurredAt: base.Add(3 * time.Hour)},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_SortByActor_AscEmptyTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedActorSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=actor&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// asc: app < system < (empty trails)
+	want := []string{"3", "1", "2"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=actor asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByActor_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedActorSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=actor&order=desc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// desc: (empty leads) > system > app
+	want := []string{"2", "1", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=actor desc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByActor_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	for _, e := range []*types.Event{
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", Actor: "system", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", Actor: "system", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", Actor: "system", OccurredAt: base.Add(3 * time.Hour)},
+	} {
+		if _, err := s.AppendEvent(e); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=actor&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// Equal actors must tiebreak on id (ascending) so paginated requests
+	// over an all-equal cohort are deterministic.
+	want := []string{"1", "2", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("tiebreak: got %v, want %v", g, want)
 	}
 }
 

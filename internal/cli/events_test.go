@@ -1022,12 +1022,46 @@ func TestCLI_EventsList_RejectsInvalidSort(t *testing.T) {
 	_, cleanup := withTestEventStore(t)
 	defer cleanup()
 
-	_, err := runCLI("events", "list", "--sort", "attributes")
+	// `attributes` was the historical canary but actor is now a real axis
+	// (5.4.87) so the unknown-canary needs to be something clearly absent
+	// from the whitelist.
+	_, err := runCLI("events", "list", "--sort", "attribute_keys")
 	if err == nil {
 		t.Fatal("expected error for invalid --sort")
 	}
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Errorf("wrong error: %v", err)
+	}
+	// Error message must advertise the full supported set so operators
+	// don't have to guess what landed in the whitelist; the 5.4.87 sweep
+	// added `actor`.
+	if !strings.Contains(err.Error(), "actor") {
+		t.Errorf("error message must advertise actor: %v", err)
+	}
+}
+
+func TestCLI_EventsList_SortByActor_AscEmptyTrailing(t *testing.T) {
+	// Empty actor sinks to the tail of `asc`, concrete actors sort
+	// case-sensitively. Mirrors the API contract.
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	base := time.Now()
+	s.PutEvent(&types.Event{ID: "1", Type: "alpha", Actor: "system", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "2", Type: "bravo", Actor: "", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "3", Type: "charlie", Actor: "app", CreatedAt: base})
+
+	out, err := runCLI("events", "list", "--sort", "actor", "--order", "asc")
+	if err != nil {
+		t.Fatalf("events list --sort actor: %v", err)
+	}
+	// asc: app(charlie) < system(alpha) < empty(bravo)
+	idxCharlie := strings.Index(out, "charlie")
+	idxAlpha := strings.Index(out, "alpha")
+	idxBravo := strings.Index(out, "bravo")
+	if !(idxCharlie >= 0 && idxAlpha >= 0 && idxBravo >= 0 && idxCharlie < idxAlpha && idxAlpha < idxBravo) {
+		t.Errorf("expected actor asc order charlie<alpha<bravo (empty trails); got positions %d/%d/%d:\n%s",
+			idxCharlie, idxAlpha, idxBravo, out)
 	}
 }
 

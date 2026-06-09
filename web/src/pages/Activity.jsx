@@ -379,6 +379,7 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="type">Sort: type</option>
             <option value="source">Sort: source</option>
             <option value="severity">Sort: severity</option>
+            <option value="actor">Sort: actor</option>
           </select>
           <select
             className="input py-1 text-xs w-28"

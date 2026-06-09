@@ -3803,10 +3803,17 @@ export interface paths {
                     until?: string;
                     /**
                      * @description Sort field. `type`, `source`, and `severity` match
-                     *     case-insensitively. Defaults to `id` so the long-standing
-                     *     newest-first contract is preserved.
+                     *     case-insensitively; `actor` is **case-sensitive** to mirror
+                     *     the case-sensitive `?actor=` exact-match filter contract.
+                     *     Events with an empty `actor` (legacy events written before
+                     *     the actor attribution sweep) sort to the tail of `asc` and
+                     *     the head of `desc`, mirroring the nil-trailing semantics on
+                     *     the VM list `ip` axis and the schedule `last_fired_at` /
+                     *     `next_fire_at` axes. All comparators tiebreak on `id` so
+                     *     paginated responses are deterministic. Defaults to `id` so
+                     *     the long-standing newest-first contract is preserved.
                      */
-                    sort?: "id" | "occurred_at" | "type" | "source" | "severity";
+                    sort?: "id" | "occurred_at" | "type" | "source" | "severity" | "actor";
                     /**
                      * @description Sort direction. Defaults to `desc` so the long-standing
                      *     newest-first contract is preserved.
