@@ -134,6 +134,16 @@ func TestCLI_LogsList_EmptyFlagsOmitParams(t *testing.T) {
 	}
 }
 
+func TestCLI_LogsList_DefaultPageOneOmitsParam(t *testing.T) {
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if strings.Contains(state.lastQuery, "page=") {
+		t.Fatalf("default page=1 should not be forwarded; query=%q", state.lastQuery)
+	}
+}
+
 func TestCLI_LogsList_SinceDurationBecomesRFC3339(t *testing.T) {
 	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
 	if _, err := runCLI("logs", "list", "--api-url", srv.URL, "--since", "5m"); err != nil {
@@ -263,6 +273,17 @@ func TestCLI_LogsList_RejectsNegativeLimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--limit") {
 		t.Fatalf("error = %q, want it to mention --limit", err.Error())
+	}
+}
+
+func TestCLI_LogsList_RejectsPageZero(t *testing.T) {
+	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--page", "0")
+	if err == nil {
+		t.Fatalf("expected error for page zero, got nil")
+	}
+	if !strings.Contains(err.Error(), "--page") {
+		t.Fatalf("error = %q, want it to mention --page", err.Error())
 	}
 }
 
