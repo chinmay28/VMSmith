@@ -123,16 +123,16 @@ func SortVMs(vms []*VM, sortField, order string) {
 			// desc — mirrors the nil-trailing semantics on every
 			// other nullable sort axis (ip, guest_ip, last_fired_at,
 			// last_delivery_at, actor).
-			ai_img, aj_img := strings.ToLower(ai.Spec.Image), strings.ToLower(aj.Spec.Image)
+			aiImg, ajImg := strings.ToLower(ai.Spec.Image), strings.ToLower(aj.Spec.Image)
 			switch {
-			case ai_img == "" && aj_img == "":
+			case aiImg == "" && ajImg == "":
 				less = ai.ID < aj.ID
-			case ai_img == "":
+			case aiImg == "":
 				less = false
-			case aj_img == "":
+			case ajImg == "":
 				less = true
-			case ai_img != aj_img:
-				less = ai_img < aj_img
+			case aiImg != ajImg:
+				less = aiImg < ajImg
 			default:
 				less = ai.ID < aj.ID
 			}
