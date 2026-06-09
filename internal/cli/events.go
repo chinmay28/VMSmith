@@ -40,9 +40,9 @@ are applied client-side after a full bucket scan. For real-time streaming
 or daemon-side filtering, query GET /api/v1/events instead.
 
 Sort: --sort and --order accept the same whitelist as the API
-(--sort=id|occurred_at|type|source|severity, --order=asc|desc). When
---sort is omitted the legacy "newest by timestamp" ordering is used,
-which matches the long-standing CLI behaviour.`,
+(--sort=id|occurred_at|type|source|severity|actor, --order=asc|desc).
+When --sort is omitted the legacy "newest by timestamp" ordering is
+used, which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmFilter, _ := cmd.Flags().GetString("vm")
 		typeFilter, _ := cmd.Flags().GetString("type")
@@ -270,14 +270,8 @@ func validateEventSort(sortFlag, orderFlag string) (sortField, order string, err
 		// Leave order empty too — caller short-circuits to legacy path.
 		return "", "", nil
 	}
-	switch sortField {
-	case types.EventSortID,
-		types.EventSortOccurredAt,
-		types.EventSortType,
-		types.EventSortSource,
-		types.EventSortSeverity:
-	default:
-		return "", "", fmt.Errorf("invalid --sort value %q (want one of: id, occurred_at, type, source, severity)", sortFlag)
+	if !types.IsValidEventSort(sortField) {
+		return "", "", fmt.Errorf("invalid --sort value %q (want one of: id, occurred_at, type, source, severity, actor)", sortFlag)
 	}
 	order = strings.TrimSpace(strings.ToLower(orderFlag))
 	if order == "" {

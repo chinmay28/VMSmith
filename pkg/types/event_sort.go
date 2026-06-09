@@ -13,7 +13,20 @@ const (
 	EventSortType       = "type"
 	EventSortSource     = "source"
 	EventSortSeverity   = "severity"
+	EventSortActor      = "actor"
 )
+
+// IsValidEventSort reports whether s is an accepted event list sort field.
+// Used by the API and CLI parsers to reject unknown values uniformly so the
+// whitelist lives in one place.
+func IsValidEventSort(s string) bool {
+	switch s {
+	case EventSortID, EventSortOccurredAt, EventSortType,
+		EventSortSource, EventSortSeverity, EventSortActor:
+		return true
+	}
+	return false
+}
 
 // SortEvents sorts the given events in place by the requested field and
 // order. All comparators tiebreak on `id` so pagination over repeated
@@ -67,6 +80,29 @@ func SortEvents(events []*Event, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case EventSortActor:
+			// Case-sensitive comparison mirrors the case-sensitive
+			// `?actor=` exact-match filter contract — operators
+			// reference actor identifiers verbatim (e.g. `system`,
+			// `app`, `ops-alice`). Empty actors sort to the tail of
+			// asc / head of desc so legacy events written before the
+			// actor attribution sweep don't crowd the head of a
+			// freshly-sorted timeline; mirrors the nil-trailing
+			// semantics on the VM list `ip` axis and the schedule
+			// `last_fired_at` / `next_fire_at` axes.
+			ax, bx := ai.Actor, aj.Actor
+			switch {
+			case ax == "" && bx == "":
+				less = ai.ID < aj.ID
+			case ax == "":
+				less = false
+			case bx == "":
+				less = true
+			case ax != bx:
+				less = ax < bx
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // EventSortID
 			less = ai.ID < aj.ID
 		}

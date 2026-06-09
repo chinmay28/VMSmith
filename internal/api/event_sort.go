@@ -22,16 +22,10 @@ func parseEventSort(r *http.Request) (sortField, order string, err error) {
 	if sortField == "" {
 		sortField = types.EventSortID
 	}
-	switch sortField {
-	case types.EventSortID,
-		types.EventSortOccurredAt,
-		types.EventSortType,
-		types.EventSortSource,
-		types.EventSortSeverity:
-	default:
+	if !types.IsValidEventSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, occurred_at, type, source, severity",
+			"sort must be one of: id, occurred_at, type, source, severity, actor",
 		)
 	}
 

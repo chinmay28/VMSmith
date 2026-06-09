@@ -116,15 +116,114 @@ func TestSortEvents_BySeverity_CaseInsensitive(t *testing.T) {
 }
 
 func TestSortEvents_UnknownFieldFallsBackToID(t *testing.T) {
+	// `attributes` was the canonical "clearly unknown" sort string before
+	// 5.4.87, but the actor axis now shares the same conceptual surface;
+	// keep the test using a string that is unambiguously not a real axis.
 	evts := []*Event{
 		{ID: "3"},
 		{ID: "1"},
 		{ID: "2"},
 	}
-	SortEvents(evts, "attributes", SortOrderAsc)
+	SortEvents(evts, "attribute_keys", SortOrderAsc)
 	want := []string{"1", "2", "3"}
 	if got := evtIDs(evts); !equalStrings(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestIsValidEventSort_AcceptsActor(t *testing.T) {
+	// Defense-in-depth: the API parser, CLI parser, and SortEvents all
+	// gate on IsValidEventSort, so a regression here silently breaks every
+	// surface at once.
+	if !IsValidEventSort(EventSortActor) {
+		t.Fatalf("IsValidEventSort(%q) = false, want true", EventSortActor)
+	}
+}
+
+func TestIsValidEventSort_RejectsUnknown(t *testing.T) {
+	if IsValidEventSort("attribute_keys") {
+		t.Fatalf("IsValidEventSort(%q) = true, want false", "attribute_keys")
+	}
+}
+
+// ============================================================
+// `actor` sort axis (5.4.87)
+// ============================================================
+
+func TestSortEvents_ByActor_AscEmptyTrailing(t *testing.T) {
+	// Empty actor sinks to the tail of `asc` — mirrors the nil-trailing
+	// contract on the VM list `ip` axis (5.4.85) and the schedule
+	// `last_fired_at` axis (5.4.84). Concrete actors sort
+	// case-sensitively (mirrors the case-sensitive `?actor=` filter).
+	evts := []*Event{
+		{ID: "1", Actor: "system"},
+		{ID: "2", Actor: ""},
+		{ID: "3", Actor: "app"},
+	}
+	SortEvents(evts, EventSortActor, SortOrderAsc)
+	want := []string{"3", "1", "2"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByActor_DescEmptyLeading(t *testing.T) {
+	// Empty actor heads `desc` — same nil-handling, mirrored.
+	evts := []*Event{
+		{ID: "1", Actor: "system"},
+		{ID: "2", Actor: ""},
+		{ID: "3", Actor: "app"},
+	}
+	SortEvents(evts, EventSortActor, SortOrderDesc)
+	want := []string{"2", "1", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("desc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByActor_CaseSensitive(t *testing.T) {
+	// `Bob` < `alice` lexically in ASCII (uppercase < lowercase), and the
+	// actor axis is case-sensitive on purpose so the sort agrees with the
+	// case-sensitive `?actor=` exact-match filter. A lowercased comparator
+	// would order `alice` before `Bob`, which would diverge from the
+	// filter contract.
+	evts := []*Event{
+		{ID: "1", Actor: "alice"},
+		{ID: "2", Actor: "Bob"},
+	}
+	SortEvents(evts, EventSortActor, SortOrderAsc)
+	want := []string{"2", "1"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("case-sensitive asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByActor_TiebreaksOnID(t *testing.T) {
+	evts := []*Event{
+		{ID: "3", Actor: "system"},
+		{ID: "1", Actor: "system"},
+		{ID: "2", Actor: "system"},
+	}
+	SortEvents(evts, EventSortActor, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("tiebreak: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByActor_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// Every actor empty — comparator must fall through to the id tiebreak
+	// instead of treating empty<empty as a swap candidate (sort instability
+	// would otherwise reorder paginated requests).
+	evts := []*Event{
+		{ID: "3", Actor: ""},
+		{ID: "1", Actor: ""},
+		{ID: "2", Actor: ""},
+	}
+	SortEvents(evts, EventSortActor, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("all-empty: got %v, want %v", got, want)
 	}
 }
 

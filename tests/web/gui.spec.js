@@ -5414,6 +5414,32 @@ test.describe("Activity", () => {
     await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
       .toBe("activity-row-evt-3");
   });
+
+  // 5.4.87 — `actor` sort axis (case-sensitive, empty-trailing).
+  test("actor sort axis reorders the activity timeline case-sensitively and trails empties", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    const rows = page.locator('[data-testid^="activity-row-"]');
+
+    // sort=actor asc: "ops-alice" < "system" (case-sensitive), evt-0 (empty
+    // actor) sinks to the tail. evt-1 and evt-3 both carry "system" so they
+    // tiebreak on id ascending — evt-1 before evt-3.
+    await page.getByTestId("activity-sort-field").selectOption("actor");
+    await page.getByTestId("activity-sort-order").selectOption("asc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-2");
+    await expect.poll(async () => (await rows.last().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-0");
+
+    // URL captures the new sort + order so a refresh/back-button restores it.
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("actor");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // sort=actor desc: empty actor heads (evt-0), then concrete actors fall
+    // in reverse case-sensitive order.
+    await page.getByTestId("activity-sort-order").selectOption("desc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-0");
+  });
 });
 
 // ============================================================
