@@ -3381,11 +3381,19 @@ components:
         mirroring the nil-trailing semantics on the schedule
         `last_fired_at` / `next_fire_at` sort axes. It is the symmetric
         sort counterpart to the `?ip=` filter so the same runtime-IP cohort
-        can be both sorted and narrowed. All comparators tiebreak on `id`
-        so pagination is deterministic across backends.
+        can be both sorted and narrowed. `image` (5.4.88) is a
+        case-insensitive sort on `spec.image` mirroring the
+        case-insensitive `?image=` exact-match filter contract (5.4.22) so
+        the same base-image cohort can be both filtered and sorted on the
+        same column; VMs with an empty `spec.image` sink to the tail in
+        ascending order and the head in descending order, mirroring the
+        nil-trailing semantics on every other nullable sort axis (ip,
+        guest_ip, last_fired_at, last_delivery_at, actor). All
+        comparators tiebreak on `id` so pagination is deterministic
+        across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image]
         default: id
     ImageSort:
       name: sort

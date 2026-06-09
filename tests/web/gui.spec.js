@@ -1152,6 +1152,31 @@ test.describe("VM List", () => {
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.88 — case-insensitive `image` sort axis.
+  test("image sort axis reorders the VM list case-insensitively and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed images: web-server=ubuntu-22.04, db-server=rocky-9, win-app=win-server-2022.qcow2.
+    // Case-folded asc: rocky-9 < ubuntu-22.04 < win-server-2022.qcow2 — so
+    // db-server surfaces first, then web-server, then win-app. Mirrors the
+    // case-insensitive `?image=` filter (5.4.22) contract.
+    await page.getByTestId("vm-list-sort-field").selectOption("image");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=image");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips the order — win-app heads the list. The unit test in
+    // pkg/types asserts the case-insensitive contract (Rocky9.qcow2 collates
+    // with rocky9.qcow2); the Playwright case verifies the dropdown ↔ URL ↔
+    // API plumbing.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

@@ -1965,6 +1965,72 @@ func TestCLI_VMList_RejectsInvalidSort_IPMentioned(t *testing.T) {
 	if !strings.Contains(msg, "invalid --sort") || !strings.Contains(msg, "ip") {
 		t.Errorf("error %q should mention 'invalid --sort' and advertise 'ip' as a valid axis", msg)
 	}
+	// 5.4.88 — the error message must also advertise `image` now that the
+	// VM list whitelist includes it.
+	if !strings.Contains(msg, "image") {
+		t.Errorf("error %q should advertise 'image' as a valid axis", msg)
+	}
+}
+
+// ============================================================
+// VM list `image` sort axis (5.4.88)
+// ============================================================
+
+func TestCLI_VMList_SortByImage_AscEmptyTrailing(t *testing.T) {
+	// Concrete images sort case-insensitively (alpine < rocky9). The
+	// empty-image VM sinks to the tail in ascending order, mirroring the
+	// nil-trailing contract on the runtime IP axis (5.4.85).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "rocky-prod", State: types.VMStateRunning, Spec: types.VMSpec{Image: "rocky9.qcow2", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "no-image", State: types.VMStateStopped, Spec: types.VMSpec{Image: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "alpine-bastion", State: types.VMStateRunning, Spec: types.VMSpec{Image: "alpine.qcow2", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "image")
+	if err != nil {
+		t.Fatalf("vm list --sort image: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"alpine-bastion", "rocky-prod", "no-image"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByImage_CaseInsensitive(t *testing.T) {
+	// `Rocky9.qcow2` and `rocky9.qcow2` collate as identical so the sort
+	// agrees with the case-insensitive `?image=` filter (5.4.22).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{Image: "Rocky9.qcow2", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "alpine", State: types.VMStateRunning, Spec: types.VMSpec{Image: "alpine.qcow2", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{Image: "rocky9.qcow2", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "image", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort image: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// alpine < rocky9 (case-folded). Equal-image cohort tiebreaks on id
+	// ascending so vm-1 ("uppercase") precedes vm-3 ("lowercase").
+	want := []string{"alpine", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
 }
 
 func TestCLI_VMList_InvalidOffset(t *testing.T) {

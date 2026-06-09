@@ -18,6 +18,7 @@ const (
 	VMSortRAMMB     = "ram_mb"
 	VMSortDiskGB    = "disk_gb"
 	VMSortIP        = "ip"
+	VMSortImage     = "image"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -28,7 +29,8 @@ const (
 func IsValidVMSort(s string) bool {
 	switch s {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
-		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP:
+		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
+		VMSortImage:
 		return true
 	}
 	return false
@@ -113,6 +115,27 @@ func SortVMs(vms []*VM, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case VMSortImage:
+			// Case-insensitive compare mirrors the case-insensitive
+			// `?image=` exact-match filter contract (5.4.22) so the
+			// filter and sort agree on the same column. VMs with an
+			// empty `spec.image` sink to the tail of asc / head of
+			// desc — mirrors the nil-trailing semantics on every
+			// other nullable sort axis (ip, guest_ip, last_fired_at,
+			// last_delivery_at, actor).
+			ai_img, aj_img := strings.ToLower(ai.Spec.Image), strings.ToLower(aj.Spec.Image)
+			switch {
+			case ai_img == "" && aj_img == "":
+				less = ai.ID < aj.ID
+			case ai_img == "":
+				less = false
+			case aj_img == "":
+				less = true
+			case ai_img != aj_img:
+				less = ai_img < aj_img
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // VMSortID
 			less = ai.ID < aj.ID
 		}
