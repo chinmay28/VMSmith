@@ -1,7 +1,7 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-06-07
-> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, webhook delivery + Settings UX, OpenAPI tooling, and clone integration/E2E coverage are now complete; the main remaining gaps are the libvirt clone implementation, metrics soak/E2E coverage, advanced operations, and long-tail production polish.
+> **Last updated:** 2026-06-09
+> **Status:** Active roadmap — foundation work, auth/TLS/systemd/quotas, templates, bulk ops, host + VM metrics APIs/CLI/UI, event storage/streaming/UI, webhook delivery + Settings UX, OpenAPI tooling, clone integration/E2E coverage, and the daemon-side console proxy foundation are now complete; the main remaining gaps are the libvirt clone implementation, the browser console UI/password/serial follow-ons, metrics soak/E2E coverage, advanced operations, and long-tail production polish.
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -523,11 +523,11 @@ VNC is already configured in domain XML (`internal/vm/domain.go:60` — `<graphi
 **Security checklist (must hold for v1).**
 - [x] Ticket endpoint requires `Authorization: Bearer`.
 - [x] Ticket is single-use, ≤60s TTL, scoped to VM ID + API key.
-- [ ] Websocket handler rejects requests without a valid ticket with HTTP 401.
+- [x] Websocket handler rejects requests without a valid ticket with HTTP 401.
 - [x] VNC port stays bound to `127.0.0.1` — `internal/vm/console_endpoint_test.go::TestMockManager_SeedConsoleListener_RejectsExternalInterfaceDial` binds a real loopback listener and asserts dialing the host's non-loopback IPv4 address on that port fails.
 - [x] No ticket appears in any access log (the middleware redacts `?ticket=`).
-- [ ] Sessions are forcibly closed on VM stop, VM delete, daemon shutdown, and API-key revocation.
-- [ ] `wss://` is required when TLS is configured (`ws://` rejected with 403 to avoid mixed-content downgrade).
+- [x] Sessions are forcibly closed on VM stop, VM delete, and daemon shutdown; API-key revocation remains future work.
+- [x] `wss://` is required when TLS is configured (`ws://` rejected with 403 to avoid mixed-content downgrade).
 
 #### 5.1.1 Task list
 
