@@ -19,16 +19,10 @@ func parsePortForwardSort(r *http.Request) (sortField, order string, err error) 
 	if sortField == "" {
 		sortField = types.PortForwardSortID
 	}
-	switch sortField {
-	case types.PortForwardSortID,
-		types.PortForwardSortHostPort,
-		types.PortForwardSortGuestPort,
-		types.PortForwardSortProtocol,
-		types.PortForwardSortDescription:
-	default:
+	if !types.IsValidPortForwardSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, host_port, guest_port, protocol, description",
+			"sort must be one of: id, host_port, guest_port, protocol, description, guest_ip",
 		)
 	}
 

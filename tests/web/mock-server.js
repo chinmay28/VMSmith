@@ -10,6 +10,41 @@ const WEBHOOK_TAG_RE = /^[a-z0-9][a-z0-9._:-]*$/;
 // lowercase, dedupe, alphabetise; reject empty values and characters outside
 // the lowercase tag alphabet. Returns {tags, err} so callers can short-circuit
 // on validation failure.
+// ipKey converts an IP string to a numeric-comparable BigInt that mirrors the
+// Go `compareVMIP` contract (canonical 16-byte To16() form). IPv4 dotted-quads
+// land in the IPv4-mapped slot above the leading-zero IPv6 cohort so the two
+// families interleave correctly. Returns null for empty / unparseable input;
+// callers are expected to push null to the tail (asc) / head (desc). Shared
+// by the VM-list `ip` sort axis (5.4.85) and the port-forward-list
+// `guest_ip` sort axis (5.4.86).
+function ipKey(ip) {
+  if (!ip) return null;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (v4) {
+    const parts = v4.slice(1).map(Number);
+    if (parts.some(p => p < 0 || p > 255)) return null;
+    return (BigInt(0xFFFF) << 32n) | (BigInt(parts[0]) << 24n) | (BigInt(parts[1]) << 16n) | (BigInt(parts[2]) << 8n) | BigInt(parts[3]);
+  }
+  if (ip.includes(":")) {
+    if (!/^[0-9a-f:]+$/i.test(ip)) return null;
+    const parts = ip.split("::", 2);
+    const head = parts[0] ? parts[0].split(":") : [];
+    const tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    const groups = [...head, ...Array(fill).fill("0"), ...tail];
+    if (groups.length !== 8) return null;
+    let k = 0n;
+    for (const g of groups) {
+      const n = parseInt(g, 16);
+      if (Number.isNaN(n) || n < 0 || n > 0xFFFF) return null;
+      k = (k << 16n) | BigInt(n);
+    }
+    return k;
+  }
+  return null;
+}
+
 function normalizeWebhookTags(input) {
   if (!Array.isArray(input)) return { tags: null, err: null };
   if (input.length === 0) return { tags: [], err: null };
@@ -702,41 +737,6 @@ const server = http.createServer(async (req, res) => {
         return true;
       });
     }
-    // Convert an IP string to a numeric-comparable key. IPv4 dotted quads
-    // become 32-bit big-endian numbers (in BigInt for safety); IPv6 are
-    // expanded to 8 hextets and packed similarly. Anything unparseable
-    // becomes BigInt(-1) so it sorts BEFORE any concrete address — but the
-    // ascending order then flips that to the tail because we treat -1 as
-    // "missing" and bump it to a value larger than any real IP.
-    const ipKey = (ip) => {
-      if (!ip) return null;
-      const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
-      if (v4) {
-        const parts = v4.slice(1).map(Number);
-        if (parts.some(p => p < 0 || p > 255)) return null;
-        // IPv4-mapped form: 80 leading zero bits + 0x00 0x00 0xFF 0xFF + the four octets.
-        return (BigInt(0xFFFF) << 32n) | (BigInt(parts[0]) << 24n) | (BigInt(parts[1]) << 16n) | (BigInt(parts[2]) << 8n) | BigInt(parts[3]);
-      }
-      if (ip.includes(":")) {
-        // Reject anything not a hex/colon literal so 'fe80::xyz' falls to null.
-        if (!/^[0-9a-f:]+$/i.test(ip)) return null;
-        const parts = ip.split("::", 2);
-        const head = parts[0] ? parts[0].split(":") : [];
-        const tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
-        const fill = 8 - head.length - tail.length;
-        if (fill < 0) return null;
-        const groups = [...head, ...Array(fill).fill("0"), ...tail];
-        if (groups.length !== 8) return null;
-        let k = 0n;
-        for (const g of groups) {
-          const n = parseInt(g, 16);
-          if (Number.isNaN(n) || n < 0 || n > 0xFFFF) return null;
-          k = (k << 16n) | BigInt(n);
-        }
-        return k;
-      }
-      return null;
-    };
     const cmp = (a, b) => {
       let l;
       const num = (x) => (typeof x === "number" && !Number.isNaN(x) ? x : 0);
@@ -1233,9 +1233,9 @@ const server = http.createServer(async (req, res) => {
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/ports$/)) && method === "GET") {
     const sortField = (url.searchParams.get("sort") || "id").toLowerCase().trim();
     const order = (url.searchParams.get("order") || "asc").toLowerCase().trim();
-    const allowedSort = ["id", "host_port", "guest_port", "protocol", "description"];
+    const allowedSort = ["id", "host_port", "guest_port", "protocol", "description", "guest_ip"];
     if (!allowedSort.includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, host_port, guest_port, protocol, description" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, host_port, guest_port, protocol, description, guest_ip" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -1320,6 +1320,19 @@ const server = http.createServer(async (req, res) => {
           const bd = (b.description || "").toLowerCase();
           if (ad !== bd) l = ad < bd ? -1 : 1;
           else l = (a.id || "").localeCompare(b.id || "");
+          break;
+        }
+        case "guest_ip": {
+          // Numeric IP sort (5.4.86): mirror the Go compareVMIP contract via
+          // the shared `ipKey` helper defined for the VM list ip sort axis
+          // (5.4.85). Empty / unparseable guest_ip sinks to the tail in asc
+          // (head in desc).
+          const ka = ipKey(a.guest_ip), kb = ipKey(b.guest_ip);
+          if (ka === null && kb === null) l = 0;
+          else if (ka === null) l = 1;
+          else if (kb === null) l = -1;
+          else l = ka < kb ? -1 : ka > kb ? 1 : 0;
+          if (l === 0) l = (a.id || "").localeCompare(b.id || "");
           break;
         }
         default: // id

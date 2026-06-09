@@ -1838,6 +1838,30 @@ test.describe("VM Detail", () => {
     await expect(rows().nth(1)).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
   });
 
+  test("port sort by guest_ip exposes the new dropdown option and round-trips through the URL (5.4.86)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    // The new "Guest IP" option appears on the sort dropdown alongside the
+    // existing ID / Host port / Guest port / Protocol / Description axes.
+    const sortDropdown = page.getByTestId("port-sort-field");
+    await expect(sortDropdown.locator('option[value="guest_ip"]')).toHaveText(/Guest IP/);
+
+    // Selecting it round-trips through `?port_sort=guest_ip`. Both seeded
+    // rules share the same guest_ip (192.168.100.10) so the numeric compare
+    // returns 0 and the id tiebreak applies: pf-seed-http < pf-seed-ssh.
+    await sortDropdown.selectOption("guest_ip");
+    await expect.poll(() => new URL(page.url()).search).toContain("port_sort=guest_ip");
+    const rows = () => page.locator('[data-testid^="port-row-"]');
+    await expect(rows().first()).toHaveAttribute("data-testid", "port-row-pf-seed-http");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
+
+    // Flip to desc — the id tiebreak inverts: pf-seed-ssh first.
+    await page.getByTestId("port-sort-order").selectOption("desc");
+    await expect(rows().first()).toHaveAttribute("data-testid", "port-row-pf-seed-ssh");
+    await expect.poll(() => new URL(page.url()).search).toContain("port_order=desc");
+  });
+
   test("port forward search input filters the list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

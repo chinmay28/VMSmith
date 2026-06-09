@@ -99,12 +99,116 @@ func TestSortPortForwards_UnknownFieldFallsBackToID(t *testing.T) {
 		{ID: "vm-1/22001", HostPort: 22001},
 		{ID: "vm-1/22002", HostPort: 22002},
 	}
-	SortPortForwards(pfs, "guest_ip", SortOrderAsc)
+	SortPortForwards(pfs, "definitely-not-a-field", SortOrderAsc)
 	want := []string{"vm-1/22001", "vm-1/22002", "vm-1/22003"}
 	got := pfIDs(pfs)
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortPortForwards_ByGuestIP_Numeric_AscEmptyTrailing(t *testing.T) {
+	pfs := []*PortForward{
+		{ID: "vm-1/22003", HostPort: 22003, GuestIP: ""},
+		{ID: "vm-1/22001", HostPort: 22001, GuestIP: "192.168.100.10"},
+		{ID: "vm-1/22002", HostPort: 22002, GuestIP: "192.168.100.2"},
+	}
+	SortPortForwards(pfs, PortForwardSortGuestIP, SortOrderAsc)
+	// 192.168.100.2 < 192.168.100.10 (numeric, NOT lexicographic — lex would
+	// invert these). Empty guest_ip sinks to the tail in asc.
+	want := []string{"vm-1/22002", "vm-1/22001", "vm-1/22003"}
+	got := pfIDs(pfs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortPortForwards_ByGuestIP_DescEmptyLeading(t *testing.T) {
+	pfs := []*PortForward{
+		{ID: "vm-1/22001", HostPort: 22001, GuestIP: "192.168.100.2"},
+		{ID: "vm-1/22003", HostPort: 22003, GuestIP: ""},
+		{ID: "vm-1/22002", HostPort: 22002, GuestIP: "192.168.100.10"},
+	}
+	SortPortForwards(pfs, PortForwardSortGuestIP, SortOrderDesc)
+	// Mirror of asc: nil-leading in desc, then the higher numeric IP first.
+	want := []string{"vm-1/22003", "vm-1/22002", "vm-1/22001"}
+	got := pfIDs(pfs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortPortForwards_ByGuestIP_TiebreaksOnID(t *testing.T) {
+	pfs := []*PortForward{
+		{ID: "vm-1/22003", HostPort: 22003, GuestIP: "192.168.100.5"},
+		{ID: "vm-1/22001", HostPort: 22001, GuestIP: "192.168.100.5"},
+		{ID: "vm-1/22002", HostPort: 22002, GuestIP: "192.168.100.5"},
+	}
+	SortPortForwards(pfs, PortForwardSortGuestIP, SortOrderAsc)
+	// All equal-IP rules tiebreak on ID.
+	want := []string{"vm-1/22001", "vm-1/22002", "vm-1/22003"}
+	got := pfIDs(pfs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortPortForwards_ByGuestIP_AllEmpty_TiebreaksOnID(t *testing.T) {
+	pfs := []*PortForward{
+		{ID: "vm-1/22003", HostPort: 22003, GuestIP: ""},
+		{ID: "vm-1/22001", HostPort: 22001, GuestIP: ""},
+		{ID: "vm-1/22002", HostPort: 22002, GuestIP: ""},
+	}
+	SortPortForwards(pfs, PortForwardSortGuestIP, SortOrderAsc)
+	want := []string{"vm-1/22001", "vm-1/22002", "vm-1/22003"}
+	got := pfIDs(pfs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSortPortForwards_ByGuestIP_GarbageSortsAsEmpty(t *testing.T) {
+	pfs := []*PortForward{
+		{ID: "vm-1/22002", HostPort: 22002, GuestIP: "not-an-ip"},
+		{ID: "vm-1/22001", HostPort: 22001, GuestIP: "192.168.100.50"},
+	}
+	SortPortForwards(pfs, PortForwardSortGuestIP, SortOrderAsc)
+	// Garbage parses as nil — sorts to the tail in asc, mirroring empty.
+	want := []string{"vm-1/22001", "vm-1/22002"}
+	got := pfIDs(pfs)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestIsValidPortForwardSort_AcceptsGuestIP(t *testing.T) {
+	for _, f := range []string{
+		PortForwardSortID,
+		PortForwardSortHostPort,
+		PortForwardSortGuestPort,
+		PortForwardSortProtocol,
+		PortForwardSortDescription,
+		PortForwardSortGuestIP,
+	} {
+		if !IsValidPortForwardSort(f) {
+			t.Errorf("IsValidPortForwardSort(%q) = false, want true", f)
+		}
+	}
+	for _, f := range []string{"", "bogus", "Host_Port", "host-port"} {
+		if IsValidPortForwardSort(f) {
+			t.Errorf("IsValidPortForwardSort(%q) = true, want false", f)
 		}
 	}
 }
