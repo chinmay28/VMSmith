@@ -14,6 +14,7 @@ const (
 	EventSortSource     = "source"
 	EventSortSeverity   = "severity"
 	EventSortActor      = "actor"
+	EventSortResourceID = "resource_id"
 )
 
 // IsValidEventSort reports whether s is an accepted event list sort field.
@@ -22,7 +23,8 @@ const (
 func IsValidEventSort(s string) bool {
 	switch s {
 	case EventSortID, EventSortOccurredAt, EventSortType,
-		EventSortSource, EventSortSeverity, EventSortActor:
+		EventSortSource, EventSortSeverity, EventSortActor,
+		EventSortResourceID:
 		return true
 	}
 	return false
@@ -100,6 +102,28 @@ func SortEvents(events []*Event, sortField, order string) {
 				less = true
 			case ax != bx:
 				less = ax < bx
+			default:
+				less = ai.ID < aj.ID
+			}
+		case EventSortResourceID:
+			// Case-sensitive comparison mirrors the case-sensitive
+			// `?resource_id=` exact-match filter contract — operators
+			// reference opaque server-issued IDs verbatim
+			// (`vm-1741234567890123`, `sched-…`). Empty resource IDs
+			// sort to the tail of asc / head of desc, mirroring the
+			// nil-trailing semantics on every other nullable sort
+			// axis (ip, guest_ip, last_fired_at, last_delivery_at,
+			// actor).
+			rx, sx := ai.ResourceID, aj.ResourceID
+			switch {
+			case rx == "" && sx == "":
+				less = ai.ID < aj.ID
+			case rx == "":
+				less = false
+			case sx == "":
+				less = true
+			case rx != sx:
+				less = rx < sx
 			default:
 				less = ai.ID < aj.ID
 			}

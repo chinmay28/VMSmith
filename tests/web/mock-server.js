@@ -2060,13 +2060,13 @@ const server = http.createServer(async (req, res) => {
       { id: "evt-0", type: "vm_template_synced", source: "app", severity: "info", message: "Daily template sync completed", created_at: new Date(Date.now() - 180_000).toISOString() },
     ];
     // Sort whitelist mirrors internal/api/event_sort.go.
-    const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity", "actor"]);
+    const allowedSort = new Set(["id", "occurred_at", "type", "source", "severity", "actor", "resource_id"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, occurred_at, type, source, severity, actor" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, occurred_at, type, source, severity, actor, resource_id" });
     }
     if (order === "") order = "desc";
     else if (!allowedOrder.has(order)) {
@@ -2174,6 +2174,24 @@ const server = http.createServer(async (req, res) => {
             cmp = -1;
           } else {
             cmp = aa < ba ? -1 : aa > ba ? 1 : 0;
+            if (cmp === 0) cmp = cmpID;
+          }
+          break;
+        }
+        case "resource_id": {
+          // Case-sensitive (mirrors the API contract and the
+          // `?resource_id=` exact-match filter). Empty resource ids sink
+          // to tail-asc / head-desc, mirroring the actor axis.
+          const ar = a.resource_id || "";
+          const br = b.resource_id || "";
+          if (ar === "" && br === "") {
+            cmp = cmpID;
+          } else if (ar === "") {
+            cmp = 1;
+          } else if (br === "") {
+            cmp = -1;
+          } else {
+            cmp = ar < br ? -1 : ar > br ? 1 : 0;
             if (cmp === 0) cmp = cmpID;
           }
           break;

@@ -25,7 +25,7 @@ func parseEventSort(r *http.Request) (sortField, order string, err error) {
 	if !types.IsValidEventSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, occurred_at, type, source, severity, actor",
+			"sort must be one of: id, occurred_at, type, source, severity, actor, resource_id",
 		)
 	}
 
