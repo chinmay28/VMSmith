@@ -3068,6 +3068,31 @@ test.describe("Templates", () => {
     await expect(rows.nth(2)).toHaveAttribute("data-testid", "template-row-big-rocky");
   });
 
+  // 5.4.89 — case-insensitive `image` sort axis on the template list, the
+  // symmetric sort counterpart to the existing `?image=` filter. Mirrors the
+  // VM list image sort axis (5.4.88).
+  test("image sort axis reorders the template list case-insensitively and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+    await expect(rows).toHaveCount(3);
+
+    // Seed images: small-ubuntu=/images/ubuntu-base.qcow2,
+    // big-rocky=/images/rocky9.qcow2, windows-2022=/images/win-server-2022.qcow2.
+    // Case-folded asc: rocky9 < ubuntu-base < win-server-2022 — so big-rocky
+    // surfaces first, then small-ubuntu, then windows-2022. Mirrors the
+    // case-insensitive `?image=` filter contract.
+    await page.getByTestId("template-list-sort-field").selectOption("image");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=image");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-big-rocky");
+
+    // Descending flips the order — windows-2022 heads the list.
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-windows-2022");
+  });
+
   test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

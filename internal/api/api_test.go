@@ -12571,13 +12571,18 @@ func TestListTemplates_SortPaginationDeterministic(t *testing.T) {
 func TestListTemplates_RejectsInvalidSort(t *testing.T) {
 	ts, _, _, cleanup := testServerFull(t)
 	defer cleanup()
-	// `ram_mb` is now a valid template sort axis (5.4.57); use a sentinel
+	// `image` is now a valid template sort axis (5.4.89); use a sentinel
 	// that's still unsupported so the 400 path is exercised.
 	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=memory")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	assertAPIErrorCode(t, resp, "invalid_sort")
+	errResp := assertAPIErrorCode(t, resp, "invalid_sort")
+	// The error message must advertise the new `image` axis on the API
+	// surface so operators see the full whitelist.
+	if !strings.Contains(errResp.Message, "image") {
+		t.Errorf("invalid_sort message = %q, want to mention `image`", errResp.Message)
+	}
 }
 
 func TestListTemplates_SortByCPUs(t *testing.T) {
@@ -12652,6 +12657,80 @@ func TestListTemplates_SortByDiskGB(t *testing.T) {
 	for i, tpl := range got {
 		if tpl.Name != want[i] {
 			t.Errorf("idx %d: name = %q, want %q", i, tpl.Name, want[i])
+		}
+	}
+}
+
+// 5.4.89 — case-insensitive `image` sort axis on the template list.
+// Mirrors the VM list `image` sort axis (5.4.88).
+
+func TestListTemplates_SortByImage_AscEmptyTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "ubuntu-22.04.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=image")
+	got := decodeTemplateList(t, resp)
+	// rocky9 < ubuntu; empty trails in asc.
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByImage_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "ubuntu-22.04.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=image&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Empty leads desc; then ubuntu; then rocky.
+	want := []string{"c", "a", "b"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByImage_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "Rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2"}) // case-folded same
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "alpine.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=image")
+	got := decodeTemplateList(t, resp)
+	// alpine < rocky (case-folded); rocky tie tiebreaks on id (tmpl-1 before tmpl-3).
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByImage_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=image")
+	got := decodeTemplateList(t, resp)
+	want := []string{"a", "b", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
 		}
 	}
 }

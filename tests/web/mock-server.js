@@ -1788,9 +1788,9 @@ const server = http.createServer(async (req, res) => {
     }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
-    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb"];
+    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image"];
     if (!allowedSort.includes(sort)) {
-      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb", code: "invalid_sort" });
+      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image", code: "invalid_sort" });
     }
     if (order !== "asc" && order !== "desc") {
       return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
@@ -1814,6 +1814,23 @@ const server = http.createServer(async (req, res) => {
       } else if (sort === "disk_gb") {
         cmp = numTpl(a.disk_gb) - numTpl(b.disk_gb);
         if (cmp === 0) cmp = String(a.id).localeCompare(String(b.id));
+      } else if (sort === "image") {
+        // 5.4.89: case-insensitive `image` sort. Templates with an
+        // empty image sink to the tail of asc / head of desc (nil-trailing
+        // contract). Mirrors the VM list `image` sort axis (5.4.88).
+        const ai = String(a.image || "").toLowerCase();
+        const bi = String(b.image || "").toLowerCase();
+        if (ai === "" && bi === "") {
+          cmp = String(a.id).localeCompare(String(b.id));
+        } else if (ai === "") {
+          cmp = 1;
+        } else if (bi === "") {
+          cmp = -1;
+        } else if (ai !== bi) {
+          cmp = ai < bi ? -1 : 1;
+        } else {
+          cmp = String(a.id).localeCompare(String(b.id));
+        }
       } else {
         cmp = String(a.id).localeCompare(String(b.id));
       }

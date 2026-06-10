@@ -3428,12 +3428,20 @@ components:
         desc = largest first); they complement the matching `?min_cpus=` /
         `?max_cpus=` / `?min_ram_mb=` / `?max_ram_mb=` / `?min_disk_gb=` /
         `?max_disk_gb=` range filters so the same capacity-audit query can
-        be sorted as well as filtered on the template cohort. All
-        comparators tiebreak on `id` so paginated requests return the
-        same set across two independent fetches.
+        be sorted as well as filtered on the template cohort. `image`
+        (5.4.89) is the symmetric sort counterpart to the `?image=`
+        exact-match filter, using the same case-insensitive comparator —
+        operators paste base-image names verbatim from the images
+        directory (`rocky9.qcow2`, `Rocky9.qcow2`) and a case-sensitive
+        comparator would split the rocky9 cohort across multiple
+        buckets. Templates with an empty `image` sort to the tail of
+        `asc` / head of `desc`, mirroring the nil-trailing semantics on
+        every other nullable sort axis. All comparators tiebreak on
+        `id` so paginated requests return the same set across two
+        independent fetches.
       schema:
         type: string
-        enum: [id, name, created_at, cpus, ram_mb, disk_gb]
+        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image]
         default: id
     SortOrder:
       name: order

@@ -541,6 +541,7 @@ export default function TemplateList() {
           <option value="cpus">vCPUs</option>
           <option value="ram_mb">RAM (MB)</option>
           <option value="disk_gb">Disk (GB)</option>
+          <option value="image">Image</option>
         </select>
         <select
           value={order}

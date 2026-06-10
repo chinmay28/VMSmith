@@ -19,13 +19,10 @@ func parseTemplateSort(r *http.Request) (sortField, order string, err error) {
 	if sortField == "" {
 		sortField = types.TemplateSortID
 	}
-	switch sortField {
-	case types.TemplateSortID, types.TemplateSortName, types.TemplateSortCreatedAt,
-		types.TemplateSortCPUs, types.TemplateSortRAMMB, types.TemplateSortDiskGB:
-	default:
+	if !types.IsValidTemplateSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb",
+			"sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image",
 		)
 	}
 
