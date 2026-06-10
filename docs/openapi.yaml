@@ -3445,12 +3445,21 @@ components:
         comparator would split the rocky9 cohort across multiple
         buckets. Templates with an empty `image` sort to the tail of
         `asc` / head of `desc`, mirroring the nil-trailing semantics on
-        every other nullable sort axis. All comparators tiebreak on
-        `id` so paginated requests return the same set across two
-        independent fetches.
+        every other nullable sort axis. `default_user` (5.4.92) is the
+        symmetric sort counterpart to the `?default_user=` exact-match
+        filter, using the same case-insensitive comparator. Diverges
+        from the VM list `default_user` sort axis (5.4.91) which
+        collapses empty → "root": templates store an empty
+        `default_user` as "use the image's built-in user" (e.g.
+        cloud-init's `cloud-user` / `ec2-user` / `ubuntu`), not root.
+        So templates with an empty `default_user` sort to the tail of
+        `asc` / head of `desc`, mirroring the nil-trailing semantics
+        on the template `image` axis (5.4.89). All comparators
+        tiebreak on `id` so paginated requests return the same set
+        across two independent fetches.
       schema:
         type: string
-        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image]
+        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user]
         default: id
     SortOrder:
       name: order

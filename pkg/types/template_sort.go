@@ -8,13 +8,14 @@ import (
 // Template list sort fields. Whitelisted at the API/CLI surface so callers
 // can't silently fall through to a different ordering.
 const (
-	TemplateSortID        = "id"
-	TemplateSortName      = "name"
-	TemplateSortCreatedAt = "created_at"
-	TemplateSortCPUs      = "cpus"
-	TemplateSortRAMMB     = "ram_mb"
-	TemplateSortDiskGB    = "disk_gb"
-	TemplateSortImage     = "image"
+	TemplateSortID          = "id"
+	TemplateSortName        = "name"
+	TemplateSortCreatedAt   = "created_at"
+	TemplateSortCPUs        = "cpus"
+	TemplateSortRAMMB       = "ram_mb"
+	TemplateSortDiskGB      = "disk_gb"
+	TemplateSortImage       = "image"
+	TemplateSortDefaultUser = "default_user"
 )
 
 // IsValidTemplateSort reports whether s is an accepted template list sort
@@ -23,7 +24,7 @@ func IsValidTemplateSort(s string) bool {
 	switch s {
 	case TemplateSortID, TemplateSortName, TemplateSortCreatedAt,
 		TemplateSortCPUs, TemplateSortRAMMB, TemplateSortDiskGB,
-		TemplateSortImage:
+		TemplateSortImage, TemplateSortDefaultUser:
 		return true
 	}
 	return false
@@ -74,6 +75,33 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case TemplateSortDefaultUser:
+			// Case-insensitive compare mirrors the case-insensitive
+			// `?default_user=` exact-match filter contract on the
+			// template list so the filter and sort agree on the same
+			// column. Diverges from the VM list `default_user` axis
+			// (5.4.91) which collapses empty → "root": templates store
+			// an empty `default_user` as "use the image's built-in
+			// user" (e.g. cloud-init's `cloud-user`/`ec2-user`/
+			// `ubuntu`), NOT root. So an empty stored value here means
+			// "deferred to the image" and sinks to the tail of asc /
+			// head of desc, mirroring the nil-trailing semantics on
+			// every other nullable sort axis (ip, guest_ip,
+			// last_fired_at, last_delivery_at, actor, template `image`,
+			// VM `image`).
+			aiU, ajU := strings.ToLower(ai.DefaultUser), strings.ToLower(aj.DefaultUser)
+			switch {
+			case aiU == "" && ajU == "":
+				less = ai.ID < aj.ID
+			case aiU == "":
+				less = false
+			case ajU == "":
+				less = true
+			case aiU != ajU:
+				less = aiU < ajU
+			default:
+				less = ai.ID < aj.ID
+			}
 		case TemplateSortImage:
 			// Case-insensitive compare mirrors the case-insensitive
 			// `?image=` exact-match filter contract so the filter and sort

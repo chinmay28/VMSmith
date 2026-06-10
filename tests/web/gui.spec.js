@@ -3120,6 +3120,30 @@ test.describe("Templates", () => {
     await expect(rows.first()).toHaveAttribute("data-testid", "template-row-windows-2022");
   });
 
+  // 5.4.92 — case-insensitive `default_user` sort axis on the template list,
+  // the symmetric sort counterpart to the existing `?default_user=` filter.
+  // Diverges from the VM list `default_user` axis (5.4.91): empty stored values
+  // sink to the tail of asc / head of desc rather than collapsing to "root",
+  // because templates store empty as "use the image's built-in user".
+  test("default_user sort axis reorders the template list case-insensitively and trails empties", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+
+    // Seed: small-ubuntu=ubuntu, big-rocky=root, windows-2022="" (and
+    // windows-11-desktop=""). Case-folded asc: "root" < "ubuntu" < "" — so
+    // big-rocky surfaces first, then small-ubuntu, then the empty cohort.
+    await page.getByTestId("template-list-sort-field").selectOption("default_user");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=default_user");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-big-rocky");
+
+    // Descending flips: empties lead, then ubuntu, then root.
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-big-rocky");
+  });
+
   test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
