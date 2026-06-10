@@ -1034,12 +1034,16 @@ func TestCLI_EventsList_RejectsInvalidSort(t *testing.T) {
 	}
 	// Error message must advertise the full supported set so operators
 	// don't have to guess what landed in the whitelist; the 5.4.87 sweep
-	// added `actor`, and the 5.4.90 sweep added `resource_id`.
+	// added `actor`, the 5.4.90 sweep added `resource_id`, and the 5.4.93
+	// sweep added `vm_id`.
 	if !strings.Contains(err.Error(), "actor") {
 		t.Errorf("error message must advertise actor: %v", err)
 	}
 	if !strings.Contains(err.Error(), "resource_id") {
 		t.Errorf("error message must advertise resource_id: %v", err)
+	}
+	if !strings.Contains(err.Error(), "vm_id") {
+		t.Errorf("error message must advertise vm_id: %v", err)
 	}
 }
 
@@ -1089,6 +1093,32 @@ func TestCLI_EventsList_SortByResourceID_AscEmptyTrailing(t *testing.T) {
 	idxBravo := strings.Index(out, "bravo")
 	if !(idxCharlie >= 0 && idxAlpha >= 0 && idxBravo >= 0 && idxCharlie < idxAlpha && idxAlpha < idxBravo) {
 		t.Errorf("expected resource_id asc order charlie<alpha<bravo (empty trails); got positions %d/%d/%d:\n%s",
+			idxCharlie, idxAlpha, idxBravo, out)
+	}
+}
+
+func TestCLI_EventsList_SortByVMID_AscEmptyTrailing(t *testing.T) {
+	// Empty vm_id (host-level events like `system.daemon_started`) sinks
+	// to the tail of `asc`, concrete vm_ids sort case-sensitively. Mirrors
+	// the API contract — see 5.4.93.
+	s, cleanup := withTestEventStore(t)
+	defer cleanup()
+
+	base := time.Now()
+	s.PutEvent(&types.Event{ID: "1", Type: "alpha", VMID: "vm-200", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "2", Type: "bravo", VMID: "", CreatedAt: base})
+	s.PutEvent(&types.Event{ID: "3", Type: "charlie", VMID: "vm-100", CreatedAt: base})
+
+	out, err := runCLI("events", "list", "--sort", "vm_id", "--order", "asc")
+	if err != nil {
+		t.Fatalf("events list --sort vm_id: %v", err)
+	}
+	// asc: vm-100(charlie) < vm-200(alpha) < empty(bravo)
+	idxCharlie := strings.Index(out, "charlie")
+	idxAlpha := strings.Index(out, "alpha")
+	idxBravo := strings.Index(out, "bravo")
+	if !(idxCharlie >= 0 && idxAlpha >= 0 && idxBravo >= 0 && idxCharlie < idxAlpha && idxAlpha < idxBravo) {
+		t.Errorf("expected vm_id asc order charlie<alpha<bravo (empty trails); got positions %d/%d/%d:\n%s",
 			idxCharlie, idxAlpha, idxBravo, out)
 	}
 }

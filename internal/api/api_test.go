@@ -10435,12 +10435,16 @@ func TestListEvents_RejectsInvalidSort(t *testing.T) {
 	resp.Body.Close()
 	// Error message must advertise the full supported set so operators
 	// don't have to guess what landed in the whitelist; the 5.4.87 sweep
-	// added `actor`, and the 5.4.90 sweep added `resource_id`.
+	// added `actor`, the 5.4.90 sweep added `resource_id`, and the 5.4.93
+	// sweep added `vm_id`.
 	if !strings.Contains(string(body), "actor") {
 		t.Errorf("400 body must advertise actor: %s", string(body))
 	}
 	if !strings.Contains(string(body), "resource_id") {
 		t.Errorf("400 body must advertise resource_id: %s", string(body))
+	}
+	if !strings.Contains(string(body), "vm_id") {
+		t.Errorf("400 body must advertise vm_id: %s", string(body))
 	}
 }
 
@@ -10624,6 +10628,92 @@ func TestListEvents_SortByResourceID_TiebreaksOnID(t *testing.T) {
 	got := decodeEvents(t, resp)
 	// Equal resource ids must tiebreak on id (asc) so paginated requests
 	// over an all-equal cohort are deterministic.
+	want := []string{"1", "2", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("tiebreak: got %v, want %v", g, want)
+	}
+}
+
+// ============================================================
+// Events `vm_id` sort axis (5.4.93)
+// ============================================================
+
+// seedVMIDSortableEvents writes a small set of events with distinct vm_id
+// strings (plus one empty-vm_id event representing a host-level event like
+// `system.daemon_started`) so the ?sort=vm_id tests can assert exact
+// orderings without depending on insertion order.
+func seedVMIDSortableEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	seeds := []*types.Event{
+		// Insertion order intentionally not vm_id-sorted so a regression
+		// to "default insert order" surfaces.
+		{Type: "vm.started", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "started", VMID: "vm-200", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "system.daemon_started", Source: types.EventSourceSystem, Severity: types.EventSeverityInfo, Message: "up", VMID: "", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "vm.started", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "started", VMID: "vm-100", OccurredAt: base.Add(3 * time.Hour)},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_SortByVMID_AscEmptyTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedVMIDSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=vm_id&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// asc: vm-100 < vm-200 < (empty trails)
+	want := []string{"3", "1", "2"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=vm_id asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByVMID_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedVMIDSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=vm_id&order=desc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// desc: (empty leads) > vm-200 > vm-100
+	want := []string{"2", "1", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=vm_id desc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByVMID_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	for _, e := range []*types.Event{
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", VMID: "vm-x", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", VMID: "vm-x", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", VMID: "vm-x", OccurredAt: base.Add(3 * time.Hour)},
+	} {
+		if _, err := s.AppendEvent(e); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=vm_id&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// Equal vm_ids must tiebreak on id (asc) so paginated requests over an
+	// all-equal cohort are deterministic.
 	want := []string{"1", "2", "3"}
 	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
 		t.Fatalf("tiebreak: got %v, want %v", g, want)
