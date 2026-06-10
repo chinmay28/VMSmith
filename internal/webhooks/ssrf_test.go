@@ -71,3 +71,37 @@ func TestValidateTarget_DNSFailureRejected(t *testing.T) {
 		t.Fatalf("expected resolution error")
 	}
 }
+
+func TestValidateTarget_RejectsMixedResolutionWhenAnyIPIsBlocked(t *testing.T) {
+	resolver := func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("127.0.0.1")}, nil
+	}
+	_, _, err := validateTarget("https://example.com/hook", nil, resolver)
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Fatalf("err = %v, want ErrSSRFBlocked", err)
+	}
+}
+
+func TestValidateTarget_RejectsUnspecifiedAddress(t *testing.T) {
+	_, _, err := validateTarget("https://example.com/hook", nil, staticResolver("0.0.0.0"))
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Fatalf("err = %v, want ErrSSRFBlocked", err)
+	}
+}
+
+func TestValidateTarget_RejectsMulticastAddress(t *testing.T) {
+	_, _, err := validateTarget("https://example.com/hook", nil, staticResolver("224.0.0.1"))
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Fatalf("err = %v, want ErrSSRFBlocked", err)
+	}
+}
+
+func TestValidateTarget_AllowedHostsAreTrimmedAndCaseInsensitive(t *testing.T) {
+	_, ips, err := validateTarget("http://LOCALHOST:9000/hook", []string{" localhost "}, staticResolver("127.0.0.1"))
+	if err != nil {
+		t.Fatalf("unexpected err with allow-list: %v", err)
+	}
+	if ips != nil {
+		t.Fatalf("ips = %v, want nil when allow-list bypasses SSRF resolution pinning", ips)
+	}
+}
