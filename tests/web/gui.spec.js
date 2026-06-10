@@ -5517,6 +5517,36 @@ test.describe("Activity", () => {
     await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
       .toBe("activity-row-evt-0");
   });
+
+  // 5.4.90 — `resource_id` sort axis (case-sensitive, empty-trailing).
+  test("resource_id sort axis reorders the activity timeline case-sensitively and trails empties", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    const rows = page.locator('[data-testid^="activity-row-"]');
+
+    // sort=resource_id asc: "img-2" (evt-1) < "tpl-rocky9-base" (evt-2),
+    // then evt-0 and evt-3 (both empty resource_id) trail — tiebreak on id
+    // ascending puts evt-0 before evt-3 at the tail.
+    await page.getByTestId("activity-sort-field").selectOption("resource_id");
+    await page.getByTestId("activity-sort-order").selectOption("asc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-1");
+    await expect.poll(async () => (await rows.last().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-3");
+
+    // URL captures the new sort + order so a refresh/back-button restores it.
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("resource_id");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // sort=resource_id desc: empty resource ids head — evt-3 / evt-0 (id
+    // tiebreak reverses under desc, so evt-3 comes first), then concrete
+    // resource ids fall in reverse: evt-2 ("tpl-rocky9-base"), evt-1
+    // ("img-2") at the tail.
+    await page.getByTestId("activity-sort-order").selectOption("desc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-3");
+    await expect.poll(async () => (await rows.last().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-1");
+  });
 });
 
 // ============================================================

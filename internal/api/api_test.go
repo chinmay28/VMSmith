@@ -10435,9 +10435,12 @@ func TestListEvents_RejectsInvalidSort(t *testing.T) {
 	resp.Body.Close()
 	// Error message must advertise the full supported set so operators
 	// don't have to guess what landed in the whitelist; the 5.4.87 sweep
-	// added `actor`.
+	// added `actor`, and the 5.4.90 sweep added `resource_id`.
 	if !strings.Contains(string(body), "actor") {
 		t.Errorf("400 body must advertise actor: %s", string(body))
+	}
+	if !strings.Contains(string(body), "resource_id") {
+		t.Errorf("400 body must advertise resource_id: %s", string(body))
 	}
 }
 
@@ -10538,6 +10541,92 @@ func TestListEvents_RejectsInvalidOrder(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// ============================================================
+// Events `resource_id` sort axis (5.4.90)
+// ============================================================
+
+// seedResourceIDSortableEvents writes a small set of events with distinct
+// resource_id strings (plus one empty-resource_id event) so the
+// ?sort=resource_id tests can assert exact orderings without depending on
+// insertion order.
+func seedResourceIDSortableEvents(t *testing.T, s *store.Store) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	seeds := []*types.Event{
+		// Insertion order intentionally not resource_id-sorted so a
+		// regression to "default insert order" surfaces.
+		{Type: "snapshot.created", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "made", ResourceID: "snap-prod", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "vm.created", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "created", ResourceID: "", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "image.uploaded", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "uploaded", ResourceID: "img-base", OccurredAt: base.Add(3 * time.Hour)},
+	}
+	for i, evt := range seeds {
+		if _, err := s.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent #%d: %v", i, err)
+		}
+	}
+}
+
+func TestListEvents_SortByResourceID_AscEmptyTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=resource_id&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// asc: img-base < snap-prod < (empty trails)
+	want := []string{"3", "1", "2"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=resource_id asc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByResourceID_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedResourceIDSortableEvents(t, s)
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=resource_id&order=desc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// desc: (empty leads) > snap-prod > img-base
+	want := []string{"2", "1", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("sort=resource_id desc: got %v, want %v", g, want)
+	}
+}
+
+func TestListEvents_SortByResourceID_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	for _, e := range []*types.Event{
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", ResourceID: "snap-x", OccurredAt: base.Add(1 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", ResourceID: "snap-x", OccurredAt: base.Add(2 * time.Hour)},
+		{Type: "t", Source: types.EventSourceApp, Severity: types.EventSeverityInfo, Message: "m", ResourceID: "snap-x", OccurredAt: base.Add(3 * time.Hour)},
+	} {
+		if _, err := s.AppendEvent(e); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?sort=resource_id&order=asc")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	got := decodeEvents(t, resp)
+	// Equal resource ids must tiebreak on id (asc) so paginated requests
+	// over an all-equal cohort are deterministic.
+	want := []string{"1", "2", "3"}
+	if g := eventIDs(got); !sortedEventIDsEqual(g, want) {
+		t.Fatalf("tiebreak: got %v, want %v", g, want)
 	}
 }
 

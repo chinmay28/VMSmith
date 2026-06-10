@@ -227,6 +227,94 @@ func TestSortEvents_ByActor_AllEmpty_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `resource_id` sort axis (5.4.90)
+// ============================================================
+
+func TestSortEvents_ByResourceID_AscEmptyTrailing(t *testing.T) {
+	// Empty resource_id sinks to the tail of `asc` — mirrors the
+	// nil-trailing contract on the VM list `ip` axis (5.4.85) and the
+	// events `actor` axis (5.4.87). Concrete resource ids sort
+	// case-sensitively (mirrors the case-sensitive `?resource_id=`
+	// filter).
+	evts := []*Event{
+		{ID: "1", ResourceID: "snap-prod"},
+		{ID: "2", ResourceID: ""},
+		{ID: "3", ResourceID: "snap-dev"},
+	}
+	SortEvents(evts, EventSortResourceID, SortOrderAsc)
+	want := []string{"3", "1", "2"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByResourceID_DescEmptyLeading(t *testing.T) {
+	// Empty resource_id heads `desc` — same nil-handling, mirrored.
+	evts := []*Event{
+		{ID: "1", ResourceID: "snap-prod"},
+		{ID: "2", ResourceID: ""},
+		{ID: "3", ResourceID: "snap-dev"},
+	}
+	SortEvents(evts, EventSortResourceID, SortOrderDesc)
+	want := []string{"2", "1", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("desc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByResourceID_CaseSensitive(t *testing.T) {
+	// `Snap-A` < `snap-a` lexically in ASCII (uppercase < lowercase),
+	// and the resource_id axis is case-sensitive on purpose so the sort
+	// agrees with the case-sensitive `?resource_id=` exact-match filter.
+	evts := []*Event{
+		{ID: "1", ResourceID: "snap-a"},
+		{ID: "2", ResourceID: "Snap-A"},
+	}
+	SortEvents(evts, EventSortResourceID, SortOrderAsc)
+	want := []string{"2", "1"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("case-sensitive asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByResourceID_TiebreaksOnID(t *testing.T) {
+	evts := []*Event{
+		{ID: "3", ResourceID: "snap-x"},
+		{ID: "1", ResourceID: "snap-x"},
+		{ID: "2", ResourceID: "snap-x"},
+	}
+	SortEvents(evts, EventSortResourceID, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("tiebreak: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByResourceID_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// Every resource_id empty — comparator must fall through to the id
+	// tiebreak instead of treating empty<empty as a swap candidate.
+	evts := []*Event{
+		{ID: "3", ResourceID: ""},
+		{ID: "1", ResourceID: ""},
+		{ID: "2", ResourceID: ""},
+	}
+	SortEvents(evts, EventSortResourceID, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("all-empty: got %v, want %v", got, want)
+	}
+}
+
+func TestIsValidEventSort_AcceptsResourceID(t *testing.T) {
+	// Defense-in-depth: the API parser, CLI parser, and SortEvents all
+	// gate on IsValidEventSort, so a regression here silently breaks
+	// every surface at once.
+	if !IsValidEventSort(EventSortResourceID) {
+		t.Fatalf("IsValidEventSort(%q) = false, want true", EventSortResourceID)
+	}
+}
+
 func TestSortEvents_StableEqualKeys(t *testing.T) {
 	// Two independent sorts on equal-key data must produce the same order so
 	// repeated paginated requests return deterministic results.
