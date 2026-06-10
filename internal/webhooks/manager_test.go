@@ -328,6 +328,95 @@ func TestManager_EmitsDeliveryFailedAfterRetries(t *testing.T) {
 	}
 }
 
+func TestManager_BoltStore_PersistsSuccessfulDeliveryArtifacts(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer db.Close()
+
+	bus := events.New(db)
+	bus.Start()
+	defer bus.Stop()
+
+	type capture struct {
+		body []byte
+		hdr  http.Header
+		hits int32
+	}
+	cap := &capture{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		cap.body = append([]byte(nil), body...)
+		cap.hdr = r.Header.Clone()
+		atomic.AddInt32(&cap.hits, 1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	mgr := newTestManager(t, db, bus, []string{host, "127.0.0.1"})
+
+	wh := &types.Webhook{
+		ID:         "wh-bolt-success",
+		URL:        srv.URL,
+		Secret:     "bolt-secret",
+		EventTypes: []string{"vm.started"},
+		Active:     true,
+		CreatedAt:  time.Now(),
+	}
+	if err := db.PutWebhook(wh); err != nil {
+		t.Fatalf("PutWebhook: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer mgr.Stop()
+
+	bus.Publish(&types.Event{Type: "vm.started", Source: types.EventSourceApp, VMID: "vm-bolt"})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		persisted, err := db.GetWebhook(wh.ID)
+		if err != nil {
+			t.Fatalf("GetWebhook: %v", err)
+		}
+		if atomic.LoadInt32(&cap.hits) == 1 && persisted.LastStatus == http.StatusAccepted && persisted.LastError == "" && !persisted.LastDeliveryAt.IsZero() {
+			if cap.hdr.Get(HeaderEventType) != "vm.started" {
+				t.Fatalf("event type header = %q, want vm.started", cap.hdr.Get(HeaderEventType))
+			}
+			if cap.hdr.Get(HeaderSchemaVersion) != "1" {
+				t.Fatalf("schema-version header = %q, want 1", cap.hdr.Get(HeaderSchemaVersion))
+			}
+			sig := cap.hdr.Get(HeaderSignature)
+			if !strings.HasPrefix(sig, "sha256=") {
+				t.Fatalf("missing/invalid signature header: %q", sig)
+			}
+			if want := signWith("bolt-secret", cap.body); strings.TrimPrefix(sig, "sha256=") != want {
+				t.Fatalf("signature mismatch: got %q want %q", sig, want)
+			}
+			events, _, err := db.ListEventsFiltered(store.EventFilter{Type: "webhook.delivery_failed"})
+			if err != nil {
+				t.Fatalf("ListEventsFiltered: %v", err)
+			}
+			if len(events) != 0 {
+				t.Fatalf("expected no delivery_failed events on success, got %d", len(events))
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	persisted, err := db.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	t.Fatalf("timed out waiting for persisted success artifacts: hits=%d LastStatus=%d LastError=%q", atomic.LoadInt32(&cap.hits), persisted.LastStatus, persisted.LastError)
+}
+
 func TestManager_BoltStore_PersistsFailedDeliveryArtifacts(t *testing.T) {
 	db, err := store.New(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
