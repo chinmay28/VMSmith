@@ -774,6 +774,7 @@ export default function VMList() {
           <option value="disk_gb">Disk (GB)</option>
           <option value="ip">IP</option>
           <option value="image">Image</option>
+          <option value="default_user">Default user</option>
         </select>
         <select
           value={order}

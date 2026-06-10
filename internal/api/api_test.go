@@ -4046,6 +4046,11 @@ func TestListVMs_SortByIP_400InvalidSortMentionsIP(t *testing.T) {
 	if !strings.Contains(apiErr.Message, "image") {
 		t.Errorf("message = %q, expected to advertise 'image' as a valid sort axis", apiErr.Message)
 	}
+	// 5.4.91 — the error message must also advertise `default_user` now
+	// that the VM list whitelist includes it.
+	if !strings.Contains(apiErr.Message, "default_user") {
+		t.Errorf("message = %q, expected to advertise 'default_user' as a valid sort axis", apiErr.Message)
+	}
 }
 
 // ============================================================
@@ -4129,6 +4134,100 @@ func TestListVMs_SortByImage_TiebreaksOnID(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Image: "rocky9.qcow2"}})
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=image")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+// ============================================================
+// VM list `default_user` sort axis (5.4.91)
+// ============================================================
+
+func TestListVMs_SortByDefaultUser_AscEmptyResolvesToRoot(t *testing.T) {
+	// Diverges from the nil-trailing convention on `image` because
+	// `default_user` has a documented default — empty stored values
+	// resolve to "root" so they collate with explicit-root VMs in the
+	// alphabetic ordering rather than sinking to the tail.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "ec2", Spec: types.VMSpec{DefaultUser: "ec2-user"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "explicit-root", Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "unset", Spec: types.VMSpec{DefaultUser: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "admin", Spec: types.VMSpec{DefaultUser: "admin"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=default_user")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: admin < ec2-user < root; vm-2 and vm-3 both resolve to "root"
+	// and tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"admin", "ec2", "explicit-root", "unset"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDefaultUserDesc_EmptyResolvesToRoot(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "ec2", Spec: types.VMSpec{DefaultUser: "ec2-user"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "explicit-root", Spec: types.VMSpec{DefaultUser: "root"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "unset", Spec: types.VMSpec{DefaultUser: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "admin", Spec: types.VMSpec{DefaultUser: "admin"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=default_user&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// desc reverses the entire compare result so the root cohort heads
+	// the list (vm-3 leads vm-2 because the id tiebreak also inverts).
+	want := []string{"unset", "explicit-root", "ec2", "admin"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDefaultUser_CaseInsensitive(t *testing.T) {
+	// `ROOT` and `root` must collate as identical so the sort agrees with
+	// the case-insensitive `?default_user=` filter (5.4.23).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{DefaultUser: "ROOT"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "admin", Spec: types.VMSpec{DefaultUser: "admin"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{DefaultUser: "root"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=default_user&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// admin < root (case-folded). Equal-user cohort tiebreaks on id ascending
+	// so vm-1 ("uppercase") precedes vm-3 ("lowercase").
+	want := []string{"admin", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDefaultUser_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{DefaultUser: "ops-alice"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{DefaultUser: "ops-alice"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{DefaultUser: "ops-alice"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=default_user")
 	var got []*types.VM
 	decodeJSON(t, resp, &got)
 	want := []string{"vm-1", "vm-2", "vm-3"}

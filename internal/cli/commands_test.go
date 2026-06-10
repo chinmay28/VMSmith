@@ -1970,6 +1970,11 @@ func TestCLI_VMList_RejectsInvalidSort_IPMentioned(t *testing.T) {
 	if !strings.Contains(msg, "image") {
 		t.Errorf("error %q should advertise 'image' as a valid axis", msg)
 	}
+	// 5.4.91 — the error message must also advertise `default_user` now
+	// that the VM list whitelist includes it.
+	if !strings.Contains(msg, "default_user") {
+		t.Errorf("error %q should advertise 'default_user' as a valid axis", msg)
+	}
 }
 
 // ============================================================
@@ -2026,6 +2031,67 @@ func TestCLI_VMList_SortByImage_CaseInsensitive(t *testing.T) {
 	// alpine < rocky9 (case-folded). Equal-image cohort tiebreaks on id
 	// ascending so vm-1 ("uppercase") precedes vm-3 ("lowercase").
 	want := []string{"alpine", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// ============================================================
+// VM list `default_user` sort axis (5.4.91)
+// ============================================================
+
+func TestCLI_VMList_SortByDefaultUser_AscEmptyResolvesToRoot(t *testing.T) {
+	// Empty `default_user` resolves to "root" so the unset VM collates
+	// with the explicit-root VM in alphabetical order rather than sinking
+	// to the tail — diverges from the nil-trailing image-sort contract
+	// because `default_user` has a documented default.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "ec2", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "ec2-user", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "explicit-root", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "root", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "unset", State: types.VMStateStopped, Spec: types.VMSpec{DefaultUser: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "admin", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "admin", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "default_user")
+	if err != nil {
+		t.Fatalf("vm list --sort default_user: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	want := []string{"admin", "ec2", "explicit-root", "unset"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDefaultUser_CaseInsensitive(t *testing.T) {
+	// `ROOT` and `root` collate as identical so the sort agrees with the
+	// case-insensitive `?default_user=` filter (5.4.23).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "ROOT", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "admin", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "admin", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{DefaultUser: "root", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "default_user", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort default_user: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"admin", "uppercase", "lowercase"}
 	for i := range got {
 		if got[i] != want[i] {
 			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)

@@ -10,15 +10,16 @@ import (
 // VM list sort fields. Whitelisted at the API/CLI surface so callers can't
 // silently fall through to a different ordering.
 const (
-	VMSortID        = "id"
-	VMSortName      = "name"
-	VMSortCreatedAt = "created_at"
-	VMSortState     = "state"
-	VMSortCPUs      = "cpus"
-	VMSortRAMMB     = "ram_mb"
-	VMSortDiskGB    = "disk_gb"
-	VMSortIP        = "ip"
-	VMSortImage     = "image"
+	VMSortID          = "id"
+	VMSortName        = "name"
+	VMSortCreatedAt   = "created_at"
+	VMSortState       = "state"
+	VMSortCPUs        = "cpus"
+	VMSortRAMMB       = "ram_mb"
+	VMSortDiskGB      = "disk_gb"
+	VMSortIP          = "ip"
+	VMSortImage       = "image"
+	VMSortDefaultUser = "default_user"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -30,10 +31,22 @@ func IsValidVMSort(s string) bool {
 	switch s {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
-		VMSortImage:
+		VMSortImage, VMSortDefaultUser:
 		return true
 	}
 	return false
+}
+
+// resolveDefaultUser collapses an empty stored `spec.default_user` to "root",
+// mirroring the runtime semantics in `internal/vm/lifecycle.go` and the
+// `?default_user=` filter contract (5.4.23). Exposed at the type layer so the
+// VM list sort axis (5.4.91) and the future template/list filter parity all
+// share a single source of truth.
+func resolveDefaultUser(s string) string {
+	if s == "" {
+		return "root"
+	}
+	return s
 }
 
 // compareVMIP returns -1/0/+1 comparing two VM runtime IPs numerically.
@@ -136,6 +149,25 @@ func SortVMs(vms []*VM, sortField, order string) {
 			default:
 				less = ai.ID < aj.ID
 			}
+		case VMSortDefaultUser:
+			// Case-insensitive compare mirrors the case-insensitive
+			// `?default_user=` exact-match filter (5.4.23). Diverges
+			// from the nil-trailing convention on `ip` / `image` /
+			// `actor` because this column has a documented default:
+			// `lifecycle.go` runs the VM as root when
+			// `spec.default_user` is empty, and the filter contract
+			// is "an empty `spec.default_user` is treated as `root`"
+			// — so empty VMs collate with explicit-root VMs rather
+			// than sinking to the tail. The resolveDefaultUser
+			// helper lives at the type layer so the filter and sort
+			// share a single source of truth.
+			aiU := strings.ToLower(resolveDefaultUser(ai.Spec.DefaultUser))
+			ajU := strings.ToLower(resolveDefaultUser(aj.Spec.DefaultUser))
+			if aiU != ajU {
+				less = aiU < ajU
+				break
+			}
+			less = ai.ID < aj.ID
 		default: // VMSortID
 			less = ai.ID < aj.ID
 		}

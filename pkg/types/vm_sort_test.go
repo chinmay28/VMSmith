@@ -389,3 +389,111 @@ func TestIsValidVMSort_AcceptsImage(t *testing.T) {
 		t.Errorf("IsValidVMSort(%q) = true, want false", "Image")
 	}
 }
+
+// ============================================================
+// `default_user` sort axis (5.4.91)
+// ============================================================
+
+func TestSortVMs_ByDefaultUser_AscEmptyResolvesToRoot(t *testing.T) {
+	// Diverges from the nil-trailing convention on `ip` / `image` / `actor`
+	// because `default_user` has a documented default. Empty stored values
+	// resolve to "root" so they collate with explicit-root VMs in the
+	// alphabetic ordering (`a` < `e` < `r`). The empty-stored row sorts
+	// alongside vm-2 (explicit `root`), not at the tail.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DefaultUser: "ec2-user"}},
+		{ID: "vm-2", Spec: VMSpec{DefaultUser: "root"}},
+		{ID: "vm-3", Spec: VMSpec{DefaultUser: ""}}, // resolves to "root"
+		{ID: "vm-4", Spec: VMSpec{DefaultUser: "admin"}},
+	}
+	SortVMs(vms, VMSortDefaultUser, SortOrderAsc)
+	// asc: admin < ec2-user < root; vm-2 and vm-3 both resolve to "root"
+	// and tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"vm-4", "vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q default_user=%q, want %q", i, v.ID, v.Spec.DefaultUser, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDefaultUser_DescEmptyResolvesToRoot(t *testing.T) {
+	// Desc order also resolves empty to "root", so the empty row sits in
+	// the `r` bucket reversed (vm-3 trails vm-2 in desc tiebreak inversion).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DefaultUser: "ec2-user"}},
+		{ID: "vm-2", Spec: VMSpec{DefaultUser: "root"}},
+		{ID: "vm-3", Spec: VMSpec{DefaultUser: ""}}, // resolves to "root"
+		{ID: "vm-4", Spec: VMSpec{DefaultUser: "admin"}},
+	}
+	SortVMs(vms, VMSortDefaultUser, SortOrderDesc)
+	// desc reverses the entire compare result, so vm-3 leads the root
+	// cohort (tiebreak on id flips too).
+	want := []string{"vm-3", "vm-2", "vm-1", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q default_user=%q, want %q", i, v.ID, v.Spec.DefaultUser, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDefaultUser_CaseInsensitive(t *testing.T) {
+	// `ROOT` and `root` collate as identical so the sort agrees with the
+	// case-insensitive `?default_user=` filter (5.4.23). Without lowering,
+	// the uppercase `R` (0x52) would sort before lowercase `a` (0x61) and
+	// split the root cohort apart.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DefaultUser: "ROOT"}},
+		{ID: "vm-2", Spec: VMSpec{DefaultUser: "admin"}},
+		{ID: "vm-3", Spec: VMSpec{DefaultUser: "root"}},
+	}
+	SortVMs(vms, VMSortDefaultUser, SortOrderAsc)
+	// asc: admin < root (case-folded). Equal-user cohort tiebreaks on id
+	// ascending so vm-1 ("ROOT") precedes vm-3 ("root").
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q default_user=%q, want %q", i, v.ID, v.Spec.DefaultUser, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDefaultUser_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{DefaultUser: "ops-alice"}},
+		{ID: "vm-1", Spec: VMSpec{DefaultUser: "ops-alice"}},
+		{ID: "vm-2", Spec: VMSpec{DefaultUser: "ops-alice"}},
+	}
+	SortVMs(vms, VMSortDefaultUser, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDefaultUser_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All-empty VMs all resolve to "root" so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortDefaultUser, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsDefaultUser(t *testing.T) {
+	if !IsValidVMSort(VMSortDefaultUser) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortDefaultUser)
+	}
+	if IsValidVMSort("Default_User") {
+		t.Errorf("IsValidVMSort(%q) = true, want false", "Default_User")
+	}
+}
