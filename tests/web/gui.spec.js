@@ -1177,6 +1177,33 @@ test.describe("VM List", () => {
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.91 — case-insensitive `default_user` sort axis with empty→root resolution.
+  test("default_user sort axis reorders the VM list and resolves empty to root", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed defaults: web-server=ubuntu, db-server="" (resolves to root),
+    // win-app="" (resolves to root). Asc orders alphabetically: r < u so the
+    // root cohort heads the list. Within the root cohort, id tiebreak puts
+    // vm-2 (db-server) before vm-3 (win-app), then vm-1 (web-server / ubuntu)
+    // trails. Validates the empty-means-root divergence from the nil-trailing
+    // convention on every other nullable sort axis.
+    await page.getByTestId("vm-list-sort-field").selectOption("default_user");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=default_user");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+
+    // Descending flips everything including the id tiebreak inside the root
+    // cohort — web-server (ubuntu) heads the list, then win-app, then db-server.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

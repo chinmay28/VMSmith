@@ -3388,12 +3388,19 @@ components:
         same column; VMs with an empty `spec.image` sink to the tail in
         ascending order and the head in descending order, mirroring the
         nil-trailing semantics on every other nullable sort axis (ip,
-        guest_ip, last_fired_at, last_delivery_at, actor). All
-        comparators tiebreak on `id` so pagination is deterministic
-        across backends.
+        guest_ip, last_fired_at, last_delivery_at, actor).
+        `default_user` (5.4.91) is a case-insensitive sort on
+        `spec.default_user` mirroring the case-insensitive
+        `?default_user=` exact-match filter contract (5.4.23); unlike
+        every other nullable axis it resolves an empty stored value to
+        `root` so empty VMs collate with explicit-root VMs in
+        alphabetical order rather than sinking to the tail — matches the
+        runtime semantics in `internal/vm/lifecycle.go` and the
+        empty-means-root filter contract. All comparators tiebreak on
+        `id` so pagination is deterministic across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user]
         default: id
     ImageSort:
       name: sort

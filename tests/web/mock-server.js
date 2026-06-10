@@ -100,6 +100,12 @@ function seed() {
   // exercised).
   vm1.spec.nat_gateway = "192.168.100.1";
   vm1.tags = ["dev"];
+  // 5.4.91 — Pin web-server's default_user to "ubuntu" so the new
+  // `default_user` sort axis has a meaningful cohort to slice (web-server
+  // alone in the "ubuntu" bucket; db-server / win-app leave default_user
+  // empty so they resolve to "root" under the empty-means-root contract
+  // and collate together).
+  vm1.spec.default_user = "ubuntu";
   // Named network attachments power the 5.4.36 ?network= filter tests.
   vm1.spec.networks = [{ name: "data-net", mode: "macvtap", host_interface: "eth1" }];
   // Fixed timestamps so the 5.4.30 created-at time-range filter tests are
@@ -559,8 +565,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -767,6 +773,16 @@ const server = http.createServer(async (req, res) => {
           else if (ia === "") l = 1;
           else if (ib === "") l = -1;
           else l = ia < ib ? -1 : ia > ib ? 1 : 0;
+          break;
+        }
+        case "default_user": {
+          // Case-insensitive sort on spec.default_user; empty resolves
+          // to "root" (mirrors lifecycle.go and the `?default_user=root`
+          // filter contract — 5.4.91), so empty VMs collate with
+          // explicit-root VMs rather than sinking to the tail.
+          const ra = ((a?.spec?.default_user || "") || "root").toLowerCase();
+          const rb = ((b?.spec?.default_user || "") || "root").toLowerCase();
+          l = ra < rb ? -1 : ra > rb ? 1 : 0;
           break;
         }
         default:           l = 0;
