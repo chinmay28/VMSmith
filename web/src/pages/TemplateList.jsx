@@ -542,6 +542,7 @@ export default function TemplateList() {
           <option value="ram_mb">RAM (MB)</option>
           <option value="disk_gb">Disk (GB)</option>
           <option value="image">Image</option>
+          <option value="default_user">Default user</option>
         </select>
         <select
           value={order}

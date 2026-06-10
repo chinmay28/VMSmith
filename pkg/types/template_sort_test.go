@@ -240,6 +240,7 @@ func TestIsValidTemplateSort_AcceptsImage(t *testing.T) {
 		{TemplateSortRAMMB, true},
 		{TemplateSortDiskGB, true},
 		{TemplateSortImage, true},
+		{TemplateSortDefaultUser, true},
 		{"bogus", false},
 		{"", false},
 	}
@@ -247,6 +248,107 @@ func TestIsValidTemplateSort_AcceptsImage(t *testing.T) {
 		if got := IsValidTemplateSort(tc.field); got != tc.want {
 			t.Errorf("IsValidTemplateSort(%q) = %v, want %v", tc.field, got, tc.want)
 		}
+	}
+}
+
+// 5.4.92 — case-insensitive `default_user` sort axis on the template list.
+// Diverges from the VM list `default_user` axis (5.4.91): empty stored values
+// sink to the tail of asc / head of desc rather than collapsing to "root",
+// because templates store empty as "use the image's built-in user".
+
+func TestSortTemplates_ByDefaultUser_AscEmptyTrailing(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", DefaultUser: ""},
+		{ID: "tpl-1", Name: "a", DefaultUser: "ubuntu"},
+		{ID: "tpl-2", Name: "b", DefaultUser: "ops-alice"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderAsc)
+	// ops-alice < ubuntu lex; empty trails in asc (unlike VM list, where
+	// empty would collapse to root and collate alphabetically).
+	want := []string{"tpl-2", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDefaultUser_DescEmptyLeading(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", Name: "a", DefaultUser: "ubuntu"},
+		{ID: "tpl-3", Name: "c", DefaultUser: ""},
+		{ID: "tpl-2", Name: "b", DefaultUser: "ops-alice"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderDesc)
+	// Desc inverts: empty leads, then ubuntu, then ops-alice.
+	want := []string{"tpl-3", "tpl-1", "tpl-2"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDefaultUser_CaseInsensitive(t *testing.T) {
+	// Mirrors the case-insensitive `?default_user=` filter contract — operators
+	// paste user names verbatim and case shouldn't split the cohort.
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", DefaultUser: "Root"},
+		{ID: "tpl-1", Name: "a", DefaultUser: "root"}, // case-folded same
+		{ID: "tpl-2", Name: "b", DefaultUser: "alice"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderAsc)
+	// alice < root (case-folded); root tie tiebreaks on id (tpl-1 < tpl-3).
+	want := []string{"tpl-2", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDefaultUser_EmptyDoesNotCollateWithRoot(t *testing.T) {
+	// Unlike VM list `default_user` (5.4.91) — which collapses empty → "root"
+	// to mirror runtime semantics — templates store empty as "use the image's
+	// built-in user" so an empty stored value must sink to the tail of asc
+	// rather than interleave with explicit "root" rows.
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", DefaultUser: ""},
+		{ID: "tpl-1", Name: "a", DefaultUser: "root"},
+		{ID: "tpl-2", Name: "b", DefaultUser: "root"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderAsc)
+	want := []string{"tpl-1", "tpl-2", "tpl-3"} // root, root, then empty trails
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDefaultUser_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Name: "c", DefaultUser: "ubuntu"},
+		{ID: "tpl-1", Name: "a", DefaultUser: "ubuntu"},
+		{ID: "tpl-2", Name: "b", DefaultUser: "ubuntu"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3",
+			templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+func TestSortTemplates_ByDefaultUser_AllEmpty_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3"},
+		{ID: "tpl-1"},
+		{ID: "tpl-2"},
+	}
+	SortTemplates(templates, TemplateSortDefaultUser, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3 — empty/empty pair must tiebreak on id",
+			templates[0].ID, templates[1].ID, templates[2].ID)
 	}
 }
 

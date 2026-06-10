@@ -6780,8 +6780,9 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	_, _, cleanup := withTestStorage(t)
 	defer cleanup()
 
-	// `image` is now a valid template sort axis (5.4.89); use a sentinel
-	// that's still unsupported so the error path is exercised.
+	// `image` and `default_user` are valid template sort axes (5.4.89,
+	// 5.4.92); use a sentinel that's still unsupported so the error path
+	// is exercised.
 	_, err := runCLI("template", "list", "--sort", "memory")
 	if err == nil {
 		t.Fatal("expected error for unsupported --sort, got nil")
@@ -6789,10 +6790,13 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Errorf("error = %v, want it to mention 'invalid --sort'", err)
 	}
-	// CLI rejection message must advertise the new `image` axis so the
-	// help text mirrors the API surface (5.4.89).
+	// CLI rejection message must advertise the new axes so the help text
+	// mirrors the API surface.
 	if !strings.Contains(err.Error(), "image") {
 		t.Errorf("error = %v, want it to mention `image`", err)
+	}
+	if !strings.Contains(err.Error(), "default_user") {
+		t.Errorf("error = %v, want it to mention `default_user`", err)
 	}
 }
 
@@ -6847,6 +6851,67 @@ func TestCLI_TemplateList_SortByImage_CaseInsensitive(t *testing.T) {
 	rows := tableRows(t, out)
 	// alpine < rocky9 (case-folded); rocky tie tiebreaks on id (tmpl-1 before tmpl-3).
 	want := []string{"alpine", "rockyLower", "RockyUpper"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+// 5.4.92 — case-insensitive `default_user` sort axis on the template list.
+// Diverges from the VM list `default_user` axis (5.4.91): empty stored values
+// sink to the tail of asc rather than collapsing to "root".
+
+func TestCLI_TemplateList_SortByDefaultUser_AscEmptyTrailing(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "no-user", Image: "rocky9.qcow2", DefaultUser: ""}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "ubuntu", Image: "rocky9.qcow2", DefaultUser: "ubuntu"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "alice", Image: "rocky9.qcow2", DefaultUser: "ops-alice"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "default_user")
+	if err != nil {
+		t.Fatalf("template list --sort default_user: %v", err)
+	}
+	rows := tableRows(t, out)
+	// ops-alice < ubuntu lex; empty trails in asc.
+	want := []string{"alice", "ubuntu", "no-user"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByDefaultUser_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	// Same user with varying case should collate as a single cohort.
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "RootUpper", Image: "rocky9.qcow2", DefaultUser: "Root"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "rootLower", Image: "rocky9.qcow2", DefaultUser: "root"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "alice", Image: "rocky9.qcow2", DefaultUser: "alice"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "default_user")
+	if err != nil {
+		t.Fatalf("template list --sort default_user: %v", err)
+	}
+	rows := tableRows(t, out)
+	// alice < root (case-folded); root tie tiebreaks on id (tmpl-1 before tmpl-3).
+	want := []string{"alice", "rootLower", "RootUpper"}
 	for i, name := range want {
 		if rows[i+1][1] != name {
 			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)

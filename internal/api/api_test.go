@@ -12759,17 +12759,21 @@ func TestListTemplates_SortPaginationDeterministic(t *testing.T) {
 func TestListTemplates_RejectsInvalidSort(t *testing.T) {
 	ts, _, _, cleanup := testServerFull(t)
 	defer cleanup()
-	// `image` is now a valid template sort axis (5.4.89); use a sentinel
-	// that's still unsupported so the 400 path is exercised.
+	// `image` and `default_user` are valid template sort axes (5.4.89,
+	// 5.4.92); use a sentinel that's still unsupported so the 400 path
+	// is exercised.
 	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=memory")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	errResp := assertAPIErrorCode(t, resp, "invalid_sort")
-	// The error message must advertise the new `image` axis on the API
-	// surface so operators see the full whitelist.
+	// The error message must advertise the new axes on the API surface so
+	// operators see the full whitelist.
 	if !strings.Contains(errResp.Message, "image") {
 		t.Errorf("invalid_sort message = %q, want to mention `image`", errResp.Message)
+	}
+	if !strings.Contains(errResp.Message, "default_user") {
+		t.Errorf("invalid_sort message = %q, want to mention `default_user`", errResp.Message)
 	}
 }
 
@@ -12916,6 +12920,85 @@ func TestListTemplates_SortByImage_TiebreaksOnID(t *testing.T) {
 	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=image")
 	got := decodeTemplateList(t, resp)
 	want := []string{"a", "b", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+// 5.4.92 — case-insensitive `default_user` sort axis on the template list.
+// Diverges from the VM list `default_user` axis (5.4.91): empty stored values
+// sink to the tail of asc / head of desc rather than collapsing to "root",
+// because templates store empty as "use the image's built-in user".
+
+func TestListTemplates_SortByDefaultUser_AscEmptyTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", DefaultUser: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", DefaultUser: "ubuntu"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", DefaultUser: "ops-alice"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=default_user")
+	got := decodeTemplateList(t, resp)
+	// ops-alice < ubuntu lex; empty trails in asc.
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByDefaultUser_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", DefaultUser: "ubuntu"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", DefaultUser: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", DefaultUser: "ops-alice"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=default_user&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Empty leads desc; then ubuntu; then ops-alice.
+	want := []string{"c", "a", "b"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByDefaultUser_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", DefaultUser: "Root"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", DefaultUser: "root"}) // case-folded same
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", DefaultUser: "alice"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=default_user")
+	got := decodeTemplateList(t, resp)
+	// alice < root (case-folded); root tie tiebreaks on id (tmpl-1 before tmpl-3).
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByDefaultUser_EmptyDoesNotCollateWithRoot(t *testing.T) {
+	// Unlike VM list `default_user` (5.4.91) — which collapses empty → "root"
+	// to mirror runtime semantics — templates store empty as "use the image's
+	// built-in user" so an empty stored value must sink to the tail of asc.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", DefaultUser: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", DefaultUser: "root"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", DefaultUser: "root"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=default_user")
+	got := decodeTemplateList(t, resp)
+	want := []string{"a", "b", "c"} // root, root, then empty trails
 	for i, tpl := range got {
 		if tpl.Name != want[i] {
 			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)

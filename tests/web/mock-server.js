@@ -1804,9 +1804,9 @@ const server = http.createServer(async (req, res) => {
     }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
-    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image"];
+    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image", "default_user"];
     if (!allowedSort.includes(sort)) {
-      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image", code: "invalid_sort" });
+      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user", code: "invalid_sort" });
     }
     if (order !== "asc" && order !== "desc") {
       return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
@@ -1836,6 +1836,25 @@ const server = http.createServer(async (req, res) => {
         // contract). Mirrors the VM list `image` sort axis (5.4.88).
         const ai = String(a.image || "").toLowerCase();
         const bi = String(b.image || "").toLowerCase();
+        if (ai === "" && bi === "") {
+          cmp = String(a.id).localeCompare(String(b.id));
+        } else if (ai === "") {
+          cmp = 1;
+        } else if (bi === "") {
+          cmp = -1;
+        } else if (ai !== bi) {
+          cmp = ai < bi ? -1 : 1;
+        } else {
+          cmp = String(a.id).localeCompare(String(b.id));
+        }
+      } else if (sort === "default_user") {
+        // 5.4.92: case-insensitive `default_user` sort. Diverges from the
+        // VM list `default_user` axis (5.4.91): empty stored values sink
+        // to the tail of asc / head of desc rather than collapsing to
+        // "root", because templates store empty as "use the image's
+        // built-in user".
+        const ai = String(a.default_user || "").toLowerCase();
+        const bi = String(b.default_user || "").toLowerCase();
         if (ai === "" && bi === "") {
           cmp = String(a.id).localeCompare(String(b.id));
         } else if (ai === "") {
