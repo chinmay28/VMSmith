@@ -1122,12 +1122,26 @@ paths:
       summary: Issue a single-use console ticket
       description: |
         Returns a short-TTL one-time token the caller passes to the console
-        websocket endpoint (forthcoming).  The VM must be in the `running`
-        state.  The endpoint returns 503 `service_unavailable` when the
-        daemon was started without a console subsystem (e.g. on a host where
-        the console feature is disabled in config).
+        websocket endpoint.  The VM must be in the `running` state.  The
+        endpoint returns 503 `service_unavailable` when the daemon was
+        started without a console subsystem (e.g. on a host where the
+        console feature is disabled in config).
+
+        The optional `intent` query parameter selects the console flavour:
+        `vnc` (default, graphical RFB) or `serial` (text pty).  The issued
+        ticket is bound to the intent — the websocket proxy follows the
+        ticket's intent, so a VNC ticket can never open the serial console
+        and vice versa.  Unknown values return 400 `invalid_console_intent`.
       parameters:
         - $ref: '#/components/parameters/VMID'
+        - in: query
+          name: intent
+          required: false
+          schema:
+            type: string
+            enum: [vnc, serial]
+            default: vnc
+          description: Console flavour the ticket should open (5.1.9).
       responses:
         '200':
           description: Ticket issued
@@ -1135,6 +1149,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleTicket'
+        '400':
+          $ref: '#/components/responses/APIError'
         '404':
           $ref: '#/components/responses/APIError'
         '409':
@@ -1146,14 +1162,18 @@ paths:
   /vms/{vmID}/console:
     get:
       tags: [Console]
-      summary: Proxy the live VM VNC console over websocket
+      summary: Proxy the live VM console over websocket
       description: |
-        Upgrades the request to a websocket and proxies raw VNC/RFB bytes for a
+        Upgrades the request to a websocket and proxies the console for a
         running VM. Call `POST /vms/{vmID}/console/ticket` first, then connect
         with the returned short-lived single-use `ticket` query parameter.
 
-        The server negotiates the `binary` websocket subprotocol and bridges
-        websocket binary frames to the VM's loopback-only VNC listener. When
+        The proxy follows the ticket's intent. For `vnc` tickets the server
+        negotiates the `binary` websocket subprotocol and bridges websocket
+        binary frames to the VM's loopback-only VNC listener. For `serial`
+        tickets (5.1.9) it negotiates the `text` subprotocol and bridges
+        UTF-8 text frames to the domain's pty via libvirt's stream API —
+        client frames are keystrokes, server frames are console output. When
         daemon TLS is enabled, callers must use `wss://`; reverse-proxy
         deployments may forward that fact with `X-Forwarded-Proto: https`.
       parameters:
@@ -3636,9 +3656,43 @@ components:
             attribute and falls back to SeaBIOS; "uefi" and "ovmf" both
             resolve to libvirt's `firmware='efi'` shorthand, which
             auto-picks the host's OVMF code/vars pair. Required for
-            Windows 11. Does NOT enable Secure Boot or attach a virtual
-            TPM (tracked separately under roadmap 5.6.9). Any other value
-            returns 400 `invalid_firmware`.
+            Windows 11. Pair with `secure_boot` / `tpm` (5.6.9) for the
+            full Windows 11 boot chain. Any other value returns 400
+            `invalid_firmware`.
+        secure_boot:
+          type: boolean
+          description: >-
+            Enable UEFI Secure Boot (5.6.9). Requires firmware to resolve
+            to EFI — an explicit `true` with BIOS firmware returns 400
+            `secure_boot_requires_uefi`. Omitted resolves to the variant
+            default: on for windows-11 guests already booting via EFI,
+            off otherwise. When enabled the domain asks libvirt's firmware
+            auto-selection for a secure-boot capable OVMF build with
+            enrolled Microsoft keys and turns on SMM. An explicit `true`
+            on a host without a secboot OVMF build fails with 422
+            `secure_boot_unavailable`; the windows-11 default degrades to
+            a logged warning instead.
+        tpm:
+          type: boolean
+          description: >-
+            Attach an emulated TPM 2.0 device (swtpm-backed `tpm-crb`,
+            5.6.9). Omitted resolves to the variant default: on for
+            windows-11 guests (Windows 11 Setup requires one), off
+            otherwise. An explicit `true` on a host without the `swtpm`
+            binary fails with 422 `tpm_unavailable`; the windows-11
+            default degrades to a logged warning instead.
+        vnc_password:
+          type: string
+          maxLength: 64
+          description: >-
+            Write-only VNC console password (5.1.8). The daemon persists
+            only a bcrypt hash plus an AES-GCM blob keyed by
+            `daemon.console.password_key` and bakes the password into the
+            domain XML `passwd=` attribute; the plaintext never appears in
+            any read response. Requires the daemon password key (422
+            `vnc_password_key_missing` otherwise). Longer than 64 chars
+            returns 400 `invalid_vnc_password`; note QEMU only honours the
+            first 8 characters of an RFB password.
         virtio_win_iso:
           type: string
           description: >-
@@ -3733,6 +3787,17 @@ components:
             Omit (null) to leave unchanged. Applying a change triggers a
             domain redefine and restarts the VM if it was running. Any
             other value returns 400 `invalid_nic_model`.
+        vnc_password:
+          type: string
+          maxLength: 64
+          nullable: true
+          description: >-
+            Set, rotate, or clear the VNC console password (5.1.8). Omit
+            (null) to leave unchanged; an explicit empty string clears the
+            password. Write-only — only the bcrypt hash + AES-GCM blob are
+            persisted. Rejected with 409 `vm_running` while the VM is
+            running: the password is baked into the defined domain XML, so
+            stop the VM first; the change takes effect on the next start.
     VM:
       type: object
       required: [id, name, spec, state, disk_path, created_at, updated_at]
@@ -4193,6 +4258,13 @@ components:
         websocket_url:
           type: string
           description: Path the client should dial after upgrading to a websocket.
+        intent:
+          type: string
+          enum: [vnc, serial]
+          description: |
+            Console flavour this ticket was issued for. The websocket proxy
+            follows the ticket's intent, so a VNC ticket can never open the
+            serial console and vice versa (5.1.9).
     Image:
       type: object
       required: [id, name, path, size_bytes, format, created_at]

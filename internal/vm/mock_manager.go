@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ type MockManager struct {
 	snapshots         map[string][]*types.Snapshot // vmID -> snapshots
 	consoleEndpoints  map[string]*types.ConsoleEndpoint
 	consoleListeners  map[string]net.Listener
+	serialConsoles    map[string]io.ReadWriteCloser
 	nextID            int
 	consoleTerminator ConsoleSessionTerminator
 
@@ -40,6 +42,7 @@ type MockManager struct {
 	RestoreSnapshotErr    error
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
+	OpenSerialConsoleErr  error
 	CreateDelay           time.Duration
 }
 
@@ -50,6 +53,7 @@ func NewMockManager() *MockManager {
 		snapshots:        make(map[string][]*types.Snapshot),
 		consoleEndpoints: make(map[string]*types.ConsoleEndpoint),
 		consoleListeners: make(map[string]net.Listener),
+		serialConsoles:   make(map[string]io.ReadWriteCloser),
 	}
 }
 
@@ -102,17 +106,28 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	storedSpec := spec
 	storedSpec.AdminPassword = ""
 
+	// Mirror the libvirt manager's VNC password derivation (5.1.8): only
+	// synthetic hash/blob markers are stored, never the plaintext.
+	var vncHash, vncEnc string
+	if spec.VNCPassword != "" {
+		vncHash = "mock-bcrypt:" + spec.VNCPassword
+		vncEnc = "mock-aesgcm:" + spec.VNCPassword
+		storedSpec.VNCPassword = ""
+	}
+
 	vm := &types.VM{
-		ID:          id,
-		Name:        spec.Name,
-		Description: spec.Description,
-		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        storedSpec,
-		State:       types.VMStateRunning,
-		IP:          "192.168.100.10",
-		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            spec.Name,
+		Description:     spec.Description,
+		Tags:            append([]string(nil), spec.Tags...),
+		Spec:            storedSpec,
+		State:           types.VMStateRunning,
+		IP:              "192.168.100.10",
+		DiskPath:        fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		VNCPasswordHash: vncHash,
+		VNCPasswordEnc:  vncEnc,
 	}
 
 	m.vms[id] = vm
@@ -173,6 +188,22 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	vm, ok := m.vms[id]
 	if !ok {
 		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+
+	// VNC password change mirrors the libvirt manager's contract (5.1.8):
+	// rejected while running, pointer-to-"" clears, otherwise re-derive.
+	if patch.VNCPassword != nil {
+		if *patch.VNCPassword == "" && vm.VNCPasswordHash == "" {
+			// Clearing an unset password is a no-op.
+		} else if vm.State == types.VMStateRunning {
+			return nil, types.NewAPIError("vm_running", "stop the VM before changing the vnc password; the new password takes effect on the next start")
+		} else if *patch.VNCPassword == "" {
+			vm.VNCPasswordHash = ""
+			vm.VNCPasswordEnc = ""
+		} else {
+			vm.VNCPasswordHash = "mock-bcrypt:" + *patch.VNCPassword
+			vm.VNCPasswordEnc = "mock-aesgcm:" + *patch.VNCPassword
+		}
 	}
 
 	if patch.CPUs > 0 {
@@ -581,6 +612,50 @@ func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent 
 	}
 	m.mu.RUnlock()
 	return nil, fmt.Errorf("vms/%s: not found", id)
+}
+
+// OpenSerialConsole returns a bidirectional in-memory stream for the
+// running VM.  Tests can pin the stream a VM hands out with
+// SeedSerialConsole; otherwise a loopback echo pipe is returned so the
+// websocket proxy has something live to pump.  Stopped VMs return the
+// same typed `vm_not_running` error the libvirt implementation emits.
+func (m *MockManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	if m.OpenSerialConsoleErr != nil {
+		return nil, m.OpenSerialConsoleErr
+	}
+
+	m.mu.RLock()
+	vm, ok := m.vms[id]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+	state := vm.State
+	seeded := m.serialConsoles[id]
+	m.mu.RUnlock()
+
+	if state != types.VMStateRunning {
+		return nil, types.NewAPIError("vm_not_running", "vm is not running; start it before opening a serial console")
+	}
+	if seeded != nil {
+		return seeded, nil
+	}
+
+	// Loopback echo: bytes written by the proxy come straight back as
+	// console "output", which is enough to drive end-to-end ws tests.
+	client, server := net.Pipe()
+	go func() {
+		_, _ = io.Copy(server, server)
+	}()
+	return client, nil
+}
+
+// SeedSerialConsole pins the stream OpenSerialConsole returns for a VM so
+// tests can hold the far end of a net.Pipe and script the conversation.
+func (m *MockManager) SeedSerialConsole(vmID string, rwc io.ReadWriteCloser) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.serialConsoles[vmID] = rwc
 }
 
 func (m *MockManager) Close() error {

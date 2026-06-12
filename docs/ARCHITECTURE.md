@@ -285,10 +285,10 @@ See `docs/WINDOWS_GUESTS.md` for the operator guide (preparing base images, virt
 
 VMSmith's browser-console path is intentionally split into two halves:
 
-1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket`
-2. **Console proxying** via the forthcoming websocket endpoint that will consume that ticket and bridge the browser to a loopback-only libvirt console endpoint
+1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket` (optional `?intent=vnc|serial`, default `vnc`)
+2. **Console proxying** via the `GET /api/v1/vms/{id}/console` websocket endpoint, which consumes the ticket exactly once and bridges the browser to a loopback-only libvirt console endpoint
 
-The daemon already ships the first half and the discovery primitives for the second half.
+Both halves ship today. Tickets are intent-bound: a `vnc` ticket opens the RFB proxy (`binary` subprotocol), a `serial` ticket opens the pty proxy (`text` subprotocol via `vm.Manager.OpenSerialConsole` / libvirt `Domain.OpenConsole`); neither can be replayed against the other flavour.
 
 #### Ticket flow
 
@@ -298,8 +298,13 @@ The daemon already ships the first half and the discovery primitives for the sec
 4. The response returns:
    - `ticket`
    - `expires_at`
-   - `websocket_url` (currently a future-facing URL of the form `/api/v1/vms/{id}/console?ticket=...`)
-5. The websocket handler will later consume the ticket exactly once, recover the caller identity, and reject reuse / expiry / VM-scope mismatch.
+   - `websocket_url` (`/api/v1/vms/{id}/console?ticket=...`)
+   - `intent` (`vnc` or `serial`)
+5. The websocket handler consumes the ticket exactly once, recovers the caller identity and intent, and rejects reuse / expiry / VM-scope mismatch.
+
+#### VNC passwords (5.1.8)
+
+A per-VM `vnc_password` adds RFB-level authentication beneath the ticket layer. The plaintext is write-only: the daemon persists a bcrypt hash (verification) plus an AES-GCM blob keyed by SHA-256 of `daemon.console.password_key` (so the `passwd=` attribute can be re-rendered into the domain XML on later redefines), and every VM read path redacts both via `VM.RedactConsoleSecrets`. Password changes require the VM stopped (409 `vm_running`) because the password lives in the defined domain XML; the change takes effect on the next start. Rotating `daemon.console.password_key` invalidates stored blobs — re-set passwords afterwards.
 
 #### Proxy boundary
 

@@ -9,6 +9,11 @@ type ConsoleTicket struct {
 	Ticket       string    `json:"ticket"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	WebsocketURL string    `json:"websocket_url"`
+	// Intent records which console flavour this ticket was issued for
+	// ("vnc" or "serial"). The websocket proxy follows the ticket's
+	// intent, so a VNC ticket can never open the serial console and
+	// vice versa.
+	Intent ConsoleIntent `json:"intent"`
 }
 
 // ConsoleIntent identifies which console flavour the caller wants when

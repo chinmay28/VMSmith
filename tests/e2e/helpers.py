@@ -6,6 +6,7 @@ overridden by conftest.py ``pytest_configure`` with any CLI option values.
 """
 
 import os
+import socket
 import subprocess
 import time
 
@@ -20,12 +21,14 @@ import requests
 VMSMITH_BIN: str = os.environ.get("VMSMITH_BIN", "vmsmith")
 VMSMITH_API: str = os.environ.get("VMSMITH_API", "http://localhost:8080")
 ROCKY_IMAGE: str = os.environ.get("VMSMITH_ROCKY_IMAGE", "")
+WINDOWS_IMAGE: str = os.environ.get("VMSMITH_WINDOWS_IMAGE", "")
 SSH_PRIVATE_KEY: str = os.environ.get("VMSMITH_SSH_PRIVATE_KEY", os.path.expanduser("~/.ssh/id_rsa"))
 SSH_USER: str = os.environ.get("VMSMITH_SSH_USER", "root")
 
 # Timeouts (seconds)
 VM_IP_TIMEOUT: int = int(os.environ.get("VMSMITH_IP_TIMEOUT", "120"))
 VM_SSH_TIMEOUT: int = int(os.environ.get("VMSMITH_SSH_TIMEOUT", "180"))
+WINDOWS_IP_TIMEOUT: int = int(os.environ.get("VMSMITH_WINDOWS_IP_TIMEOUT", "900"))
 POLL_INTERVAL: int = 5
 
 
@@ -197,6 +200,20 @@ def ssh_run(ip: str, command: str, port: int = 22, user: str = None) -> str:
         return out
     finally:
         client.close()
+
+
+def wait_for_tcp_port(ip: str, port: int, timeout: int = 300) -> None:
+    """Wait until a plain TCP connect to ip:port succeeds."""
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((ip, port), timeout=5):
+                return
+        except OSError as e:
+            last_err = e
+            time.sleep(POLL_INTERVAL)
+    raise TimeoutError(f"TCP port {ip}:{port} not reachable within {timeout}s: {last_err}")
 
 
 def ping_host(ip: str, count: int = 3, timeout: int = 10) -> bool:
