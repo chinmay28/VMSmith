@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -532,10 +533,18 @@ func TestProxyConsole_ClosesWhenMaxSessionDeadlineExpires(t *testing.T) {
 	backend := <-accepted
 	defer backend.Close()
 
+	readDeadline := time.Now().Add(5 * time.Second)
+	if err := conn.SetReadDeadline(readDeadline); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
+			}
 			_ = conn.Close()
 			return
 		}
@@ -573,10 +582,18 @@ func TestProxyConsole_ClosesWhenIdleTimeoutExpires(t *testing.T) {
 	backend := <-accepted
 	defer backend.Close()
 
+	readDeadline := time.Now().Add(5 * time.Second)
+	if err := conn.SetReadDeadline(readDeadline); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
+			}
 			_ = conn.Close()
 			return
 		}
