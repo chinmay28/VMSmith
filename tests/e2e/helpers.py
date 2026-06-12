@@ -8,6 +8,7 @@ overridden by conftest.py ``pytest_configure`` with any CLI option values.
 import os
 import subprocess
 import time
+from typing import Callable
 
 import paramiko
 import requests
@@ -110,6 +111,42 @@ def api_post(path: str, json=None) -> requests.Response:
 
 def api_delete(path: str) -> requests.Response:
     return requests.delete(api_url(path), timeout=30)
+
+
+def stream_events(params: dict | None = None) -> requests.Response:
+    """Open the live events SSE stream."""
+    return requests.get(api_url("/events/stream"), params=params or {}, stream=True, timeout=30)
+
+
+def wait_for_event(
+    matcher: Callable[[dict], bool],
+    params: dict | None = None,
+    timeout: int = 90,
+) -> dict:
+    """Wait for the first SSE event whose decoded JSON payload matches."""
+    deadline = time.time() + timeout
+    with stream_events(params=params) as resp:
+        resp.raise_for_status()
+        lines = resp.iter_lines(decode_unicode=True)
+        data_lines: list[str] = []
+        for raw_line in lines:
+            if time.time() > deadline:
+                raise TimeoutError(f"Timed out waiting for matching event within {timeout}s")
+            line = raw_line or ""
+            if line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+                continue
+            if line == "":
+                if not data_lines:
+                    continue
+                payload = "\n".join(data_lines)
+                data_lines.clear()
+                event = requests.models.complexjson.loads(payload)
+                if matcher(event):
+                    return event
+        raise TimeoutError("Events stream closed before a matching event arrived")
 
 
 # ---------------------------------------------------------------------------

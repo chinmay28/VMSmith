@@ -165,6 +165,11 @@ VMSMITH_GUI_URL=http://192.168.1.50:8080 \
 - SSH into the VM via the forwarded port on localhost
 - Add multiple port forwards, list them, selectively remove
 
+### Test 5: Live Events SSE (API)
+- Subscribe to `GET /api/v1/events/stream`
+- Start a real VM through the API
+- Assert the live stream emits `vm.started` from the libvirt event source
+
 ## File Structure
 
 ```
@@ -176,6 +181,7 @@ tests/e2e/
 ├── test_cli_vm_lifecycle.py # CLI: create, IP, SSH, snapshot, image, re-create
 ├── test_cli_networking.py   # CLI: multi-NIC, inter-VM ping, port forwarding
 ├── test_api_vm_lifecycle.py # API: same lifecycle via REST endpoints
+├── test_api_events.py       # API: live SSE event stream against a real VM
 ├── test_api_networking.py   # API: same networking via REST endpoints
 ├── gui-e2e.spec.js          # Playwright: GUI lifecycle, snapshots, port fwd
 ├── playwright.config.js     # Playwright config for live daemon
