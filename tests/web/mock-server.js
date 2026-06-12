@@ -1001,6 +1001,29 @@ const server = http.createServer(async (req, res) => {
     vm.state = "running";
     return json(res, 200, { status: "resumed" });
   }
+  // 5.1.7 / 5.1.9 — single-use console ticket issuance. `?intent=vnc|serial`
+  // (default vnc) selects the transport; the websocket_url carries the ticket
+  // back so the console page can dial GET /api/v1/vms/{id}/console. The mock
+  // has no real VNC/serial websocket behind it — the GUI tests assert the
+  // console page degrades to a visible disconnected/error overlay instead.
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/console\/ticket$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state !== "running") {
+      return json(res, 409, { code: "vm_not_running", message: "vm is not running; start it to open a console" });
+    }
+    const intent = (url.searchParams.get("intent") || "vnc").trim().toLowerCase() || "vnc";
+    if (intent !== "vnc" && intent !== "serial") {
+      return json(res, 400, { code: "invalid_intent", message: "intent must be vnc or serial" });
+    }
+    const ticket = `tick-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    return json(res, 200, {
+      ticket,
+      expires_at: new Date(Date.now() + 60 * 1000).toISOString(),
+      websocket_url: `/api/v1/vms/${m[1]}/console?ticket=${ticket}`,
+      intent,
+    });
+  }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
     const source = vms.get(m[1]);
     if (!source) return json(res, 404, { error: "not found" });

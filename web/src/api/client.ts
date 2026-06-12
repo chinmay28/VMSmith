@@ -78,7 +78,14 @@ export const vms = {
   reboot: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/reboot', { params: { path: { vmID: id } } })),
   suspend: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/suspend', { params: { path: { vmID: id } } })),
   resume: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/resume', { params: { path: { vmID: id } } })),
-  issueConsoleTicket: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/console/ticket', { params: { path: { vmID: id } } })),
+  // issueConsoleTicket mints a single-use console ticket. `intent` selects
+  // the transport: 'vnc' (default — websocket subprotocol "binary" carrying
+  // raw RFB bytes) or 'serial' (subprotocol "text" carrying UTF-8 frames).
+  // Tickets expire in ~60s, so fetch a fresh one per connection attempt.
+  // The intent query param is hand-rolled until the generated OpenAPI types
+  // catch up.
+  issueConsoleTicket: (id: string, intent: 'vnc' | 'serial' = 'vnc'): Promise<{ ticket: string; expires_at: string; websocket_url: string; intent: string }> =>
+    unwrap(apiClient.POST('/vms/{vmID}/console/ticket', { params: { path: { vmID: id }, query: { intent } as any } as any })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
   stats: (id: string, { since = '', fields = '' }: { since?: string; fields?: string } = {}) =>
     unwrap(apiClient.GET('/vms/{vmID}/stats', {
