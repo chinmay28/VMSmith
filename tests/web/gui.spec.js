@@ -5722,3 +5722,88 @@ test.describe("Layout footer", () => {
     await expect(footer).toHaveText("VM Smith");
   });
 });
+
+// ============================================================
+// VM Console (5.1.7 VNC / 5.1.9 serial — GUI slice of 5.1.11)
+// ============================================================
+test.describe("VM Console", () => {
+  test("running VM detail shows a Console button linking to the console route", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+
+    const btn = page.getByTestId("btn-console");
+    await expect(btn).toBeVisible();
+    await expect(btn).toHaveAttribute("href", "/vms/vm-1/console");
+    await expect(btn).toHaveAttribute("target", "_blank");
+    await expect(btn).toHaveAttribute("rel", "noopener");
+  });
+
+  test("stopped VM detail hides the Console button", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-db-server").click();
+
+    await expect(page.getByTestId("vm-detail-state")).toHaveText("stopped");
+    await expect(page.getByTestId("btn-console")).toHaveCount(0);
+  });
+
+  test("console page mounts its chrome and degrades gracefully without a real VNC websocket", async ({ page }) => {
+    // Reset mock state (running web-server), then open the console route the
+    // way the new-tab link does.
+    await page.goto(BASE_URL);
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+
+    // Full-viewport page chrome — no sidebar, toolbar visible.
+    await expect(page.getByTestId("console-page")).toBeVisible();
+    await expect(page.getByTestId("console-vm-name")).toHaveText("web-server");
+    await expect(page.getByTestId("nav-vms")).toHaveCount(0);
+
+    // Toolbar controls.
+    await expect(page.getByTestId("console-tab-vnc")).toBeVisible();
+    await expect(page.getByTestId("console-tab-serial")).toBeVisible();
+    await expect(page.getByTestId("console-btn-cad")).toBeVisible();
+    await expect(page.getByTestId("console-btn-fullscreen")).toBeVisible();
+    await expect(page.getByTestId("console-btn-reconnect")).toBeVisible();
+
+    // Canvas container is mounted.
+    await expect(page.getByTestId("console-vnc-container")).toBeAttached();
+
+    // The mock server has no real VNC websocket behind the ticket endpoint,
+    // so the connection must settle into a visible disconnected/error
+    // overlay (not a blank page or a crash).
+    await expect(page.getByTestId("console-status")).toHaveAttribute(
+      "data-status", /disconnected|error/, { timeout: 15000 },
+    );
+    await expect(page.getByTestId("console-overlay")).toBeVisible();
+    await expect(page.getByTestId("console-overlay-reconnect")).toBeVisible();
+  });
+
+  test("serial tab mounts an xterm terminal and keeps the status overlay honest", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+
+    await page.getByTestId("console-tab-serial").click();
+
+    // xterm mounts inside the serial container; Ctrl-Alt-Del is VNC-only.
+    await expect(page.getByTestId("console-serial-container")).toBeVisible();
+    await expect(page.getByTestId("console-serial-container").locator(".xterm")).toBeAttached();
+    await expect(page.getByTestId("console-btn-cad")).toHaveCount(0);
+
+    // No real serial websocket either — must settle into a non-crash state.
+    await expect(page.getByTestId("console-status")).toHaveAttribute(
+      "data-status", /disconnected|error/, { timeout: 15000 },
+    );
+    await expect(page.getByTestId("console-overlay")).toBeVisible();
+  });
+
+  test("console page surfaces vm_not_running for a stopped VM", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.goto(`${BASE_URL}/vms/vm-2/console`);
+
+    // Ticket issuance returns 409 vm_not_running; the page shows the message
+    // instead of crashing.
+    await expect(page.getByTestId("console-overlay")).toBeVisible();
+    await expect(page.getByTestId("console-overlay-status")).toHaveText("Console unavailable");
+    await expect(page.getByTestId("console-overlay-message")).toContainText("not running");
+    await expect(page.getByTestId("console-overlay-reconnect")).toBeVisible();
+  });
+});

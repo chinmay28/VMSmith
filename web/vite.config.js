@@ -13,6 +13,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        // Console websockets (/api/v1/vms/{id}/console) ride the same proxy.
+        ws: true,
       },
     },
   },
