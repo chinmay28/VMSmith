@@ -12,10 +12,13 @@ CLI options (run ``pytest --help`` to see all):
     --host-iface2 NAME       Second host interface for dual-NIC tests
     --ip-timeout SECS        Timeout waiting for VM IP (default: 120)
     --ssh-timeout SECS       Timeout waiting for SSH (default: 180)
+    --windows-image PATH     Windows qcow2 image path (windows tests skipped when unset)
+    --windows-ip-timeout SECS  Timeout waiting for a Windows VM IP (default: 900)
 
 Equivalent env vars: VMSMITH_ROCKY_IMAGE, VMSMITH_SSH_PRIVATE_KEY, VMSMITH_SSH_USER,
 VMSMITH_BIN, VMSMITH_API, VMSMITH_HOST_IFACE, VMSMITH_HOST_IFACE2,
-VMSMITH_IP_TIMEOUT, VMSMITH_SSH_TIMEOUT.
+VMSMITH_IP_TIMEOUT, VMSMITH_SSH_TIMEOUT, VMSMITH_WINDOWS_IMAGE,
+VMSMITH_WINDOWS_IP_TIMEOUT.
 """
 
 import os
@@ -89,6 +92,17 @@ def pytest_addoption(parser):
         type=int,
         help="Seconds to wait for SSH readiness (env: VMSMITH_SSH_TIMEOUT, default: 180)",
     )
+    g.addoption(
+        "--windows-image",
+        default=os.environ.get("VMSMITH_WINDOWS_IMAGE", ""),
+        help="Path to Windows qcow2 image (env: VMSMITH_WINDOWS_IMAGE)",
+    )
+    g.addoption(
+        "--windows-ip-timeout",
+        default=int(os.environ.get("VMSMITH_WINDOWS_IP_TIMEOUT", "900")),
+        type=int,
+        help="Seconds to wait for a Windows VM IP (env: VMSMITH_WINDOWS_IP_TIMEOUT, default: 900)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +116,10 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "gui: GUI/Playwright E2E tests")
     config.addinivalue_line("markers", "networking: multi-NIC networking tests")
     config.addinivalue_line("markers", "portforward: port forwarding tests")
+    config.addinivalue_line("markers", "metrics: per-VM metrics endpoint tests")
+    config.addinivalue_line("markers", "events: live SSE event stream tests")
+    config.addinivalue_line("markers", "schedules: scheduled operations tests")
+    config.addinivalue_line("markers", "windows: Windows guest tests (require --windows-image)")
 
     # Propagate CLI options into helpers module-level config.
     # getoption() returns None when pytest_addoption hasn't run yet (e.g. during
@@ -114,6 +132,10 @@ def pytest_configure(config):
         helpers.SSH_USER = config.getoption("--ssh-user") or helpers.SSH_USER
         helpers.VM_IP_TIMEOUT = config.getoption("--ip-timeout") or helpers.VM_IP_TIMEOUT
         helpers.VM_SSH_TIMEOUT = config.getoption("--ssh-timeout") or helpers.VM_SSH_TIMEOUT
+        helpers.WINDOWS_IMAGE = config.getoption("--windows-image") or helpers.WINDOWS_IMAGE
+        helpers.WINDOWS_IP_TIMEOUT = (
+            config.getoption("--windows-ip-timeout") or helpers.WINDOWS_IP_TIMEOUT
+        )
     except (ValueError, AttributeError):
         pass
 
@@ -191,6 +213,25 @@ def host_interface2(request):
     if not iface:
         pytest.skip("--host-iface2 not set — skipping dual-NIC tests")
     return iface
+
+
+@pytest.fixture(scope="session")
+def windows_image():
+    """Return the Windows qcow2 image path, or skip when not configured."""
+    if not helpers.WINDOWS_IMAGE:
+        pytest.skip(
+            "--windows-image / VMSMITH_WINDOWS_IMAGE not set — skipping Windows guest tests"
+        )
+    assert os.path.isfile(helpers.WINDOWS_IMAGE), (
+        f"Windows image not found: {helpers.WINDOWS_IMAGE}"
+    )
+    return helpers.WINDOWS_IMAGE
+
+
+@pytest.fixture(scope="session")
+def windows_ip_timeout():
+    """Return the (generous) IP wait timeout for Windows boots."""
+    return helpers.WINDOWS_IP_TIMEOUT
 
 
 @pytest.fixture(scope="session")
