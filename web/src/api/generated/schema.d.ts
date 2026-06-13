@@ -2680,6 +2680,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/host/gpus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover host GPUs available for VFIO passthrough
+         * @description Enumerates the host's PCI display controllers (GPUs) with their vendor/device ids, the kernel driver currently bound to each, and their IOMMU group membership. Use the returned addresses with VMSpec.gpus / `vm create --gpu` to pass a GPU through to a VM.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Host GPUs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GPUDevice"][];
+                    };
+                };
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/host/stats": {
         parameters: {
             query?: never;
@@ -4042,6 +4082,8 @@ export interface components {
             firmware?: "bios" | "uefi" | "ovmf";
             /** @description Per-VM virtio-win driver ISO path. Overrides the daemon-wide `storage.virtio_win_iso` config for this Windows VM only; ignored for Linux guests. If the override path is missing on the daemon host the resolver logs a warning and falls back to the daemon config / probe. The guest still boots without an ISO (SATA + e1000e work natively); the ISO is only required in-guest to install virtio drivers. */
             virtio_win_iso?: string;
+            /** @description Host PCI GPU addresses to pass through to this VM via VFIO, in the long ("0000:01:00.0") or short ("01:00.0") form. Discover assignable GPUs via GET /host/gpus. vmsmith attaches each requested GPU together with the rest of its IOMMU group (the GPU plus, typically, its HDMI audio function) as managed='yes' <hostdev> entries. The host must have IOMMU enabled (intel_iommu=on / amd_iommu=on) and the GPU must not be driving the host console. Invalid addresses return 400 `invalid_gpu`. See docs/GPU_PASSTHROUGH.md. */
+            gpus?: string[];
         };
         VMUpdateSpec: {
             cpus?: number;
@@ -4448,6 +4490,24 @@ export interface components {
             mac: string;
             is_up: boolean;
             is_physical: boolean;
+        };
+        GPUDevice: {
+            /** @description PCI address in canonical form, e.g. "0000:01:00.0". */
+            address: string;
+            /** @description Raw 0x-prefixed PCI vendor id, e.g. "0x10de". */
+            vendor_id: string;
+            /** @description Raw 0x-prefixed PCI device id, e.g. "0x2704". */
+            device_id: string;
+            /** @description Human-readable vendor name (NVIDIA / AMD / Intel) or the raw id. */
+            vendor: string;
+            /** @description Raw PCI class code, e.g. "0x030000" (VGA controller). */
+            class: string;
+            /** @description Kernel driver currently bound to the device ("nvidia", "vfio-pci", "" when unbound). */
+            driver?: string;
+            /** @description IOMMU group number; the whole group is passed through together. */
+            iommu_group: number;
+            /** @description Every assignable PCI function sharing this device's IOMMU group (the GPU plus, typically, its HDMI audio function); bridges excluded. These are the addresses vmsmith attaches when this GPU is requested. */
+            group_devices?: string[];
         };
         HostResourceUsageSummary: {
             /** Format: int64 */

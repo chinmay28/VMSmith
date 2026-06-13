@@ -116,6 +116,18 @@ curl -X POST http://localhost:8080/api/v1/vms \
 
 The create response and `vmsmith vm create` output echo the attached GPUs.
 
+### 2.1 From the web GUI
+
+In the **Machines** page, click **New VM** → **Advanced** tab. The **GPU
+Passthrough** section lists every GPU the daemon discovered (the same data as
+`vmsmith host gpus`), each with its vendor, PCI address, bound driver, and IOMMU
+group. Tick the GPU(s) to pass through and create the VM as usual. A green
+`vfio-pci` chip means the device is ready; an amber chip (e.g. `nvidia`) warns
+that libvirt will rebind it at start, which only works if the GPU isn't driving
+the host console. Recommended: also set **Firmware → uefi** in the Device
+Tuning section. The VM detail page shows a **GPU Passthrough** card listing the
+assigned addresses.
+
 ---
 
 ## 3. Inside the guest

@@ -3141,6 +3141,30 @@ const server = http.createServer(async (req, res) => {
       { name: "eth1", ips: ["192.168.1.16/24"], mac: "52:54:00:00:00:02", is_up: true, is_physical: true },
     ]);
   }
+  if (p === "/api/v1/host/gpus" && method === "GET") {
+    return json(res, 200, [
+      {
+        address: "0000:01:00.0",
+        vendor_id: "0x10de",
+        device_id: "0x2704",
+        vendor: "NVIDIA",
+        class: "0x030000",
+        driver: "vfio-pci",
+        iommu_group: 15,
+        group_devices: ["0000:01:00.0", "0000:01:00.1"],
+      },
+      {
+        address: "0000:00:02.0",
+        vendor_id: "0x8086",
+        device_id: "0x4680",
+        vendor: "Intel",
+        class: "0x030000",
+        driver: "i915",
+        iommu_group: 2,
+        group_devices: ["0000:00:02.0"],
+      },
+    ]);
+  }
   if (p === "/api/v1/host/stats" && method === "GET") {
     return json(res, 200, {
       vm_count: vms.length,

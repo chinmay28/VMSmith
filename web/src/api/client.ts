@@ -290,6 +290,7 @@ export const templates = {
 // --- Host ---
 export const host = {
   interfaces: () => unwrap(apiClient.GET('/host/interfaces')),
+  gpus: () => unwrap(apiClient.GET('/host/gpus')),
   stats: () => unwrap(apiClient.GET('/host/stats')),
 };
 
