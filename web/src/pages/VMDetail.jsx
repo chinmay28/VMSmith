@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -245,6 +245,7 @@ export default function VMDetail() {
   const spec = normalizeSpec(vm.spec);
   const tags = safeArray(vm.tags);
   const networks = safeArray(spec.networks);
+  const gpus = safeArray(spec.gpus);
   const cpuText = Number.isFinite(spec.cpus) ? spec.cpus : '—';
   const ramText = Number.isFinite(spec.ram_mb) ? spec.ram_mb : '—';
   const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
@@ -425,6 +426,24 @@ export default function VMDetail() {
                 ) : (
                   <span className="text-xs text-steel-500">DHCP</span>
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* GPU passthrough */}
+      {gpus.length > 0 && (
+        <div className="card mb-4" data-testid="vm-detail-gpus">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-steel-800/40">
+            <Cpu size={14} className="text-steel-500" />
+            <h2 className="text-sm font-display font-semibold text-steel-300">GPU Passthrough</h2>
+          </div>
+          <div className="divide-y divide-steel-800/40">
+            {gpus.map((addr, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="badge bg-steel-800/60 text-steel-400 border-steel-700/40">VFIO</span>
+                <span className="font-mono text-sm text-steel-200">{addr}</span>
               </div>
             ))}
           </div>

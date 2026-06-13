@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, RotateCcw, RefreshCw, Pause, Zap, Search } from 'lucide-react';
+import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSquare, Lock, RotateCcw, RefreshCw, Pause, Zap, Search, Cpu } from 'lucide-react';
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -1272,7 +1272,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '' };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '', gpus: [] };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -1286,8 +1286,18 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     0,
   );
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
+  const { data: hostGpuData } = useFetch(() => hostApi.gpus(), [], 0);
   const imageList = safeArray(imageResponse?.data || imageResponse);
   const templates = safeArray(templateResponse?.data || templateResponse);
+  const hostGpus = safeArray(hostGpuData);
+
+  // Toggle a GPU PCI address in/out of the form's passthrough list.
+  const toggleGpu = (address) => setForm(f => {
+    const current = f.gpus || [];
+    return current.includes(address)
+      ? { ...f, gpus: current.filter(a => a !== address) }
+      : { ...f, gpus: [...current, address] };
+  });
 
   // Debounce the template-selector search box. `templateSearchInput` is the
   // live value the user types; `templateSearch` is the committed query that
@@ -1380,6 +1390,9 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     if (!spec.machine) delete spec.machine;
     if (!spec.firmware) delete spec.firmware;
     if (!spec.virtio_win_iso) delete spec.virtio_win_iso;
+    // GPU passthrough — only send the list when the operator selected at least
+    // one device, so the daemon defaults to no passthrough otherwise.
+    if (!spec.gpus || spec.gpus.length === 0) delete spec.gpus;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -1415,7 +1428,8 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   const advancedCount = [
     form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
     form.disk_bus, form.nic_model, form.machine, form.firmware, form.virtio_win_iso,
-    networks.length > 0 ? 'x' : ''
+    networks.length > 0 ? 'x' : '',
+    (form.gpus && form.gpus.length > 0) ? 'x' : ''
   ].filter(Boolean).length;
 
   return (
@@ -1753,6 +1767,73 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* GPU passthrough (VFIO) */}
+              <div>
+                <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider mb-3">
+                  GPU Passthrough <span className="text-steel-500 font-normal normal-case">(VFIO — assigns a host GPU to this VM)</span>
+                </h3>
+                {hostGpus.length === 0 ? (
+                  <p className="text-xs text-steel-500 px-1" data-testid="gpu-empty">
+                    No GPUs detected on the host. Requires a discrete GPU and IOMMU enabled
+                    (<span className="font-mono">intel_iommu=on</span> / <span className="font-mono">amd_iommu=on</span>).
+                    See docs/GPU_PASSTHROUGH.md.
+                  </p>
+                ) : (
+                  <div className="space-y-2" data-testid="gpu-list">
+                    {hostGpus.map(gpu => {
+                      const selected = (form.gpus || []).includes(gpu.address);
+                      const ready = gpu.driver === 'vfio-pci';
+                      return (
+                        <label
+                          key={gpu.address}
+                          className={`flex items-start gap-3 p-3 rounded border cursor-pointer transition-colors ${
+                            selected ? 'border-blue-500/50 bg-blue-500/10' : 'border-steel-700/40 bg-steel-900/40'
+                          }`}
+                          data-testid={`gpu-option-${gpu.address}`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1 rounded border-steel-600 bg-steel-800 text-blue-500 focus:ring-blue-500/30"
+                            checked={selected}
+                            onChange={() => toggleGpu(gpu.address)}
+                            data-testid={`gpu-checkbox-${gpu.address}`}
+                          />
+                          <Cpu size={15} className="text-steel-400 mt-0.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-medium text-steel-200">{gpu.vendor}</span>
+                              <span className="text-xs font-mono text-steel-400">{gpu.address}</span>
+                              <span className={`text-[10px] rounded-full px-1.5 py-0 leading-4 border ${
+                                ready
+                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              }`}>
+                                {gpu.driver || 'unbound'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-steel-500 mt-1">
+                              device {gpu.device_id} · IOMMU group {gpu.iommu_group}
+                              {gpu.group_devices?.length > 1 && (
+                                <> · attaches {gpu.group_devices.join(', ')}</>
+                              )}
+                            </div>
+                            {!ready && (
+                              <div className="text-[10px] text-amber-400/80 mt-1">
+                                Bound to <span className="font-mono">{gpu.driver || 'no'}</span> driver — libvirt will rebind it to
+                                vfio-pci at start, which only works if the GPU isn't driving the host console.
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                    <p className="text-[10px] text-steel-500 px-1">
+                      The whole IOMMU group is attached together. UEFI firmware (above) is recommended for passthrough.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Extra networks */}

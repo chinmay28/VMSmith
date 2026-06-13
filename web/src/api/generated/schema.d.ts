@@ -287,9 +287,16 @@ export interface paths {
                      *     same column; VMs with an empty `spec.image` sink to the tail in
                      *     ascending order and the head in descending order, mirroring the
                      *     nil-trailing semantics on every other nullable sort axis (ip,
-                     *     guest_ip, last_fired_at, last_delivery_at, actor). All
-                     *     comparators tiebreak on `id` so pagination is deterministic
-                     *     across backends.
+                     *     guest_ip, last_fired_at, last_delivery_at, actor).
+                     *     `default_user` (5.4.91) is a case-insensitive sort on
+                     *     `spec.default_user` mirroring the case-insensitive
+                     *     `?default_user=` exact-match filter contract (5.4.23); unlike
+                     *     every other nullable axis it resolves an empty stored value to
+                     *     `root` so empty VMs collate with explicit-root VMs in
+                     *     alphabetical order rather than sinking to the tail — matches the
+                     *     runtime semantics in `internal/vm/lifecycle.go` and the
+                     *     empty-means-root filter contract. All comparators tiebreak on
+                     *     `id` so pagination is deterministic across backends.
                      */
                     sort?: components["parameters"]["VMSort"];
                     /**
@@ -2192,9 +2199,18 @@ export interface paths {
                      *     comparator would split the rocky9 cohort across multiple
                      *     buckets. Templates with an empty `image` sort to the tail of
                      *     `asc` / head of `desc`, mirroring the nil-trailing semantics on
-                     *     every other nullable sort axis. All comparators tiebreak on
-                     *     `id` so paginated requests return the same set across two
-                     *     independent fetches.
+                     *     every other nullable sort axis. `default_user` (5.4.92) is the
+                     *     symmetric sort counterpart to the `?default_user=` exact-match
+                     *     filter, using the same case-insensitive comparator. Diverges
+                     *     from the VM list `default_user` sort axis (5.4.91) which
+                     *     collapses empty → "root": templates store an empty
+                     *     `default_user` as "use the image's built-in user" (e.g.
+                     *     cloud-init's `cloud-user` / `ec2-user` / `ubuntu`), not root.
+                     *     So templates with an empty `default_user` sort to the tail of
+                     *     `asc` / head of `desc`, mirroring the nil-trailing semantics
+                     *     on the template `image` axis (5.4.89). All comparators
+                     *     tiebreak on `id` so paginated requests return the same set
+                     *     across two independent fetches.
                      */
                     sort?: components["parameters"]["TemplateSort"];
                     /**
@@ -2595,6 +2611,46 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["HostInterface"][];
+                    };
+                };
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/host/gpus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover host GPUs available for VFIO passthrough
+         * @description Enumerates the host's PCI display controllers (GPUs) with their vendor/device ids, the kernel driver currently bound to each, and their IOMMU group membership. Use the returned addresses with VMSpec.gpus / `vm create --gpu` to pass a GPU through to a VM.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Host GPUs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GPUDevice"][];
                     };
                 };
                 default: components["responses"]["APIError"];
@@ -3969,6 +4025,8 @@ export interface components {
             firmware?: "bios" | "uefi" | "ovmf";
             /** @description Per-VM virtio-win driver ISO path. Overrides the daemon-wide `storage.virtio_win_iso` config for this Windows VM only; ignored for Linux guests. If the override path is missing on the daemon host the resolver logs a warning and falls back to the daemon config / probe. The guest still boots without an ISO (SATA + e1000e work natively); the ISO is only required in-guest to install virtio drivers. */
             virtio_win_iso?: string;
+            /** @description Host PCI GPU addresses to pass through to this VM via VFIO, in the long ("0000:01:00.0") or short ("01:00.0") form. Discover assignable GPUs via GET /host/gpus. vmsmith attaches each requested GPU together with the rest of its IOMMU group (the GPU plus, typically, its HDMI audio function) as managed='yes' <hostdev> entries. The host must have IOMMU enabled (intel_iommu=on / amd_iommu=on) and the GPU must not be driving the host console. Invalid addresses return 400 `invalid_gpu`. See docs/GPU_PASSTHROUGH.md. */
+            gpus?: string[];
         };
         VMUpdateSpec: {
             cpus?: number;
@@ -4375,6 +4433,24 @@ export interface components {
             mac: string;
             is_up: boolean;
             is_physical: boolean;
+        };
+        GPUDevice: {
+            /** @description PCI address in canonical form, e.g. "0000:01:00.0". */
+            address: string;
+            /** @description Raw 0x-prefixed PCI vendor id, e.g. "0x10de". */
+            vendor_id: string;
+            /** @description Raw 0x-prefixed PCI device id, e.g. "0x2704". */
+            device_id: string;
+            /** @description Human-readable vendor name (NVIDIA / AMD / Intel) or the raw id. */
+            vendor: string;
+            /** @description Raw PCI class code, e.g. "0x030000" (VGA controller). */
+            class: string;
+            /** @description Kernel driver currently bound to the device ("nvidia", "vfio-pci", "" when unbound). */
+            driver?: string;
+            /** @description IOMMU group number; the whole group is passed through together. */
+            iommu_group: number;
+            /** @description Every assignable PCI function sharing this device's IOMMU group (the GPU plus, typically, its HDMI audio function); bridges excluded. These are the addresses vmsmith attaches when this GPU is requested. */
+            group_devices?: string[];
         };
         HostResourceUsageSummary: {
             /** Format: int64 */
@@ -4892,9 +4968,16 @@ export interface components {
          *     same column; VMs with an empty `spec.image` sink to the tail in
          *     ascending order and the head in descending order, mirroring the
          *     nil-trailing semantics on every other nullable sort axis (ip,
-         *     guest_ip, last_fired_at, last_delivery_at, actor). All
-         *     comparators tiebreak on `id` so pagination is deterministic
-         *     across backends.
+         *     guest_ip, last_fired_at, last_delivery_at, actor).
+         *     `default_user` (5.4.91) is a case-insensitive sort on
+         *     `spec.default_user` mirroring the case-insensitive
+         *     `?default_user=` exact-match filter contract (5.4.23); unlike
+         *     every other nullable axis it resolves an empty stored value to
+         *     `root` so empty VMs collate with explicit-root VMs in
+         *     alphabetical order rather than sinking to the tail — matches the
+         *     runtime semantics in `internal/vm/lifecycle.go` and the
+         *     empty-means-root filter contract. All comparators tiebreak on
+         *     `id` so pagination is deterministic across backends.
          */
         VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user";
         /**
