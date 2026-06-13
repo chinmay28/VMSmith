@@ -4,7 +4,7 @@
 daemon:
   listen: "0.0.0.0:8080"
   pid_file: "/var/run/vmsmith.pid"
-  log_file: "/var/log/vmsmith/vmsmith.log"   # structured log output (absolute path; '~' is NOT expanded). Leave empty to disable file logging. For rootless/dev use, point this at a writable path under your home dir.
+  log_file: "/var/log/vmsmith/vmsmith.log"   # structured log output (leading '~' is expanded to the current user's home dir). Leave empty to disable file logging. For rootless/dev use, point this at a writable path under your home dir.
   tls:
     cert_file: ""                      # optional; when both cert_file + key_file are set, daemon serves HTTPS
     key_file: ""

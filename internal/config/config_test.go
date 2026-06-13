@@ -309,6 +309,50 @@ func TestEnsureDirsCreatesAutoCertCacheDirWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestLoadExpandsTildePaths(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no user home dir available")
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `
+daemon:
+  log_file: "~/.vmsmith/vmsmith.log"
+  tls:
+    auto_cert_cache_dir: "~/.vmsmith/autocert"
+storage:
+  db_path: "~/.vmsmith/vmsmith.db"
+  virtio_win_iso: "~/iso/virtio-win.iso"
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	wantDB := filepath.Join(home, ".vmsmith", "vmsmith.db")
+	if cfg.Storage.DBPath != wantDB {
+		t.Errorf("Storage.DBPath = %q, want %q", cfg.Storage.DBPath, wantDB)
+	}
+	wantLog := filepath.Join(home, ".vmsmith", "vmsmith.log")
+	if cfg.Daemon.LogFile != wantLog {
+		t.Errorf("Daemon.LogFile = %q, want %q", cfg.Daemon.LogFile, wantLog)
+	}
+	wantCache := filepath.Join(home, ".vmsmith", "autocert")
+	if cfg.Daemon.TLS.AutoCertCacheDir != wantCache {
+		t.Errorf("Daemon.TLS.AutoCertCacheDir = %q, want %q", cfg.Daemon.TLS.AutoCertCacheDir, wantCache)
+	}
+	wantISO := filepath.Join(home, "iso", "virtio-win.iso")
+	if cfg.Storage.VirtioWinISO != wantISO {
+		t.Errorf("Storage.VirtioWinISO = %q, want %q", cfg.Storage.VirtioWinISO, wantISO)
+	}
+}
+
 func TestLoadAuthConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
