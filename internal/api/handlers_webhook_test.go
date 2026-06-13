@@ -155,7 +155,7 @@ func webhookRuntimeTestServer(t *testing.T) (*httptest.Server, *store.Store, *ev
 	bus.Start()
 	apiServer.SetEventBus(bus)
 
-	mgr := webhooks.NewManager(s, bus, webhooks.Config{AllowedHosts: []string{"127.0.0.1"}, HTTPTimeout: time.Second})
+	mgr := webhooks.NewManager(s, bus, webhooks.Config{AllowedHosts: []string{"127.0.0.1"}, HTTPTimeout: time.Second, Backoff: []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}})
 	apiServer.SetWebhookSubsystem(s, mgr)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -594,6 +594,72 @@ func TestTestWebhook_EndToEndFailure(t *testing.T) {
 	if persisted.LastDeliveryAt.IsZero() {
 		t.Fatal("LastDeliveryAt was not updated")
 	}
+}
+
+func TestWebhookDelivery_EndToEndFailurePublishesFinalEventAfterRetries(t *testing.T) {
+	ts, s, bus, _, cleanup := webhookRuntimeTestServer(t)
+	defer cleanup()
+
+	var hits int32
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "always fails", http.StatusBadGateway)
+	}))
+	defer receiver.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/webhooks", "application/json", jsonBody(t, types.WebhookCreateRequest{
+		URL:        receiver.URL,
+		Secret:     "topsecret",
+		EventTypes: []string{"vm.deleted"},
+	}))
+	if err != nil {
+		t.Fatalf("POST /webhooks: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created types.Webhook
+	decodeJSON(t, resp, &created)
+
+	bus.Publish(&types.Event{Type: "vm.deleted", Source: types.EventSourceApp, VMID: "vm-e2e-fail"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		persisted, err := s.GetWebhook(created.ID)
+		if err != nil {
+			t.Fatalf("GetWebhook: %v", err)
+		}
+		events, _, err := s.ListEventsFiltered(store.EventFilter{Type: "webhook.delivery_failed"})
+		if err != nil {
+			t.Fatalf("ListEventsFiltered: %v", err)
+		}
+		if persisted.LastStatus == http.StatusBadGateway && persisted.LastError == "HTTP 502" && len(events) == 1 {
+			if got := atomic.LoadInt32(&hits); got != 3 {
+				t.Fatalf("receiver hits = %d, want 3 attempts", got)
+			}
+			if events[0].Attributes["webhook_id"] != created.ID {
+				t.Fatalf("delivery_failed webhook_id = %q, want %q", events[0].Attributes["webhook_id"], created.ID)
+			}
+			if events[0].Attributes["event_type"] != "vm.deleted" {
+				t.Fatalf("delivery_failed event_type = %q, want vm.deleted", events[0].Attributes["event_type"])
+			}
+			if events[0].Attributes["last_status"] != "502" {
+				t.Fatalf("delivery_failed last_status = %q, want 502", events[0].Attributes["last_status"])
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	persisted, err := s.GetWebhook(created.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	events, _, err := s.ListEventsFiltered(store.EventFilter{Type: "webhook.delivery_failed"})
+	if err != nil {
+		t.Fatalf("ListEventsFiltered: %v", err)
+	}
+	t.Fatalf("timed out waiting for delivery_failed event: hits=%d LastStatus=%d LastError=%q events=%d", atomic.LoadInt32(&hits), persisted.LastStatus, persisted.LastError, len(events))
 }
 
 // patchWebhook is a small helper for PATCH /api/v1/webhooks/{id} tests.

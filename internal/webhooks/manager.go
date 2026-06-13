@@ -95,6 +95,9 @@ type Config struct {
 	AllowedHosts []string
 	// HTTPTimeout is the per-request timeout.  Zero defaults to 10s.
 	HTTPTimeout time.Duration
+	// Backoff overrides the retry schedule. Nil falls back to defaultBackoff.
+	// Intended for tests that need deterministic, short retries.
+	Backoff []time.Duration
 }
 
 // NewManager constructs a Manager.  The bus may be nil, in which case events
@@ -104,13 +107,17 @@ func NewManager(store Store, bus *events.EventBus, cfg Config) *Manager {
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
+	backoff := cfg.Backoff
+	if backoff == nil {
+		backoff = defaultBackoff
+	}
 	return &Manager{
 		store:        store,
 		bus:          bus,
 		httpTimeout:  timeout,
 		allowedHosts: cfg.AllowedHosts,
 		workers:      make(map[string]*worker),
-		backoff:      defaultBackoff,
+		backoff:      backoff,
 	}
 }
 
