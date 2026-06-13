@@ -161,6 +161,18 @@ type VMSpec struct {
 	// to the Windows guest so the operator can install virtio drivers
 	// in-guest. Empty falls back to the daemon config / probe.
 	VirtioWinISO string `json:"virtio_win_iso,omitempty" yaml:"virtio_win_iso,omitempty"`
+
+	// GPUs lists host PCI GPU addresses to pass through to this VM via VFIO,
+	// in either the long ("0000:01:00.0") or short ("01:00.0") form.
+	// Discover assignable GPUs with GET /api/v1/host/gpus (`vmsmith host
+	// gpus`). vmsmith attaches each requested GPU together with the rest of
+	// its IOMMU group (the GPU plus, typically, its HDMI audio function) as
+	// managed='yes' <hostdev> entries, so libvirt rebinds the devices from
+	// the host driver (nvidia) to vfio-pci at VM start and reattaches them on
+	// stop. The host must have IOMMU enabled (intel_iommu=on / amd_iommu=on)
+	// and the GPU must not be in use by the host's display. See
+	// docs/GPU_PASSTHROUGH.md.
+	GPUs []string `json:"gpus,omitempty" yaml:"gpus,omitempty"`
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.

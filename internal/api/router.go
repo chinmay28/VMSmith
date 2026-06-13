@@ -272,6 +272,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 
 		// Host discovery and stats
 		r.Get("/host/interfaces", s.ListHostInterfaces)
+		r.Get("/host/gpus", s.ListHostGPUs)
 		r.Get("/host/stats", s.GetHostStats)
 
 		// Quotas / allocation overview
