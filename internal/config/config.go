@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -272,12 +273,50 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.expandPaths()
+
 	return cfg, nil
+}
+
+// expandPaths replaces a leading "~" or "~/" in path-typed config fields with
+// the current user's home directory. Config files routinely contain values
+// like "~/.vmsmith/vmsmith.db" copied from the example file, and the syscalls
+// underneath (bolt.Open, os.OpenFile, etc.) do not perform shell expansion.
+func (c *Config) expandPaths() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	expand := func(p *string) {
+		if p == nil || *p == "" {
+			return
+		}
+		if *p == "~" {
+			*p = home
+		} else if strings.HasPrefix(*p, "~/") {
+			*p = filepath.Join(home, (*p)[2:])
+		}
+	}
+	expand(&c.Daemon.LogFile)
+	expand(&c.Daemon.PIDFile)
+	expand(&c.Daemon.TLS.CertFile)
+	expand(&c.Daemon.TLS.KeyFile)
+	expand(&c.Daemon.TLS.AutoCertCacheDir)
+	expand(&c.Storage.ImagesDir)
+	expand(&c.Storage.BaseDir)
+	expand(&c.Storage.DBPath)
+	expand(&c.Storage.VirtioWinISO)
 }
 
 // EnsureDirs creates all required directories.
 func (c *Config) EnsureDirs() error {
 	dirs := []string{c.Storage.ImagesDir, c.Storage.BaseDir}
+	if c.Storage.DBPath != "" {
+		dirs = append(dirs, filepath.Dir(c.Storage.DBPath))
+	}
+	if c.Daemon.LogFile != "" {
+		dirs = append(dirs, filepath.Dir(c.Daemon.LogFile))
+	}
 	if c.Daemon.AutoCertConfigured() && c.Daemon.TLS.AutoCertCacheDir != "" {
 		dirs = append(dirs, c.Daemon.TLS.AutoCertCacheDir)
 	}
