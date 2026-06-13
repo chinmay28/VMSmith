@@ -40,7 +40,7 @@ are applied client-side after a full bucket scan. For real-time streaming
 or daemon-side filtering, query GET /api/v1/events instead.
 
 Sort: --sort and --order accept the same whitelist as the API
-(--sort=id|occurred_at|type|source|severity|actor|resource_id, --order=asc|desc).
+(--sort=id|occurred_at|type|source|severity|actor|resource_id|vm_id, --order=asc|desc).
 When --sort is omitted the legacy "newest by timestamp" ordering is
 used, which matches the long-standing CLI behaviour.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -271,7 +271,7 @@ func validateEventSort(sortFlag, orderFlag string) (sortField, order string, err
 		return "", "", nil
 	}
 	if !types.IsValidEventSort(sortField) {
-		return "", "", fmt.Errorf("invalid --sort value %q (want one of: id, occurred_at, type, source, severity, actor, resource_id)", sortFlag)
+		return "", "", fmt.Errorf("invalid --sort value %q (want one of: id, occurred_at, type, source, severity, actor, resource_id, vm_id)", sortFlag)
 	}
 	order = strings.TrimSpace(strings.ToLower(orderFlag))
 	if order == "" {
@@ -713,7 +713,7 @@ func init() {
 	eventsListCmd.Flags().String("resource-id", "", "filter events by resource ID (exact match, case-sensitive)")
 	eventsListCmd.Flags().String("search", "", "case-insensitive substring match across message, type, source, severity, actor, vm_id, resource_id, and attribute values")
 	eventsListCmd.Flags().String("since", "", "show events since (Go duration like 5m, or RFC3339 timestamp)")
-	eventsListCmd.Flags().String("sort", "", "sort field: id, occurred_at, type, source, severity, actor, resource_id (default: legacy newest-by-timestamp)")
+	eventsListCmd.Flags().String("sort", "", "sort field: id, occurred_at, type, source, severity, actor, resource_id, vm_id (default: legacy newest-by-timestamp)")
 	eventsListCmd.Flags().String("order", "", "sort order: asc | desc (default: desc when --sort is set)")
 	eventsListCmd.Flags().Int("limit", 100, "maximum number of events to show")
 	eventsListCmd.Flags().Bool("show-actor", false, "include the ACTOR column (who initiated the event)")

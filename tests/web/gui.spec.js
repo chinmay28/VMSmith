@@ -5542,6 +5542,34 @@ test.describe("Activity", () => {
       .toBe("activity-row-evt-0");
   });
 
+  // 5.4.93 — `vm_id` sort axis (case-sensitive, empty-trailing).
+  test("vm_id sort axis reorders the activity timeline case-sensitively and trails empties", async ({ page }) => {
+    await page.goto(`${BASE_URL}/activity`);
+    const rows = page.locator('[data-testid^="activity-row-"]');
+
+    // sort=vm_id asc: "vm-1" (evt-2 and evt-3 tiebreak on id — evt-2 before
+    // evt-3) < "vm-2" (evt-1), then evt-0 (empty vm_id — host-level event)
+    // sinks to the tail.
+    await page.getByTestId("activity-sort-field").selectOption("vm_id");
+    await page.getByTestId("activity-sort-order").selectOption("asc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-2");
+    await expect.poll(async () => (await rows.last().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-0");
+
+    // URL captures the new sort + order so a refresh/back-button restores it.
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("vm_id");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // sort=vm_id desc: empty vm_id heads (evt-0), then "vm-2" (evt-1),
+    // then "vm-1" — id tiebreak reverses under desc so evt-3 before evt-2.
+    await page.getByTestId("activity-sort-order").selectOption("desc");
+    await expect.poll(async () => (await rows.first().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-0");
+    await expect.poll(async () => (await rows.last().getAttribute("data-testid")) || "")
+      .toBe("activity-row-evt-2");
+  });
+
   // 5.4.90 — `resource_id` sort axis (case-sensitive, empty-trailing).
   test("resource_id sort axis reorders the activity timeline case-sensitively and trails empties", async ({ page }) => {
     await page.goto(`${BASE_URL}/activity`);
