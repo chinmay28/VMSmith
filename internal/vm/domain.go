@@ -94,6 +94,9 @@ const domainXMLTemplate = `<domain type='kvm'>
     <rng model='virtio'>
       <backend model='random'>/dev/urandom</backend>
     </rng>
+    {{- range .GPUHostdevs}}
+    {{.}}
+    {{- end}}
   </devices>
 </domain>`
 
@@ -140,6 +143,19 @@ type DomainParams struct {
 	// embedded only in the rendered interface XML strings) so tests can
 	// assert it without grepping XML.
 	NICModel string
+
+	// GPUAddresses lists normalized host PCI addresses to attach as VFIO
+	// passthrough <hostdev> entries — the GPU plus its IOMMU-group
+	// companions (e.g. the HDMI audio function). The caller (LibvirtManager)
+	// is responsible for expanding requested GPUs to full IOMMU groups; the
+	// pure DomainParamsFromSpec path populates this from VMSpec.ResolvedGPUs
+	// without expansion. Empty = no passthrough. GenerateDomainXML renders
+	// each address into GPUHostdevs.
+	GPUAddresses []string
+
+	// GPUHostdevs holds the rendered <hostdev> XML fragments, computed from
+	// GPUAddresses by GenerateDomainXML. Not set by callers.
+	GPUHostdevs []string
 }
 
 // qemuBinaryCandidates is the ordered list of QEMU binary paths to probe.
@@ -248,6 +264,7 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 		Machine:      machine,
 		Emulator:     detectQEMUBinary(),
 		NICModel:     nicModel,
+		GPUAddresses: spec.ResolvedGPUs(),
 	}
 
 	if windows {
@@ -321,6 +338,16 @@ func GenerateDomainXML(params DomainParams) (string, error) {
 	}
 	if params.ClockOffset == "" {
 		params.ClockOffset = "utc"
+	}
+
+	// Render VFIO GPU passthrough hostdev fragments from the PCI addresses.
+	params.GPUHostdevs = params.GPUHostdevs[:0]
+	for _, addr := range params.GPUAddresses {
+		hostdev, err := gpuHostdevXML(addr)
+		if err != nil {
+			return "", err
+		}
+		params.GPUHostdevs = append(params.GPUHostdevs, hostdev)
 	}
 
 	tmpl, err := template.New("domain").Parse(domainXMLTemplate)
@@ -398,6 +425,23 @@ func machineTypeFromCaps(capsXMLStr, fallback string) string {
 	}
 
 	return fallback
+}
+
+// gpuHostdevXML renders a single VFIO PCI passthrough <hostdev> element for the
+// given PCI address. managed='yes' tells libvirt to detach the device from its
+// host driver and bind it to vfio-pci when the domain starts, then reattach it
+// on shutdown. Returns an error for a malformed PCI address so a bad value
+// fails the create rather than producing invalid domain XML.
+func gpuHostdevXML(addr string) (string, error) {
+	domain, bus, slot, function, ok := types.PCIAddressParts(addr)
+	if !ok {
+		return "", fmt.Errorf("invalid GPU PCI address %q", addr)
+	}
+	return fmt.Sprintf(`<hostdev mode='subsystem' type='pci' managed='yes'>
+      <source>
+        <address domain='%s' bus='%s' slot='%s' function='%s'/>
+      </source>
+    </hostdev>`, domain, bus, slot, function), nil
 }
 
 // generateMAC creates a random MAC address with the local/unicast prefix 52:54:00

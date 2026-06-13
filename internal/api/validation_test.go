@@ -159,6 +159,16 @@ func TestValidateVMSpec(t *testing.T) {
 			name: "windows with default resources (zero) is allowed",
 			spec: types.VMSpec{Name: "valid-name", Image: "win.qcow2", OSType: types.OSTypeWindows},
 		},
+		{
+			name: "valid gpu passthrough addresses",
+			spec: types.VMSpec{Name: "gpu-01", Image: "ubuntu", GPUs: []string{"0000:01:00.0", "01:00.1"}},
+		},
+		{
+			name:        "invalid gpu address",
+			spec:        types.VMSpec{Name: "gpu-01", Image: "ubuntu", GPUs: []string{"not-a-pci-address"}},
+			wantCode:    "invalid_gpu",
+			wantMessage: `gpu "not-a-pci-address" must be a PCI address like 0000:01:00.0 or 01:00.0`,
+		},
 	}
 
 	for _, tt := range tests {
