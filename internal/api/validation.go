@@ -47,6 +47,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if err := validateDeviceOverrides(spec); err != nil {
 		return err
 	}
+	if err := validateGPUs(spec.GPUs); err != nil {
+		return err
+	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
 			return err
@@ -181,6 +184,27 @@ func validateDeviceOverrides(spec types.VMSpec) error {
 	// bytes break filepath handling on every Unix).
 	if strings.ContainsRune(spec.VirtioWinISO, '\x00') {
 		return types.NewAPIError("invalid_spec", "virtio_win_iso must not contain NUL bytes")
+	}
+	return nil
+}
+
+// validateGPUs validates the optional VFIO passthrough GPU list. Each entry
+// must be a syntactically valid PCI address in either the long
+// ("0000:01:00.0") or short ("01:00.0") form; anything else returns 400
+// `invalid_gpu`. Empty/whitespace entries are ignored (ResolvedGPUs drops
+// them). The addresses are not checked against the host's actual GPU inventory
+// here — the API server may run on a different node from the libvirt daemon,
+// and an address that does not resolve to a device simply fails the domain
+// start with a libvirt error the operator can act on.
+func validateGPUs(gpus []string) error {
+	for _, g := range gpus {
+		if strings.TrimSpace(g) == "" {
+			continue
+		}
+		if !types.IsValidPCIAddress(g) {
+			return types.NewAPIError("invalid_gpu",
+				fmt.Sprintf("gpu %q must be a PCI address like 0000:01:00.0 or 01:00.0", g))
+		}
 	}
 	return nil
 }
@@ -454,7 +478,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "os_type_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "os_type_immutable", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503

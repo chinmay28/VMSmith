@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/vmsmith/vmsmith/internal/host"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -523,4 +524,20 @@ func (s *Server) ListHostInterfaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ifaces)
+}
+
+// ListHostGPUs handles GET /api/v1/host/gpus. It enumerates the host's PCI
+// display controllers (GPUs) with their IOMMU group membership so operators
+// can pick which device(s) to pass through via VMSpec.GPUs / `vm create --gpu`.
+func (s *Server) ListHostGPUs(w http.ResponseWriter, r *http.Request) {
+	gpus, err := host.DiscoverGPUs()
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
+		return
+	}
+	if gpus == nil {
+		gpus = []types.GPUDevice{}
+	}
+	writeJSON(w, http.StatusOK, gpus)
 }

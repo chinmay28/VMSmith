@@ -1821,6 +1821,26 @@ paths:
                   $ref: '#/components/schemas/HostInterface'
         default:
           $ref: '#/components/responses/APIError'
+  /host/gpus:
+    get:
+      tags: [Host]
+      summary: Discover host GPUs available for VFIO passthrough
+      description: >
+        Enumerates the host's PCI display controllers (GPUs) with their
+        vendor/device ids, the kernel driver currently bound to each, and their
+        IOMMU group membership. Use the returned addresses with
+        VMSpec.gpus / `vm create --gpu` to pass a GPU through to a VM.
+      responses:
+        '200':
+          description: Host GPUs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GPUDevice'
+        default:
+          $ref: '#/components/responses/APIError'
   /host/stats:
     get:
       tags: [Host]
@@ -3683,6 +3703,20 @@ components:
             the daemon config / probe. The guest still boots without an
             ISO (SATA + e1000e work natively); the ISO is only required
             in-guest to install virtio drivers.
+        gpus:
+          type: array
+          items:
+            type: string
+          description: >-
+            Host PCI GPU addresses to pass through to this VM via VFIO, in
+            the long ("0000:01:00.0") or short ("01:00.0") form. Discover
+            assignable GPUs via GET /host/gpus. vmsmith attaches each
+            requested GPU together with the rest of its IOMMU group (the GPU
+            plus, typically, its HDMI audio function) as managed='yes'
+            <hostdev> entries. The host must have IOMMU enabled
+            (intel_iommu=on / amd_iommu=on) and the GPU must not be driving
+            the host console. Invalid addresses return 400 `invalid_gpu`.
+            See docs/GPU_PASSTHROUGH.md.
     VMUpdateSpec:
       type: object
       properties:
@@ -4396,6 +4430,42 @@ components:
           type: boolean
         is_physical:
           type: boolean
+    GPUDevice:
+      type: object
+      required: [address, vendor_id, device_id, vendor, class, iommu_group]
+      properties:
+        address:
+          type: string
+          description: PCI address in canonical form, e.g. "0000:01:00.0".
+        vendor_id:
+          type: string
+          description: Raw 0x-prefixed PCI vendor id, e.g. "0x10de".
+        device_id:
+          type: string
+          description: Raw 0x-prefixed PCI device id, e.g. "0x2704".
+        vendor:
+          type: string
+          description: Human-readable vendor name (NVIDIA / AMD / Intel) or the raw id.
+        class:
+          type: string
+          description: Raw PCI class code, e.g. "0x030000" (VGA controller).
+        driver:
+          type: string
+          description: >-
+            Kernel driver currently bound to the device ("nvidia",
+            "vfio-pci", "" when unbound).
+        iommu_group:
+          type: integer
+          description: IOMMU group number; the whole group is passed through together.
+        group_devices:
+          type: array
+          items:
+            type: string
+          description: >-
+            Every assignable PCI function sharing this device's IOMMU group
+            (the GPU plus, typically, its HDMI audio function); bridges
+            excluded. These are the addresses vmsmith attaches when this GPU
+            is requested.
     HostResourceUsageSummary:
       type: object
       required: [used, total]
