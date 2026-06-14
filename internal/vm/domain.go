@@ -21,11 +21,20 @@ const domainXMLTemplate = `<domain type='kvm'>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
   <os{{if .FirmwareAttr}} firmware='{{.FirmwareAttr}}'{{end}}>
     <type arch='x86_64' machine='{{.Machine}}'>hvm</type>
+    {{- if .SecureBoot}}
+    <firmware>
+      <feature enabled='yes' name='enrolled-keys'/>
+      <feature enabled='yes' name='secure-boot'/>
+    </firmware>
+    {{- end}}
     <boot dev='hd'/>
   </os>
   <features>
     <acpi/>
     <apic/>
+    {{- if .SecureBoot}}
+    <smm state='on'/>
+    {{- end}}
     {{- if .Hyperv}}
     <hyperv>
       <relaxed state='on'/>
@@ -87,13 +96,18 @@ const domainXMLTemplate = `<domain type='kvm'>
       <model type='{{.VideoModel}}'/>
     </video>
     {{- end}}
-    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'{{if .VNCPasswordAttr}} passwd='{{.VNCPasswordAttr}}'{{end}}/>
     <channel type='unix'>
       <target type='virtio' name='org.qemu.guest_agent.0'/>
     </channel>
     <rng model='virtio'>
       <backend model='random'>/dev/urandom</backend>
     </rng>
+    {{- if .TPM}}
+    <tpm model='tpm-crb'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+    {{- end}}
   </devices>
 </domain>`
 
@@ -133,6 +147,19 @@ type DomainParams struct {
 	// indirectly from VMSpec.Firmware ("uefi"/"ovmf" → "efi"; "bios"/"" →
 	// empty) via VMSpec.ResolvedFirmwareAttr.
 	FirmwareAttr string
+	// SecureBoot asks libvirt's firmware auto-selection for a secure-boot
+	// capable OVMF build with enrolled keys (<firmware><feature .../>
+	// inside <os>) and enables SMM, which secure-boot firmware requires
+	// on q35 (roadmap 5.6.9). Only meaningful when FirmwareAttr is "efi".
+	SecureBoot bool
+	// TPM attaches an emulated (swtpm-backed) TPM 2.0 device using the
+	// modern tpm-crb model (roadmap 5.6.9).
+	TPM bool
+	// VNCPasswordAttr is the XML-escaped plaintext emitted into the
+	// <graphics passwd='...'> attribute (roadmap 5.1.8). Callers must set
+	// it via SetVNCPassword so escaping cannot be skipped; empty omits
+	// the attribute (no VNC auth — the historical behaviour).
+	VNCPasswordAttr string
 	// NICModel is the libvirt <interface><model type='...'/></interface>
 	// value used for the primary NAT interface and every additional
 	// attachment. Populated in DomainParamsFromSpec via
@@ -140,6 +167,26 @@ type DomainParams struct {
 	// embedded only in the rendered interface XML strings) so tests can
 	// assert it without grepping XML.
 	NICModel string
+}
+
+// SetVNCPassword installs a plaintext VNC password on the params,
+// XML-escaping it so quotes / angle brackets in an operator-chosen
+// password cannot break out of the passwd attribute in the template.
+func (p *DomainParams) SetVNCPassword(password string) {
+	p.VNCPasswordAttr = xmlEscapeAttr(password)
+}
+
+// xmlEscapeAttr escapes the five XML special characters for safe embedding
+// inside a single-quoted attribute value.
+func xmlEscapeAttr(v string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"'", "&apos;",
+		`"`, "&quot;",
+	)
+	return r.Replace(v)
 }
 
 // qemuBinaryCandidates is the ordered list of QEMU binary paths to probe.
@@ -294,9 +341,16 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	// Apply Firmware override (5.6.15). "uefi"/"ovmf" resolve to libvirt's
 	// firmware='efi' shorthand which auto-selects the host's OVMF code/vars
 	// pair from the QEMU firmware descriptors; "bios"/"" emit no attribute.
-	// This is the minimal-viable UEFI path — Secure Boot + virtual TPM are
-	// out of scope for 5.6.15 (tracked separately under roadmap 5.6.9).
 	params.FirmwareAttr = spec.ResolvedFirmwareAttr()
+
+	// Secure Boot + virtual TPM 2.0 (5.6.9). Both default on for
+	// windows-11 guests (Setup refuses to install without them) and can be
+	// pinned either way per-VM. Secure Boot only renders on the EFI path —
+	// the API rejects an explicit secure_boot=true on BIOS firmware, and
+	// the guard here keeps a defaulted value from emitting an invalid
+	// SeaBIOS + <firmware> combination.
+	params.SecureBoot = spec.ResolvedSecureBoot() && params.FirmwareAttr == "efi"
+	params.TPM = spec.ResolvedTPM()
 
 	return params
 }

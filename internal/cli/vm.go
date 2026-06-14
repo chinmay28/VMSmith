@@ -56,6 +56,19 @@ var vmCreateCmd = &cobra.Command{
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
 		locked, _ := cmd.Flags().GetBool("locked")
 
+		// secure_boot / tpm are tristate on the wire (nil = variant
+		// default), so only send them when the operator passed the flag.
+		var secureBoot, tpm *bool
+		if cmd.Flags().Changed("secure-boot") {
+			v, _ := cmd.Flags().GetBool("secure-boot")
+			secureBoot = &v
+		}
+		if cmd.Flags().Changed("tpm") {
+			v, _ := cmd.Flags().GetBool("tpm")
+			tpm = &v
+		}
+		vncPassword, _ := cmd.Flags().GetString("vnc-password")
+
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
 			"disk", fmt.Sprintf("%d", disk))
@@ -92,6 +105,9 @@ var vmCreateCmd = &cobra.Command{
 			NICModel:      strings.TrimSpace(strings.ToLower(nicModel)),
 			Machine:       strings.TrimSpace(machineType),
 			Firmware:      strings.TrimSpace(strings.ToLower(firmware)),
+			SecureBoot:    secureBoot,
+			TPM:           tpm,
+			VNCPassword:   vncPassword,
 			VirtioWinISO:  strings.TrimSpace(virtioWinISO),
 			CloudInitFile: cloudInit,
 			Networks:      networks,
@@ -602,9 +618,11 @@ var vmEditCmd = &cobra.Command{
 		diskBus, _ := cmd.Flags().GetString("disk-bus")
 		nicModelChanged := cmd.Flags().Changed("nic-model")
 		nicModel, _ := cmd.Flags().GetString("nic-model")
+		vncPasswordChanged := cmd.Flags().Changed("vnc-password")
+		vncPassword, _ := cmd.Flags().GetString("vnc-password")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged && !diskBusChanged && !nicModelChanged {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, --clock-offset, --disk-bus, or --nic-model")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged && !diskBusChanged && !nicModelChanged && !vncPasswordChanged {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, --clock-offset, --disk-bus, --nic-model, or --vnc-password")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -648,6 +666,10 @@ var vmEditCmd = &cobra.Command{
 		if nicModelChanged {
 			normalised := strings.TrimSpace(strings.ToLower(nicModel))
 			patch.NICModel = &normalised
+		}
+		if vncPasswordChanged {
+			val := vncPassword
+			patch.VNCPassword = &val
 		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
@@ -1220,6 +1242,9 @@ func init() {
 	vmCreateCmd.Flags().String("nic-model", "", "NIC model override for every interface: virtio or e1000e (default: linux=virtio, windows=e1000e)")
 	vmCreateCmd.Flags().String("machine", "", "libvirt machine type override (default: pc-q35-6.2)")
 	vmCreateCmd.Flags().String("firmware", "", "firmware override: bios (default), uefi, or ovmf (uefi/ovmf both select libvirt's firmware='efi')")
+	vmCreateCmd.Flags().Bool("secure-boot", false, "enable UEFI Secure Boot (requires --firmware uefi|ovmf and a secure-boot OVMF build on the host; default: on for windows-11 guests booting via EFI)")
+	vmCreateCmd.Flags().Bool("tpm", false, "attach an emulated TPM 2.0 device via swtpm (default: on for windows-11 guests)")
+	vmCreateCmd.Flags().String("vnc-password", "", "protect the VNC console with this password (stored as bcrypt hash + AES-GCM blob; requires daemon.console.password_key)")
 	vmCreateCmd.Flags().String("virtio-win-iso", "", "per-VM virtio-win driver ISO path (overrides daemon storage.virtio_win_iso for this Windows VM only)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init / cloudbase-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
@@ -1260,6 +1285,7 @@ Examples:
 	vmEditCmd.Flags().String("clock-offset", "", "new libvirt domain clock offset: utc, localtime, or empty to clear the override and use the OS-family default")
 	vmEditCmd.Flags().String("disk-bus", "", "switch the system disk bus: virtio or sata, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
 	vmEditCmd.Flags().String("nic-model", "", "switch every NIC model: virtio or e1000e, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
+	vmEditCmd.Flags().String("vnc-password", "", "set or rotate the VNC console password (pass \"\" to clear; VM must be stopped; takes effect on next start)")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")

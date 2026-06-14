@@ -5,12 +5,14 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -242,10 +244,30 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// response (the VMSpec is persisted and returned verbatim).
 	spec.AdminPassword = ""
 
+	// Derive the persisted forms of the VNC console password (5.1.8)
+	// before the spec is stored: only the bcrypt hash + AES-GCM blob
+	// survive, never the plaintext.
+	var vncPlain, vncHash, vncEnc string
+	if spec.VNCPassword != "" {
+		vncPlain = spec.VNCPassword
+		spec.VNCPassword = ""
+		var derr error
+		vncHash, vncEnc, derr = m.deriveVNCPassword(vncPlain)
+		if derr != nil {
+			return nil, derr
+		}
+	}
+
 	// Generate and define domain XML
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = resolveMachine(spec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, spec)
+	if err := enforceSecureBootTPM(&params, spec); err != nil {
+		return nil, err
+	}
+	if vncPlain != "" {
+		params.SetVNCPassword(vncPlain)
+	}
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		return nil, err
@@ -285,16 +307,18 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	}
 
 	vm := &types.VM{
-		ID:          id,
-		Name:        spec.Name,
-		Description: spec.Description,
-		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        spec,
-		State:       types.VMStateRunning,
-		NatMAC:      natMAC,
-		DiskPath:    diskPath,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            spec.Name,
+		Description:     spec.Description,
+		Tags:            append([]string(nil), spec.Tags...),
+		Spec:            spec,
+		State:           types.VMStateRunning,
+		NatMAC:          natMAC,
+		DiskPath:        diskPath,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		VNCPasswordHash: vncHash,
+		VNCPasswordEnc:  vncEnc,
 	}
 
 	// Persist to store
@@ -389,6 +413,11 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	params := DomainParamsFromSpec(clonedSpec, clonedDiskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = resolveMachine(clonedSpec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, clonedSpec)
+	if err := enforceSecureBootTPM(&params, clonedSpec); err != nil {
+		cleanupCloneReservation()
+		os.RemoveAll(vmDir)
+		return nil, err
+	}
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		cleanupCloneReservation()
@@ -870,14 +899,33 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// Resolve VNC password change (roadmap 5.1.8). nil = no change;
+	// pointer-to-"" clears. The password is baked into the defined domain
+	// XML, so a change on a running VM is rejected rather than silently
+	// power-cycling the guest — the operator stops the VM first and the
+	// new password takes effect on the next start.
+	vncChanged := false
+	newVNCPlain := ""
+	if patch.VNCPassword != nil {
+		if *patch.VNCPassword == "" && storedVM.VNCPasswordHash == "" {
+			// Clearing an unset password is a no-op.
+		} else {
+			if wasRunning {
+				return nil, types.NewAPIError("vm_running", "stop the VM before changing the vnc password; the new password takes effect on the next start")
+			}
+			newVNCPlain = *patch.VNCPassword
+			vncChanged = true
+		}
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged {
 		return storedVM, nil
 	}
 
 	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
 	// dance and any libvirt redefinitions — they're pure bbolt writes.
-	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged
 	if metadataOnly {
 		if autoStartChanged {
 			storedVM.Spec.AutoStart = newAutoStart
@@ -937,8 +985,23 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
-	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model.
-	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged {
+	// Derive the persisted VNC password forms before touching libvirt so a
+	// missing daemon.console.password_key fails the update cleanly.
+	newVNCHash, newVNCEnc := storedVM.VNCPasswordHash, storedVM.VNCPasswordEnc
+	if vncChanged {
+		if newVNCPlain == "" {
+			newVNCHash, newVNCEnc = "", ""
+		} else {
+			var derr error
+			newVNCHash, newVNCEnc, derr = m.deriveVNCPassword(newVNCPlain)
+			if derr != nil {
+				return nil, derr
+			}
+		}
+	}
+
+	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model/vnc password.
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged || vncChanged {
 		// Preserve the existing domain UUID so libvirt accepts the redefinition.
 		existingUUID, _ := dom.GetUUIDString()
 
@@ -953,6 +1016,23 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		params.UUID = existingUUID
 		params.Machine = resolveMachine(updatedSpec.Machine, func() string { return detectMachineType(m.conn) })
 		m.applyVirtioWin(&params, updatedSpec)
+		if err := enforceSecureBootTPM(&params, updatedSpec); err != nil {
+			return nil, err
+		}
+		// Carry the VNC password into the redefined XML: the new plaintext
+		// when it is being set, or the decrypted stored blob when an
+		// unrelated change (CPU/RAM/…) triggered this redefine.
+		if vncChanged {
+			if newVNCPlain != "" {
+				params.SetVNCPassword(newVNCPlain)
+			}
+		} else if storedVM.VNCPasswordEnc != "" {
+			plain, derr := decryptVNCPassword(m.cfg.Daemon.Console.PasswordKey, storedVM.VNCPasswordEnc)
+			if derr != nil {
+				return nil, types.NewAPIError("vnc_password_undecryptable", "stored vnc password cannot be decrypted; check daemon.console.password_key or rotate the password while the vm is stopped")
+			}
+			params.SetVNCPassword(plain)
+		}
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
 			return nil, fmt.Errorf("generating domain XML: %w", err)
@@ -999,6 +1079,10 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if nicModelChanged {
 		storedVM.Spec.NICModel = newNICModel
+	}
+	if vncChanged {
+		storedVM.VNCPasswordHash = newVNCHash
+		storedVM.VNCPasswordEnc = newVNCEnc
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {
@@ -1437,6 +1521,87 @@ func (m *LibvirtManager) GetConsoleEndpoint(ctx context.Context, id string, inte
 	return endpoint, nil
 }
 
+// OpenSerialConsole attaches to the VM's primary serial console via
+// libvirt's Domain.OpenConsole stream API (roadmap 5.1.9). The returned
+// ReadWriteCloser carries the raw pty bytes; closing it aborts the
+// underlying libvirt stream. The VM must be running — the pty only
+// exists while the domain is alive.
+func (m *LibvirtManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	storedVM, err := m.store.GetVM(id)
+	if err != nil {
+		return nil, err
+	}
+
+	dom, err := m.conn.LookupDomainByName(storedVM.Name)
+	if err != nil {
+		return nil, fmt.Errorf("looking up domain: %w", err)
+	}
+	defer dom.Free()
+
+	if state := domainStateToVMState(dom); state != types.VMStateRunning {
+		return nil, types.NewAPIError("vm_not_running", "vm is not running; start it before opening a serial console")
+	}
+
+	stream, err := m.conn.NewStream(0)
+	if err != nil {
+		return nil, fmt.Errorf("creating libvirt stream: %w", err)
+	}
+
+	// Empty device name selects the domain's primary console alias.
+	// FORCE detaches an existing (possibly dead) connection holding the
+	// pty so a browser reconnect after a network blip does not get stuck
+	// behind its own zombie session.
+	if err := dom.OpenConsole("", stream, libvirt.DOMAIN_CONSOLE_FORCE); err != nil {
+		_ = stream.Free()
+		return nil, types.NewAPIError("console_unavailable", "failed to open serial console")
+	}
+
+	return &libvirtStreamConsole{stream: stream}, nil
+}
+
+// libvirtStreamConsole adapts a *libvirt.Stream to io.ReadWriteCloser so
+// the websocket proxy can pump it like any other connection.
+type libvirtStreamConsole struct {
+	stream    *libvirt.Stream
+	closeOnce sync.Once
+}
+
+func (c *libvirtStreamConsole) Read(p []byte) (int, error) {
+	n, err := c.stream.Recv(p)
+	if err != nil {
+		return 0, err
+	}
+	if n <= 0 {
+		return 0, io.EOF
+	}
+	return n, nil
+}
+
+func (c *libvirtStreamConsole) Write(p []byte) (int, error) {
+	total := 0
+	for total < len(p) {
+		n, err := c.stream.Send(p[total:])
+		if err != nil {
+			return total, err
+		}
+		if n <= 0 {
+			return total, io.ErrShortWrite
+		}
+		total += n
+	}
+	return total, nil
+}
+
+func (c *libvirtStreamConsole) Close() error {
+	c.closeOnce.Do(func() {
+		// Abort tears the stream down immediately; the error is not
+		// actionable for the caller (the session is over either way).
+		_ = c.stream.Abort()
+		_ = c.stream.Free()
+	})
+	return nil
+}
+
 // parseConsoleEndpointFromXML extracts a console endpoint from a
 // libvirt domain XML document.  Pure-Go so it can be unit-tested
 // without a real libvirt connection.
@@ -1561,6 +1726,86 @@ func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 		return fmt.Errorf("qemu-img create: %s: %w", string(out), err)
 	}
 	return nil
+}
+
+// swtpmLookPath and secureBootFirmwareCandidates are package vars so unit
+// tests can stub host probing without a real swtpm / OVMF install.
+var swtpmLookPath = func() bool {
+	_, err := exec.LookPath("swtpm")
+	return err == nil
+}
+
+// secureBootFirmwareCandidates lists the conventional install paths of
+// secure-boot capable OVMF builds across the supported distros (Ubuntu
+// 22.04+ ships 4M secboot images under /usr/share/OVMF; Rocky/RHEL ship
+// under /usr/share/edk2/ovmf). libvirt's firmware auto-selection reads the
+// QEMU firmware descriptors, but probing the well-known paths is a cheap
+// fail-fast that produces a clearer error than a mid-define libvirt one.
+var secureBootFirmwareCandidates = []string{
+	"/usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
+	"/usr/share/OVMF/OVMF_CODE.secboot.fd",
+	"/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
+	"/usr/share/edk2-ovmf/x64/OVMF_CODE.secboot.4m.fd",
+	"/usr/share/edk2-ovmf/x64/OVMF_CODE.secboot.fd",
+}
+
+var secureBootFirmwareAvailable = func() bool {
+	for _, p := range secureBootFirmwareCandidates {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// enforceSecureBootTPM reconciles the resolved Secure Boot / TPM settings
+// against what the host can actually provide (roadmap 5.6.9). An explicit
+// operator request that the host cannot satisfy fails the create with a
+// typed error; a variant-derived default (windows-11 ⇒ on) degrades to a
+// warning + device drop so pre-5.6.9 specs keep working on hosts without
+// swtpm / secure-boot OVMF.
+func enforceSecureBootTPM(params *DomainParams, spec types.VMSpec) error {
+	if params.TPM && !swtpmLookPath() {
+		if spec.TPM != nil {
+			return types.NewAPIError("tpm_unavailable",
+				"tpm requested but the swtpm binary was not found on the daemon host; install swtpm (and swtpm-tools) or set \"tpm\": false")
+		}
+		logger.Warn("daemon", "swtpm not found; creating windows-11 guest without a TPM device",
+			"vm", spec.Name)
+		params.TPM = false
+	}
+	if params.SecureBoot && !secureBootFirmwareAvailable() {
+		if spec.SecureBoot != nil {
+			return types.NewAPIError("secure_boot_unavailable",
+				"secure_boot requested but no secure-boot capable OVMF firmware was found on the daemon host; install the OVMF/edk2-ovmf package or set \"secure_boot\": false")
+		}
+		logger.Warn("daemon", "no secure-boot OVMF firmware found; creating windows-11 guest without Secure Boot",
+			"vm", spec.Name)
+		params.SecureBoot = false
+	}
+	return nil
+}
+
+// deriveVNCPassword turns an operator-supplied plaintext VNC password into
+// its two persisted forms (roadmap 5.1.8): a bcrypt hash for verification
+// and an AES-GCM blob (keyed by daemon.console.password_key) the manager
+// can decrypt when re-rendering domain XML. Fails with a typed error when
+// the daemon has no password key configured.
+func (m *LibvirtManager) deriveVNCPassword(plain string) (hash, enc string, err error) {
+	key := m.cfg.Daemon.Console.PasswordKey
+	if strings.TrimSpace(key) == "" {
+		return "", "", types.NewAPIError("vnc_password_key_missing",
+			"daemon.console.password_key must be configured before setting VNC passwords")
+	}
+	hash, err = hashVNCPassword(plain)
+	if err != nil {
+		return "", "", err
+	}
+	enc, err = encryptVNCPassword(key, plain)
+	if err != nil {
+		return "", "", err
+	}
+	return hash, enc, nil
 }
 
 // virtioWinISOPath resolves the virtio-win driver ISO to attach to Windows

@@ -42,6 +42,8 @@ Resolution order: CLI option → env var → built-in default.
 | `--host-iface2 NAME` | `VMSMITH_HOST_IFACE2` | — | Second host interface for dual-NIC tests |
 | `--ip-timeout SECS` | `VMSMITH_IP_TIMEOUT` | `120` | Seconds to wait for VM IP assignment |
 | `--ssh-timeout SECS` | `VMSMITH_SSH_TIMEOUT` | `180` | Seconds to wait for SSH readiness |
+| `--windows-image PATH` | `VMSMITH_WINDOWS_IMAGE` | — | Path to a Windows qcow2 image (Windows tests skipped when unset) |
+| `--windows-ip-timeout SECS` | `VMSMITH_WINDOWS_IP_TIMEOUT` | `900` | Seconds to wait for a Windows VM IP (first boot runs cloudbase-init) |
 
 **GUI-only** (Playwright env vars, no pytest equivalent):
 
@@ -51,7 +53,8 @@ Resolution order: CLI option → env var → built-in default.
 | `VMSMITH_SSH_PUBKEY` | — | SSH public key content (injected into VM create form) |
 
 Multi-NIC tests (`--host-iface` / `--host-iface2`) are **skipped** when the interfaces
-are not specified.
+are not specified. Windows guest tests (`--windows-image`) are likewise **skipped**
+when no Windows image is configured.
 
 Run `cd tests/e2e && python -m pytest --help` to see the full option list under the
 "VMSmith E2E test options" group.
@@ -67,6 +70,10 @@ make test-e2e-api            # API tests only
 make test-e2e-gui            # GUI tests only (Playwright)
 make test-e2e-networking     # Only multi-NIC networking tests
 make test-e2e-portforward    # Only port forwarding tests
+make test-e2e-metrics        # Only per-VM metrics tests
+make test-e2e-events         # Only SSE event stream tests
+make test-e2e-schedules      # Only scheduled-operations tests
+make test-e2e-windows        # Only Windows guest tests (need VMSMITH_WINDOWS_IMAGE)
 ```
 
 ### Via pytest directly (with CLI options)
@@ -98,6 +105,10 @@ python -m pytest -m networking -v
 python -m pytest -m portforward -v
 python -m pytest -m cli -v
 python -m pytest -m api -v
+python -m pytest -m metrics -v
+python -m pytest -m events -v
+python -m pytest -m schedules -v
+python -m pytest -m windows -v --windows-image /images/win2022.qcow2
 
 # Single test class
 python -m pytest test_api_networking.py::TestAPIPortForward -v
@@ -136,6 +147,10 @@ VMSMITH_GUI_URL=http://192.168.1.50:8080 \
 | `api` | Tests that exercise the REST API |
 | `networking` | Multi-NIC networking tests (require `--host-iface`) |
 | `portforward` | Port forwarding tests |
+| `metrics` | Per-VM metrics endpoint tests (skipped when daemon metrics are disabled) |
+| `events` | Live SSE event stream tests |
+| `schedules` | Scheduled-operations tests (skipped when the subsystem is disabled) |
+| `windows` | Windows guest tests (require `--windows-image`) |
 
 ## Test Coverage
 
@@ -165,6 +180,36 @@ VMSMITH_GUI_URL=http://192.168.1.50:8080 \
 - SSH into the VM via the forwarded port on localhost
 - Add multiple port forwards, list them, selectively remove
 
+### Test 5: Per-VM Metrics (API)
+- Create a Rocky VM, generate CPU load (`dd if=/dev/zero of=/dev/null` busy loop)
+  and network traffic (dd-over-SSH transfers) inside the guest
+- Poll `GET /vms/{id}/stats` until samples report non-zero `cpu_percent` and
+  non-zero `net_rx_bps`/`net_tx_bps`
+- Skips cleanly when the daemon returns 503 `metrics_disabled`
+
+### Test 6: Live Event Stream (API)
+- Create a VM, stop it, then open `GET /events/stream` (SSE, server-side
+  `?vm_id=` filter) with a background reader thread
+- Start the VM via the API and assert the libvirt-emitted `vm.started` event
+  for that VM arrives live on the stream within a timeout
+
+### Test 7: Scheduled Operations (API)
+- Create a VM, then a snapshot schedule (`POST /schedules`) with a 6-field cron
+  spec firing every 15 seconds
+- Poll `GET /schedules/{id}/runs` until a `status=success` run appears
+- Assert the auto-snapshot (`auto-<schedule-name>-<UTC ts>`) exists via
+  `GET /vms/{id}/snapshots`; the schedule is deleted on teardown
+- Skips cleanly when the daemon returns 503 `schedules_disabled`
+
+### Test 8: Windows Guest (API, requires `--windows-image`)
+- Create a Windows VM (`os_type: windows`, explicit `admin_password`,
+  ram_mb ≥ 2048, disk_gb ≥ 32)
+- Verify no `generated_admin_password` is returned and the password is redacted
+  from the stored spec
+- Wait for the DHCP IP (generous `--windows-ip-timeout`, default 900s), then
+  verify RDP reachability (TCP connect to port 3389)
+- Optional non-fatal SSH login check when the image ships OpenSSH Server
+
 ## File Structure
 
 ```
@@ -177,6 +222,10 @@ tests/e2e/
 ├── test_cli_networking.py   # CLI: multi-NIC, inter-VM ping, port forwarding
 ├── test_api_vm_lifecycle.py # API: same lifecycle via REST endpoints
 ├── test_api_networking.py   # API: same networking via REST endpoints
+├── test_api_metrics.py      # API: per-VM stats under generated CPU/net load
+├── test_api_events_stream.py # API: live SSE stream delivers vm.started
+├── test_api_schedules_e2e.py # API: snapshot schedule fires + auto-snapshot
+├── test_windows_guest.py    # API: Windows guest create + RDP reachability
 ├── gui-e2e.spec.js          # Playwright: GUI lifecycle, snapshots, port fwd
 ├── playwright.config.js     # Playwright config for live daemon
 └── README.md                # This file

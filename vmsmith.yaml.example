@@ -17,7 +17,9 @@ daemon:
     max_concurrent_sessions: 8          # global cap on active browser console sessions
     max_session_seconds: 3600           # hard cap before a console session is closed
     idle_timeout_seconds: 600           # close idle console sessions after this many seconds
-    password_key: ""                    # optional base64 secret for encrypting per-VM VNC passwords
+    password_key: ""                    # master key for per-VM VNC passwords (5.1.8); required
+                                        # before vnc_password can be set on any VM. Rotating it
+                                        # invalidates stored blobs — re-set passwords afterwards.
   max_request_body_bytes: 52428800      # 50 MiB for JSON/form API requests
   max_upload_body_bytes: 53687091200    # 50 GiB for image upload requests
   max_concurrent_creates: 2             # return HTTP 429 when too many VM creates are already in flight

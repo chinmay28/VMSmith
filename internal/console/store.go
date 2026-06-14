@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 const (
@@ -24,6 +26,7 @@ var (
 type ticket struct {
 	vmID    string
 	apiKey  string
+	intent  types.ConsoleIntent
 	expires time.Time
 }
 
@@ -70,8 +73,17 @@ func (s *Store) Close() {
 	s.stopJanitor = nil
 }
 
-// IssueTicket creates a new single-use ticket for the given VM and API key.
+// IssueTicket creates a new single-use VNC ticket for the given VM and API
+// key. Kept for callers that predate console intents; equivalent to
+// IssueTicketIntent with types.ConsoleIntentVNC.
 func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
+	return s.IssueTicketIntent(vmID, apiKey, types.ConsoleIntentVNC)
+}
+
+// IssueTicketIntent creates a new single-use ticket bound to a console
+// intent ("vnc" or "serial"). The websocket proxy follows the ticket's
+// intent so a VNC ticket cannot be replayed against the serial console.
+func (s *Store) IssueTicketIntent(vmID, apiKey string, intent types.ConsoleIntent) (string, time.Time, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", time.Time{}, err
@@ -83,6 +95,7 @@ func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
 	s.tickets[token] = ticket{
 		vmID:    vmID,
 		apiKey:  apiKey,
+		intent:  intent,
 		expires: expires,
 	}
 	s.mu.Unlock()
@@ -90,8 +103,16 @@ func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
 	return token, expires, nil
 }
 
-// ConsumeTicket validates and removes a ticket.
+// ConsumeTicket validates and removes a ticket, returning the API key it
+// was issued with. Kept for callers that predate console intents.
 func (s *Store) ConsumeTicket(token, vmID string) (string, error) {
+	apiKey, _, err := s.ConsumeTicketIntent(token, vmID)
+	return apiKey, err
+}
+
+// ConsumeTicketIntent validates and removes a ticket, returning both the
+// API key and the console intent the ticket was issued for.
+func (s *Store) ConsumeTicketIntent(token, vmID string) (string, types.ConsoleIntent, error) {
 	now := s.now()
 
 	s.mu.Lock()
@@ -99,18 +120,22 @@ func (s *Store) ConsumeTicket(token, vmID string) (string, error) {
 
 	t, ok := s.tickets[token]
 	if !ok {
-		return "", ErrTicketNotFound
+		return "", "", ErrTicketNotFound
 	}
 	delete(s.tickets, token)
 
 	if !now.Before(t.expires) {
-		return "", ErrTicketExpired
+		return "", "", ErrTicketExpired
 	}
 	if t.vmID != vmID {
-		return "", ErrTicketVMMismatch
+		return "", "", ErrTicketVMMismatch
 	}
 
-	return t.apiKey, nil
+	intent := t.intent
+	if intent == "" {
+		intent = types.ConsoleIntentVNC
+	}
+	return t.apiKey, intent, nil
 }
 
 func (s *Store) startJanitor() {

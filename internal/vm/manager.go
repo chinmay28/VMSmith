@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"io"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -38,6 +39,14 @@ type Manager interface {
 	// only exist while the domain is alive) and `console_unavailable`
 	// when the domain XML carries no matching device for the intent.
 	GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error)
+
+	// OpenSerialConsole attaches to the VM's primary serial console and
+	// returns a bidirectional byte stream (libvirt `Domain.OpenConsole`
+	// in production).  The caller owns the stream and must Close it.
+	// Returns the same typed errors as GetConsoleEndpoint:
+	// `vm_not_running` when the domain is not alive and
+	// `console_unavailable` when no pty console exists.
+	OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error)
 
 	// Connection management
 	Close() error
