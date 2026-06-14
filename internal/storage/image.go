@@ -1,11 +1,15 @@
 package storage
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +35,11 @@ func NewManager(cfg *config.Config, store *store.Store) *Manager {
 type CreateImageOptions struct {
 	Description string
 	Tags        []string
+	// Progress, when non-nil, is invoked with the qemu-img convert completion
+	// percentage (0-100) as the export runs. It enables the `-p` progress flag
+	// and a streaming read of qemu-img's output. Leave nil for the original
+	// buffered (no-progress) behaviour.
+	Progress func(percent float64)
 }
 
 // CreateImage creates a flattened qcow2 image from a VM's disk and persists
@@ -38,16 +47,22 @@ type CreateImageOptions struct {
 func (m *Manager) CreateImage(vmDiskPath, name, sourceVM string, opts CreateImageOptions) (*types.Image, error) {
 	imagePath := filepath.Join(m.cfg.Storage.ImagesDir, name+".qcow2")
 
-	// Flatten the overlay into a standalone image (no backing file)
-	cmd := exec.Command("qemu-img", "convert",
-		"-f", "qcow2",
-		"-O", "qcow2",
-		"-c", // compress
-		vmDiskPath,
-		imagePath,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
+	// Flatten the overlay into a standalone image (no backing file). With a
+	// progress callback we add `-p` and stream qemu-img's output so the caller
+	// can surface a live percentage; otherwise we keep the simple buffered path.
+	args := []string{"convert", "-f", "qcow2", "-O", "qcow2", "-c"}
+	if opts.Progress != nil {
+		args = append(args, "-p")
+	}
+	args = append(args, vmDiskPath, imagePath)
+	cmd := exec.Command("qemu-img", args...)
+
+	if opts.Progress == nil {
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
+		}
+	} else if err := runConvertWithProgress(cmd, opts.Progress); err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(imagePath)
@@ -74,6 +89,57 @@ func (m *Manager) CreateImage(vmDiskPath, name, sourceVM string, opts CreateImag
 	}
 
 	return img, nil
+}
+
+// qemuProgressRE matches qemu-img's `-p` progress tokens, e.g. "(73.45/100%)".
+var qemuProgressRE = regexp.MustCompile(`\(\s*([0-9]+(?:\.[0-9]+)?)/100%\)`)
+
+// runConvertWithProgress runs a qemu-img convert command, streaming its stdout
+// (which qemu-img updates in place with carriage returns when `-p` is set) and
+// invoking progress with each parsed completion percentage. Stderr is captured
+// separately so a failure still surfaces a useful message.
+func runConvertWithProgress(cmd *exec.Cmd, progress func(percent float64)) error {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("qemu-img convert: stdout pipe: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("qemu-img convert: start: %w", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Split(scanLinesCR)
+	for scanner.Scan() {
+		if matches := qemuProgressRE.FindStringSubmatch(scanner.Text()); matches != nil {
+			if pct, perr := strconv.ParseFloat(matches[1], 64); perr == nil {
+				progress(pct)
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("qemu-img convert: %s: %w", strings.TrimSpace(stderr.String()), err)
+	}
+	return nil
+}
+
+// scanLinesCR is a bufio.SplitFunc that breaks on either a newline or a
+// carriage return, so qemu-img's `\r`-updated progress line yields one token
+// per update rather than a single buffered blob at EOF.
+func scanLinesCR(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // ListImages returns all available images.

@@ -287,9 +287,16 @@ export interface paths {
                      *     same column; VMs with an empty `spec.image` sink to the tail in
                      *     ascending order and the head in descending order, mirroring the
                      *     nil-trailing semantics on every other nullable sort axis (ip,
-                     *     guest_ip, last_fired_at, last_delivery_at, actor). All
-                     *     comparators tiebreak on `id` so pagination is deterministic
-                     *     across backends.
+                     *     guest_ip, last_fired_at, last_delivery_at, actor).
+                     *     `default_user` (5.4.91) is a case-insensitive sort on
+                     *     `spec.default_user` mirroring the case-insensitive
+                     *     `?default_user=` exact-match filter contract (5.4.23); unlike
+                     *     every other nullable axis it resolves an empty stored value to
+                     *     `root` so empty VMs collate with explicit-root VMs in
+                     *     alphabetical order rather than sinking to the tail — matches the
+                     *     runtime semantics in `internal/vm/lifecycle.go` and the
+                     *     empty-means-root filter contract. All comparators tiebreak on
+                     *     `id` so pagination is deterministic across backends.
                      */
                     sort?: components["parameters"]["VMSort"];
                     /**
@@ -1074,6 +1081,60 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                503: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/export/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream image-export progress (SSE)
+         * @description Server-Sent Events stream of image-export progress for the VM. While a
+         *     `POST /images` export of this VM runs, each `export.progress` event's
+         *     `data` field is a JSON object `{ "name": string, "percent": number,
+         *     "done": boolean }` carrying the live `qemu-img convert` completion
+         *     percentage (throttled to whole-percent steps). A terminal frame with
+         *     `done: true` is sent when the export finishes (success or failure) and
+         *     closes the stream. The daemon replays the most recent frame to a
+         *     subscriber that connects mid-export, so a small connect delay never
+         *     loses progress. This dedicated channel bypasses the event bus, so the
+         *     high-frequency frames never reach the persistent event log or webhooks.
+         *     A `: keepalive` comment frame is sent every 30 seconds.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Server-Sent Events stream */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
                 404: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
                 default: components["responses"]["APIError"];
@@ -2192,9 +2253,18 @@ export interface paths {
                      *     comparator would split the rocky9 cohort across multiple
                      *     buckets. Templates with an empty `image` sort to the tail of
                      *     `asc` / head of `desc`, mirroring the nil-trailing semantics on
-                     *     every other nullable sort axis. All comparators tiebreak on
-                     *     `id` so paginated requests return the same set across two
-                     *     independent fetches.
+                     *     every other nullable sort axis. `default_user` (5.4.92) is the
+                     *     symmetric sort counterpart to the `?default_user=` exact-match
+                     *     filter, using the same case-insensitive comparator. Diverges
+                     *     from the VM list `default_user` sort axis (5.4.91) which
+                     *     collapses empty → "root": templates store an empty
+                     *     `default_user` as "use the image's built-in user" (e.g.
+                     *     cloud-init's `cloud-user` / `ec2-user` / `ubuntu`), not root.
+                     *     So templates with an empty `default_user` sort to the tail of
+                     *     `asc` / head of `desc`, mirroring the nil-trailing semantics
+                     *     on the template `image` axis (5.4.89). All comparators
+                     *     tiebreak on `id` so paginated requests return the same set
+                     *     across two independent fetches.
                      */
                     sort?: components["parameters"]["TemplateSort"];
                     /**
@@ -4892,9 +4962,16 @@ export interface components {
          *     same column; VMs with an empty `spec.image` sink to the tail in
          *     ascending order and the head in descending order, mirroring the
          *     nil-trailing semantics on every other nullable sort axis (ip,
-         *     guest_ip, last_fired_at, last_delivery_at, actor). All
-         *     comparators tiebreak on `id` so pagination is deterministic
-         *     across backends.
+         *     guest_ip, last_fired_at, last_delivery_at, actor).
+         *     `default_user` (5.4.91) is a case-insensitive sort on
+         *     `spec.default_user` mirroring the case-insensitive
+         *     `?default_user=` exact-match filter contract (5.4.23); unlike
+         *     every other nullable axis it resolves an empty stored value to
+         *     `root` so empty VMs collate with explicit-root VMs in
+         *     alphabetical order rather than sinking to the tail — matches the
+         *     runtime semantics in `internal/vm/lifecycle.go` and the
+         *     empty-means-root filter contract. All comparators tiebreak on
+         *     `id` so pagination is deterministic across backends.
          */
         VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user";
         /**

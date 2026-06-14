@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
@@ -11,6 +11,7 @@ import { buildChartData } from '../hooks/vmStatsHelpers.js';
 import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar, OperationProgress } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
+import { getAuthToken } from '../auth';
 import Activity from './Activity';
 
 function resolveOsType(spec = {}) {
@@ -1818,16 +1819,58 @@ function ExportImageModal({ vmId, open, onClose }) {
   const [name, setName] = useState('');
   const createMut = useMutation((n) => imagesApi.create(vmId, n));
   const [done, setDone] = useState(false);
+  // Live qemu-img convert percentage from the SSE progress channel. null until
+  // the first real frame arrives; the daemon throttles to whole-percent steps.
+  const [percent, setPercent] = useState(null);
+  const esRef = useRef(null);
+
+  const closeStream = () => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+  };
+
+  // Tear the stream down if the modal unmounts mid-export.
+  useEffect(() => closeStream, []);
 
   const handleSubmit = async () => {
-    await createMut.execute(name);
-    setDone(true);
+    setPercent(0);
+    // Open the progress stream before kicking off the blocking export POST. The
+    // daemon replays the last frame to late subscribers, so a small connect
+    // delay can't lose progress. Best-effort: if SSE is unavailable we simply
+    // fall back to the indeterminate bar.
+    try {
+      const token = getAuthToken();
+      const qs = token ? `?api_key=${encodeURIComponent(token)}` : '';
+      const es = new EventSource(`/api/v1/vms/${vmId}/export/progress${qs}`);
+      esRef.current = es;
+      es.addEventListener('export.progress', (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.name && name && msg.name !== name) return;
+          if (msg.done) { closeStream(); return; }
+          if (typeof msg.percent === 'number') setPercent(msg.percent);
+        } catch { /* ignore malformed frame */ }
+      });
+      es.onerror = () => { /* keep the indeterminate fallback */ };
+    } catch { /* EventSource unsupported */ }
+
+    try {
+      await createMut.execute(name);
+      setPercent(100);
+      setDone(true);
+    } finally {
+      closeStream();
+    }
   };
 
   const handleClose = () => {
+    closeStream();
     onClose();
     setName('');
     setDone(false);
+    setPercent(null);
   };
 
   return (
@@ -1844,7 +1887,19 @@ function ExportImageModal({ vmId, open, onClose }) {
             <input className="input" placeholder="my-golden-image" value={name} onChange={e => setName(e.target.value)} autoFocus />
           </div>
           <p className="text-xs text-steel-500">This flattens the VM disk into a standalone portable qcow2 image. May take several minutes for large disks.</p>
-          <OperationProgress active={createMut.loading} label="Exporting disk image…" testId="export-image-progress" />
+          {createMut.loading && (
+            percent != null && percent > 0 ? (
+              <div className="space-y-1.5" data-testid="export-image-progress" role="status" aria-live="polite">
+                <div className="flex items-center justify-between text-xs text-steel-400">
+                  <span className="inline-flex items-center gap-2"><Spinner size={12} />Exporting disk image…</span>
+                  <span className="font-mono">{Math.round(percent)}%</span>
+                </div>
+                <ProgressBar value={percent} max={100} variant="info" />
+              </div>
+            ) : (
+              <OperationProgress active label="Exporting disk image…" testId="export-image-progress" />
+            )
+          )}
           {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
           <div className="flex justify-end gap-2">
             <button className="btn-secondary" onClick={handleClose} disabled={createMut.loading}>Cancel</button>

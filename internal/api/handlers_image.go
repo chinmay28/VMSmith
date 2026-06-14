@@ -74,10 +74,23 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	img, err := s.storageMgr.CreateImage(vm.DiskPath, req.Name, vm.ID, storage.CreateImageOptions{
-		Description: req.Description,
-		Tags:        tags,
-	})
+	// Stream live qemu-img convert progress over the dedicated SSE channel
+	// (GET /vms/{id}/export/progress). Throttle to whole-percent advances so a
+	// fast disk doesn't flood subscribers, and always emit a terminal Done
+	// frame so the GUI stops cleanly whether the export succeeds or fails.
+	opts := storage.CreateImageOptions{Description: req.Description, Tags: tags}
+	if s.exportProgress != nil {
+		var lastPct float64 = -1
+		opts.Progress = func(p float64) {
+			if p-lastPct >= 1 || p >= 100 {
+				lastPct = p
+				s.exportProgress.publish(vm.ID, exportProgressMsg{Name: req.Name, Percent: p})
+			}
+		}
+		defer s.exportProgress.publish(vm.ID, exportProgressMsg{Name: req.Name, Done: true})
+	}
+
+	img, err := s.storageMgr.CreateImage(vm.DiskPath, req.Name, vm.ID, opts)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)
