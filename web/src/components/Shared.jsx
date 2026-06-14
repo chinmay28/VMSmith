@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot, Power, SlidersHorizontal, ChevronDown, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
 import { STATE_LIVE, STATE_RECONNECTING, STATE_FALLBACK, STATE_SHUTDOWN } from '../hooks/useEventStream.js';
 
@@ -193,6 +193,33 @@ export function UsageMeter({ label, icon: Icon, value, max, primary, subtitle, v
       </div>
       <ProgressBar value={value} max={hasCap ? max : 100} variant={hasCap ? variant : 'neutral'} className="mt-2.5" />
       {subtitle && <p className="text-xs text-steel-500 mt-1.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+// --- Operation Progress ---
+// Status indicator for long-running, opaque operations (image export, snapshot
+// create/restore, clone). The backend runs these synchronously with no
+// progress stream, so we show an honest indeterminate bar plus a live elapsed
+// timer rather than a fake percentage. Render it while the mutation is in
+// flight; pass `active={mutation.loading}`.
+export function OperationProgress({ active, label, className = '', testId }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    setElapsed(0);
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - start) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [active]);
+  if (!active) return null;
+  return (
+    <div className={`space-y-1.5 ${className}`} data-testid={testId} role="status" aria-live="polite">
+      <div className="flex items-center justify-between text-xs text-steel-400">
+        <span className="inline-flex items-center gap-2"><Spinner size={12} />{label}</span>
+        <span className="font-mono text-steel-500">{elapsed}s elapsed</span>
+      </div>
+      <ProgressBar indeterminate />
     </div>
   );
 }

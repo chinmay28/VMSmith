@@ -4,7 +4,7 @@ import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSqua
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
-import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, StatusBanner, PaginationControls, LiveIndicator, FilterPanel, ProgressBar } from '../components/Shared';
+import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, StatusBanner, PaginationControls, LiveIndicator, FilterPanel, ProgressBar, OperationProgress } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
 
 const WINDOWS_MIN_RAM_MB = 4096;
@@ -1917,11 +1917,16 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
         {/* Pinned footer */}
         <div className="shrink-0 pt-3 mt-1 border-t border-steel-800/60">
+          {createMut.loading && (
+            <div className="mb-2">
+              <OperationProgress active label="Provisioning machine — allocating disk and writing cloud-init…" testId="create-vm-progress" />
+            </div>
+          )}
           {createMut.error && (
             <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
           )}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create">Cancel</button>
+            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create" disabled={createMut.loading}>Cancel</button>
             <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (!form.image && !form.template_id)} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create

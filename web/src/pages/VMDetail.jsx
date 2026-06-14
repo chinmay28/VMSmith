@@ -8,7 +8,7 @@ import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi }
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
-import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar } from '../components/Shared';
+import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar, OperationProgress } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
 import Activity from './Activity';
@@ -348,6 +348,25 @@ export default function VMDetail() {
           </button>
         </div>
       </div>
+
+      {(startMut.loading || stopMut.loading || forceStopMut.loading || restartMut.loading || rebootMut.loading || suspendMut.loading || resumeMut.loading || deleteMut.loading) && (
+        <div className="mb-4">
+          <OperationProgress
+            active
+            label={
+              startMut.loading ? 'Starting machine…'
+                : stopMut.loading ? 'Stopping machine…'
+                : forceStopMut.loading ? 'Force-stopping machine…'
+                : restartMut.loading ? 'Restarting machine…'
+                : rebootMut.loading ? 'Rebooting guest OS…'
+                : suspendMut.loading ? 'Suspending machine…'
+                : resumeMut.loading ? 'Resuming machine…'
+                : 'Deleting machine…'
+            }
+            testId="vm-lifecycle-progress"
+          />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-steel-800/60">
@@ -871,9 +890,10 @@ function CloneVMModal({ vm, open, onClose }) {
             autoFocus
           />
         </div>
+        <OperationProgress active={cloneMut.loading} label="Cloning machine…" testId="clone-vm-progress" />
         {cloneMut.error && <p className="text-sm text-red-400">{cloneMut.error}</p>}
         <div className="flex justify-end gap-2">
-          <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose}>Cancel</button>
+          <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose} disabled={cloneMut.loading}>Cancel</button>
           <button data-testid="btn-submit-clone" className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
             {cloneMut.loading ? <Spinner size={14} /> : <Copy size={14} />} Clone VM
           </button>
@@ -1117,10 +1137,11 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           </div>
         </div>
 
+        <OperationProgress active={updateMut.loading} label="Applying changes — the machine restarts to take effect…" testId="edit-vm-progress" />
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 
         <div className="flex justify-end gap-2">
-          <button data-testid="btn-cancel-edit" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button data-testid="btn-cancel-edit" className="btn-secondary" onClick={onClose} disabled={updateMut.loading}>Cancel</button>
           <button data-testid="btn-submit-edit" className="btn-primary" onClick={handleSubmit} disabled={updateMut.loading}>
             {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />}
             {updateMut.loading ? 'Applying…' : 'Apply Changes'}
@@ -1139,6 +1160,8 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [restoringName, setRestoringName] = useState(null);
+  const [deletingName, setDeletingName] = useState(null);
 
   // Drop selections that no longer exist (e.g., after a deletion or list refresh).
   React.useEffect(() => {
@@ -1213,6 +1236,21 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
           <Trash2 size={12} /> Delete selected
         </button>
       </div>
+      {(restoringName || deletingName || bulkMut.loading) && (
+        <div className="px-4 py-2.5 border-b border-steel-800/40 bg-steel-900/30">
+          <OperationProgress
+            active
+            label={
+              restoringName
+                ? `Restoring snapshot "${restoringName}"…`
+                : bulkMut.loading
+                ? `Deleting ${selected.size || ''} snapshot(s)…`
+                : `Deleting snapshot "${deletingName}"…`
+            }
+            testId="snapshot-op-progress"
+          />
+        </div>
+      )}
       <div className="divide-y divide-steel-800/40">
         {snapList.map(snap => (
           <div key={snap.name} className="flex items-start justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors gap-3" data-testid={`snap-${snap.name}`}>
@@ -1251,14 +1289,24 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
                 <Pencil size={12} />
               </button>
               <button
-                className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
-                onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
+                className="btn-ghost text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40"
+                disabled={restoreMut.loading || deleteMut.loading}
+                onClick={async () => {
+                  setRestoringName(snap.name);
+                  try { await restoreMut.execute(snap.name); refreshSnaps(); }
+                  finally { setRestoringName(null); }
+                }}
               >
                 <RotateCcw size={12} /> Restore
               </button>
               <button
-                className="btn-ghost text-xs text-red-400 hover:text-red-300"
-                onClick={async () => { await deleteMut.execute(snap.name); refreshSnaps(); }}
+                className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40"
+                disabled={restoreMut.loading || deleteMut.loading}
+                onClick={async () => {
+                  setDeletingName(snap.name);
+                  try { await deleteMut.execute(snap.name); refreshSnaps(); }
+                  finally { setDeletingName(null); }
+                }}
                 data-testid={`btn-delete-snap-${snap.name}`}
               >
                 <Trash2 size={12} />
@@ -1660,9 +1708,10 @@ function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
             data-testid="input-snap-tags"
           />
         </div>
+        <OperationProgress active={createMut.loading} label="Creating snapshot…" testId="snapshot-create-progress" />
         {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
         <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose} disabled={createMut.loading}>Cancel</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading} data-testid="btn-submit-snapshot">
             {createMut.loading ? <Spinner size={14} /> : <Camera size={14} />} Create
           </button>
@@ -1795,9 +1844,10 @@ function ExportImageModal({ vmId, open, onClose }) {
             <input className="input" placeholder="my-golden-image" value={name} onChange={e => setName(e.target.value)} autoFocus />
           </div>
           <p className="text-xs text-steel-500">This flattens the VM disk into a standalone portable qcow2 image. May take several minutes for large disks.</p>
+          <OperationProgress active={createMut.loading} label="Exporting disk image…" testId="export-image-progress" />
           {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+            <button className="btn-secondary" onClick={handleClose} disabled={createMut.loading}>Cancel</button>
             <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading}>
               {createMut.loading ? <Spinner size={14} /> : <Download size={14} />} Export
             </button>
