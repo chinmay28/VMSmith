@@ -61,7 +61,7 @@ type Server struct {
 	consoleSessions      map[string]map[*activeConsoleSession]struct{}
 	scheduleStore        ScheduleStore
 	scheduleController   ScheduleController
-	exportProgress       *exportProgressBroker
+	operationProgress    *operationProgressBroker
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -130,7 +130,7 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		rateLimiter:          newIPRateLimiter(cfg.Daemon.RateLimitPerSecond, cfg.Daemon.RateLimitBurst),
 		shutdownNotify:       make(chan struct{}),
 		consoleSessions:      make(map[string]map[*activeConsoleSession]struct{}),
-		exportProgress:       newExportProgressBroker(),
+		operationProgress:    newOperationProgressBroker(),
 	}
 	if setter, ok := vmMgr.(vm.ConsoleSessionTerminatorSetter); ok {
 		setter.SetConsoleSessionTerminator(s.closeConsoleSessionsForVM)
@@ -236,14 +236,15 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 					})
 				}).Get("/stats/stream", s.StreamVMStats)
 
-				// Live image-export progress (SSE). Dedicated channel so the
-				// high-frequency frames bypass the event bus / persistent log.
+				// Live long-operation progress (SSE) for export / clone.
+				// Dedicated channel so the high-frequency frames bypass the
+				// event bus / persistent log.
 				r.With(func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Del("Content-Type") // SSE sets its own
 						next.ServeHTTP(w, r)
 					})
-				}).Get("/export/progress", s.StreamExportProgress)
+				}).Get("/operations/progress", s.StreamOperationProgress)
 
 				// Port forwards
 				r.Route("/ports", func(r chi.Router) {

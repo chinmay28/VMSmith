@@ -847,6 +847,9 @@ function CloneVMModal({ vm, open, onClose }) {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const cloneMut = useMutation((cloneName) => vms.clone(vm.id, cloneName));
+  // Clone progress is keyed by the source VM and the cloned name the daemon
+  // echoes back in each frame.
+  const progress = useOperationProgress(vm?.id, 'clone', name.trim());
 
   useEffect(() => {
     if (open && vm) {
@@ -856,20 +859,25 @@ function CloneVMModal({ vm, open, onClose }) {
   }, [open, vm, cloneMut.reset]);
 
   const handleClose = () => {
+    progress.reset();
     cloneMut.reset();
     setName('');
     onClose();
   };
 
   const handleSubmit = async () => {
+    progress.start();
     try {
       const cloned = await cloneMut.execute(name.trim());
+      progress.finish();
       handleClose();
       if (cloned?.id) {
         navigate(`/vms/${cloned.id}`);
       }
     } catch {
       // Error shown inline.
+    } finally {
+      progress.stop();
     }
   };
 
@@ -891,7 +899,7 @@ function CloneVMModal({ vm, open, onClose }) {
             autoFocus
           />
         </div>
-        <OperationProgress active={cloneMut.loading} label="Cloning machine…" testId="clone-vm-progress" />
+        <ProgressReadout active={cloneMut.loading} percent={progress.percent} label="Cloning machine…" testId="clone-vm-progress" />
         {cloneMut.error && <p className="text-sm text-red-400">{cloneMut.error}</p>}
         <div className="flex justify-end gap-2">
           <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose} disabled={cloneMut.loading}>Cancel</button>
@@ -1815,62 +1823,90 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
 }
 
 // --- Export Image Modal ---
-function ExportImageModal({ vmId, open, onClose }) {
-  const [name, setName] = useState('');
-  const createMut = useMutation((n) => imagesApi.create(vmId, n));
-  const [done, setDone] = useState(false);
-  // Live qemu-img convert percentage from the SSE progress channel. null until
-  // the first real frame arrives; the daemon throttles to whole-percent steps.
+// useOperationProgress subscribes to the per-VM operation-progress SSE channel
+// and tracks the live percentage for a single op ("export" | "clone"). Returns
+// { percent, start, stop } — call start() right before the blocking POST and
+// stop() in its finally. Best-effort: if SSE is unavailable the caller simply
+// falls back to the indeterminate bar (percent stays null).
+function useOperationProgress(vmId, op, name) {
   const [percent, setPercent] = useState(null);
   const esRef = useRef(null);
 
-  const closeStream = () => {
+  const stop = () => {
     if (esRef.current) {
       esRef.current.close();
       esRef.current = null;
     }
   };
 
-  // Tear the stream down if the modal unmounts mid-export.
-  useEffect(() => closeStream, []);
+  useEffect(() => stop, []);
 
-  const handleSubmit = async () => {
+  const start = () => {
     setPercent(0);
-    // Open the progress stream before kicking off the blocking export POST. The
-    // daemon replays the last frame to late subscribers, so a small connect
-    // delay can't lose progress. Best-effort: if SSE is unavailable we simply
-    // fall back to the indeterminate bar.
     try {
       const token = getAuthToken();
       const qs = token ? `?api_key=${encodeURIComponent(token)}` : '';
-      const es = new EventSource(`/api/v1/vms/${vmId}/export/progress${qs}`);
+      const es = new EventSource(`/api/v1/vms/${vmId}/operations/progress${qs}`);
       esRef.current = es;
-      es.addEventListener('export.progress', (e) => {
+      es.addEventListener('operation.progress', (e) => {
         try {
           const msg = JSON.parse(e.data);
+          if (msg.op && op && msg.op !== op) return;
           if (msg.name && name && msg.name !== name) return;
-          if (msg.done) { closeStream(); return; }
+          if (msg.done) { stop(); return; }
           if (typeof msg.percent === 'number') setPercent(msg.percent);
         } catch { /* ignore malformed frame */ }
       });
       es.onerror = () => { /* keep the indeterminate fallback */ };
     } catch { /* EventSource unsupported */ }
+  };
 
+  const finish = () => { setPercent(100); };
+  const reset = () => { stop(); setPercent(null); };
+
+  return { percent, start, stop, finish, reset };
+}
+
+// ProgressReadout renders a determinate percentage bar once a real frame has
+// arrived, otherwise the indeterminate OperationProgress fallback.
+function ProgressReadout({ active, percent, label, testId }) {
+  if (!active) return null;
+  if (percent != null && percent > 0) {
+    return (
+      <div className="space-y-1.5" data-testid={testId} role="status" aria-live="polite">
+        <div className="flex items-center justify-between text-xs text-steel-400">
+          <span className="inline-flex items-center gap-2"><Spinner size={12} />{label}</span>
+          <span className="font-mono">{Math.round(percent)}%</span>
+        </div>
+        <ProgressBar value={percent} max={100} variant="info" />
+      </div>
+    );
+  }
+  return <OperationProgress active label={label} testId={testId} />;
+}
+
+function ExportImageModal({ vmId, open, onClose }) {
+  const [name, setName] = useState('');
+  const createMut = useMutation((n) => imagesApi.create(vmId, n));
+  const [done, setDone] = useState(false);
+  const progress = useOperationProgress(vmId, 'export', name);
+
+  const handleSubmit = async () => {
+    progress.start();
     try {
       await createMut.execute(name);
-      setPercent(100);
+      progress.finish();
       setDone(true);
     } finally {
-      closeStream();
+      progress.stop();
     }
   };
 
   const handleClose = () => {
-    closeStream();
+    progress.reset();
     onClose();
     setName('');
     setDone(false);
-    setPercent(null);
   };
 
   return (
@@ -1887,19 +1923,7 @@ function ExportImageModal({ vmId, open, onClose }) {
             <input className="input" placeholder="my-golden-image" value={name} onChange={e => setName(e.target.value)} autoFocus />
           </div>
           <p className="text-xs text-steel-500">This flattens the VM disk into a standalone portable qcow2 image. May take several minutes for large disks.</p>
-          {createMut.loading && (
-            percent != null && percent > 0 ? (
-              <div className="space-y-1.5" data-testid="export-image-progress" role="status" aria-live="polite">
-                <div className="flex items-center justify-between text-xs text-steel-400">
-                  <span className="inline-flex items-center gap-2"><Spinner size={12} />Exporting disk image…</span>
-                  <span className="font-mono">{Math.round(percent)}%</span>
-                </div>
-                <ProgressBar value={percent} max={100} variant="info" />
-              </div>
-            ) : (
-              <OperationProgress active label="Exporting disk image…" testId="export-image-progress" />
-            )
-          )}
+          <ProgressReadout active={createMut.loading} percent={progress.percent} label="Exporting disk image…" testId="export-image-progress" />
           {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
           <div className="flex justify-end gap-2">
             <button className="btn-secondary" onClick={handleClose} disabled={createMut.loading}>Cancel</button>

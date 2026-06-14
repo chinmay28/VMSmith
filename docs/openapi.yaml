@@ -635,22 +635,24 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
-  /vms/{vmID}/export/progress:
+  /vms/{vmID}/operations/progress:
     get:
       tags: [VMs]
-      summary: Stream image-export progress (SSE)
+      summary: Stream long-operation progress (SSE)
       description: |
-        Server-Sent Events stream of image-export progress for the VM. While a
-        `POST /images` export of this VM runs, each `export.progress` event's
-        `data` field is a JSON object `{ "name": string, "percent": number,
-        "done": boolean }` carrying the live `qemu-img convert` completion
-        percentage (throttled to whole-percent steps). A terminal frame with
-        `done: true` is sent when the export finishes (success or failure) and
-        closes the stream. The daemon replays the most recent frame to a
-        subscriber that connects mid-export, so a small connect delay never
-        loses progress. This dedicated channel bypasses the event bus, so the
-        high-frequency frames never reach the persistent event log or webhooks.
-        A `: keepalive` comment frame is sent every 30 seconds.
+        Server-Sent Events stream of long-running operation progress for the VM
+        — currently image export (`POST /images`) and clone (`POST
+        /vms/{id}/clone`). Each `operation.progress` event's `data` field is a
+        JSON object `{ "op": string, "name": string, "percent": number, "done":
+        boolean }` where `op` is `"export"` or `"clone"`, carrying the live
+        `qemu-img convert` completion percentage (throttled to whole-percent
+        steps). A terminal frame with `done: true` is sent when the operation
+        finishes (success or failure) and closes the stream. The daemon replays
+        the most recent frame to a subscriber that connects mid-operation, so a
+        small connect delay never loses progress. This dedicated channel
+        bypasses the event bus, so the high-frequency frames never reach the
+        persistent event log or webhooks. A `: keepalive` comment frame is sent
+        every 30 seconds.
       parameters:
         - $ref: '#/components/parameters/VMID'
       responses:
