@@ -730,13 +730,13 @@ func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
 
 	br := bufio.NewReader(resp.Body)
 	type result struct {
-		frame *sseFrame
-		err   error
+		line string
+		err  error
 	}
 	readCh := make(chan result, 1)
 	go func() {
-		frame, err := readSSEFrame(br)
-		readCh <- result{frame: frame, err: err}
+		line, err := br.ReadString('\n')
+		readCh <- result{line: line, err: err}
 	}()
 
 	select {
@@ -744,8 +744,15 @@ func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
 		if got.err != nil {
 			t.Fatalf("read heartbeat frame: %v", got.err)
 		}
-		if got.frame.event != "" || got.frame.data != "" || got.frame.id != "" {
-			t.Fatalf("expected heartbeat comment frame, got %+v", got.frame)
+		if got.line != ": keepalive\n" {
+			t.Fatalf("expected heartbeat comment line, got %q", got.line)
+		}
+		blank, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read heartbeat terminator: %v", err)
+		}
+		if blank != "\n" {
+			t.Fatalf("expected blank line after heartbeat, got %q", blank)
 		}
 	case <-time.After(33 * time.Second):
 		t.Fatal("expected heartbeat within 33s on idle stream")
