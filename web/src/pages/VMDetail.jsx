@@ -8,7 +8,7 @@ import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi }
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
-import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls } from '../components/Shared';
+import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
 import Activity from './Activity';
@@ -1864,6 +1864,22 @@ function VMMetrics({ vmId }) {
                 <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500" data-testid="metrics-live-status">{status}</span>
               </div>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-4 border-b border-steel-800/40">
+              <MetricGauge
+                label="CPU"
+                value={typeof cur.cpu_percent === 'number' ? cur.cpu_percent : 0}
+                max={100}
+                display={fmtPercent(cur.cpu_percent)}
+                testId="metric-gauge-cpu"
+              />
+              <MetricGauge
+                label="Memory"
+                value={memPercent(cur)}
+                max={100}
+                display={`${fmtMB(cur.mem_used_mb)}${memTotal(cur) ? ` / ${fmtMB(memTotal(cur))}` : ''}`}
+                testId="metric-gauge-mem"
+              />
+            </div>
             <table className="w-full text-sm" data-testid="metrics-table">
               <thead className="text-left text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500 border-b border-steel-800/40">
                 <tr>
@@ -1918,6 +1934,34 @@ function VMMetrics({ vmId }) {
   );
 }
 
+
+function MetricGauge({ label, value, max, display, testId }) {
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  return (
+    <div data-testid={testId}>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
+        <span className="font-mono text-sm text-steel-100" data-testid={`${testId}-value`}>{display}</span>
+      </div>
+      <ProgressBar value={value} max={max} height="h-2" />
+      <p className="text-[10px] font-mono text-steel-500 mt-1">{Math.round(pct)}% utilised</p>
+    </div>
+  );
+}
+
+// Total guest memory inferred from the current sample (used + available). Both
+// fields come from the same /stats snapshot so the sum is the visible total.
+function memTotal(cur) {
+  const used = typeof cur?.mem_used_mb === 'number' ? cur.mem_used_mb : 0;
+  const avail = typeof cur?.mem_avail_mb === 'number' ? cur.mem_avail_mb : 0;
+  return used + avail;
+}
+
+function memPercent(cur) {
+  const total = memTotal(cur);
+  if (!total) return 0;
+  return ((cur?.mem_used_mb || 0) / total) * 100;
+}
 
 function MetricRow({ label, cur, avg, testId }) {
   return (

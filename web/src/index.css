@@ -113,4 +113,28 @@
   .table-cell {
     @apply py-3 px-4 text-sm border-b border-steel-800/40;
   }
+
+  /* Progress track + fill — used by ProgressBar / UsageMeter for capacity
+     and operation reporting. The fill colour is set per-instance. */
+  .progress-track {
+    @apply w-full rounded-full bg-steel-800/70 overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-[width] duration-500 ease-out;
+  }
+
+  /* Indeterminate sweep for in-flight operations of unknown duration. */
+  .progress-indeterminate {
+    @apply h-full rounded-full bg-forge-500/80;
+    width: 35%;
+    animation: progressSweep 1.1s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  @keyframes progressSweep {
+    0%   { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+  }
 }
