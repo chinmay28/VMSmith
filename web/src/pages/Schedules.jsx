@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { schedules as schedulesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls, FilterPanel } from '../components/Shared';
 
 const DEFAULT_SCHEDULE_PER_PAGE = 25;
 
@@ -235,6 +235,26 @@ export default function Schedules() {
     refresh();
   };
 
+  const clearAllFilters = () => {
+    setTagSelectorInput('');
+    setPrefixInput('');
+    setActionFilter('');
+    setCatchUpFilter('');
+    setTimezoneInput('');
+    setEnabledFilter('');
+    setSortField('');
+    setSortOrder('');
+    setSinceFilter(''); setUntilFilter('');
+    setNextFireSinceFilter(''); setNextFireUntilFilter('');
+    setLastFiredSinceFilter(''); setLastFiredUntilFilter('');
+  };
+
+  const activeFilterCount = [
+    tagSelectorInput, prefixInput, actionFilter, catchUpFilter, timezoneInput, enabledFilter,
+    sinceFilter, untilFilter, nextFireSinceFilter, nextFireUntilFilter,
+    lastFiredSinceFilter, lastFiredUntilFilter,
+  ].filter(v => String(v ?? '').trim() !== '').length;
+
   return (
     <div data-testid="schedules-page">
       <PageHeader
@@ -269,15 +289,15 @@ export default function Schedules() {
         onUpdated={refresh}
       />
 
-      <div className="mb-4 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 max-w-md min-w-[200px]">
+      <div className="mb-3">
+        <div className="relative max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, action, VM, or tag…"
-            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            className="input w-full pl-8 pr-8 py-2 text-sm"
             data-testid="schedule-list-search"
             aria-label="Search schedules"
           />
@@ -293,6 +313,10 @@ export default function Schedules() {
             </button>
           )}
         </div>
+      </div>
+
+      <FilterPanel activeCount={activeFilterCount} onClear={clearAllFilters} testId="schedule-list-filters">
+      <div className="flex items-center gap-2 flex-wrap">
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
           Tag selector
           <input
@@ -500,6 +524,7 @@ export default function Schedules() {
           </button>
         )}
       </div>
+      </FilterPanel>
 
       {loading && !response ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>

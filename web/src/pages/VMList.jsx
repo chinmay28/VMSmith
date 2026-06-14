@@ -4,7 +4,7 @@ import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSqua
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
-import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, PaginationControls, LiveIndicator } from '../components/Shared';
+import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, StatusBanner, PaginationControls, LiveIndicator, FilterPanel, ProgressBar, OperationProgress } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
 
 const WINDOWS_MIN_RAM_MB = 4096;
@@ -329,6 +329,38 @@ export default function VMList() {
 
   const clearSelection = () => setSelectedIds([]);
 
+  // Reset every secondary filter (everything except the always-visible search
+  // box) back to its empty state in one click. Drives both the live input
+  // values and the committed filter values so useFetch re-runs immediately.
+  const clearAllFilters = () => {
+    setTagFilter('');
+    setImageInput(''); setImageFilter('');
+    setDefaultUserInput(''); setDefaultUserFilter('');
+    setOsTypeFilter(''); setOsVariantFilter('');
+    setFirmwareFilter(''); setDiskBusFilter(''); setNicModelFilter('');
+    setMachineInput(''); setMachineFilter('');
+    setClockOffsetFilter('');
+    setNetworkInput(''); setNetworkFilter('');
+    setPrefixInput(''); setPrefixFilter('');
+    setNatStaticIpInput(''); setNatStaticIpFilter('');
+    setNatGatewayInput(''); setNatGatewayFilter('');
+    setIpInput(''); setIpFilter('');
+    setAutoStartFilter(''); setLockedFilter('');
+    setSinceFilter(''); setUntilFilter('');
+    setMinCpusInput(''); setMinCpusFilter(''); setMaxCpusInput(''); setMaxCpusFilter('');
+    setMinRamInput(''); setMinRamFilter(''); setMaxRamInput(''); setMaxRamFilter('');
+    setMinDiskInput(''); setMinDiskFilter(''); setMaxDiskInput(''); setMaxDiskFilter('');
+  };
+
+  // Live count of engaged secondary filters, used to badge the filter panel.
+  const activeFilterCount = [
+    tagFilter, imageInput, defaultUserInput, osTypeFilter, osVariantFilter,
+    firmwareFilter, diskBusFilter, nicModelFilter, machineInput, clockOffsetFilter,
+    networkInput, prefixInput, natStaticIpInput, natGatewayInput, ipInput,
+    autoStartFilter, lockedFilter, sinceFilter, untilFilter,
+    minCpusInput, maxCpusInput, minRamInput, maxRamInput, minDiskInput, maxDiskInput,
+  ].filter(v => String(v ?? '').trim() !== '').length;
+
   return (
     <div>
       <PageHeader
@@ -348,19 +380,26 @@ export default function VMList() {
 
       {bulkMessage && (
         <div className="mb-4">
-          <ErrorBanner message={bulkMessage} onRetry={() => setBulkMessage(null)} />
+          <StatusBanner
+            message={bulkMessage.message}
+            variant={bulkMessage.variant}
+            onDismiss={() => setBulkMessage(null)}
+            testId="vm-list-bulk-status"
+          />
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 max-w-md">
+      {/* Primary toolbar — the always-visible search box. Secondary filters
+          live in the collapsible FilterPanel below to keep the surface calm. */}
+      <div className="mb-3">
+        <div className="relative max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, description, or tag…"
-            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            className="input w-full pl-8 pr-8 py-2 text-sm"
             data-testid="vm-list-search"
             aria-label="Search machines"
           />
@@ -376,6 +415,21 @@ export default function VMList() {
             </button>
           )}
         </div>
+      </div>
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button className={`btn-ghost text-xs ${tagFilter === '' ? 'text-forge-400' : ''}`} onClick={() => setTagFilter('')}>All</button>
+          {allTags.map(tag => (
+            <button key={tag} className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`} onClick={() => setTagFilter(tag)}>
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <FilterPanel activeCount={activeFilterCount} onClear={clearAllFilters} testId="vm-list-filters">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-64">
           <input
             type="search"
@@ -746,18 +800,7 @@ export default function VMList() {
         )}
       </div>
 
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`} onClick={() => setTagFilter('')}>All</button>
-          {allTags.map(tag => (
-            <button key={tag} className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`} onClick={() => setTagFilter(tag)}>
-              #{tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-steel-400" data-testid="vm-list-sort-controls">
+      <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-steel-800/40 text-xs text-steel-400" data-testid="vm-list-sort-controls">
         <span>Sort by</span>
         <select
           value={sort}
@@ -839,6 +882,7 @@ export default function VMList() {
           </button>
         )}
       </div>
+      </FilterPanel>
 
       {!!visibleVMs.length && (
         <BulkActionBar
@@ -847,8 +891,8 @@ export default function VMList() {
           allSelected={selectedVMs.length > 0 && selectedVMs.length === visibleVMs.length}
           onToggleSelectAll={toggleSelectAll}
           onClearSelection={clearSelection}
-          onDone={(message) => {
-            setBulkMessage(message);
+          onDone={(result) => {
+            setBulkMessage(result);
             refresh();
           }}
         />
@@ -983,6 +1027,7 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
   const resumeMut = useMutation(vms.resume);
   const deleteMut = useMutation(vms.delete);
 
+  const [progress, setProgress] = useState(null); // { action, done, total }
   const runningCount = selectedVMs.filter(vm => vm.state === 'running').length;
   const stoppedCount = selectedVMs.filter(vm => vm.state === 'stopped').length;
   const pausedCount = selectedVMs.filter(vm => vm.state === 'paused').length;
@@ -1026,13 +1071,14 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
     const targets = selectedVMs.filter(spec.eligible);
     const skipped = selectedVMs.length - targets.length;
     if (targets.length === 0) {
-      if (spec.emptyMsg) onDone(spec.emptyMsg);
+      if (spec.emptyMsg) onDone({ message: spec.emptyMsg, variant: 'info' });
       return;
     }
 
     let success = 0;
     let failure = 0;
 
+    setProgress({ action, done: 0, total: targets.length });
     for (const vm of targets) {
       try {
         await spec.mut.execute(vm.id);
@@ -1040,14 +1086,17 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
       } catch {
         failure += 1;
       }
+      setProgress(p => (p ? { ...p, done: p.done + 1 } : p));
     }
+    setProgress(null);
 
     const parts = [];
     parts.push(`${success} ${action}${success === 1 ? '' : 's'} succeeded`);
     if (failure > 0) parts.push(`${failure} failed`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
+    const variant = failure > 0 ? 'error' : (skipped > 0 ? 'warning' : 'success');
     onClearSelection();
-    onDone(parts.join(' · '));
+    onDone({ message: parts.join(' · '), variant });
   };
 
   return (
@@ -1076,6 +1125,9 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
           )}
         </div>
 
+        {!hasSelection ? (
+          <span className="text-xs text-steel-500">Select machines to run bulk actions.</span>
+        ) : (
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="btn-secondary"
@@ -1158,7 +1210,17 @@ function BulkActionBar({ selectedVMs, totalVisible, allSelected, onToggleSelectA
             Clear
           </button>
         </div>
+        )}
       </div>
+      {progress && (
+        <div className="mt-3" data-testid="bulk-progress">
+          <div className="flex items-center justify-between text-xs text-steel-400 mb-1.5">
+            <span className="capitalize">{progress.action.replace('-', ' ')} in progress…</span>
+            <span className="font-mono">{progress.done}/{progress.total}</span>
+          </div>
+          <ProgressBar value={progress.done} max={progress.total} variant="info" />
+        </div>
+      )}
       {mutationError && <p className="mt-3 text-sm text-red-400">Bulk action error: {mutationError}</p>}
     </div>
   );
@@ -1855,11 +1917,16 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
         {/* Pinned footer */}
         <div className="shrink-0 pt-3 mt-1 border-t border-steel-800/60">
+          {createMut.loading && (
+            <div className="mb-2">
+              <OperationProgress active label="Provisioning machine — allocating disk and writing cloud-init…" testId="create-vm-progress" />
+            </div>
+          )}
           {createMut.error && (
             <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
           )}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create">Cancel</button>
+            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create" disabled={createMut.loading}>Cancel</button>
             <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (!form.image && !form.template_id)} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
@@ -8,9 +8,10 @@ import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi }
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
-import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls } from '../components/Shared';
+import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar, OperationProgress } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
+import { getAuthToken } from '../auth';
 import Activity from './Activity';
 
 function resolveOsType(spec = {}) {
@@ -348,6 +349,25 @@ export default function VMDetail() {
           </button>
         </div>
       </div>
+
+      {(startMut.loading || stopMut.loading || forceStopMut.loading || restartMut.loading || rebootMut.loading || suspendMut.loading || resumeMut.loading || deleteMut.loading) && (
+        <div className="mb-4">
+          <OperationProgress
+            active
+            label={
+              startMut.loading ? 'Starting machine…'
+                : stopMut.loading ? 'Stopping machine…'
+                : forceStopMut.loading ? 'Force-stopping machine…'
+                : restartMut.loading ? 'Restarting machine…'
+                : rebootMut.loading ? 'Rebooting guest OS…'
+                : suspendMut.loading ? 'Suspending machine…'
+                : resumeMut.loading ? 'Resuming machine…'
+                : 'Deleting machine…'
+            }
+            testId="vm-lifecycle-progress"
+          />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-steel-800/60">
@@ -827,6 +847,9 @@ function CloneVMModal({ vm, open, onClose }) {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const cloneMut = useMutation((cloneName) => vms.clone(vm.id, cloneName));
+  // Clone progress is keyed by the source VM and the cloned name the daemon
+  // echoes back in each frame.
+  const progress = useOperationProgress(vm?.id, 'clone', name.trim());
 
   useEffect(() => {
     if (open && vm) {
@@ -836,20 +859,25 @@ function CloneVMModal({ vm, open, onClose }) {
   }, [open, vm, cloneMut.reset]);
 
   const handleClose = () => {
+    progress.reset();
     cloneMut.reset();
     setName('');
     onClose();
   };
 
   const handleSubmit = async () => {
+    progress.start();
     try {
       const cloned = await cloneMut.execute(name.trim());
+      progress.finish();
       handleClose();
       if (cloned?.id) {
         navigate(`/vms/${cloned.id}`);
       }
     } catch {
       // Error shown inline.
+    } finally {
+      progress.stop();
     }
   };
 
@@ -871,9 +899,10 @@ function CloneVMModal({ vm, open, onClose }) {
             autoFocus
           />
         </div>
+        <ProgressReadout active={cloneMut.loading} percent={progress.percent} label="Cloning machine…" testId="clone-vm-progress" />
         {cloneMut.error && <p className="text-sm text-red-400">{cloneMut.error}</p>}
         <div className="flex justify-end gap-2">
-          <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose}>Cancel</button>
+          <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose} disabled={cloneMut.loading}>Cancel</button>
           <button data-testid="btn-submit-clone" className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
             {cloneMut.loading ? <Spinner size={14} /> : <Copy size={14} />} Clone VM
           </button>
@@ -1117,10 +1146,11 @@ function EditVMModal({ vm, open, onClose, onUpdated }) {
           </div>
         </div>
 
+        <OperationProgress active={updateMut.loading} label="Applying changes — the machine restarts to take effect…" testId="edit-vm-progress" />
         {updateMut.error && <p className="text-sm text-red-400">Error: {updateMut.error}</p>}
 
         <div className="flex justify-end gap-2">
-          <button data-testid="btn-cancel-edit" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button data-testid="btn-cancel-edit" className="btn-secondary" onClick={onClose} disabled={updateMut.loading}>Cancel</button>
           <button data-testid="btn-submit-edit" className="btn-primary" onClick={handleSubmit} disabled={updateMut.loading}>
             {updateMut.loading ? <Spinner size={14} /> : <Pencil size={14} />}
             {updateMut.loading ? 'Applying…' : 'Apply Changes'}
@@ -1139,6 +1169,8 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [restoringName, setRestoringName] = useState(null);
+  const [deletingName, setDeletingName] = useState(null);
 
   // Drop selections that no longer exist (e.g., after a deletion or list refresh).
   React.useEffect(() => {
@@ -1213,6 +1245,21 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
           <Trash2 size={12} /> Delete selected
         </button>
       </div>
+      {(restoringName || deletingName || bulkMut.loading) && (
+        <div className="px-4 py-2.5 border-b border-steel-800/40 bg-steel-900/30">
+          <OperationProgress
+            active
+            label={
+              restoringName
+                ? `Restoring snapshot "${restoringName}"…`
+                : bulkMut.loading
+                ? `Deleting ${selected.size || ''} snapshot(s)…`
+                : `Deleting snapshot "${deletingName}"…`
+            }
+            testId="snapshot-op-progress"
+          />
+        </div>
+      )}
       <div className="divide-y divide-steel-800/40">
         {snapList.map(snap => (
           <div key={snap.name} className="flex items-start justify-between px-4 py-2.5 hover:bg-steel-800/20 transition-colors gap-3" data-testid={`snap-${snap.name}`}>
@@ -1251,14 +1298,24 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
                 <Pencil size={12} />
               </button>
               <button
-                className="btn-ghost text-xs text-blue-400 hover:text-blue-300"
-                onClick={async () => { await restoreMut.execute(snap.name); refreshSnaps(); }}
+                className="btn-ghost text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40"
+                disabled={restoreMut.loading || deleteMut.loading}
+                onClick={async () => {
+                  setRestoringName(snap.name);
+                  try { await restoreMut.execute(snap.name); refreshSnaps(); }
+                  finally { setRestoringName(null); }
+                }}
               >
                 <RotateCcw size={12} /> Restore
               </button>
               <button
-                className="btn-ghost text-xs text-red-400 hover:text-red-300"
-                onClick={async () => { await deleteMut.execute(snap.name); refreshSnaps(); }}
+                className="btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-40"
+                disabled={restoreMut.loading || deleteMut.loading}
+                onClick={async () => {
+                  setDeletingName(snap.name);
+                  try { await deleteMut.execute(snap.name); refreshSnaps(); }
+                  finally { setDeletingName(null); }
+                }}
                 data-testid={`btn-delete-snap-${snap.name}`}
               >
                 <Trash2 size={12} />
@@ -1660,9 +1717,10 @@ function CreateSnapshotModal({ vmId, open, onClose, onCreated }) {
             data-testid="input-snap-tags"
           />
         </div>
+        <OperationProgress active={createMut.loading} label="Creating snapshot…" testId="snapshot-create-progress" />
         {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
         <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose} disabled={createMut.loading}>Cancel</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading} data-testid="btn-submit-snapshot">
             {createMut.loading ? <Spinner size={14} /> : <Camera size={14} />} Create
           </button>
@@ -1765,17 +1823,87 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
 }
 
 // --- Export Image Modal ---
+// useOperationProgress subscribes to the per-VM operation-progress SSE channel
+// and tracks the live percentage for a single op ("export" | "clone"). Returns
+// { percent, start, stop } — call start() right before the blocking POST and
+// stop() in its finally. Best-effort: if SSE is unavailable the caller simply
+// falls back to the indeterminate bar (percent stays null).
+function useOperationProgress(vmId, op, name) {
+  const [percent, setPercent] = useState(null);
+  const esRef = useRef(null);
+
+  const stop = () => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+  };
+
+  useEffect(() => stop, []);
+
+  const start = () => {
+    setPercent(0);
+    try {
+      const token = getAuthToken();
+      const qs = token ? `?api_key=${encodeURIComponent(token)}` : '';
+      const es = new EventSource(`/api/v1/vms/${vmId}/operations/progress${qs}`);
+      esRef.current = es;
+      es.addEventListener('operation.progress', (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.op && op && msg.op !== op) return;
+          if (msg.name && name && msg.name !== name) return;
+          if (msg.done) { stop(); return; }
+          if (typeof msg.percent === 'number') setPercent(msg.percent);
+        } catch { /* ignore malformed frame */ }
+      });
+      es.onerror = () => { /* keep the indeterminate fallback */ };
+    } catch { /* EventSource unsupported */ }
+  };
+
+  const finish = () => { setPercent(100); };
+  const reset = () => { stop(); setPercent(null); };
+
+  return { percent, start, stop, finish, reset };
+}
+
+// ProgressReadout renders a determinate percentage bar once a real frame has
+// arrived, otherwise the indeterminate OperationProgress fallback.
+function ProgressReadout({ active, percent, label, testId }) {
+  if (!active) return null;
+  if (percent != null && percent > 0) {
+    return (
+      <div className="space-y-1.5" data-testid={testId} role="status" aria-live="polite">
+        <div className="flex items-center justify-between text-xs text-steel-400">
+          <span className="inline-flex items-center gap-2"><Spinner size={12} />{label}</span>
+          <span className="font-mono">{Math.round(percent)}%</span>
+        </div>
+        <ProgressBar value={percent} max={100} variant="info" />
+      </div>
+    );
+  }
+  return <OperationProgress active label={label} testId={testId} />;
+}
+
 function ExportImageModal({ vmId, open, onClose }) {
   const [name, setName] = useState('');
   const createMut = useMutation((n) => imagesApi.create(vmId, n));
   const [done, setDone] = useState(false);
+  const progress = useOperationProgress(vmId, 'export', name);
 
   const handleSubmit = async () => {
-    await createMut.execute(name);
-    setDone(true);
+    progress.start();
+    try {
+      await createMut.execute(name);
+      progress.finish();
+      setDone(true);
+    } finally {
+      progress.stop();
+    }
   };
 
   const handleClose = () => {
+    progress.reset();
     onClose();
     setName('');
     setDone(false);
@@ -1795,9 +1923,10 @@ function ExportImageModal({ vmId, open, onClose }) {
             <input className="input" placeholder="my-golden-image" value={name} onChange={e => setName(e.target.value)} autoFocus />
           </div>
           <p className="text-xs text-steel-500">This flattens the VM disk into a standalone portable qcow2 image. May take several minutes for large disks.</p>
+          <ProgressReadout active={createMut.loading} percent={progress.percent} label="Exporting disk image…" testId="export-image-progress" />
           {createMut.error && <p className="text-sm text-red-400">{createMut.error}</p>}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={handleClose}>Cancel</button>
+            <button className="btn-secondary" onClick={handleClose} disabled={createMut.loading}>Cancel</button>
             <button className="btn-primary" onClick={handleSubmit} disabled={!name || createMut.loading}>
               {createMut.loading ? <Spinner size={14} /> : <Download size={14} />} Export
             </button>
@@ -1864,6 +1993,22 @@ function VMMetrics({ vmId }) {
                 <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500" data-testid="metrics-live-status">{status}</span>
               </div>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-4 border-b border-steel-800/40">
+              <MetricGauge
+                label="CPU"
+                value={typeof cur.cpu_percent === 'number' ? cur.cpu_percent : 0}
+                max={100}
+                display={fmtPercent(cur.cpu_percent)}
+                testId="metric-gauge-cpu"
+              />
+              <MetricGauge
+                label="Memory"
+                value={memPercent(cur)}
+                max={100}
+                display={`${fmtMB(cur.mem_used_mb)}${memTotal(cur) ? ` / ${fmtMB(memTotal(cur))}` : ''}`}
+                testId="metric-gauge-mem"
+              />
+            </div>
             <table className="w-full text-sm" data-testid="metrics-table">
               <thead className="text-left text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500 border-b border-steel-800/40">
                 <tr>
@@ -1918,6 +2063,34 @@ function VMMetrics({ vmId }) {
   );
 }
 
+
+function MetricGauge({ label, value, max, display, testId }) {
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  return (
+    <div data-testid={testId}>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
+        <span className="font-mono text-sm text-steel-100" data-testid={`${testId}-value`}>{display}</span>
+      </div>
+      <ProgressBar value={value} max={max} height="h-2" />
+      <p className="text-[10px] font-mono text-steel-500 mt-1">{Math.round(pct)}% utilised</p>
+    </div>
+  );
+}
+
+// Total guest memory inferred from the current sample (used + available). Both
+// fields come from the same /stats snapshot so the sum is the visible total.
+function memTotal(cur) {
+  const used = typeof cur?.mem_used_mb === 'number' ? cur.mem_used_mb : 0;
+  const avail = typeof cur?.mem_avail_mb === 'number' ? cur.mem_avail_mb : 0;
+  return used + avail;
+}
+
+function memPercent(cur) {
+  const total = memTotal(cur);
+  if (!total) return 0;
+  return ((cur?.mem_used_mb || 0) / total) * 100;
+}
 
 function MetricRow({ label, cur, avg, testId }) {
   return (

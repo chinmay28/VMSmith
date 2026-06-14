@@ -557,7 +557,15 @@ func (s *Server) CloneVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cloned, err := s.vmManager.Clone(r.Context(), id, req.Name)
+	// Stream live qemu-img convert progress for the clone over the dedicated
+	// SSE channel (GET /vms/{id}/operations/progress), keyed by the source VM.
+	ctx := r.Context()
+	if s.operationProgress != nil {
+		ctx = vm.WithCloneProgress(ctx, s.operationProgress.progressCallback(id, "clone", req.Name))
+		defer s.operationProgress.publish(id, operationProgressMsg{Op: "clone", Name: req.Name, Done: true})
+	}
+
+	cloned, err := s.vmManager.Clone(ctx, id, req.Name)
 	if err != nil {
 		err = logAndSanitizeManagerError("clone vm", err)
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
