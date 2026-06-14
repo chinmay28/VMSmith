@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +24,31 @@ import (
 	"github.com/vmsmith/vmsmith/pkg/types"
 	"libvirt.org/go/libvirt"
 )
+
+// cloneProgressKey is the context key under which a clone progress callback may
+// be attached. It lets the API layer observe qemu-img convert progress during
+// Clone without widening the Manager interface (the CLI passes a plain context
+// and simply gets no callback).
+type cloneProgressKey struct{}
+
+// WithCloneProgress returns a context that carries a clone progress callback,
+// invoked with the qemu-img convert completion percentage (0-100).
+func WithCloneProgress(ctx context.Context, fn func(percent float64)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, cloneProgressKey{}, fn)
+}
+
+func cloneProgressFromContext(ctx context.Context) func(percent float64) {
+	if ctx == nil {
+		return nil
+	}
+	if fn, ok := ctx.Value(cloneProgressKey{}).(func(percent float64)); ok {
+		return fn
+	}
+	return nil
+}
 
 // LibvirtManager implements the Manager interface using libvirt.
 type LibvirtManager struct {
@@ -347,7 +375,7 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 
 	clonedSpec := cloneVMSpec(sourceVM.Spec, newName)
 	clonedDiskPath := filepath.Join(vmDir, "disk.qcow2")
-	if err := createClonedDisk(sourceVM.DiskPath, clonedDiskPath); err != nil {
+	if err := createClonedDiskWithProgress(sourceVM.DiskPath, clonedDiskPath, cloneProgressFromContext(ctx)); err != nil {
 		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("creating overlay disk: %w", err)
 	}
@@ -1536,16 +1564,77 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 }
 
 func createClonedDisk(sourceDiskPath, diskPath string) error {
-	cmd := exec.Command("qemu-img", "convert",
-		"-f", "qcow2",
-		"-O", "qcow2",
-		sourceDiskPath,
-		diskPath,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
+	return createClonedDiskWithProgress(sourceDiskPath, diskPath, nil)
+}
+
+// createClonedDiskWithProgress copies a VM disk via qemu-img convert. When
+// progress is non-nil it adds `-p` and stream-parses the completion percentage
+// so callers can surface a live clone progress bar.
+func createClonedDiskWithProgress(sourceDiskPath, diskPath string, progress func(percent float64)) error {
+	args := []string{"convert", "-f", "qcow2", "-O", "qcow2"}
+	if progress != nil {
+		args = append(args, "-p")
+	}
+	args = append(args, sourceDiskPath, diskPath)
+	cmd := exec.Command("qemu-img", args...)
+
+	if progress == nil {
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("qemu-img convert: %s: %w", string(out), err)
+		}
+		return nil
+	}
+	return runQemuConvertWithProgress(cmd, progress)
+}
+
+// qemuProgressRE matches qemu-img's `-p` progress tokens, e.g. "(73.45/100%)".
+var qemuProgressRE = regexp.MustCompile(`\(\s*([0-9]+(?:\.[0-9]+)?)/100%\)`)
+
+// runQemuConvertWithProgress runs a qemu-img command, streaming its stdout
+// (carriage-return-updated when `-p` is set) and invoking progress with each
+// parsed percentage. Stderr is captured separately for a useful error message.
+func runQemuConvertWithProgress(cmd *exec.Cmd, progress func(percent float64)) error {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("qemu-img convert: stdout pipe: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("qemu-img convert: start: %w", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Split(scanLinesCR)
+	for scanner.Scan() {
+		if matches := qemuProgressRE.FindStringSubmatch(scanner.Text()); matches != nil {
+			if pct, perr := strconv.ParseFloat(matches[1], 64); perr == nil {
+				progress(pct)
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("qemu-img convert: %s: %w", strings.TrimSpace(stderr.String()), err)
 	}
 	return nil
+}
+
+// scanLinesCR is a bufio.SplitFunc that breaks on either a newline or a
+// carriage return, so qemu-img's `\r`-updated progress line yields one token
+// per update rather than a single buffered blob at EOF.
+func scanLinesCR(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {

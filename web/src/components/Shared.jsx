@@ -1,4 +1,5 @@
-import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot, Power } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Inbox, Radio, RotateCcw, WifiOff, CircleDot, Power, SlidersHorizontal, ChevronDown, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
 import { STATE_LIVE, STATE_RECONNECTING, STATE_FALLBACK, STATE_SHUTDOWN } from '../hooks/useEventStream.js';
 
 // --- Status Badge ---
@@ -142,6 +143,158 @@ export function LiveIndicator({ status }) {
       <Icon size={10} />
       {label}
     </span>
+  );
+}
+
+// --- Progress Bar ---
+// A determinate (value/max) or indeterminate capacity/operation meter. When
+// `variant` is omitted the colour auto-escalates with utilisation so operators
+// can spot pressure at a glance: green < 75% < amber < 90% < red.
+const progressColors = {
+  ok: 'bg-forge-500',
+  warn: 'bg-amber-500',
+  danger: 'bg-red-500',
+  info: 'bg-blue-500',
+  neutral: 'bg-steel-500',
+};
+
+export function ProgressBar({ value = 0, max = 100, variant, indeterminate = false, height = 'h-1.5', className = '', testId }) {
+  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  const auto = pct >= 90 ? 'danger' : pct >= 75 ? 'warn' : 'ok';
+  const color = progressColors[variant || auto] || progressColors.ok;
+  return (
+    <div className={`progress-track ${height} ${className}`} data-testid={testId} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+      {indeterminate ? (
+        <div className="progress-indeterminate" />
+      ) : (
+        <div className={`progress-fill ${color}`} style={{ width: `${pct}%` }} />
+      )}
+    </div>
+  );
+}
+
+// --- Usage Meter ---
+// Card-friendly metric block: label + icon, a large primary readout, a
+// utilisation bar, and a muted subtitle. Used for host / quota capacity cards.
+export function UsageMeter({ label, icon: Icon, value, max, primary, subtitle, variant, showPercent = true, testId }) {
+  const hasCap = Number.isFinite(max) && max > 0;
+  const pct = hasCap ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
+  return (
+    <div className="card-hover px-4 py-3.5" data-testid={testId}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
+        {Icon && <Icon size={14} className="text-steel-600" />}
+      </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="font-display font-bold text-2xl text-steel-100">{primary}</p>
+        {hasCap && showPercent && (
+          <span className="text-xs font-mono text-steel-500">{Math.round(pct)}%</span>
+        )}
+      </div>
+      <ProgressBar value={value} max={hasCap ? max : 100} variant={hasCap ? variant : 'neutral'} className="mt-2.5" />
+      {subtitle && <p className="text-xs text-steel-500 mt-1.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+// --- Operation Progress ---
+// Status indicator for long-running, opaque operations (image export, snapshot
+// create/restore, clone). The backend runs these synchronously with no
+// progress stream, so we show an honest indeterminate bar plus a live elapsed
+// timer rather than a fake percentage. Render it while the mutation is in
+// flight; pass `active={mutation.loading}`.
+export function OperationProgress({ active, label, className = '', testId }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    setElapsed(0);
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - start) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [active]);
+  if (!active) return null;
+  return (
+    <div className={`space-y-1.5 ${className}`} data-testid={testId} role="status" aria-live="polite">
+      <div className="flex items-center justify-between text-xs text-steel-400">
+        <span className="inline-flex items-center gap-2"><Spinner size={12} />{label}</span>
+        <span className="font-mono text-steel-500">{elapsed}s elapsed</span>
+      </div>
+      <ProgressBar indeterminate />
+    </div>
+  );
+}
+
+// --- Status Banner ---
+// Variant-aware inline banner for operation results. Replaces overloading
+// ErrorBanner for success/partial messages (which mislabelled success as an
+// error in red). `variant` ∈ success | warning | error | info.
+const statusVariants = {
+  success: { wrap: 'border-emerald-700/40 bg-emerald-950/30 text-emerald-200', icon: CheckCircle2 },
+  warning: { wrap: 'border-amber-700/40 bg-amber-950/30 text-amber-200', icon: AlertTriangle },
+  error:   { wrap: 'border-red-800/40 bg-red-950/30 text-red-300', icon: XCircle },
+  info:    { wrap: 'border-blue-800/40 bg-blue-950/30 text-blue-200', icon: Info },
+};
+
+export function StatusBanner({ message, variant = 'info', onDismiss, testId }) {
+  if (!message) return null;
+  const cfg = statusVariants[variant] || statusVariants.info;
+  const Icon = cfg.icon;
+  return (
+    <div className={`card flex items-center justify-between gap-3 px-4 py-3 ${cfg.wrap}`} data-testid={testId} role="status">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Icon size={16} className="shrink-0" />
+        <p className="text-sm truncate">{message}</p>
+      </div>
+      {onDismiss && (
+        <button onClick={onDismiss} className="shrink-0 opacity-70 hover:opacity-100 transition-opacity" aria-label="Dismiss">
+          <X size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// --- Filter Panel ---
+// Collapsible container that tames a wide row of filter controls. Renders a
+// compact header (icon + title + active-count chip + optional "Clear all")
+// and a body that the operator can fold away. Defaults to open so the controls
+// are reachable on first paint; collapse state is local (resets per load).
+export function FilterPanel({ activeCount = 0, onClear, defaultOpen = true, children, testId, clearTestId }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card mb-4 overflow-hidden" data-testid={testId}>
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-medium text-steel-300 hover:text-steel-100 transition-colors"
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}
+          data-testid={testId ? `${testId}-toggle` : undefined}
+        >
+          <SlidersHorizontal size={14} className="text-steel-500" />
+          Filters
+          {activeCount > 0 && (
+            <span className="badge bg-forge-900/60 text-forge-300 border border-forge-700/40">{activeCount} active</span>
+          )}
+          <ChevronDown size={14} className={`text-steel-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {activeCount > 0 && onClear && (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={onClear}
+            data-testid={clearTestId || (testId ? `${testId}-clear-all` : undefined)}
+          >
+            <X size={12} /> Clear all
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="px-4 pb-4 pt-1 border-t border-steel-800/40">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 

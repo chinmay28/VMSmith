@@ -635,6 +635,39 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/operations/progress:
+    get:
+      tags: [VMs]
+      summary: Stream long-operation progress (SSE)
+      description: |
+        Server-Sent Events stream of long-running operation progress for the VM
+        — currently image export (`POST /images`) and clone (`POST
+        /vms/{id}/clone`). Each `operation.progress` event's `data` field is a
+        JSON object `{ "op": string, "name": string, "percent": number, "done":
+        boolean }` where `op` is `"export"` or `"clone"`, carrying the live
+        `qemu-img convert` completion percentage (throttled to whole-percent
+        steps). A terminal frame with `done: true` is sent when the operation
+        finishes (success or failure) and closes the stream. The daemon replays
+        the most recent frame to a subscriber that connects mid-operation, so a
+        small connect delay never loses progress. This dedicated channel
+        bypasses the event bus, so the high-frequency frames never reach the
+        persistent event log or webhooks. A `: keepalive` comment frame is sent
+        every 30 seconds.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/APIError'
+        '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/snapshots:
     get:
       tags: [Snapshots]

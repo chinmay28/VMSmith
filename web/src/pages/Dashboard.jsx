@@ -4,7 +4,7 @@ import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database, Trending
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
-import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState, LiveIndicator } from '../components/Shared';
+import { PageHeader, StatCard, StatusBadge, Spinner, ErrorBanner, EmptyState, LiveIndicator, UsageMeter } from '../components/Shared';
 import { listData, normalizeVMList } from '../utils/normalize';
 
 const TOP_METRICS = [
@@ -109,9 +109,9 @@ export default function Dashboard() {
       {showHostError && <div className="mb-4"><ErrorBanner message={hostError} /></div>}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-        <HostUsageCard label="Host CPU" resource={hostStats?.cpu} icon={Cpu} loading={hostLoading} formatValue={(resource) => `${resource?.percentage ?? 0}%`} />
-        <HostUsageCard label="Host RAM" resource={hostStats?.ram} icon={MemoryStick} loading={hostLoading} formatSubtitle={(resource) => `${formatBytes(resource?.used)} / ${formatBytes(resource?.total)} used`} />
-        <HostUsageCard label="Host Disk" resource={hostStats?.disk} icon={Database} loading={hostLoading} formatSubtitle={(resource) => `${formatBytes(resource?.used)} / ${formatBytes(resource?.total)} used`} />
+        <HostUsageCard label="Host CPU" kind="percent" resource={hostStats?.cpu} icon={Cpu} loading={hostLoading} />
+        <HostUsageCard label="Host RAM" kind="bytes" resource={hostStats?.ram} icon={MemoryStick} loading={hostLoading} />
+        <HostUsageCard label="Host Disk" kind="bytes" resource={hostStats?.disk} icon={Database} loading={hostLoading} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
@@ -207,25 +207,38 @@ function formatBytes(value) {
   return `${current.toFixed(decimals)} ${units[index]}`;
 }
 
-function HostUsageCard({ label, resource, icon: Icon, loading, formatValue, formatSubtitle }) {
+function HostUsageCard({ label, resource, icon: Icon, loading, kind = 'percent' }) {
   if (loading) {
     return <StatCard label={label} value="—" icon={Icon} />;
   }
 
-  const value = formatValue ? formatValue(resource) : `${resource?.percentage ?? 0}%`;
-  const subtitle = formatSubtitle
-    ? formatSubtitle(resource)
-    : `${formatBytes(resource?.available)} free of ${formatBytes(resource?.total)}`;
+  if (kind === 'bytes') {
+    const used = resource?.used ?? 0;
+    const total = resource?.total ?? 0;
+    const pct = total > 0 ? (used / total) * 100 : 0;
+    return (
+      <UsageMeter
+        label={label}
+        icon={Icon}
+        value={used}
+        max={total > 0 ? total : 100}
+        primary={`${Math.round(pct)}%`}
+        subtitle={`${formatBytes(used)} / ${formatBytes(total)} used`}
+      />
+    );
+  }
 
+  const pct = resource?.percentage ?? 0;
   return (
-    <div className="card-hover px-4 py-3.5">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
-        {Icon && <Icon size={14} className="text-steel-600" />}
-      </div>
-      <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
-      <p className="text-xs text-steel-500 mt-1">{subtitle}</p>
-    </div>
+    <UsageMeter
+      label={label}
+      icon={Icon}
+      value={pct}
+      max={100}
+      primary={`${pct.toFixed ? pct.toFixed(1) : pct}%`}
+      showPercent={false}
+      subtitle={`${(100 - pct).toFixed ? (100 - pct).toFixed(1) : 100 - pct}% idle`}
+    />
   );
 }
 
@@ -303,17 +316,18 @@ function QuotaCard({ label, resource, unit, icon: Icon, loading }) {
 
   const used = resource?.used ?? 0;
   const limit = resource?.limit ?? 0;
-  const value = limit > 0 ? `${used}/${limit}` : `${used}`;
-  const subtitle = limit > 0 ? `${used} of ${limit} ${unit}` : `${used} ${unit} allocated`;
+  const capped = limit > 0;
+  const primary = capped ? `${used}/${limit}` : `${used}`;
+  const subtitle = capped ? `${used} of ${limit} ${unit}` : `${used} ${unit} · uncapped`;
 
   return (
-    <div className="card-hover px-4 py-3.5">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">{label}</span>
-        {Icon && <Icon size={14} className="text-steel-600" />}
-      </div>
-      <p className="font-display font-bold text-2xl text-steel-100">{value}</p>
-      <p className="text-xs text-steel-500 mt-1">{subtitle}</p>
-    </div>
+    <UsageMeter
+      label={label}
+      icon={Icon}
+      value={used}
+      max={capped ? limit : undefined}
+      primary={primary}
+      subtitle={subtitle}
+    />
   );
 }

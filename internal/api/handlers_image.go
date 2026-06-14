@@ -74,10 +74,16 @@ func (s *Server) CreateImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	img, err := s.storageMgr.CreateImage(vm.DiskPath, req.Name, vm.ID, storage.CreateImageOptions{
-		Description: req.Description,
-		Tags:        tags,
-	})
+	// Stream live qemu-img convert progress over the dedicated SSE channel
+	// (GET /vms/{id}/operations/progress). Always emit a terminal Done frame so
+	// the GUI stops cleanly whether the export succeeds or fails.
+	opts := storage.CreateImageOptions{Description: req.Description, Tags: tags}
+	if s.operationProgress != nil {
+		opts.Progress = s.operationProgress.progressCallback(vm.ID, "export", req.Name)
+		defer s.operationProgress.publish(vm.ID, operationProgressMsg{Op: "export", Name: req.Name, Done: true})
+	}
+
+	img, err := s.storageMgr.CreateImage(vm.DiskPath, req.Name, vm.ID, opts)
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)

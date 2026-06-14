@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { HardDrive, Download, Trash2, Upload, Pencil, Search, X } from 'lucide-react';
 import { images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls, FilterPanel, ProgressBar } from '../components/Shared';
 
 const DEFAULT_PER_PAGE = 25;
 
@@ -147,6 +147,19 @@ export default function ImageList() {
   };
   const dismissBulkResult = () => setBulkResult(null);
 
+  const clearAllFilters = () => {
+    setTagFilter('');
+    setSourceVMInput(''); setSourceVMFilter('');
+    setPrefixInput(''); setPrefixFilter('');
+    setSince(''); setUntil('');
+    setMinSizeInput(''); setMinSizeFilter('');
+    setMaxSizeInput(''); setMaxSizeFilter('');
+  };
+
+  const activeFilterCount = [
+    tagFilter, sourceVMInput, prefixInput, since, until, minSizeInput, maxSizeInput,
+  ].filter(v => String(v ?? '').trim() !== '').length;
+
   const humanSize = (bytes) => {
     if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
     if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
@@ -170,15 +183,15 @@ export default function ImageList() {
       <UploadImageModal open={showUpload} onClose={() => setShowUpload(false)} onUploaded={refresh} />
       <EditImageModal image={editing} onClose={() => setEditing(null)} onSaved={refresh} />
 
-      <div className="mb-4 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[220px] max-w-md">
+      <div className="mb-3">
+        <div className="relative max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, description, or tag…"
-            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            className="input w-full pl-8 pr-8 py-2 text-sm"
             data-testid="image-list-search"
             aria-label="Search images"
           />
@@ -194,6 +207,32 @@ export default function ImageList() {
             </button>
           )}
         </div>
+      </div>
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3" data-testid="image-tag-filter">
+          <button
+            className={`btn-ghost text-xs ${tagFilter === '' ? 'text-forge-400' : ''}`}
+            onClick={() => setTagFilter('')}
+            data-testid="image-tag-filter-all"
+          >
+            All
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`}
+              onClick={() => setTagFilter(tag)}
+              data-testid={`image-tag-filter-${tag}`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <FilterPanel activeCount={activeFilterCount} onClear={clearAllFilters} testId="image-list-filters">
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="relative min-w-[220px] max-w-xs">
           <input
             type="search"
@@ -314,29 +353,7 @@ export default function ImageList() {
         </div>
       </div>
 
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4" data-testid="image-tag-filter">
-          <button
-            className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`}
-            onClick={() => setTagFilter('')}
-            data-testid="image-tag-filter-all"
-          >
-            All
-          </button>
-          {allTags.map(tag => (
-            <button
-              key={tag}
-              className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`}
-              onClick={() => setTagFilter(tag)}
-              data-testid={`image-tag-filter-${tag}`}
-            >
-              #{tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-steel-400" data-testid="image-list-sort-controls">
+      <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-steel-800/40 text-xs text-steel-400" data-testid="image-list-sort-controls">
         <span>Sort by</span>
         <select
           value={sort}
@@ -359,6 +376,7 @@ export default function ImageList() {
           <option value="desc">Descending</option>
         </select>
       </div>
+      </FilterPanel>
 
       {loading && !imageList ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
@@ -657,13 +675,7 @@ function UploadImageModal({ open, onClose, onUploaded }) {
               <span>Uploading…</span>
               <span>{uploadProgress.percent}%</span>
             </div>
-            <div className="h-2 rounded-full bg-steel-800/60 overflow-hidden border border-steel-700/40">
-              <div
-                className="h-full bg-forge-500 transition-all"
-                style={{ width: `${uploadProgress.percent}%` }}
-                data-testid="image-upload-progress-bar"
-              />
-            </div>
+            <ProgressBar value={uploadProgress.percent} max={100} variant="ok" height="h-2" testId="image-upload-progress-bar" />
             {uploadProgress.total > 0 && (
               <p className="text-[10px] font-mono text-steel-600">
                 {Math.min(uploadProgress.loaded, uploadProgress.total).toLocaleString()} / {uploadProgress.total.toLocaleString()} bytes
