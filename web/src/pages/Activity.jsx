@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Activity as ActivityIcon, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { events as eventsApi, vms as vmsApi } from '../api/client';
-import { PageHeader, Spinner, ErrorBanner, EmptyState, PaginationControls, SeverityBadge } from '../components/Shared';
+import { PageHeader, Spinner, ErrorBanner, EmptyState, PaginationControls, SeverityBadge, FilterPanel } from '../components/Shared';
 
 const DEFAULT_PER_PAGE = 50;
 const POLL_INTERVAL_MS = 5000;
@@ -215,6 +215,17 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
     ? `${total} ${total === 1 ? 'event' : 'events'} for this VM`
     : `${total} ${total === 1 ? 'event' : 'events'}`;
 
+  const clearActivityFilters = () => {
+    setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter('');
+    setMinSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setTypePrefixInput('');
+    setSortField(''); setSortOrder('');
+  };
+
+  const activeFilterCount = [
+    vmFilter, typeFilter, sourceFilter, severityFilter, minSeverityFilter,
+    actorInput, resourceIdInput, typePrefixInput,
+  ].filter(v => String(v ?? '').trim() !== '').length;
+
   return (
     <div className="flex flex-col h-full">
       {!embedded && (
@@ -230,12 +241,12 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
       )}
 
       {!embedded && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <div className="relative" data-testid="activity-search-wrap">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
+        <div className="mb-3">
+          <div className="relative max-w-md" data-testid="activity-search-wrap">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
             <input
               type="search"
-              className="input py-1 text-xs w-60 pl-7 pr-7"
+              className="input py-2 text-sm w-full pl-8 pr-8"
               placeholder="Search message, type, attrs…"
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
@@ -244,15 +255,21 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             {searchInput && (
               <button
                 type="button"
-                className="absolute right-1 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200 p-1"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200 p-1"
                 onClick={() => setSearchInput('')}
                 aria-label="Clear search"
                 data-testid="btn-activity-clear-search"
               >
-                <X size={12} />
+                <X size={13} />
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {!embedded && (
+        <FilterPanel activeCount={activeFilterCount} onClear={clearActivityFilters} testId="activity-filters" clearTestId="btn-activity-clear-filters">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             className="input py-1 text-xs w-44"
             placeholder="Filter by VM ID"
@@ -394,16 +411,8 @@ export default function Activity({ vmId: vmIdProp = '', embedded = false } = {})
             <option value="asc">Order: asc</option>
             <option value="desc">Order: desc</option>
           </select>
-          {(vmFilter || typeFilter || sourceFilter || severityFilter || minSeverityFilter || actorInput || resourceIdInput || typePrefixInput || searchInput || sortField || sortOrder) && (
-            <button
-              className="btn-ghost text-xs text-steel-400"
-              onClick={() => { setVmFilter(''); setTypeFilter(''); setSourceFilter(''); setSeverityFilter(''); setMinSeverityFilter(''); setActorInput(''); setResourceIdInput(''); setTypePrefixInput(''); setSearchInput(''); setSortField(''); setSortOrder(''); }}
-              data-testid="btn-activity-clear-filters"
-            >
-              Clear
-            </button>
-          )}
         </div>
+        </FilterPanel>
       )}
 
       {error && <div className="mb-3"><ErrorBanner message={error} onRetry={fetchEvents} /></div>}

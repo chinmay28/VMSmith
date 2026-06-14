@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { RefreshCw, ChevronDown, Search, X } from 'lucide-react';
 import { logs as logsApi } from '../api/client';
-import { PageHeader, Spinner, ErrorBanner, PaginationControls } from '../components/Shared';
+import { PageHeader, Spinner, ErrorBanner, PaginationControls, FilterPanel } from '../components/Shared';
 
 const LEVEL_ORDER = { debug: 0, info: 1, warn: 2, error: 3 };
 
@@ -276,15 +276,15 @@ export default function LogViewer() {
 
       {error && <div className="mb-3"><ErrorBanner message={error} onRetry={fetchLogs} /></div>}
 
-      <div className="mb-3 flex items-center gap-2">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-3">
+        <div className="relative max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search messages, sources, levels, fields…"
-            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            className="input w-full pl-8 pr-8 py-2 text-sm"
             data-testid="log-search"
             aria-label="Search log entries"
           />
@@ -300,6 +300,14 @@ export default function LogViewer() {
             </button>
           )}
         </div>
+      </div>
+
+      <FilterPanel
+        activeCount={[vmIDInput, sinceFilter, untilFilter].filter(v => String(v ?? '').trim() !== '').length}
+        onClear={() => { setVMIDInput(''); setSinceFilter(''); setUntilFilter(''); }}
+        testId="log-filters"
+      >
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="relative w-64">
           <input
             type="search"
@@ -354,6 +362,7 @@ export default function LogViewer() {
           )}
         </div>
       </div>
+      </FilterPanel>
 
       {/* Log table */}
       <div

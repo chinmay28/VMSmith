@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Layers, Trash2, Pencil, Search, X, Plus } from 'lucide-react';
 import { templates as templatesApi, images as imagesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
-import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls } from '../components/Shared';
+import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls, FilterPanel } from '../components/Shared';
 import { safeArray } from '../utils/normalize';
 
 const DEFAULT_PER_PAGE = 25;
@@ -179,6 +179,25 @@ export default function TemplateList() {
     refresh();
   };
 
+  const clearAllFilters = () => {
+    setTagFilter('');
+    setImageInput(''); setImageFilter('');
+    setDefaultUserInput(''); setDefaultUserFilter('');
+    setOsTypeFilter(''); setOsVariantFilter('');
+    setNetworkInput(''); setNetworkFilter('');
+    setPrefixInput(''); setPrefixFilter('');
+    setSince(''); setUntil('');
+    setMinCpusInput(''); setMinCpusFilter(''); setMaxCpusInput(''); setMaxCpusFilter('');
+    setMinRamInput(''); setMinRamFilter(''); setMaxRamInput(''); setMaxRamFilter('');
+    setMinDiskGbInput(''); setMinDiskGbFilter(''); setMaxDiskGbInput(''); setMaxDiskGbFilter('');
+  };
+
+  const activeFilterCount = [
+    tagFilter, imageInput, defaultUserInput, osTypeFilter, osVariantFilter, networkInput,
+    prefixInput, since, until, minCpusInput, maxCpusInput, minRamInput, maxRamInput,
+    minDiskGbInput, maxDiskGbInput,
+  ].filter(v => String(v ?? '').trim() !== '').length;
+
   const allSelected = selected.size > 0 && selected.size === templateList.length;
   const someSelected = selected.size > 0 && !allSelected;
   const toggleAll = () => {
@@ -218,15 +237,15 @@ export default function TemplateList() {
       <EditTemplateModal template={editing} onClose={() => setEditing(null)} onSaved={refresh} />
       <CreateTemplateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={refresh} />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-3">
+        <div className="relative max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-steel-500 pointer-events-none" />
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name, description, or tag…"
-            className="input w-full pl-8 pr-8 py-1.5 text-sm"
+            className="input w-full pl-8 pr-8 py-2 text-sm"
             data-testid="template-list-search"
             aria-label="Search templates"
           />
@@ -242,6 +261,32 @@ export default function TemplateList() {
             </button>
           )}
         </div>
+      </div>
+
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3" data-testid="template-tag-filter">
+          <button
+            className={`btn-ghost text-xs ${tagFilter === '' ? 'text-forge-400' : ''}`}
+            onClick={() => setTagFilter('')}
+            data-testid="template-tag-filter-all"
+          >
+            All
+          </button>
+          {allTags.map(tag => (
+            <button
+              key={tag}
+              className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`}
+              onClick={() => setTagFilter(tag)}
+              data-testid={`template-tag-filter-${tag}`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <FilterPanel activeCount={activeFilterCount} onClear={clearAllFilters} testId="template-list-filters">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-64">
           <input
             type="text"
@@ -505,29 +550,7 @@ export default function TemplateList() {
         </div>
       </div>
 
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4" data-testid="template-tag-filter">
-          <button
-            className={`btn-ghost text-xs ${tagFilter === '' ? 'text-blue-400' : ''}`}
-            onClick={() => setTagFilter('')}
-            data-testid="template-tag-filter-all"
-          >
-            All
-          </button>
-          {allTags.map(tag => (
-            <button
-              key={tag}
-              className={`badge ${tagFilter === tag ? 'badge-running' : 'bg-steel-800/60 text-steel-300 border-steel-700/40'}`}
-              onClick={() => setTagFilter(tag)}
-              data-testid={`template-tag-filter-${tag}`}
-            >
-              #{tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2 mb-4 text-xs text-steel-400" data-testid="template-list-sort-controls">
+      <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-steel-800/40 text-xs text-steel-400" data-testid="template-list-sort-controls">
         <span>Sort by</span>
         <select
           value={sort}
@@ -554,6 +577,7 @@ export default function TemplateList() {
           <option value="desc">Descending</option>
         </select>
       </div>
+      </FilterPanel>
 
       {loading && !templateList.length ? (
         <div className="flex justify-center py-20"><Spinner size={20} /></div>
