@@ -42,9 +42,41 @@ Source of truth: [`docs/ROADMAP.md`](docs/ROADMAP.md). The block above is regene
 
 Want a disposable containerized setup for local testing instead of a host install? See [docs/CONTAINER.md](docs/CONTAINER.md).
 
-### 1. Install the latest release binary
+### Option A — One-command install (managed systemd service)
 
-For Linux x86_64 hosts, you can install the latest published release directly to `/usr/local/bin/vmsmith`:
+On an Ubuntu/Debian host, the quickstart script does everything end to end: installs
+dependencies (qemu/kvm, libvirt, Go, Node), builds VMSmith from source, writes a
+production config, creates `/var/lib/vmsmith`, and runs the daemon under systemd.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/quickstart.sh | sudo bash
+```
+
+It defaults to the `main` branch. Pin a specific release tag (or any branch/commit)
+with `VMSMITH_REF`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/quickstart.sh | sudo VMSMITH_REF=v1.0.0 bash
+```
+
+**Re-run it any time to upgrade in place.** Upgrades are non-disruptive: the new
+binary is built *before* the running service is stopped, the metadata DB is
+snapshotted first, and a failed post-upgrade health check automatically rolls back
+to the previous binary and database. VMs, images, and metadata are never touched.
+
+Manage the service afterwards:
+
+```bash
+systemctl status vmsmith
+journalctl -u vmsmith -f
+```
+
+Other knobs (all optional env vars): `VMSMITH_LISTEN`, `VMSMITH_DATA_DIR`,
+`VMSMITH_CONFIG_DIR`, `VMSMITH_PREFIX`, `INSTALL_DEPS=never`, `BACKUP_KEEP`.
+
+### Option B — Install just the release binary
+
+For Linux x86_64 hosts, you can install the latest published release directly to `/usr/local/bin/vmsmith` (no systemd setup):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/install.sh | sh
@@ -56,9 +88,11 @@ Pin a specific Git tag by setting `VERSION` before piping to `sh`:
 curl -fsSL https://raw.githubusercontent.com/chinmay28/VMSmith/main/scripts/install.sh | VERSION=v1.0.0 sh
 ```
 
-If you want to build from source instead, follow the steps below.
+### Option C — Build from source manually
 
-### 2. Install dependencies
+If you want to drive each step yourself, follow the steps below.
+
+#### 1. Install dependencies
 
 ```bash
 # Ubuntu / Debian
@@ -74,7 +108,7 @@ Reload your PATH if Go was freshly installed:
 source /etc/profile.d/go.sh
 ```
 
-### 3. Build
+#### 2. Build
 
 ```bash
 make deps     # download Go modules
