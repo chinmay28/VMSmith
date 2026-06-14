@@ -298,6 +298,38 @@ func TestProcessSamples_HandlesLargeUint64Counters(t *testing.T) {
 	}
 }
 
+func TestProcessSamples_StoppedVMKeepsFrozenHistory(t *testing.T) {
+	rounds := [][]domainSample{
+		{{Name: "v1", State: "running", HasCPU: true, CPUTimeNs: 0, NumVcpus: 1}},
+		{{Name: "v1", State: "stopped", HasCPU: true, CPUTimeNs: 1_000_000_000, NumVcpus: 1}},
+	}
+	m := newTestManager(rounds, map[string]string{"v1": "vm-stopped"})
+
+	t0 := time.Unix(1000, 0)
+	m.processSamples(rounds[0], t0)
+	m.processSamples(rounds[1], t0.Add(10*time.Second))
+
+	snap, err := m.Snapshot("vm-stopped")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected snapshot")
+	}
+	if snap.State != "stopped" {
+		t.Fatalf("State = %q, want stopped", snap.State)
+	}
+	if len(snap.History) != 2 {
+		t.Fatalf("history len = %d, want 2", len(snap.History))
+	}
+	if snap.Current == nil || snap.Current.Timestamp != snap.History[1].Timestamp {
+		t.Fatalf("Current = %+v, want latest history sample", snap.Current)
+	}
+	if snap.Current.CPUPercent == nil {
+		t.Fatal("expected latest stopped sample to retain the final CPU delta")
+	}
+}
+
 func TestProcessSamples_NoResolverFallsBackToName(t *testing.T) {
 	// When no resolver is wired (legacy / direct test path), keying falls back
 	// to the domain name.  Verifies back-compat.

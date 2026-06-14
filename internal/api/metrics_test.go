@@ -704,6 +704,54 @@ func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
 	}
 }
 
+func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-heartbeat", "stream-heartbeat", types.VMStateRunning)
+	m.setState(v.ID, "running")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	br := bufio.NewReader(resp.Body)
+	type result struct {
+		frame *sseFrame
+		err   error
+	}
+	readCh := make(chan result, 1)
+	go func() {
+		frame, err := readSSEFrame(br)
+		readCh <- result{frame: frame, err: err}
+	}()
+
+	select {
+	case got := <-readCh:
+		if got.err != nil {
+			t.Fatalf("read heartbeat frame: %v", got.err)
+		}
+		if got.frame.event != "" || got.frame.data != "" || got.frame.id != "" {
+			t.Fatalf("expected heartbeat comment frame, got %+v", got.frame)
+		}
+	case <-time.After(33 * time.Second):
+		t.Fatal("expected heartbeat within 33s on idle stream")
+	}
+}
+
 func TestStreamVMStats_ClosesOnVMDelete(t *testing.T) {
 	m := newTestMetricsMock()
 	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
