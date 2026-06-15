@@ -32,24 +32,12 @@ var supportedBulkVMActions = map[string]bulkVMActionSpec{
 		verb:      "start",
 	},
 	"stop": {
-		apply: func(s *Server, r *http.Request, id string) error {
-			if err := s.vmManager.Stop(r.Context(), id); err != nil {
-				return err
-			}
-			s.closeConsoleSessionsForVM(id, "vm_stopped")
-			return nil
-		},
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Stop(r.Context(), id) },
 		eventType: "vm.stop_requested",
 		verb:      "stop",
 	},
 	"delete": {
-		apply: func(s *Server, r *http.Request, id string) error {
-			if err := s.vmManager.Delete(r.Context(), id); err != nil {
-				return err
-			}
-			s.closeConsoleSessionsForVM(id, "vm_deleted")
-			return nil
-		},
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.Delete(r.Context(), id) },
 		eventType: "vm.deleted",
 		verb:      "delete",
 	},
@@ -59,13 +47,7 @@ var supportedBulkVMActions = map[string]bulkVMActionSpec{
 		verb:      "restart",
 	},
 	"force-stop": {
-		apply: func(s *Server, r *http.Request, id string) error {
-			if err := s.vmManager.ForceStop(r.Context(), id); err != nil {
-				return err
-			}
-			s.closeConsoleSessionsForVM(id, "vm_force_stopped")
-			return nil
-		},
+		apply:     func(s *Server, r *http.Request, id string) error { return s.vmManager.ForceStop(r.Context(), id) },
 		eventType: "vm.force_stop_requested",
 		verb:      "force-stop",
 	},
@@ -580,7 +562,6 @@ func (s *Server) DeleteVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
-	s.closeConsoleSessionsForVM(id, "vm_deleted")
 	s.publishAppEvent("vm.deleted", id, fmt.Sprintf("VM %q deleted", id), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -605,7 +586,6 @@ func (s *Server) StopVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
-	s.closeConsoleSessionsForVM(id, "vm_stopped")
 	s.publishAppEvent("vm.stop_requested", id, fmt.Sprintf("VM %q stop requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
@@ -623,7 +603,6 @@ func (s *Server) ForceStopVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
-	s.closeConsoleSessionsForVM(id, "vm_force_stopped")
 	s.publishAppEvent("vm.force_stop_requested", id, fmt.Sprintf("VM %q force-stop requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "force_stopped"})
 }
