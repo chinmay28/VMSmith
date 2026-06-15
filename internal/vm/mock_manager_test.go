@@ -65,6 +65,7 @@ func TestMockManager_Clone(t *testing.T) {
 			DiskGB:      80,
 			Image:       "ubuntu-24.04",
 			Description: "base vm",
+			GPUs:        []string{"0000:01:00.0"},
 			Tags:        []string{"prod", "web"},
 		},
 	})
@@ -87,6 +88,9 @@ func TestMockManager_Clone(t *testing.T) {
 	}
 	if clone.Spec.CPUs != 4 || clone.Spec.RAMMB != 8192 || clone.Spec.DiskGB != 80 || clone.Spec.Image != "ubuntu-24.04" {
 		t.Fatalf("clone spec mismatch: %+v", clone.Spec)
+	}
+	if len(clone.Spec.GPUs) != 0 {
+		t.Fatalf("clone GPUs = %#v, want nil/empty", clone.Spec.GPUs)
 	}
 	if len(clone.Tags) != 2 || clone.Tags[0] != "prod" || clone.Tags[1] != "web" {
 		t.Fatalf("clone tags = %#v, want copied tags", clone.Tags)

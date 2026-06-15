@@ -221,6 +221,43 @@ func TestCreateVM_Windows(t *testing.T) {
 	}
 }
 
+func TestListHostGPUs(t *testing.T) {
+	old := discoverHostGPUs
+	discoverHostGPUs = func() ([]types.GPUDevice, error) {
+		return []types.GPUDevice{{
+			Address:      "0000:01:00.0",
+			VendorID:     "0x10de",
+			DeviceID:     "0x2704",
+			Vendor:       "NVIDIA",
+			Class:        "0x030000",
+			Driver:       "vfio-pci",
+			IOMMUGroup:   15,
+			GroupDevices: []string{"0000:01:00.0", "0000:01:00.1"},
+		}}, nil
+	}
+	defer func() { discoverHostGPUs = old }()
+
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(ts.URL + "/api/v1/host/gpus")
+	if err != nil {
+		t.Fatalf("GET /host/gpus: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var got []types.GPUDevice
+	decodeJSON(t, resp, &got)
+	if len(got) != 1 {
+		t.Fatalf("got %d GPUs, want 1", len(got))
+	}
+	if got[0].Address != "0000:01:00.0" || got[0].Driver != "vfio-pci" {
+		t.Fatalf("gpu = %+v, want address 0000:01:00.0 driver vfio-pci", got[0])
+	}
+}
+
 func TestCreateVM_MixedCaseOSTypeAndVariant(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()

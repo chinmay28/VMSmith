@@ -52,6 +52,8 @@ type bulkDeletePortsResponse struct {
 	Results []bulkDeletePortResult `json:"results"`
 }
 
+var discoverHostGPUs = host.DiscoverGPUs
+
 // AddPort handles POST /api/v1/vms/{vmID}/ports
 func (s *Server) AddPort(w http.ResponseWriter, r *http.Request) {
 	vmID := chi.URLParam(r, "vmID")
@@ -530,7 +532,7 @@ func (s *Server) ListHostInterfaces(w http.ResponseWriter, r *http.Request) {
 // display controllers (GPUs) with their IOMMU group membership so operators
 // can pick which device(s) to pass through via VMSpec.GPUs / `vm create --gpu`.
 func (s *Server) ListHostGPUs(w http.ResponseWriter, r *http.Request) {
-	gpus, err := host.DiscoverGPUs()
+	gpus, err := discoverHostGPUs()
 	if err != nil {
 		apiErr := sanitizeManagerError(err)
 		writeAPIError(w, statusForAPIError(apiErr, http.StatusInternalServerError), apiErr)

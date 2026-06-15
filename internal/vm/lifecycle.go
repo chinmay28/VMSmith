@@ -1565,6 +1565,7 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 	cloned.Name = newName
 	cloned.NatStaticIP = ""
 	cloned.NatGateway = ""
+	cloned.GPUs = nil
 	cloned.Tags = append([]string(nil), source.Tags...)
 	cloned.Networks = append([]types.NetworkAttachment(nil), source.Networks...)
 	for i := range cloned.Networks {

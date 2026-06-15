@@ -149,7 +149,9 @@ The PCI device appears in the guest as a normal GPU (`lspci | grep -i nvidia`).
   `managed='yes'`, libvirt reattaches the device to the host driver when the VM
   stops, so the same GPU can be reused by another VM (or the host) afterwards.
 - The GPU set is fixed at create time — there is no live add/remove. Recreate
-  the VM (or clone it; the GPU list is preserved) to change the assignment.
+  the VM to change the assignment. Clones intentionally start without any GPU
+  assignments so they do not inherit passthrough devices that are already bound
+  to the source VM.
 - A GPU can only be assigned to one running VM at a time. Starting a second VM
   that wants the same GPU fails at libvirt with a device-in-use error.
 
