@@ -712,6 +712,9 @@ func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
 	v := seedTestVM(t, mockMgr, "vm-stream-heartbeat", "stream-heartbeat", types.VMStateRunning)
 	m.setState(v.ID, "running")
 
+	// Heartbeats tick every 30s, so keep the request context slightly longer to
+	// leave a small buffer for scheduler / runner jitter without turning this into
+	// an open-ended wait.
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
