@@ -434,6 +434,9 @@ func TestPortForwarder_Update_NilDescriptionIsNoOp(t *testing.T) {
 
 func TestPortForwarder_Add_PersistsTags(t *testing.T) {
 	pf, _ := newTestPortForwarder(t)
+	pf.applyRuleFn = func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	}
 
 	rule, err := pf.Add("vm-tagged", 8080, 80, "192.168.100.10", types.ProtocolTCP, AddOptions{
 		Tags: []string{"production", "web"},
