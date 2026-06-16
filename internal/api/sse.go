@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const sseHeartbeatInterval = 30 * time.Second
+var sseHeartbeatInterval = 30 * time.Second
 
 // sseWriter wraps an http.ResponseWriter to write Server-Sent Event frames.
 // Flushing is delegated to an http.ResponseController so middleware that
