@@ -705,6 +705,10 @@ func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
 }
 
 func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
+	oldInterval := sseHeartbeatInterval
+	sseHeartbeatInterval = 50 * time.Millisecond
+	defer func() { sseHeartbeatInterval = oldInterval }()
+
 	m := newTestMetricsMock()
 	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
 	defer cleanup()
@@ -712,10 +716,7 @@ func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
 	v := seedTestVM(t, mockMgr, "vm-stream-heartbeat", "stream-heartbeat", types.VMStateRunning)
 	m.setState(v.ID, "running")
 
-	// Heartbeats tick every 30s, so keep the request context slightly longer to
-	// leave a small buffer for scheduler / runner jitter without turning this into
-	// an open-ended wait.
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
 	if err != nil {
@@ -757,8 +758,8 @@ func TestStreamVMStats_HeartbeatKeepsIdleStreamsAlive(t *testing.T) {
 		if blank != "\n" {
 			t.Fatalf("expected blank line after heartbeat, got %q", blank)
 		}
-	case <-time.After(33 * time.Second):
-		t.Fatal("expected heartbeat within 33s on idle stream")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected heartbeat within 500ms on idle stream")
 	}
 }
 
