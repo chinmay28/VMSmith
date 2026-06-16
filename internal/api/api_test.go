@@ -56,6 +56,9 @@ func testServerWithConfig(t *testing.T, mutator func(*config.Config)) (*httptest
 	mockMgr := vm.NewMockManager()
 	storageMgr := storage.NewManager(cfg, s)
 	portFwd := network.NewPortForwarder(s)
+	portFwd.SetApplyRuleFunc(func(action string, hostPort, guestPort int, guestIP, proto string) error {
+		return nil
+	})
 
 	apiServer := NewServerWithConfig(mockMgr, storageMgr, portFwd, s, cfg, nil)
 	ts := httptest.NewServer(apiServer)
