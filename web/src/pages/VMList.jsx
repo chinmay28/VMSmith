@@ -4,6 +4,7 @@ import { Plus, Server, Play, Square, Trash2, MoreVertical, Network, X, CheckSqua
 import { vms, images as imagesApi, templates as templatesApi, host as hostApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
+import { useOperationProgress, ProgressReadout } from '../hooks/useOperationProgress.jsx';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, StatusBanner, PaginationControls, LiveIndicator, FilterPanel, ProgressBar, OperationProgress } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
 
@@ -945,6 +946,7 @@ export default function VMList() {
         onClose={() => setShowCreate(false)}
         onCreated={refresh}
         onPasswordGenerated={setGeneratedPassword}
+        onView={(vmId) => navigate(`/vms/${vmId}`)}
       />
       <GeneratedAdminPasswordModal
         info={generatedPassword}
@@ -1333,7 +1335,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
   );
 }
 
-function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
+function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated, onView }) {
   const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
@@ -1341,6 +1343,17 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   const [templateSearchInput, setTemplateSearchInput] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
   const createMut = useMutation(vms.create);
+  // After the create POST returns, the modal switches from the form to a
+  // provisioning view that streams "boot" readiness progress until the VM is
+  // network-reachable — so the operator isn't left guessing when they can SSH.
+  const [created, setCreated] = useState(null);
+  const bootProgress = useOperationProgress(created?.id, 'boot');
+  const provisioning = created != null;
+
+  useEffect(() => {
+    if (created?.id) bootProgress.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [created?.id]);
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
   const { data: templateResponse } = useFetch(
     () => templatesApi.list({ sort: 'name', search: templateSearch }),
@@ -1453,20 +1466,28 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
       });
     }
     try {
-      const created = await createMut.execute(spec);
+      const result = await createMut.execute(spec);
       // Surface a one-time-reveal modal if the daemon auto-generated a
       // Windows Administrator password (Windows guest, no admin_password
       // supplied). The value is shown here exactly once — there is no
       // re-read path.
-      if (created?.generated_admin_password && typeof onPasswordGenerated === 'function') {
-        onPasswordGenerated(created);
+      if (result?.generated_admin_password && typeof onPasswordGenerated === 'function') {
+        onPasswordGenerated(result);
       }
+      // Refresh the list so the new VM appears immediately, but keep the modal
+      // open in the provisioning phase so the readiness bar can run.
       onCreated();
-      onClose();
-      setForm(emptyForm);
-      setNetworks([]);
-      setActiveTab('basic');
+      setCreated(result);
     } catch { /* error displayed via mutation */ }
+  };
+
+  const handleClose = () => {
+    bootProgress.reset();
+    onClose();
+    setCreated(null);
+    setForm(emptyForm);
+    setNetworks([]);
+    setActiveTab('basic');
   };
 
   const noImages = imageList.length === 0;
@@ -1481,7 +1502,10 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   ].filter(Boolean).length;
 
   return (
-    <Modal open={open} onClose={onClose} title="Create Machine" wide>
+    <Modal open={open} onClose={handleClose} title={provisioning ? 'Provisioning Machine' : 'Create Machine'} wide>
+      {provisioning ? (
+        <CreateReadinessView created={created} progress={bootProgress} onClose={handleClose} onView={onView} />
+      ) : (
       <div className="flex flex-col max-h-[75vh]">
 
         {/* Tabs */}
@@ -1926,7 +1950,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
             <p className="text-sm text-red-400 mb-2">Error: {createMut.error}</p>
           )}
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create" disabled={createMut.loading}>Cancel</button>
+            <button className="btn-secondary" onClick={handleClose} data-testid="btn-cancel-create" disabled={createMut.loading}>Cancel</button>
             <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (!form.image && !form.template_id)} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create
@@ -1934,6 +1958,63 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
           </div>
         </div>
       </div>
+      )}
     </Modal>
+  );
+}
+
+// CreateReadinessView is the post-create phase of the Create modal. It streams
+// "boot" readiness progress until the VM is network-reachable so the operator
+// knows when they can SSH in, while still letting them dismiss and continue in
+// the background at any time. A terminal frame with percent === 100 means the
+// VM was confirmed pingable; below 100 means the readiness window elapsed and
+// the VM is still coming up.
+function CreateReadinessView({ created, progress, onClose, onView }) {
+  const ready = progress.done && progress.percent === 100;
+  const timedOut = progress.done && progress.percent !== 100;
+  return (
+    <div className="space-y-5 py-2" data-testid="create-readiness-view">
+      <div>
+        <p className="text-sm text-steel-300">
+          Machine <span className="font-mono text-steel-100">{created?.name}</span> was created and is booting.
+        </p>
+        <p className="text-xs text-steel-500 mt-1">
+          Waiting until it responds to ping before it's reachable over SSH.
+        </p>
+      </div>
+
+      {!progress.done && (
+        <ProgressReadout
+          active
+          percent={progress.percent}
+          label="Waiting for the machine to become reachable…"
+          testId="create-readiness-progress"
+        />
+      )}
+
+      {ready && (
+        <p className="text-sm text-emerald-300" data-testid="create-readiness-ready">
+          ✓ The machine is reachable and ready to use.
+        </p>
+      )}
+
+      {timedOut && (
+        <p className="text-sm text-amber-300" data-testid="create-readiness-timeout">
+          The machine is taking longer than expected to come up. It will keep
+          booting in the background — try connecting again shortly.
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        {created?.id && typeof onView === 'function' && (
+          <button className="btn-secondary" onClick={() => onView(created.id)} data-testid="btn-readiness-view">
+            View machine
+          </button>
+        )}
+        <button className="btn-primary" onClick={onClose} data-testid="btn-readiness-close">
+          {progress.done ? 'Done' : 'Continue in background'}
+        </button>
+      </div>
+    </div>
   );
 }

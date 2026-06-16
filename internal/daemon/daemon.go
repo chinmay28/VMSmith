@@ -173,6 +173,11 @@ func New(cfg *config.Config) (*Daemon, error) {
 	apiServer := api.NewServerWithMetrics(vmMgr, storageMgr, portFwd, s, cfg, web.Handler(), metricsMgr)
 	apiServer.SetEventBus(eventBus)
 
+	// Bridge VM readiness progress (create / start / restart waiting for the
+	// guest to become pingable) onto the per-VM operation-progress SSE channel
+	// so the GUI can show a live progress bar instead of the operator polling.
+	libvirtMgr.SetReadinessReporter(apiServer.ReadinessReporter())
+
 	// Webhook subsystem.  Always wire so the API surface is available; if no
 	// webhooks are registered the manager simply has no workers.
 	webhookMgr := webhooks.NewManager(s, eventBus, webhooks.Config{

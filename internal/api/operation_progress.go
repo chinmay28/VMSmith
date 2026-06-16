@@ -102,6 +102,19 @@ func (b *operationProgressBroker) progressCallback(key, op, name string) func(fl
 	}
 }
 
+// ReadinessReporter returns a callback the VM manager can invoke to stream VM
+// readiness progress (create / start / restart waiting for the guest to become
+// pingable) onto the per-VM operation-progress SSE channel. Returns nil when
+// the broker is unavailable, which the manager treats as "no reporting".
+func (s *Server) ReadinessReporter() func(vmID, op string, percent float64, done bool) {
+	if s.operationProgress == nil {
+		return nil
+	}
+	return func(vmID, op string, percent float64, done bool) {
+		s.operationProgress.publish(vmID, operationProgressMsg{Op: op, Percent: percent, Done: done})
+	}
+}
+
 // StreamOperationProgress handles GET /api/v1/vms/{vmID}/operations/progress —
 // an SSE stream of long-operation progress for the VM. Frames carry {op, name,
 // percent, done}; the stream closes when a Done frame arrives or the client

@@ -7,11 +7,11 @@ import {
 import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
+import { useOperationProgress, ProgressReadout } from '../hooks/useOperationProgress.jsx';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
 import { StatusBadge, Modal, Spinner, ErrorBanner, EmptyState, LiveIndicator, PaginationControls, ProgressBar, OperationProgress } from '../components/Shared';
 import MetricChart from '../components/MetricChart';
 import { normalizeSpec, safeArray } from '../utils/normalize';
-import { getAuthToken } from '../auth';
 import Activity from './Activity';
 
 function resolveOsType(spec = {}) {
@@ -239,6 +239,39 @@ export default function VMDetail() {
   const resumeMut    = useMutation(vms.resume);
   const deleteMut    = useMutation(vms.delete);
 
+  // Readiness progress: the start / restart POST returns as soon as the domain
+  // boots, but the guest is not usable until it is network-reachable. The
+  // daemon streams "boot" progress frames over the operation-progress SSE
+  // channel; subscribe here so the operator sees a bar until the VM is pingable
+  // instead of refreshing the page by hand.
+  const bootProgress = useOperationProgress(id, 'boot');
+  const [booting, setBooting] = useState(false);
+
+  // When a readiness wait finishes, refresh the VM so the discovered IP shows
+  // up, then clear the bar.
+  useEffect(() => {
+    if (booting && bootProgress.done) {
+      refresh();
+      setBooting(false);
+      bootProgress.reset();
+    }
+  }, [booting, bootProgress.done]);
+
+  // runWithReadiness fires a lifecycle mutation, then begins streaming readiness
+  // progress so the bar persists past the (fast) POST until the guest is up.
+  const runWithReadiness = async (mut) => {
+    bootProgress.start();
+    setBooting(true);
+    try {
+      await mut.execute(id);
+      refresh();
+    } catch {
+      // The mutation surfaced its own error; stop the readiness bar.
+      setBooting(false);
+      bootProgress.reset();
+    }
+  };
+
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
   if (error) return <ErrorBanner message={error} />;
   if (!vm) return null;
@@ -296,7 +329,7 @@ export default function VMDetail() {
         </div>
         <div className="flex items-center gap-2">
           {vm.state === 'stopped' && (
-            <button className="btn-primary" onClick={() => { startMut.execute(id).then(refresh); }} data-testid="btn-start">
+            <button className="btn-primary" onClick={() => { runWithReadiness(startMut); }} data-testid="btn-start">
               <Play size={14} /> Start
             </button>
           )}
@@ -319,7 +352,7 @@ export default function VMDetail() {
             </button>
           )}
           {vm.state === 'running' && (
-            <button className="btn-secondary" onClick={() => { restartMut.execute(id).then(refresh); }} data-testid="btn-restart" title="Graceful stop and start">
+            <button className="btn-secondary" onClick={() => { runWithReadiness(restartMut); }} data-testid="btn-restart" title="Graceful stop and start">
               <RotateCcw size={14} /> Restart
             </button>
           )}
@@ -365,6 +398,17 @@ export default function VMDetail() {
                 : 'Deleting machine…'
             }
             testId="vm-lifecycle-progress"
+          />
+        </div>
+      )}
+
+      {booting && !startMut.loading && !restartMut.loading && (
+        <div className="mb-4">
+          <ProgressReadout
+            active
+            percent={bootProgress.percent}
+            label="Waiting for the machine to become reachable…"
+            testId="vm-readiness-progress"
           />
         </div>
       )}
@@ -1843,68 +1887,6 @@ function AddPortModal({ vmId, open, onClose, onCreated }) {
 }
 
 // --- Export Image Modal ---
-// useOperationProgress subscribes to the per-VM operation-progress SSE channel
-// and tracks the live percentage for a single op ("export" | "clone"). Returns
-// { percent, start, stop } — call start() right before the blocking POST and
-// stop() in its finally. Best-effort: if SSE is unavailable the caller simply
-// falls back to the indeterminate bar (percent stays null).
-function useOperationProgress(vmId, op, name) {
-  const [percent, setPercent] = useState(null);
-  const esRef = useRef(null);
-
-  const stop = () => {
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-  };
-
-  useEffect(() => stop, []);
-
-  const start = () => {
-    setPercent(0);
-    try {
-      const token = getAuthToken();
-      const qs = token ? `?api_key=${encodeURIComponent(token)}` : '';
-      const es = new EventSource(`/api/v1/vms/${vmId}/operations/progress${qs}`);
-      esRef.current = es;
-      es.addEventListener('operation.progress', (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.op && op && msg.op !== op) return;
-          if (msg.name && name && msg.name !== name) return;
-          if (msg.done) { stop(); return; }
-          if (typeof msg.percent === 'number') setPercent(msg.percent);
-        } catch { /* ignore malformed frame */ }
-      });
-      es.onerror = () => { /* keep the indeterminate fallback */ };
-    } catch { /* EventSource unsupported */ }
-  };
-
-  const finish = () => { setPercent(100); };
-  const reset = () => { stop(); setPercent(null); };
-
-  return { percent, start, stop, finish, reset };
-}
-
-// ProgressReadout renders a determinate percentage bar once a real frame has
-// arrived, otherwise the indeterminate OperationProgress fallback.
-function ProgressReadout({ active, percent, label, testId }) {
-  if (!active) return null;
-  if (percent != null && percent > 0) {
-    return (
-      <div className="space-y-1.5" data-testid={testId} role="status" aria-live="polite">
-        <div className="flex items-center justify-between text-xs text-steel-400">
-          <span className="inline-flex items-center gap-2"><Spinner size={12} />{label}</span>
-          <span className="font-mono">{Math.round(percent)}%</span>
-        </div>
-        <ProgressBar value={percent} max={100} variant="info" />
-      </div>
-    );
-  }
-  return <OperationProgress active label={label} testId={testId} />;
-}
-
 function ExportImageModal({ vmId, open, onClose }) {
   const [name, setName] = useState('');
   const createMut = useMutation((n) => imagesApi.create(vmId, n));

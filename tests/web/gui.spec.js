@@ -5707,8 +5707,11 @@ test.describe("Full Lifecycle", () => {
     await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
     await page.getByTestId("btn-submit-create").click();
 
-    // 2. New VM should appear in list
+    // 2. New VM should appear in list. The create modal stays open showing a
+    // readiness progress bar until the VM is reachable; dismiss it with
+    // "Continue in background" so we can interact with the list.
     await expect(page.getByTestId("vm-card-e2e-test-vm")).toBeVisible();
+    await page.getByTestId("btn-readiness-close").click();
 
     // 3. Click into VM detail
     await page.getByTestId("vm-card-e2e-test-vm").click();

@@ -50,6 +50,18 @@ func cloneProgressFromContext(ctx context.Context) func(percent float64) {
 	return nil
 }
 
+// ReadinessReporter receives progress frames while the manager waits for a VM
+// to become network-reachable after a create / start / restart. percent climbs
+// from 0 while polling; the terminal frame (done=true) carries percent=100 when
+// the VM was confirmed pingable, or a value below 100 when the wait timed out.
+// It lets the API layer surface a live progress bar without the vm package
+// importing the api package (mirrors the SetEventBus decoupling).
+type ReadinessReporter func(vmID, op string, percent float64, done bool)
+
+// readinessOpBoot is the operation label carried on readiness progress frames
+// for create / start / restart so the GUI can subscribe to a single, unified op.
+const readinessOpBoot = "boot"
+
 // LibvirtManager implements the Manager interface using libvirt.
 type LibvirtManager struct {
 	conn                *libvirt.Connect
@@ -60,6 +72,7 @@ type LibvirtManager struct {
 	lifecycleStopCh     chan struct{}
 	eventBus            *events.EventBus
 	consoleTerminator   ConsoleSessionTerminator
+	readinessReporter   ReadinessReporter
 }
 
 // SetEventBus wires an event bus so the manager can emit system events for
@@ -81,6 +94,21 @@ func (m *LibvirtManager) SetConsoleSessionTerminator(fn ConsoleSessionTerminator
 func (m *LibvirtManager) notifyConsoleTermination(vmID, reason string) {
 	if m.consoleTerminator != nil {
 		m.consoleTerminator(vmID, reason)
+	}
+}
+
+// SetReadinessReporter wires an optional callback invoked with progress frames
+// while a freshly created / started / restarted VM is polled for network
+// reachability. Safe to call before or after lifecycle operations; nil disables
+// reporting and the background monitor simply logs as before.
+func (m *LibvirtManager) SetReadinessReporter(fn ReadinessReporter) {
+	m.readinessReporter = fn
+}
+
+// reportReady is a nil-safe wrapper around the configured ReadinessReporter.
+func (m *LibvirtManager) reportReady(vmID, op string, percent float64, done bool) {
+	if m.readinessReporter != nil {
+		m.readinessReporter(vmID, op, percent, done)
 	}
 }
 
@@ -330,9 +358,10 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, fmt.Errorf("storing VM metadata: %w", err)
 	}
 
-	// Monitor in background: wait for DHCP IP; if none after 60 s apply a
-	// static IP fallback via libvirt DHCP reservation + VM restart.
-	go m.startIPMonitor(id, spec.Name, vmDir, natMAC, spec)
+	// Monitor in background: wait for DHCP IP; if none after the readiness
+	// window apply a static IP fallback via libvirt DHCP reservation + VM
+	// restart.  Progress is streamed to any configured ReadinessReporter.
+	go m.startIPMonitor(id, spec.Name, natMAC, readinessOpBoot, spec, true)
 
 	// Set the one-time generated password on the response copy AFTER
 	// PutVM so it never lands in bbolt. Get/List rehydrate from the store and
@@ -475,7 +504,14 @@ func (m *LibvirtManager) Start(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateRunning
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+
+	// Stream readiness progress until the VM is pingable.  The DHCP reservation
+	// already exists from create, so no static-IP fallback is needed here.
+	go m.startIPMonitor(id, vm.Name, vm.NatMAC, readinessOpBoot, vm.Spec, false)
+	return nil
 }
 
 // Stop shuts down a running VM.
@@ -584,7 +620,14 @@ func (m *LibvirtManager) Restart(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateRunning
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+
+	// Stream readiness progress until the VM is pingable again.  The DHCP
+	// reservation persists across a restart, so no static-IP fallback is needed.
+	go m.startIPMonitor(id, vm.Name, vm.NatMAC, readinessOpBoot, vm.Spec, false)
+	return nil
 }
 
 // Reboot signals the guest OS to perform an in-guest reboot via libvirt's
@@ -2040,22 +2083,46 @@ func hasStaticIPs(networks []types.NetworkAttachment) bool {
 	return false
 }
 
-// startIPMonitor runs in a goroutine after VM creation.  It waits up to 60 s
-// for the VM to acquire a pingable IP via DHCP.  If that times out it finds
-// an available IP, adds a libvirt DHCP host reservation so dnsmasq always
-// gives that IP to the VM's MAC, restarts the VM, and waits another 60 s to
-// verify the IP is reachable.
-func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec types.VMSpec) {
+// startIPMonitor runs in a goroutine after a VM create / start / restart.  It
+// waits up to dhcpTimeout for the VM to become network-reachable (pingable),
+// streaming progress frames to any configured ReadinessReporter so the GUI can
+// show a progress bar instead of the operator polling by hand.  When
+// allowFallback is true (the create path) and DHCP times out it finds an
+// available IP, adds a libvirt DHCP host reservation so dnsmasq always gives
+// that IP to the VM's MAC, restarts the VM, and verifies reachability.  When
+// allowFallback is false (start / restart) the DHCP reservation already exists,
+// so it simply reports the wait finished without perturbing the VM.
+//
+// op is the operation label carried on every progress frame (readinessOpBoot).
+func (m *LibvirtManager) startIPMonitor(vmID, vmName, natMAC, op string, spec types.VMSpec, allowFallback bool) {
 	// 120 s gives Rocky 9 (and other RHEL-based images) enough time for cloud-init to
 	// finish writing the NM keyfile and bring the interface up.  Ubuntu typically
 	// completes in ~30 s, so this longer window does not hurt.
 	const dhcpTimeout = 120 * time.Second
 	const pollInterval = 5 * time.Second
 
+	// emit publishes a progress frame.  While polling, percent climbs with
+	// elapsed time but is capped below 100 so a terminal percent of exactly 100
+	// uniquely signals confirmed reachability; a terminal frame below 100 means
+	// the readiness window elapsed without a successful ping.
+	start := time.Now()
+	emit := func(done, ready bool) {
+		pct := float64(time.Since(start)) / float64(dhcpTimeout) * 100
+		if pct > 95 {
+			pct = 95
+		}
+		if done && ready {
+			pct = 100
+		}
+		m.reportReady(vmID, op, pct, done)
+	}
+	emit(false, false) // 0% kickoff frame so subscribers see the bar immediately
+
 	// For user-specified static IP: just verify it becomes pingable.
 	if spec.NatStaticIP != "" {
 		ip, _, err := net.ParseCIDR(spec.NatStaticIP)
 		if err != nil {
+			emit(true, false)
 			return
 		}
 		deadline := time.Now().Add(dhcpTimeout)
@@ -2063,10 +2130,13 @@ func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec
 			time.Sleep(pollInterval)
 			if pingable(ip.String()) {
 				logger.Info("daemon", "VM static IP verified pingable", "vm", vmName, "ip", ip.String())
+				emit(true, true)
 				return
 			}
+			emit(false, false)
 		}
-		logger.Warn("daemon", "VM static IP not pingable after 60s", "vm", vmName, "ip", ip.String())
+		logger.Warn("daemon", "VM static IP not pingable within readiness window", "vm", vmName, "ip", ip.String())
+		emit(true, false)
 		return
 	}
 
@@ -2077,14 +2147,26 @@ func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec
 		time.Sleep(pollInterval)
 		dom, err := m.conn.LookupDomainByName(vmName)
 		if err != nil {
+			emit(false, false)
 			continue
 		}
 		ip := getDomainIP(dom, m.conn)
 		dom.Free()
 		if ip != "" && pingable(ip) {
 			logger.Info("daemon", "VM got pingable DHCP IP", "vm", vmName, "ip", ip)
+			emit(true, true)
 			return
 		}
+		emit(false, false)
+	}
+
+	if !allowFallback {
+		// start / restart: the DHCP reservation already exists from create, so
+		// don't disrupt the VM with a fallback restart — just report the wait
+		// finished (possibly without confirming reachability).
+		logger.Warn("daemon", "VM not pingable within readiness window", "vm", vmName, "op", op)
+		emit(true, false)
+		return
 	}
 
 	// DHCP timed out — fall back to a static IP via DHCP reservation.
@@ -2092,13 +2174,16 @@ func (m *LibvirtManager) startIPMonitor(vmID, vmName, vmDir, natMAC string, spec
 	staticIP, err := m.findAvailableIP()
 	if err != nil {
 		logger.Error("daemon", "could not find available static IP", "vm", vmName, "error", err.Error())
+		emit(true, false)
 		return
 	}
 	if err := m.applyStaticIPFallback(vmID, vmName, natMAC, spec, staticIP); err != nil {
 		logger.Error("daemon", "static IP fallback failed", "vm", vmName, "ip", staticIP, "error", err.Error())
+		emit(true, false)
 		return
 	}
 	logger.Info("daemon", "static IP fallback succeeded", "vm", vmName, "ip", staticIP)
+	m.reportReady(vmID, op, 100, true)
 }
 
 // findAvailableIP returns an unallocated IP from the NAT network's DHCP range.

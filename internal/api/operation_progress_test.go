@@ -103,6 +103,38 @@ func TestOperationProgressBrokerThrottlesCallback(t *testing.T) {
 	}
 }
 
+// ReadinessReporter publishes VM readiness frames onto the per-VM channel so a
+// subscriber sees the boot progress streamed by the lifecycle monitor.
+func TestReadinessReporterPublishesBootFrames(t *testing.T) {
+	s := &Server{operationProgress: newOperationProgressBroker()}
+	report := s.ReadinessReporter()
+	if report == nil {
+		t.Fatal("expected a non-nil reporter when broker is configured")
+	}
+
+	ch, cancel := s.operationProgress.subscribe("vm-1")
+	defer cancel()
+
+	report("vm-1", "boot", 100, true)
+
+	select {
+	case msg := <-ch:
+		if msg.Op != "boot" || msg.Percent != 100 || !msg.Done {
+			t.Fatalf("got %+v, want op=boot percent=100 done=true", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for readiness frame")
+	}
+}
+
+// With no broker configured the reporter is nil so the manager skips reporting.
+func TestReadinessReporterNilWithoutBroker(t *testing.T) {
+	s := &Server{}
+	if s.ReadinessReporter() != nil {
+		t.Fatal("expected nil reporter when broker is unavailable")
+	}
+}
+
 func drainPercents(ch <-chan operationProgressMsg, n int) []float64 {
 	out := make([]float64, 0, n)
 	for i := 0; i < n; i++ {

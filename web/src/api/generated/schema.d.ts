@@ -1104,13 +1104,18 @@ export interface paths {
         /**
          * Stream long-operation progress (SSE)
          * @description Server-Sent Events stream of long-running operation progress for the VM
-         *     — currently image export (`POST /images`) and clone (`POST
-         *     /vms/{id}/clone`). Each `operation.progress` event's `data` field is a
-         *     JSON object `{ "op": string, "name": string, "percent": number, "done":
-         *     boolean }` where `op` is `"export"` or `"clone"`, carrying the live
-         *     `qemu-img convert` completion percentage (throttled to whole-percent
-         *     steps). A terminal frame with `done: true` is sent when the operation
-         *     finishes (success or failure) and closes the stream. The daemon replays
+         *     — image export (`POST /images`), clone (`POST /vms/{id}/clone`), and VM
+         *     readiness after create / start / restart (`op: "boot"`). Each
+         *     `operation.progress` event's `data` field is a JSON object
+         *     `{ "op": string, "name": string, "percent": number, "done": boolean }`.
+         *     For `"export"` / `"clone"` the `percent` is the live `qemu-img convert`
+         *     completion percentage (throttled to whole-percent steps). For `"boot"`
+         *     the `percent` climbs with elapsed time while the daemon polls the guest
+         *     for network reachability (ping); the terminal frame carries
+         *     `percent: 100` when the VM was confirmed reachable, or a value below 100
+         *     when the readiness window elapsed without a successful ping. A terminal
+         *     frame with `done: true` is sent when the operation finishes (success or
+         *     failure) and closes the stream. The daemon replays
          *     the most recent frame to a subscriber that connects mid-operation, so a
          *     small connect delay never loses progress. This dedicated channel
          *     bypasses the event bus, so the high-frequency frames never reach the
