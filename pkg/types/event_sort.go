@@ -15,6 +15,7 @@ const (
 	EventSortSeverity   = "severity"
 	EventSortActor      = "actor"
 	EventSortResourceID = "resource_id"
+	EventSortVMID       = "vm_id"
 )
 
 // IsValidEventSort reports whether s is an accepted event list sort field.
@@ -24,7 +25,7 @@ func IsValidEventSort(s string) bool {
 	switch s {
 	case EventSortID, EventSortOccurredAt, EventSortType,
 		EventSortSource, EventSortSeverity, EventSortActor,
-		EventSortResourceID:
+		EventSortResourceID, EventSortVMID:
 		return true
 	}
 	return false
@@ -124,6 +125,28 @@ func SortEvents(events []*Event, sortField, order string) {
 				less = true
 			case rx != sx:
 				less = rx < sx
+			default:
+				less = ai.ID < aj.ID
+			}
+		case EventSortVMID:
+			// Case-sensitive comparison mirrors the case-sensitive
+			// `?vm_id=` exact-match filter contract — VM IDs are opaque
+			// `vm-<unix-nano>` strings operators reference verbatim. Empty
+			// vm_ids (host-level events like `system.daemon_started`)
+			// sort to the tail of asc / head of desc, mirroring the
+			// nil-trailing semantics on every other nullable sort axis
+			// (actor, resource_id, ip, guest_ip, last_fired_at,
+			// last_delivery_at).
+			vx, wx := ai.VMID, aj.VMID
+			switch {
+			case vx == "" && wx == "":
+				less = ai.ID < aj.ID
+			case vx == "":
+				less = false
+			case wx == "":
+				less = true
+			case vx != wx:
+				less = vx < wx
 			default:
 				less = ai.ID < aj.ID
 			}

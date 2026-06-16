@@ -3906,19 +3906,20 @@ export interface paths {
                     until?: string;
                     /**
                      * @description Sort field. `type`, `source`, and `severity` match
-                     *     case-insensitively; `actor` and `resource_id` are
+                     *     case-insensitively; `actor`, `resource_id`, and `vm_id` are
                      *     **case-sensitive** to mirror their respective case-sensitive
-                     *     `?actor=` / `?resource_id=` exact-match filter contracts.
-                     *     Events with an empty `actor` (legacy events written before
-                     *     the actor attribution sweep) and events with an empty
-                     *     `resource_id` sort to the tail of `asc` and the head of
-                     *     `desc`, mirroring the nil-trailing semantics on the VM list
-                     *     `ip` axis and the schedule `last_fired_at` / `next_fire_at`
-                     *     axes. All comparators tiebreak on `id` so paginated responses
-                     *     are deterministic. Defaults to `id` so the long-standing
-                     *     newest-first contract is preserved.
+                     *     `?actor=` / `?resource_id=` / `?vm_id=` exact-match filter
+                     *     contracts. Events with an empty `actor` (legacy events
+                     *     written before the actor attribution sweep), an empty
+                     *     `resource_id`, or an empty `vm_id` (host-level events like
+                     *     `system.daemon_started`) sort to the tail of `asc` and the
+                     *     head of `desc`, mirroring the nil-trailing semantics on the
+                     *     VM list `ip` axis and the schedule `last_fired_at` /
+                     *     `next_fire_at` axes. All comparators tiebreak on `id` so
+                     *     paginated responses are deterministic. Defaults to `id` so
+                     *     the long-standing newest-first contract is preserved.
                      */
-                    sort?: "id" | "occurred_at" | "type" | "source" | "severity" | "actor" | "resource_id";
+                    sort?: "id" | "occurred_at" | "type" | "source" | "severity" | "actor" | "resource_id" | "vm_id";
                     /**
                      * @description Sort direction. Defaults to `desc` so the long-standing
                      *     newest-first contract is preserved.

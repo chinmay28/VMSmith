@@ -315,6 +315,98 @@ func TestIsValidEventSort_AcceptsResourceID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `vm_id` sort axis (5.4.93)
+// ============================================================
+
+func TestSortEvents_ByVMID_AscEmptyTrailing(t *testing.T) {
+	// Empty vm_id (host-level events like `system.daemon_started`)
+	// sinks to the tail of `asc`, mirroring the nil-trailing contract on
+	// the events `actor` axis (5.4.87) and `resource_id` axis (5.4.90).
+	// Concrete vm_ids sort case-sensitively (mirrors the case-sensitive
+	// `?vm_id=` filter).
+	evts := []*Event{
+		{ID: "1", VMID: "vm-200"},
+		{ID: "2", VMID: ""},
+		{ID: "3", VMID: "vm-100"},
+	}
+	SortEvents(evts, EventSortVMID, SortOrderAsc)
+	want := []string{"3", "1", "2"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByVMID_DescEmptyLeading(t *testing.T) {
+	// Empty vm_id heads `desc` — same nil-handling, mirrored.
+	evts := []*Event{
+		{ID: "1", VMID: "vm-200"},
+		{ID: "2", VMID: ""},
+		{ID: "3", VMID: "vm-100"},
+	}
+	SortEvents(evts, EventSortVMID, SortOrderDesc)
+	want := []string{"2", "1", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("desc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByVMID_CaseSensitive(t *testing.T) {
+	// `VM-A` < `vm-a` lexically in ASCII (uppercase < lowercase), and the
+	// vm_id axis is case-sensitive on purpose so the sort agrees with the
+	// case-sensitive `?vm_id=` exact-match filter. Note that production VM
+	// IDs are always lowercase opaque `vm-<unix-nano>` strings; the upper
+	// case payload here is a unit-test contrivance to exercise the
+	// case-sensitivity contract that the API/CLI parsers depend on.
+	evts := []*Event{
+		{ID: "1", VMID: "vm-a"},
+		{ID: "2", VMID: "VM-A"},
+	}
+	SortEvents(evts, EventSortVMID, SortOrderAsc)
+	want := []string{"2", "1"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("case-sensitive asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByVMID_TiebreaksOnID(t *testing.T) {
+	evts := []*Event{
+		{ID: "3", VMID: "vm-x"},
+		{ID: "1", VMID: "vm-x"},
+		{ID: "2", VMID: "vm-x"},
+	}
+	SortEvents(evts, EventSortVMID, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("tiebreak: got %v, want %v", got, want)
+	}
+}
+
+func TestSortEvents_ByVMID_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// Every vm_id empty — comparator must fall through to the id tiebreak
+	// instead of treating empty<empty as a swap candidate. Common for a
+	// timeline that contains only host-level (`system.*`) events.
+	evts := []*Event{
+		{ID: "3", VMID: ""},
+		{ID: "1", VMID: ""},
+		{ID: "2", VMID: ""},
+	}
+	SortEvents(evts, EventSortVMID, SortOrderAsc)
+	want := []string{"1", "2", "3"}
+	if got := evtIDs(evts); !equalStrings(got, want) {
+		t.Errorf("all-empty: got %v, want %v", got, want)
+	}
+}
+
+func TestIsValidEventSort_AcceptsVMID(t *testing.T) {
+	// Defense-in-depth: the API parser, CLI parser, and SortEvents all
+	// gate on IsValidEventSort, so a regression here silently breaks
+	// every surface at once.
+	if !IsValidEventSort(EventSortVMID) {
+		t.Fatalf("IsValidEventSort(%q) = false, want true", EventSortVMID)
+	}
+}
+
 func TestSortEvents_StableEqualKeys(t *testing.T) {
 	// Two independent sorts on equal-key data must produce the same order so
 	// repeated paginated requests return deterministic results.
