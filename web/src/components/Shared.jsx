@@ -259,7 +259,7 @@ export function StatusBanner({ message, variant = 'info', onDismiss, testId }) {
 // compact header (icon + title + active-count chip + optional "Clear all")
 // and a body that the operator can fold away. Defaults to open so the controls
 // are reachable on first paint; collapse state is local (resets per load).
-export function FilterPanel({ activeCount = 0, onClear, defaultOpen = true, children, testId, clearTestId }) {
+export function FilterPanel({ activeCount = 0, onClear, defaultOpen = false, children, testId, clearTestId }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="card mb-4 overflow-hidden" data-testid={testId}>

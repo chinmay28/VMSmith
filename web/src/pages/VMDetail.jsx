@@ -374,6 +374,15 @@ export default function VMDetail() {
         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} testId="tab-overview">
           Overview
         </TabButton>
+        <TabButton active={activeTab === 'snapshots'} onClick={() => setActiveTab('snapshots')} testId="tab-snapshots">
+          Snapshots
+        </TabButton>
+        <TabButton active={activeTab === 'ports'} onClick={() => setActiveTab('ports')} testId="tab-ports">
+          Port Forwards
+        </TabButton>
+        <TabButton active={activeTab === 'schedules'} onClick={() => setActiveTab('schedules')} testId="tab-schedules">
+          Schedules
+        </TabButton>
         <TabButton active={activeTab === 'metrics'} onClick={() => setActiveTab('metrics')} testId="tab-metrics">
           Metrics
         </TabButton>
@@ -391,6 +400,8 @@ export default function VMDetail() {
           <VMMetrics vmId={id} />
         </div>
       ) : (
+      <>
+      {activeTab === 'overview' && (
       <>
       {/* Info grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -451,6 +462,9 @@ export default function VMDetail() {
         </div>
       )}
 
+      </>
+      )}
+      {activeTab === 'schedules' && (
       <div className="card mb-4" data-testid="vm-detail-schedules">
         <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
           <div className="flex items-center gap-2">
@@ -496,10 +510,9 @@ export default function VMDetail() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Snapshots + Ports side by side */}
-      <div className="grid grid-cols-2 gap-4">
-        {/* Snapshots */}
+      {activeTab === 'snapshots' && (
         <div className="card">
           <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
             <div className="flex items-center gap-2">
@@ -617,8 +630,9 @@ export default function VMDetail() {
           </div>
           <SnapshotList vmId={id} snapList={snapList} refreshSnaps={refreshSnaps} snapSearch={snapSearch} />
         </div>
+      )}
 
-        {/* Port Forwards */}
+      {activeTab === 'ports' && (
         <div className="card">
           <div className="flex items-center justify-between px-4 py-3 border-b border-steel-800/40">
             <div className="flex items-center gap-2">
@@ -627,7 +641,7 @@ export default function VMDetail() {
             </div>
             <div className="flex items-center gap-2">
               <select
-                className="form-select text-xs"
+                className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-xs text-steel-200"
                 value={portSort}
                 onChange={(e) => setPortSort(e.target.value)}
                 data-testid="port-sort-field"
@@ -641,7 +655,7 @@ export default function VMDetail() {
                 <option value="guest_ip">Guest IP</option>
               </select>
               <select
-                className="form-select text-xs"
+                className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-xs text-steel-200"
                 value={portOrder}
                 onChange={(e) => setPortOrder(e.target.value)}
                 data-testid="port-sort-order"
@@ -651,7 +665,7 @@ export default function VMDetail() {
                 <option value="desc">Desc</option>
               </select>
               <select
-                className="form-select text-xs"
+                className="bg-steel-900/60 border border-steel-700/60 rounded px-2 py-1 text-xs text-steel-200"
                 value={portProtocol}
                 onChange={(e) => setPortProtocol(e.target.value)}
                 data-testid="port-protocol-filter"
@@ -796,14 +810,15 @@ export default function VMDetail() {
             </div>
           )}
         </div>
-      </div>
+      )}
 
-      {/* Export to image */}
-      <div className="mt-4">
-        <button className="btn-secondary" onClick={() => setShowImageModal(true)}>
-          <Download size={14} /> Export as Image
-        </button>
-      </div>
+      {activeTab === 'overview' && (
+        <div className="mt-4">
+          <button className="btn-secondary" onClick={() => setShowImageModal(true)}>
+            <Download size={14} /> Export as Image
+          </button>
+        </div>
+      )}
       </>
       )}
 
@@ -1276,6 +1291,11 @@ function SnapshotList({ vmId, snapList, refreshSnaps, snapSearch }) {
                   <Clock size={12} className="text-steel-600 flex-shrink-0" />
                   <span className="font-mono text-sm text-steel-200 truncate">{snap.name}</span>
                 </div>
+                {snap.created_at ? (
+                  <p className="text-[11px] font-mono text-steel-500 mt-0.5 ml-5" data-testid={`snap-created-${snap.name}`}>
+                    {new Date(snap.created_at).toLocaleString()}
+                  </p>
+                ) : null}
                 {snap.description ? (
                   <p className="text-xs text-steel-500 mt-1 ml-5 line-clamp-2" data-testid={`snap-desc-${snap.name}`}>{snap.description}</p>
                 ) : null}

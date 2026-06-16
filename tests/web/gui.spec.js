@@ -1331,6 +1331,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
   });
 
@@ -1467,6 +1468,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("test-snap");
     await page.getByTestId("btn-submit-snapshot").click();
@@ -1479,6 +1481,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("noted-snap");
     await page.getByTestId("input-snap-description").fill("captured before risky upgrade");
@@ -1492,6 +1495,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("checkpoint before May deploy");
   });
 
@@ -1499,6 +1503,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Pre-existing snapshot before-deploy renders its seeded description.
     await expect(page.getByTestId("snap-desc-before-deploy")).toHaveText("checkpoint before May deploy");
 
@@ -1516,6 +1521,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-edit-snap-before-deploy").click();
     await page.getByTestId("input-edit-snap-description").fill("");
     await page.getByTestId("btn-submit-edit-snap").click();
@@ -1528,6 +1534,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Snapshot "before-deploy" should exist
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
 
@@ -1541,6 +1548,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Three seeded snapshots: before-deploy + two auto-* dailies
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
@@ -1565,6 +1573,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("snap-select-all").check();
     await page.getByTestId("btn-bulk-delete-snaps").click();
 
@@ -1578,6 +1587,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // All three seeded snapshots render before we touch the dropdowns.
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
@@ -1631,6 +1641,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // All three seeded snapshots are visible before typing.
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
@@ -1658,6 +1669,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("snap-list-search").fill("checkpoint");
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toHaveCount(0);
@@ -1668,6 +1680,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("snap-list-search").fill("needle-not-present");
     // All three rows disappear; the empty-state card surfaces the needle in
     // its description.
@@ -1682,6 +1695,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Baseline: all three seeded snapshots visible.
     await expect(page.getByTestId("snap-before-deploy")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
@@ -1707,6 +1721,7 @@ test.describe("VM Detail", () => {
   test("snapshot ?since= filter narrows the list by created_at and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("tab-snapshots").click();
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-07")).toBeVisible();
 
@@ -1729,6 +1744,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("snap-list-until").fill("2026-05-06T23:59");
     await expect(page.getByTestId("snap-auto-2026-05-06")).toBeVisible();
     await expect(page.getByTestId("snap-auto-2026-05-07")).toHaveCount(0);
@@ -1741,6 +1757,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("tagged-snap");
     // Mixed case + duplicate to exercise the mock-server normalisation.
@@ -1757,6 +1774,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Seed a fresh tagged snapshot via the Create flow so we can edit it.
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("editable-snap");
@@ -1779,6 +1797,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     // Seed and clear.
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("clearable-snap");
@@ -1798,6 +1817,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("tagged-search-snap");
     await page.getByTestId("input-snap-tags").fill("rocketscience");
@@ -1816,6 +1836,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("btn-new-port").click();
     await page.getByTestId("input-host-port").fill("2222");
     await page.getByTestId("input-guest-port").fill("22");
@@ -1831,6 +1852,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Two seeded port forwards on web-server
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
@@ -1849,6 +1871,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("port-select-all").check();
     await page.getByTestId("btn-bulk-delete-ports").click();
 
@@ -1860,6 +1883,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Default sort=id asc — both seeded rows are visible in id order.
     // ID "pf-seed-http" < "pf-seed-ssh" lexicographically.
     const rows = () => page.locator('[data-testid^="port-row-"]');
@@ -1882,6 +1906,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("port-sort-field").selectOption("description");
     // pf-seed-ssh has description "ssh-jumpbox"; pf-seed-http has no description.
     // Empty string sorts before "ssh-jumpbox" so pf-seed-http comes first.
@@ -1894,6 +1919,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // The new "Guest IP" option appears on the sort dropdown alongside the
     // existing ID / Host port / Guest port / Protocol / Description axes.
     const sortDropdown = page.getByTestId("port-sort-field");
@@ -1918,6 +1944,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Both seeded port forwards visible before typing.
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
@@ -1938,6 +1965,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // pf-seed-http has host_port 8080; pf-seed-ssh has 2222. Searching 8080
     // should leave only the http rule.
     await page.getByTestId("port-list-search").fill("8080");
@@ -1949,6 +1977,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("port-list-search").fill("needle-not-present");
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
     await expect(page.getByTestId("port-row-pf-seed-http")).toHaveCount(0);
@@ -1959,6 +1988,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Both seeded port forwards are tcp — udp filter should show neither.
     await page.getByTestId("port-protocol-filter").selectOption("udp");
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toHaveCount(0);
@@ -1976,6 +2006,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Switch through tcp then back to "" to confirm Any clears the URL param
     // and restores every rule.
     await page.getByTestId("port-protocol-filter").selectOption("tcp");
@@ -1991,6 +2022,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Seeded host ports: pf-seed-ssh=2222, pf-seed-http=8080.
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
@@ -2018,6 +2050,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Seeded guest ports: pf-seed-ssh guest=22, pf-seed-http guest=80.
     await expect(page.getByTestId("port-row-pf-seed-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-seed-http")).toBeVisible();
@@ -2068,6 +2101,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // All three synthetic rules visible before typing.
     await expect(page.getByTestId("port-row-pf-gip-ssh")).toBeVisible();
     await expect(page.getByTestId("port-row-pf-gip-http")).toBeVisible();
@@ -2098,6 +2132,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // search for "jumpbox" (matches only pf-seed-ssh) AND protocol=tcp.
     await page.getByTestId("port-protocol-filter").selectOption("tcp");
     await page.getByTestId("port-list-search").fill("jumpbox");
@@ -2152,6 +2187,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     const pagination = page.getByTestId("port-pagination");
     await expect(pagination).toBeVisible();
     // First page: 1-25 of 30 (default perPage=25). The first rule is rendered.
@@ -2178,6 +2214,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Seeded SSH rule has a description; verify it renders, then edit it.
     await expect(page.getByTestId("port-description-pf-seed-ssh")).toBeVisible();
 
@@ -2194,6 +2231,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
     await page.getByTestId("input-edit-port-description").fill("");
     await page.getByTestId("btn-submit-edit-port").click();
@@ -2206,6 +2244,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("btn-new-port").click();
     await page.getByTestId("input-host-port").fill("3333");
     await page.getByTestId("input-guest-port").fill("33");
@@ -2222,6 +2261,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // First, set tags via the edit modal.
     await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
     await page.getByTestId("input-edit-port-tags").fill("audit, jumpbox");
@@ -2244,6 +2284,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     // Set tags on the SSH rule, then verify the search box hits via tag.
     await page.getByTestId("btn-edit-port-pf-seed-ssh").click();
     await page.getByTestId("input-edit-port-tags").fill("jumpgateway");
@@ -2258,6 +2299,7 @@ test.describe("VM Detail", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-ports").click();
     await page.getByTestId("btn-new-port").click();
     await page.getByTestId("input-host-port").fill("4444");
     await page.getByTestId("input-guest-port").fill("80");
@@ -3945,6 +3987,7 @@ test.describe("Schedules", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
 
+    await page.getByTestId("tab-schedules").click();
     await expect(page.getByTestId("vm-detail-schedules")).toBeVisible();
     await expect(page.getByTestId("vm-detail-schedule-sch-1")).toContainText("nightly-snapshot");
     await expect(page.getByTestId("vm-detail-schedule-sch-2")).toContainText("weekend-shutdown");
@@ -3963,6 +4006,7 @@ test.describe("Schedules", () => {
 
     await expect(page.getByTestId("add-schedule-form")).not.toBeVisible();
     await page.goBack();
+    await page.getByTestId("tab-schedules").click();
     await expect(page.getByTestId("vm-detail-schedules")).toBeVisible();
     const row = page.locator('[data-testid^="vm-detail-schedule-sch-new-"]').first();
     await expect(row).toContainText("web-server-restart");
@@ -5672,6 +5716,7 @@ test.describe("Full Lifecycle", () => {
     await expect(page.getByTestId("vm-detail-state")).toHaveText("running");
 
     // 4. Create a snapshot
+    await page.getByTestId("tab-snapshots").click();
     await page.getByTestId("btn-new-snapshot").click();
     await page.getByTestId("input-snap-name").fill("e2e-checkpoint");
     await page.getByTestId("btn-submit-snapshot").click();
