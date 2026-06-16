@@ -326,6 +326,98 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	}
 }
 
+func TestProxyConsole_ClosesOnVMLifecycleHandlers(t *testing.T) {
+	actions := []struct {
+		name       string
+		method     string
+		path       string
+		reasonCode string
+	}{
+		{name: "stop", method: http.MethodPost, path: "/api/v1/vms/vm-running/stop", reasonCode: "vm_stopped"},
+		{name: "force-stop", method: http.MethodPost, path: "/api/v1/vms/vm-running/force-stop", reasonCode: "vm_force_stopped"},
+		{name: "delete", method: http.MethodDelete, path: "/api/v1/vms/vm-running", reasonCode: "vm_deleted"},
+	}
+
+	for _, tc := range actions {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+			defer cleanup()
+
+			bus := events.New(&testEventStore{})
+			bus.Start()
+			defer bus.Stop()
+			apiServer.SetEventBus(bus)
+			eventCh, cancelEvents := bus.Subscribe("test")
+			defer cancelEvents()
+
+			mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+			ln, err := mockMgr.SeedConsoleListener("vm-running")
+			if err != nil {
+				t.Fatalf("SeedConsoleListener: %v", err)
+			}
+			defer ln.Close()
+			accepted := make(chan net.Conn, 1)
+			go func() {
+				conn, err := ln.Accept()
+				if err == nil {
+					accepted <- conn
+				}
+			}()
+
+			ticket, _, err := store.IssueTicket("vm-running", "")
+			if err != nil {
+				t.Fatalf("IssueTicket: %v", err)
+			}
+			dialer := *websocket.DefaultDialer
+			dialer.Subprotocols = []string{"binary"}
+			conn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console?ticket="+ticket), nil)
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			backend := <-accepted
+			defer backend.Close()
+
+			req, err := http.NewRequest(tc.method, ts.URL+tc.path, nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+				t.Fatalf("status = %d, want 200/204", resp.StatusCode)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			for {
+				select {
+				case <-ctx.Done():
+					t.Fatal("websocket stayed open after VM lifecycle handler")
+				default:
+					_, _, err := conn.ReadMessage()
+					if err != nil {
+						_ = conn.Close()
+						events := drainEvents(t, eventCh, 1)
+						if len(events) != 1 || events[0].Type != "console.session_terminated" {
+							t.Fatalf("expected console.session_terminated event, got %+v", events)
+						}
+						if events[0].VMID != "vm-running" {
+							t.Fatalf("event VMID = %q, want vm-running", events[0].VMID)
+						}
+						if events[0].Attributes["reason"] != tc.reasonCode {
+							t.Fatalf("event reason = %q, want %q", events[0].Attributes["reason"], tc.reasonCode)
+						}
+						return
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestProxyConsole_ClosesOnDirectManagerLifecycleActions(t *testing.T) {
 	tests := []struct {
 		name   string
