@@ -156,6 +156,32 @@ func TestProxyConsole_ProxiesBinaryTraffic(t *testing.T) {
 	<-echoDone
 }
 
+func TestProxyConsole_RejectsMissingTicket(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	_, resp, err := dialer.Dial(wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console"), nil)
+	if err == nil {
+		t.Fatal("dial succeeded without ticket, want unauthorized failure")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("missing ticket status = %d, want 401", status)
+	}
+}
+
 func TestProxyConsole_RejectsTicketReuse(t *testing.T) {
 	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
