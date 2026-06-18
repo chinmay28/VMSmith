@@ -71,6 +71,9 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	if patch.OSVariant != nil {
 		return types.NewAPIError("os_type_immutable", "os_variant cannot be changed after VM creation: capture it at create time")
 	}
+	if patch.GPUs != nil {
+		return types.NewAPIError("gpus_immutable", "gpus cannot be changed after VM creation: GPU passthrough is configured only at create time")
+	}
 	if err := validateOptionalVMResourceValue(patch.CPUs, 1, 128, "cpus"); err != nil {
 		return err
 	}
@@ -478,7 +481,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "os_type_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
 		return 400
 	case "service_unavailable", "network_unavailable":
 		return 503

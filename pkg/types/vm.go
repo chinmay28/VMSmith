@@ -177,8 +177,9 @@ type VMSpec struct {
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
 // Zero / empty values are ignored (no change). Disk can only grow, not shrink.
-// GPU passthrough is intentionally immutable post-create: gpus is absent here
-// because IOMMU-group rebinding is disruptive and clone already clears GPUs.
+// GPU passthrough is intentionally immutable post-create: GPUs uses pointer
+// semantics purely so PATCH can detect and reject a present `gpus` key instead
+// of silently ignoring it.
 type VMUpdateSpec struct {
 	CPUs        int      `json:"cpus,omitempty"`
 	RAMMB       int      `json:"ram_mb,omitempty"`
@@ -239,6 +240,11 @@ type VMUpdateSpec struct {
 	// again at next render. Applying a change triggers a domain redefine
 	// and restarts the VM if it was running.
 	DiskBus *string `json:"disk_bus,omitempty"`
+
+	// GPUs is intentionally a pointer so PATCH can reject any attempt to
+	// change passthrough assignment on an existing VM. GPU/IOMMU rebinding is
+	// disruptive, and clone already clears inherited GPUs.
+	GPUs *[]string `json:"gpus,omitempty"`
 
 	// NICModel flips the model attribute on every libvirt
 	// <interface><model type='...'/></interface> entry on an existing VM —

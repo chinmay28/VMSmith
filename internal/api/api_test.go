@@ -5340,6 +5340,26 @@ func TestUpdateVM_OSVariantRejected(t *testing.T) {
 	}
 }
 
+func TestUpdateVM_GPUsRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-gpu", Name: "gpu-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}})
+
+	for _, body := range []string{
+		`{"gpus":["0000:02:00.0"]}`,
+		`{"gpus":[]}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-gpu", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "gpus_immutable")
+	}
+}
+
 func TestUpdateVM_OSFieldOmittedIsOK(t *testing.T) {
 	// Sanity check: omitting os_type / os_variant entirely (the normal case)
 	// must not trip the immutability guard.
