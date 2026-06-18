@@ -4435,6 +4435,7 @@ func TestCloneVM(t *testing.T) {
 			DiskGB:      80,
 			Description: "source description",
 			Tags:        []string{"prod", "web"},
+			GPUs:        []string{"0000:01:00.0"},
 		},
 	})
 
@@ -4459,6 +4460,9 @@ func TestCloneVM(t *testing.T) {
 	}
 	if cloned.Spec.Name != "clone-a" || cloned.Spec.Image != "ubuntu-24.04" || cloned.Spec.CPUs != 4 || cloned.Spec.RAMMB != 8192 || cloned.Spec.DiskGB != 80 {
 		t.Fatalf("unexpected clone spec: %+v", cloned.Spec)
+	}
+	if len(cloned.Spec.GPUs) != 0 {
+		t.Fatalf("clone spec GPUs = %v, want cleared", cloned.Spec.GPUs)
 	}
 	if len(cloned.Tags) != 2 || cloned.Tags[0] != "prod" || cloned.Tags[1] != "web" {
 		t.Fatalf("clone tags = %#v, want copied tags", cloned.Tags)

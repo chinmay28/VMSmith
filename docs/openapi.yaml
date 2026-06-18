@@ -3801,6 +3801,17 @@ components:
             Omit (null) to leave unchanged. Applying a change triggers a
             domain redefine and restarts the VM if it was running. Any
             other value returns 400 `invalid_nic_model`.
+        gpus:
+          readOnly: true
+          type: array
+          items:
+            type: string
+          description: >-
+            **Immutable post-create.** GPU passthrough is configured only on
+            create via `VMSpec.gpus`; PATCH does not accept `gpus`, and clone
+            clears any inherited GPU assignment so passthrough devices are not
+            silently shared across VMs. This avoids disruptive IOMMU-group
+            rebinding on an existing VM.
     VM:
       type: object
       required: [id, name, spec, state, disk_path, created_at, updated_at]

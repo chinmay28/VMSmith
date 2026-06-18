@@ -177,6 +177,8 @@ type VMSpec struct {
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
 // Zero / empty values are ignored (no change). Disk can only grow, not shrink.
+// GPU passthrough is intentionally immutable post-create: gpus is absent here
+// because IOMMU-group rebinding is disruptive and clone already clears GPUs.
 type VMUpdateSpec struct {
 	CPUs        int      `json:"cpus,omitempty"`
 	RAMMB       int      `json:"ram_mb,omitempty"`

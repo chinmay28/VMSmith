@@ -23,6 +23,15 @@ var (
 	sysfsIOMMUGroups = "/sys/kernel/iommu_group"
 )
 
+// TestingSetSysfsRoots swaps the sysfs roots used by GPU discovery/expansion
+// and returns the previous values. Intended for tests in sibling packages that
+// need to exercise applyGPUs -> GenerateDomainXML end-to-end against a fixture.
+func TestingSetSysfsRoots(devicesRoot, groupsRoot string) (oldDevicesRoot, oldGroupsRoot string) {
+	oldDevicesRoot, oldGroupsRoot = sysfsPCIDevices, sysfsIOMMUGroups
+	sysfsPCIDevices, sysfsIOMMUGroups = devicesRoot, groupsRoot
+	return oldDevicesRoot, oldGroupsRoot
+}
+
 // pciClassDisplayPrefix matches PCI display-controller class codes: VGA
 // controllers ("0x0300xx"), 3D controllers ("0x0302xx"), and other display
 // controllers all start with "0x03".
