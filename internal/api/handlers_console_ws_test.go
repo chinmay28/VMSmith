@@ -448,12 +448,15 @@ func TestProxyConsole_ClosesOnVMLifecycleHandlers(t *testing.T) {
 
 func TestProxyConsole_ClosesOnDirectManagerLifecycleActions(t *testing.T) {
 	tests := []struct {
-		name   string
-		action func(context.Context, *vm.MockManager, string) error
+		name       string
+		action     func(context.Context, *vm.MockManager, string) error
+		reasonCode string
 	}{
-		{name: "stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Stop(ctx, id) }},
-		{name: "force-stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.ForceStop(ctx, id) }},
-		{name: "delete", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Delete(ctx, id) }},
+		{name: "stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Stop(ctx, id) }, reasonCode: "vm_stopped"},
+		{name: "force-stop", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.ForceStop(ctx, id) }, reasonCode: "vm_force_stopped"},
+		{name: "restart", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Restart(ctx, id) }, reasonCode: "vm_restarted"},
+		{name: "reboot", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Reboot(ctx, id) }, reasonCode: "vm_rebooted"},
+		{name: "delete", action: func(ctx context.Context, mgr *vm.MockManager, id string) error { return mgr.Delete(ctx, id) }, reasonCode: "vm_deleted"},
 	}
 
 	for _, tc := range tests {
@@ -515,6 +518,9 @@ func TestProxyConsole_ClosesOnDirectManagerLifecycleActions(t *testing.T) {
 						}
 						if events[0].VMID != "vm-running" {
 							t.Fatalf("event VMID = %q, want vm-running", events[0].VMID)
+						}
+						if events[0].Attributes["reason"] != tc.reasonCode {
+							t.Fatalf("event reason = %q, want %q", events[0].Attributes["reason"], tc.reasonCode)
 						}
 						return
 					}

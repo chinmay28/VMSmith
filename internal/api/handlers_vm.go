@@ -624,7 +624,6 @@ func (s *Server) RestartVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
-	s.closeConsoleSessionsForVM(id, "vm_restarted")
 	s.publishAppEvent("vm.restart_requested", id, fmt.Sprintf("VM %q restart requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
 }
@@ -641,7 +640,6 @@ func (s *Server) RebootVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, statusForAPIError(err, http.StatusInternalServerError), err)
 		return
 	}
-	s.closeConsoleSessionsForVM(id, "vm_rebooted")
 	s.publishAppEvent("vm.reboot_requested", id, fmt.Sprintf("VM %q reboot requested", id), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rebooted"})
 }
