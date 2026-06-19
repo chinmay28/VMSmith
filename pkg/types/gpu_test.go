@@ -14,6 +14,8 @@ func TestIsValidPCIAddress(t *testing.T) {
 		{"01:00.0", true},
 		{"  01:00.0  ", true},
 		{"0000:0a:1f.7", true},
+		{"0000:01:20.0", false}, // slot must be 00-1f
+		{"0000:01:ff.0", false},
 		{"0000:01:00.8", false}, // function must be 0-7
 		{"01:00", false},
 		{"0000:01:00", false},
@@ -36,6 +38,7 @@ func TestNormalizePCIAddress(t *testing.T) {
 		{"0000:01:00.0", "0000:01:00.0"},
 		{"0000:01:00.1", "0000:01:00.1"},
 		{"  0A:00.0 ", "0000:0a:00.0"},
+		{"0000:01:20.0", ""},
 		{"bogus", ""},
 		{"", ""},
 	}

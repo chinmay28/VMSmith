@@ -38,9 +38,10 @@ type GPUDevice struct {
 }
 
 // pciAddrRe matches a PCI address in either the long "0000:01:00.0" form or the
-// short "01:00.0" form (the domain defaults to 0000). The function digit is a
-// single octal digit (0-7) per the PCI spec.
-var pciAddrRe = regexp.MustCompile(`^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$`)
+// short "01:00.0" form (the domain defaults to 0000). The slot byte is limited
+// to 00-1f (5 bits) and the function digit to 0-7 (3 bits), matching the PCI
+// address space libvirt expects.
+var pciAddrRe = regexp.MustCompile(`^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-1][0-9a-fA-F]\.[0-7]$`)
 
 // IsValidPCIAddress reports whether s is a syntactically valid PCI address in
 // either the long ("0000:01:00.0") or short ("01:00.0") form. Whitespace is
