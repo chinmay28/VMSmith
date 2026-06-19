@@ -361,6 +361,8 @@ func TestProxyConsole_ClosesOnVMLifecycleHandlers(t *testing.T) {
 	}{
 		{name: "stop", method: http.MethodPost, path: "/api/v1/vms/vm-running/stop", reasonCode: "vm_stopped"},
 		{name: "force-stop", method: http.MethodPost, path: "/api/v1/vms/vm-running/force-stop", reasonCode: "vm_force_stopped"},
+		{name: "restart", method: http.MethodPost, path: "/api/v1/vms/vm-running/restart", reasonCode: "vm_restarted"},
+		{name: "reboot", method: http.MethodPost, path: "/api/v1/vms/vm-running/reboot", reasonCode: "vm_rebooted"},
 		{name: "delete", method: http.MethodDelete, path: "/api/v1/vms/vm-running", reasonCode: "vm_deleted"},
 	}
 
