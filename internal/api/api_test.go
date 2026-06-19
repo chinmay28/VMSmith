@@ -233,6 +233,7 @@ func TestListHostGPUs(t *testing.T) {
 			Driver:       "vfio-pci",
 			IOMMUGroup:   15,
 			GroupDevices: []string{"0000:01:00.0", "0000:01:00.1"},
+			BootVGA:      true,
 		}}, nil
 	}
 	defer func() { discoverHostGPUs = old }()
@@ -255,6 +256,9 @@ func TestListHostGPUs(t *testing.T) {
 	}
 	if got[0].Address != "0000:01:00.0" || got[0].Driver != "vfio-pci" {
 		t.Fatalf("gpu = %+v, want address 0000:01:00.0 driver vfio-pci", got[0])
+	}
+	if !got[0].BootVGA {
+		t.Fatalf("gpu boot_vga = %v, want true", got[0].BootVGA)
 	}
 }
 

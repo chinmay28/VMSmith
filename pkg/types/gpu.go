@@ -35,6 +35,11 @@ type GPUDevice struct {
 	// function). PCI bridges are excluded. These are the addresses vmsmith
 	// actually attaches when this GPU is requested for passthrough.
 	GroupDevices []string `json:"group_devices,omitempty"`
+	// BootVGA reports whether firmware marked this GPU as the host's primary
+	// display adapter (`/sys/bus/pci/devices/<addr>/boot_vga` == "1").
+	// Operators should avoid passing the primary display through unless they
+	// intentionally want the host console to disappear.
+	BootVGA bool `json:"boot_vga,omitempty"`
 }
 
 // pciAddrRe matches a PCI address in either the long "0000:01:00.0" form or the

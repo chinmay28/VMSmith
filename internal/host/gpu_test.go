@@ -21,14 +21,14 @@ func fakeSysfs(t *testing.T) string {
 
 	type dev struct {
 		addr, class, vendor, device, driver string
-		group                               string
+		group, bootVGA                      string
 	}
 	devs := []dev{
-		{"0000:00:02.0", "0x030000", "0x8086", "0x4680", "i915", "2"},
-		{"0000:01:00.0", "0x030000", "0x10de", "0x2704", "nvidia", "15"},
-		{"0000:01:00.1", "0x040300", "0x10de", "0x22bb", "snd_hda_intel", "15"},
-		{"0000:00:01.0", "0x060400", "0x8086", "0x1901", "pcieport", "15"}, // bridge in group 15
-		{"0000:03:00.0", "0x010601", "0x8086", "0xa282", "ahci", "9"},      // SATA controller, not a GPU
+		{"0000:00:02.0", "0x030000", "0x8086", "0x4680", "i915", "2", "1"},
+		{"0000:01:00.0", "0x030000", "0x10de", "0x2704", "nvidia", "15", "0"},
+		{"0000:01:00.1", "0x040300", "0x10de", "0x22bb", "snd_hda_intel", "15", "0"},
+		{"0000:00:01.0", "0x060400", "0x8086", "0x1901", "pcieport", "15", "0"}, // bridge in group 15
+		{"0000:03:00.0", "0x010601", "0x8086", "0xa282", "ahci", "9", "0"},      // SATA controller, not a GPU
 	}
 
 	for _, d := range devs {
@@ -39,6 +39,7 @@ func fakeSysfs(t *testing.T) string {
 		writeFile(t, filepath.Join(devDir, "class"), d.class+"\n")
 		writeFile(t, filepath.Join(devDir, "vendor"), d.vendor+"\n")
 		writeFile(t, filepath.Join(devDir, "device"), d.device+"\n")
+		writeFile(t, filepath.Join(devDir, "boot_vga"), d.bootVGA+"\n")
 
 		// driver symlink: devDir/driver -> ../../bus/pci/drivers/<driver>
 		driverTarget := filepath.Join(root, "drivers", d.driver)
@@ -100,6 +101,9 @@ func TestDiscoverGPUs(t *testing.T) {
 	if igpu.Address != "0000:00:02.0" || igpu.Vendor != "Intel" {
 		t.Errorf("igpu = %+v, want addr 0000:00:02.0 vendor Intel", igpu)
 	}
+	if !igpu.BootVGA {
+		t.Errorf("igpu.BootVGA = %v, want true", igpu.BootVGA)
+	}
 
 	nv := gpus[1]
 	if nv.Address != "0000:01:00.0" {
@@ -113,6 +117,9 @@ func TestDiscoverGPUs(t *testing.T) {
 	}
 	if nv.Driver != "nvidia" {
 		t.Errorf("nv.Driver = %q, want nvidia", nv.Driver)
+	}
+	if nv.BootVGA {
+		t.Errorf("nv.BootVGA = %v, want false", nv.BootVGA)
 	}
 	if nv.IOMMUGroup != 15 {
 		t.Errorf("nv.IOMMUGroup = %d, want 15", nv.IOMMUGroup)
@@ -173,5 +180,11 @@ func TestExpandIOMMUGroupsNoIOMMU(t *testing.T) {
 	got := ExpandIOMMUGroups([]string{"01:00.0"})
 	if !reflect.DeepEqual(got, []string{"0000:01:00.0"}) {
 		t.Errorf("ExpandIOMMUGroups with no IOMMU = %v, want [0000:01:00.0]", got)
+	}
+}
+
+func TestProductionIOMMURootPathName(t *testing.T) {
+	if sysfsIOMMUGroups != "/sys/kernel/iommu_groups" {
+		t.Fatalf("sysfsIOMMUGroups = %q, want /sys/kernel/iommu_groups", sysfsIOMMUGroups)
 	}
 }

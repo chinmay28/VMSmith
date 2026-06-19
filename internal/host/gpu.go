@@ -20,7 +20,7 @@ import (
 // discovery at a fixture tree.
 var (
 	sysfsPCIDevices  = "/sys/bus/pci/devices"
-	sysfsIOMMUGroups = "/sys/kernel/iommu_group"
+	sysfsIOMMUGroups = "/sys/kernel/iommu_groups"
 )
 
 // TestingSetSysfsRoots swaps the sysfs roots used by GPU discovery/expansion
@@ -77,6 +77,7 @@ func DiscoverGPUs() ([]types.GPUDevice, error) {
 			Driver:       readLinkBase(filepath.Join(devDir, "driver")),
 			IOMMUGroup:   group,
 			GroupDevices: groupDevices(group),
+			BootVGA:      readSysfsString(filepath.Join(devDir, "boot_vga")) == "1",
 		}
 		gpus = append(gpus, gpu)
 	}
