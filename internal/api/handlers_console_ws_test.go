@@ -272,6 +272,14 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	ts, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
+	srv := ts.Config.Handler.(*Server)
+	bus := events.New(memStore{})
+	bus.Start()
+	defer bus.Stop()
+	srv.SetEventBus(bus)
+	ch, cancelEvents := bus.Subscribe("console-shutdown-test")
+	defer cancelEvents()
+
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
 	ln, err := mockMgr.SeedConsoleListener("vm-running")
 	if err != nil {
@@ -297,24 +305,41 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
+	defer conn.Close()
 	backend := <-accepted
 	defer backend.Close()
 
-	// Reach into the server by closing the backend connection; this should
-	// unwind the websocket proxy and make the client read fail promptly.
-	_ = backend.Close()
+	srv.BeginShutdown()
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatal("websocket stayed open after backend close")
+			t.Fatal("websocket stayed open after shutdown signal")
 		default:
 			_, _, err := conn.ReadMessage()
 			if err != nil {
-				_ = conn.Close()
-				return
+				goto closed
 			}
 		}
+	}
+closed:
+
+	events := drainEvents(t, ch, 1)
+	found := false
+	for _, evt := range events {
+		if evt.Type == "console.session_terminated" {
+			found = true
+			if evt.VMID != "vm-running" {
+				t.Fatalf("event VMID = %q, want vm-running", evt.VMID)
+			}
+			if evt.Attributes["reason"] != "server_shutdown" {
+				t.Fatalf("reason = %q, want server_shutdown", evt.Attributes["reason"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing console.session_terminated event: %+v", events)
 	}
 }
