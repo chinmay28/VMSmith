@@ -584,7 +584,11 @@ func (m *LibvirtManager) Restart(ctx context.Context, id string) error {
 
 	vm.State = types.VMStateRunning
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+	m.notifyConsoleTermination(id, "vm_restarted")
+	return nil
 }
 
 // Reboot signals the guest OS to perform an in-guest reboot via libvirt's
@@ -618,7 +622,11 @@ func (m *LibvirtManager) Reboot(ctx context.Context, id string) error {
 	}
 
 	vm.UpdatedAt = time.Now()
-	return m.store.PutVM(vm)
+	if err := m.store.PutVM(vm); err != nil {
+		return err
+	}
+	m.notifyConsoleTermination(id, "vm_rebooted")
+	return nil
 }
 
 // Suspend pauses a running VM, freezing CPU + memory state without releasing
