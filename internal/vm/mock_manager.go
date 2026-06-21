@@ -295,15 +295,17 @@ func (m *MockManager) Restart(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	vm, ok := m.vms[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("vms/%s: not found", id)
 	}
 
 	vm.State = types.VMStateRunning
 	vm.UpdatedAt = time.Now()
+	m.mu.Unlock()
+
+	m.notifyConsoleTermination(id, "vm_restarted")
 	return nil
 }
 
@@ -313,17 +315,20 @@ func (m *MockManager) Reboot(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	vm, ok := m.vms[id]
 	if !ok {
+		m.mu.Unlock()
 		return fmt.Errorf("vms/%s: not found", id)
 	}
 	if vm.State != types.VMStateRunning {
+		m.mu.Unlock()
 		return types.NewAPIError("vm_not_running", "vm must be running to reboot")
 	}
 
 	vm.UpdatedAt = time.Now()
+	m.mu.Unlock()
+
+	m.notifyConsoleTermination(id, "vm_rebooted")
 	return nil
 }
 
