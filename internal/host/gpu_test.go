@@ -183,6 +183,20 @@ func TestExpandIOMMUGroupsNoIOMMU(t *testing.T) {
 	}
 }
 
+func TestGroupDevicesSkipsUnreadableClass(t *testing.T) {
+	root := fakeSysfs(t)
+	classPath := filepath.Join(root, "devices", "0000:01:00.1", "class")
+	if err := os.Remove(classPath); err != nil {
+		t.Fatalf("remove class file: %v", err)
+	}
+
+	got := ExpandIOMMUGroups([]string{"01:00.0"})
+	want := []string{"0000:01:00.0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExpandIOMMUGroups with unreadable class = %v, want %v", got, want)
+	}
+}
+
 func TestProductionIOMMURootPathName(t *testing.T) {
 	if sysfsIOMMUGroups != "/sys/kernel/iommu_groups" {
 		t.Fatalf("sysfsIOMMUGroups = %q, want /sys/kernel/iommu_groups", sysfsIOMMUGroups)

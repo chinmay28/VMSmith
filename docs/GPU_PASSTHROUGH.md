@@ -75,7 +75,10 @@ in use by the host**. For a reliable setup, use a host where:
   device, or use a `vfio-pci.ids=10de:2704,10de:22bb` kernel argument).
 
 When the GPU is bound to `vfio-pci`, `vmsmith host gpus` shows `DRIVER vfio-pci`
-and it is ready to assign.
+and it is ready to assign. If the command also shows `BOOT_VGA yes` (the API/UI
+surface this as `boot_vga: true`), that device is the host's firmware-selected
+primary display adapter — passing it through will usually blank or lock up the
+host console.
 
 > **Note:** vmsmith does not modify the host's driver bindings or kernel
 > command line for you — that is a deliberate, host-wide change you make once.

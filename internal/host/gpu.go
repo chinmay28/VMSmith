@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -108,7 +109,11 @@ func ExpandIOMMUGroups(addrs []string) []string {
 		if ok {
 			if gm := groupDevices(group); len(gm) > 0 {
 				members = gm
+			} else {
+				logger.Warn("daemon", "falling back to bare GPU because IOMMU group members could not be resolved", "gpu", addr, "iommu_group", group)
 			}
+		} else {
+			logger.Warn("daemon", "falling back to bare GPU because IOMMU group could not be resolved", "gpu", addr)
 		}
 		for _, m := range members {
 			seen[m] = true
@@ -149,6 +154,10 @@ func groupDevices(group int) []string {
 	for _, e := range entries {
 		addr := e.Name()
 		class := readSysfsString(filepath.Join(sysfsPCIDevices, addr, "class"))
+		if class == "" {
+			logger.Warn("daemon", "skipping IOMMU group member with unreadable PCI class", "gpu", addr, "iommu_group", group)
+			continue
+		}
 		if strings.HasPrefix(class, pciClassBridgePrefix) {
 			continue
 		}
@@ -163,6 +172,7 @@ func groupDevices(group int) []string {
 func readSysfsString(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		logger.Warn("daemon", "failed to read sysfs attribute", "path", path, "error", err.Error())
 		return ""
 	}
 	return strings.TrimSpace(string(data))
@@ -173,6 +183,7 @@ func readSysfsString(path string) string {
 func readLinkBase(path string) string {
 	target, err := os.Readlink(path)
 	if err != nil {
+		logger.Warn("daemon", "failed to read sysfs symlink", "path", path, "error", err.Error())
 		return ""
 	}
 	return filepath.Base(target)
