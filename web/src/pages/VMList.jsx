@@ -1874,6 +1874,11 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                               }`}>
                                 {gpu.driver || 'unbound'}
                               </span>
+                              {gpu.boot_vga && (
+                                <span className="text-[10px] rounded-full px-1.5 py-0 leading-4 border bg-rose-500/15 text-rose-300 border-rose-500/30">
+                                  primary display
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] text-steel-500 mt-1">
                               device {gpu.device_id} · IOMMU group {gpu.iommu_group}
@@ -1881,12 +1886,16 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                                 <> · attaches {gpu.group_devices.join(', ')}</>
                               )}
                             </div>
-                            {!ready && (
+                            {gpu.boot_vga ? (
+                              <div className="text-[10px] text-rose-300/90 mt-1">
+                                Firmware marked this as the host's primary display adapter. Passing it through will usually blank the host console.
+                              </div>
+                            ) : !ready ? (
                               <div className="text-[10px] text-amber-400/80 mt-1">
                                 Bound to <span className="font-mono">{gpu.driver || 'no'}</span> driver — libvirt will rebind it to
                                 vfio-pci at start, which only works if the GPU isn't driving the host console.
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </label>
                       );

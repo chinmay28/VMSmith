@@ -117,8 +117,11 @@ The DRIVER column shows the kernel driver currently bound to the GPU:
 "vfio-pci" means it is ready for passthrough; "nvidia"/"nouveau"/"amdgpu"
 means the host still owns it (with managed='yes' passthrough libvirt will
 rebind it to vfio-pci at VM start, provided it is not driving the host
-console). GROUP lists every device in the same IOMMU group — vmsmith
-attaches the whole group together. See docs/GPU_PASSTHROUGH.md.`,
+console). BOOT_VGA marks the firmware-selected primary display adapter;
+operators should avoid passing that device through unless they intentionally
+want the host console to disappear. GROUP lists every device in the same
+IOMMU group — vmsmith attaches the whole group together. See
+ docs/GPU_PASSTHROUGH.md.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		flagAPIKey, _ := cmd.Flags().GetString("api-key")
@@ -144,18 +147,22 @@ attaches the whole group together. See docs/GPU_PASSTHROUGH.md.`,
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ADDRESS\tVENDOR\tDEVICE\tDRIVER\tIOMMU\tGROUP")
+		fmt.Fprintln(tw, "ADDRESS\tVENDOR\tDEVICE\tDRIVER\tBOOT_VGA\tIOMMU\tGROUP")
 		for _, g := range gpus {
 			driver := g.Driver
 			if driver == "" {
 				driver = "-"
 			}
+			bootVGA := "-"
+			if g.BootVGA {
+				bootVGA = "yes"
+			}
 			group := strings.Join(g.GroupDevices, " ")
 			if group == "" {
 				group = "-"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n",
-				g.Address, g.Vendor, g.DeviceID, driver, g.IOMMUGroup, group)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+				g.Address, g.Vendor, g.DeviceID, driver, bootVGA, g.IOMMUGroup, group)
 		}
 		return tw.Flush()
 	},

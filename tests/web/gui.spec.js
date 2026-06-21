@@ -297,6 +297,7 @@ test.describe("VM List", () => {
 
     // The mock host exposes an NVIDIA GPU; select it for passthrough.
     await expect(page.getByTestId("gpu-list")).toBeVisible();
+    await expect(page.getByText("primary display")).toBeVisible();
     await page.getByTestId("gpu-checkbox-0000:01:00.0").check();
 
     await page.getByTestId("btn-submit-create").click();

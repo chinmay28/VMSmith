@@ -4508,6 +4508,8 @@ export interface components {
             iommu_group: number;
             /** @description Every assignable PCI function sharing this device's IOMMU group (the GPU plus, typically, its HDMI audio function); bridges excluded. These are the addresses vmsmith attaches when this GPU is requested. */
             group_devices?: string[];
+            /** @description True when firmware marked this GPU as the host's primary display adapter (`boot_vga=1`). Passing the primary display through will usually blank the host console once the VM starts. */
+            boot_vga?: boolean;
         };
         HostResourceUsageSummary: {
             /** Format: int64 */
