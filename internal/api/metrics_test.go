@@ -838,6 +838,7 @@ func TestPrometheusMetrics_Enabled(t *testing.T) {
 	defer cleanup()
 
 	v := seedTestVM(t, mockMgr, "vm-prom", "prom-vm", types.VMStateRunning)
+	seedTestVM(t, mockMgr, "vm-no-sample", "idle-vm", types.VMStateRunning)
 
 	cpu := 75.0
 	mem := uint64(2048)
@@ -870,32 +871,66 @@ func TestPrometheusMetrics_Enabled(t *testing.T) {
 		t.Errorf("Content-Type = %q, want %q", ct, "text/plain; version=0.0.4")
 	}
 
-	var b []byte
-	tmp := make([]byte, 4096)
-	for {
-		n, readErr := resp.Body.Read(tmp)
-		b = append(b, tmp[:n]...)
-		if readErr != nil {
-			break
-		}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
 	}
-	body := string(b)
+	body := string(bodyBytes)
 
-	for _, keyword := range []string{
-		"vmsmith_vm_cpu_percent",
-		"vmsmith_vm_mem_used_mb",
-		"vmsmith_vm_disk_read_bps",
-		"vmsmith_vm_disk_write_bps",
-		"vmsmith_vm_net_rx_bps",
-		"vmsmith_vm_net_tx_bps",
-	} {
-		if !containsStr(body, keyword) {
-			t.Errorf("expected Prometheus output to contain %q, body:\n%s", keyword, body)
+	metricLines := map[string]string{
+		"vmsmith_vm_cpu_percent":    `vmsmith_vm_cpu_percent{vm_id="vm-prom",vm_name="prom-vm"} 75`,
+		"vmsmith_vm_mem_used_mb":    `vmsmith_vm_mem_used_mb{vm_id="vm-prom",vm_name="prom-vm"} 2048`,
+		"vmsmith_vm_disk_read_bps":  `vmsmith_vm_disk_read_bps{vm_id="vm-prom",vm_name="prom-vm"} 500000`,
+		"vmsmith_vm_disk_write_bps": `vmsmith_vm_disk_write_bps{vm_id="vm-prom",vm_name="prom-vm"} 100000`,
+		"vmsmith_vm_net_rx_bps":     `vmsmith_vm_net_rx_bps{vm_id="vm-prom",vm_name="prom-vm"} 1000000`,
+		"vmsmith_vm_net_tx_bps":     `vmsmith_vm_net_tx_bps{vm_id="vm-prom",vm_name="prom-vm"} 200000`,
+	}
+	for metric, wantLine := range metricLines {
+		if strings.Count(body, "# HELP "+metric+" ") != 1 {
+			t.Errorf("expected exactly one HELP line for %s, body:\n%s", metric, body)
+		}
+		if strings.Count(body, "# TYPE "+metric+" gauge") != 1 {
+			t.Errorf("expected exactly one TYPE line for %s, body:\n%s", metric, body)
+		}
+		if !strings.Contains(body, wantLine) {
+			t.Errorf("expected Prometheus output to contain %q, body:\n%s", wantLine, body)
 		}
 	}
-	// Check the VM ID label appears somewhere.
-	if !containsStr(body, v.ID) {
-		t.Errorf("expected VM ID %q in Prometheus output, body:\n%s", v.ID, body)
+	if strings.Contains(body, `vm_id="vm-no-sample"`) {
+		t.Errorf("expected VM without samples to be omitted, body:\n%s", body)
+	}
+}
+
+func TestPrometheusMetrics_EscapesLabels(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, `vm"slash\\line`, "ignored", types.VMStateRunning)
+	v.Name = "line\nquote\"slash\\"
+	mockMgr.SeedVM(v)
+
+	cpu := 12.5
+	m.seed(v.ID, types.MetricSample{
+		Timestamp:  time.Now(),
+		CPUPercent: &cpu,
+	})
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	body := string(bodyBytes)
+
+	wantLabelLine := `vmsmith_vm_cpu_percent{vm_id="vm\"slash\\\\line",vm_name="line\nquote\"slash\\"} 12.5`
+	if !strings.Contains(body, wantLabelLine) {
+		t.Fatalf("expected escaped label line %q, body:\n%s", wantLabelLine, body)
 	}
 }
 
