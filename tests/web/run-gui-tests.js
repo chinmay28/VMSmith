@@ -270,6 +270,28 @@ async function main() {
       await p.waitForTimeout(200);
     }, page);
 
+    await runTest("gpu passthrough selection surfaces primary-display risk and persists to VM detail", async (p) => {
+      await p.locator('[data-testid="btn-new-vm"]').click();
+      await p.waitForTimeout(250);
+      await p.locator('[data-testid="input-vm-name"]').fill("gpu-worker");
+      await p.locator('[data-testid="input-vm-image"]').selectOption('/images/ubuntu-base.qcow2');
+      await p.locator('[data-testid="tab-advanced"]').click();
+      await p.waitForTimeout(300);
+      await assertVisible(p, "gpu-option-0000:00:02.0");
+      await assertVisible(p, "gpu-checkbox-0000:00:02.0");
+      await assertVisible(p, "gpu-checkbox-0000:01:00.0");
+      await p.getByText('primary display').first().waitFor({ state: 'visible' });
+      await p.locator('[data-testid="gpu-checkbox-0000:01:00.0"]').check();
+      await p.waitForTimeout(150);
+      await p.locator('[data-testid="btn-submit-create"]').click();
+      await p.waitForTimeout(800);
+      await assertVisible(p, "vm-card-gpu-worker");
+      await p.locator('[data-testid="vm-card-gpu-worker"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "vm-detail-gpus");
+      await p.getByText('0000:01:00.0').waitFor({ state: 'visible' });
+    }, page);
+
     // 5.4.22 — image filter narrows the VM list to a single base image and
     // round-trips through the URL.  Seed data: web-server uses image
     // "ubuntu-22.04", db-server uses image "rocky-9".  The image input is

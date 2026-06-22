@@ -3160,6 +3160,7 @@ const server = http.createServer(async (req, res) => {
         vendor: "Intel",
         class: "0x030000",
         driver: "i915",
+        boot_vga: true,
         iommu_group: 2,
         group_devices: ["0000:00:02.0"],
       },
