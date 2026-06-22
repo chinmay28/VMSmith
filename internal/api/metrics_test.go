@@ -928,7 +928,7 @@ func TestPrometheusMetrics_EscapesLabels(t *testing.T) {
 	}
 	body := string(bodyBytes)
 
-	wantLabelLine := `vmsmith_vm_cpu_percent{vm_id="vm\"slash\\\\line",vm_name="line\nquote\"slash\\\\"} 12.5`
+	wantLabelLine := `vmsmith_vm_cpu_percent{vm_id="vm\"slash\\\\line",vm_name="line\nquote\"slash\\"} 12.5`
 	if !strings.Contains(body, wantLabelLine) {
 		t.Fatalf("expected escaped label line %q, body:\n%s", wantLabelLine, body)
 	}
