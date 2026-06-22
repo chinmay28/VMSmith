@@ -193,17 +193,14 @@ func validateDeviceOverrides(spec types.VMSpec) error {
 
 // validateGPUs validates the optional VFIO passthrough GPU list. Each entry
 // must be a syntactically valid PCI address in either the long
-// ("0000:01:00.0") or short ("01:00.0") form; anything else returns 400
-// `invalid_gpu`. Empty/whitespace entries are ignored (ResolvedGPUs drops
-// them). The addresses are not checked against the host's actual GPU inventory
-// here — the API server may run on a different node from the libvirt daemon,
-// and an address that does not resolve to a device simply fails the domain
-// start with a libvirt error the operator can act on.
+// ("0000:01:00.0") or short ("01:00.0") form; anything else (including an
+// empty string) returns 400 `invalid_gpu`. The addresses are not checked
+// against the host's actual GPU inventory here — the API server may run on a
+// different node from the libvirt daemon, and an address that does not
+// resolve to a device simply fails the domain start with a libvirt error the
+// operator can act on.
 func validateGPUs(gpus []string) error {
 	for _, g := range gpus {
-		if strings.TrimSpace(g) == "" {
-			continue
-		}
 		if !types.IsValidPCIAddress(g) {
 			return types.NewAPIError("invalid_gpu",
 				fmt.Sprintf("gpu %q must be a PCI address like 0000:01:00.0 or 01:00.0", g))

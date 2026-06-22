@@ -271,6 +271,14 @@ async function main() {
     }, page);
 
     await runTest("gpu passthrough selection surfaces primary-display risk and persists to VM detail", async (p) => {
+      // Reload to dismiss any modal still open from the previous test (the
+      // "advanced tab" test presses Escape but the modal backdrop can outlive
+      // the keypress and intercept the next btn-new-vm click in CI).
+      await p.goto(BASE);
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="nav-vms"]').click();
+      await p.waitForTimeout(300);
+
       await p.locator('[data-testid="btn-new-vm"]').click();
       await p.waitForTimeout(250);
       await p.locator('[data-testid="input-vm-name"]').fill("gpu-worker");

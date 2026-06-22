@@ -61,7 +61,11 @@ func DiscoverGPUs() ([]types.GPUDevice, error) {
 		addr := entry.Name()
 		devDir := filepath.Join(sysfsPCIDevices, addr)
 
-		class := readSysfsString(filepath.Join(devDir, "class"))
+		// class is read for every PCI device on the host (not just GPUs) so
+		// use the silent variant — a non-display device's class is read and
+		// discarded, but a missing/unreadable class file shouldn't spam
+		// warnings on every GET /host/gpus.
+		class := readOptionalSysfsString(filepath.Join(devDir, "class"))
 		if !strings.HasPrefix(class, pciClassDisplayPrefix) {
 			continue
 		}
@@ -70,15 +74,20 @@ func DiscoverGPUs() ([]types.GPUDevice, error) {
 		group, _ := readIOMMUGroup(devDir)
 
 		gpu := types.GPUDevice{
-			Address:      addr,
-			VendorID:     vendorID,
-			DeviceID:     readSysfsString(filepath.Join(devDir, "device")),
-			Vendor:       vendorName(vendorID),
-			Class:        class,
-			Driver:       readLinkBase(filepath.Join(devDir, "driver")),
-			IOMMUGroup:   group,
+			Address:    addr,
+			VendorID:   vendorID,
+			DeviceID:   readSysfsString(filepath.Join(devDir, "device")),
+			Vendor:     vendorName(vendorID),
+			Class:      class,
+			IOMMUGroup: group,
+			// driver may legitimately be missing for unbound devices (e.g. a
+			// GPU pre-rebound to vfio-pci via vfio-pci.ids= before the module
+			// loads), and boot_vga is only present on the firmware-selected
+			// primary display. Read both as optional so a healthy passthrough
+			// host doesn't log a warning per GET /host/gpus.
+			Driver:       readOptionalLinkBase(filepath.Join(devDir, "driver")),
 			GroupDevices: groupDevices(group),
-			BootVGA:      readSysfsString(filepath.Join(devDir, "boot_vga")) == "1",
+			BootVGA:      readOptionalSysfsString(filepath.Join(devDir, "boot_vga")) == "1",
 		}
 		gpus = append(gpus, gpu)
 	}
@@ -129,9 +138,12 @@ func ExpandIOMMUGroups(addrs []string) []string {
 }
 
 // readIOMMUGroup resolves the IOMMU group number for a PCI device directory by
-// reading its iommu_group symlink (…/iommu_group -> …/iommu_group/<N>).
+// reading its iommu_group symlink (…/iommu_group -> …/iommu_group/<N>). The
+// link is missing on hosts where IOMMU is disabled, so the read is optional;
+// ExpandIOMMUGroups already logs a higher-level fallback warning when the
+// caller actually needs the group.
 func readIOMMUGroup(devDir string) (int, bool) {
-	base := readLinkBase(filepath.Join(devDir, "iommu_group"))
+	base := readOptionalLinkBase(filepath.Join(devDir, "iommu_group"))
 	if base == "" {
 		return 0, false
 	}
@@ -153,7 +165,10 @@ func groupDevices(group int) []string {
 	var out []string
 	for _, e := range entries {
 		addr := e.Name()
-		class := readSysfsString(filepath.Join(sysfsPCIDevices, addr, "class"))
+		// The higher-level "skipping IOMMU group member" warning below covers
+		// the missing-class case, so use the silent reader to avoid double
+		// logging the same operational state.
+		class := readOptionalSysfsString(filepath.Join(sysfsPCIDevices, addr, "class"))
 		if class == "" {
 			logger.Warn("daemon", "skipping IOMMU group member with unreadable PCI class", "gpu", addr, "iommu_group", strconv.Itoa(group))
 			continue
@@ -167,8 +182,10 @@ func groupDevices(group int) []string {
 	return out
 }
 
-// readSysfsString reads a one-line sysfs attribute, trimming trailing newline
-// and surrounding whitespace. Returns "" on any error.
+// readSysfsString reads a one-line sysfs attribute that the caller treats as
+// mandatory. It trims surrounding whitespace and returns "" on any error,
+// logging the failure so an operator sees it. Use readOptionalSysfsString for
+// attributes that are absent during normal operation.
 func readSysfsString(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -178,12 +195,24 @@ func readSysfsString(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// readLinkBase returns the basename of a symlink target, or "" when the path is
-// not a symlink / cannot be read. Used for the driver and iommu_group links.
-func readLinkBase(path string) string {
+// readOptionalSysfsString reads a sysfs attribute that may legitimately be
+// missing on a healthy host (boot_vga is only present on the primary display,
+// for example). Same return contract as readSysfsString but silent on missing.
+func readOptionalSysfsString(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// readOptionalLinkBase returns the basename of a symlink target, or "" when
+// the link cannot be read. Used for the driver and iommu_group symlinks, which
+// are legitimately absent on unbound devices and on hosts without IOMMU; the
+// callers that need to surface either condition do so at a higher level.
+func readOptionalLinkBase(path string) string {
 	target, err := os.Readlink(path)
 	if err != nil {
-		logger.Warn("daemon", "failed to read sysfs symlink", "path", path, "error", err.Error())
 		return ""
 	}
 	return filepath.Base(target)

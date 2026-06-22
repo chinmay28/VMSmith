@@ -175,6 +175,18 @@ func TestValidateVMSpec(t *testing.T) {
 			wantCode:    "invalid_gpu",
 			wantMessage: `gpu "0000:01:ff.0" must be a PCI address like 0000:01:00.0 or 01:00.0`,
 		},
+		{
+			name:        "empty gpu address rejected",
+			spec:        types.VMSpec{Name: "gpu-01", Image: "ubuntu", GPUs: []string{""}},
+			wantCode:    "invalid_gpu",
+			wantMessage: `gpu "" must be a PCI address like 0000:01:00.0 or 01:00.0`,
+		},
+		{
+			name:        "whitespace-only gpu address rejected",
+			spec:        types.VMSpec{Name: "gpu-01", Image: "ubuntu", GPUs: []string{"   "}},
+			wantCode:    "invalid_gpu",
+			wantMessage: `gpu "   " must be a PCI address like 0000:01:00.0 or 01:00.0`,
+		},
 	}
 
 	for _, tt := range tests {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
 // fakeSysfs builds a minimal sysfs PCI + IOMMU group tree under a temp dir and
@@ -200,5 +202,53 @@ func TestGroupDevicesSkipsUnreadableClass(t *testing.T) {
 func TestProductionIOMMURootPathName(t *testing.T) {
 	if sysfsIOMMUGroups != "/sys/kernel/iommu_groups" {
 		t.Fatalf("sysfsIOMMUGroups = %q, want /sys/kernel/iommu_groups", sysfsIOMMUGroups)
+	}
+}
+
+// TestDiscoverGPUsToleratesMissingOptionalAttrs documents the contract behind
+// readOptionalSysfsString / readOptionalLinkBase: a healthy passthrough host
+// with a discrete GPU that is unbound and not the primary display must still
+// surface as a discoverable GPU with empty Driver and BootVGA=false, without
+// leaking a warning per missing attribute.
+func TestDiscoverGPUsToleratesMissingOptionalAttrs(t *testing.T) {
+	root := fakeSysfs(t)
+
+	// Strip every optional attribute from the discrete NVIDIA GPU: the driver
+	// symlink (operator just unbound it), the boot_vga file (not the primary
+	// display), and the iommu_group symlink (IOMMU disabled for this device).
+	devDir := filepath.Join(root, "devices", "0000:01:00.0")
+	for _, opt := range []string{"driver", "boot_vga", "iommu_group"} {
+		if err := os.Remove(filepath.Join(devDir, opt)); err != nil {
+			t.Fatalf("remove %s: %v", opt, err)
+		}
+	}
+
+	gpus, err := DiscoverGPUs()
+	if err != nil {
+		t.Fatalf("DiscoverGPUs: %v", err)
+	}
+	if len(gpus) != 2 {
+		t.Fatalf("got %d GPUs, want 2", len(gpus))
+	}
+	var nv types.GPUDevice
+	for _, g := range gpus {
+		if g.Address == "0000:01:00.0" {
+			nv = g
+		}
+	}
+	if nv.Address == "" {
+		t.Fatalf("NVIDIA GPU not surfaced after stripping optional attrs: %+v", gpus)
+	}
+	if nv.Driver != "" {
+		t.Errorf("Driver = %q, want empty (unbound)", nv.Driver)
+	}
+	if nv.BootVGA {
+		t.Errorf("BootVGA = true, want false (no boot_vga file)")
+	}
+	if nv.IOMMUGroup != 0 {
+		t.Errorf("IOMMUGroup = %d, want 0 (no iommu_group link)", nv.IOMMUGroup)
+	}
+	if len(nv.GroupDevices) != 0 {
+		t.Errorf("GroupDevices = %v, want empty", nv.GroupDevices)
 	}
 }
