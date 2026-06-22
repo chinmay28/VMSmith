@@ -110,7 +110,7 @@ func ExpandIOMMUGroups(addrs []string) []string {
 			if gm := groupDevices(group); len(gm) > 0 {
 				members = gm
 			} else {
-				logger.Warn("daemon", "falling back to bare GPU because IOMMU group members could not be resolved", "gpu", addr, "iommu_group", group)
+				logger.Warn("daemon", "falling back to bare GPU because IOMMU group members could not be resolved", "gpu", addr, "iommu_group", strconv.Itoa(group))
 			}
 		} else {
 			logger.Warn("daemon", "falling back to bare GPU because IOMMU group could not be resolved", "gpu", addr)
@@ -155,7 +155,7 @@ func groupDevices(group int) []string {
 		addr := e.Name()
 		class := readSysfsString(filepath.Join(sysfsPCIDevices, addr, "class"))
 		if class == "" {
-			logger.Warn("daemon", "skipping IOMMU group member with unreadable PCI class", "gpu", addr, "iommu_group", group)
+			logger.Warn("daemon", "skipping IOMMU group member with unreadable PCI class", "gpu", addr, "iommu_group", strconv.Itoa(group))
 			continue
 		}
 		if strings.HasPrefix(class, pciClassBridgePrefix) {
