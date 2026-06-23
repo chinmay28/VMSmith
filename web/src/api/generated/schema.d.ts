@@ -5078,10 +5078,20 @@ export interface components {
          *     `root` so empty VMs collate with explicit-root VMs in
          *     alphabetical order rather than sinking to the tail — matches the
          *     runtime semantics in `internal/vm/lifecycle.go` and the
-         *     empty-means-root filter contract. All comparators tiebreak on
+         *     empty-means-root filter contract. `gpu` (5.7.13) is a
+         *     lexicographic sort on the VM's smallest assigned GPU PCI address,
+         *     normalised to the canonical long form (`0000:01:00.0`) before
+         *     compare so a VM persisted with the short form (`01:00.0`)
+         *     collates identically; symmetric sort counterpart to the
+         *     `?gpu=` filter (5.7.9) so the same passthrough cohort can be
+         *     both filtered and sorted on the same column. VMs with no
+         *     requested GPUs sink to the tail in ascending order and the head
+         *     in descending order, mirroring the nil-trailing semantics on
+         *     every other nullable axis (ip, guest_ip, image, actor,
+         *     last_fired_at, last_delivery_at). All comparators tiebreak on
          *     `id` so pagination is deterministic across backends.
          */
-        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user";
+        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu";
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

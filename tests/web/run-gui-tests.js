@@ -397,6 +397,46 @@ async function main() {
       await p.waitForTimeout(400);
     }, page);
 
+    // 5.7.13 — `sort=gpu` axis on the VM list. Seed data: win-app alone
+    // carries `0000:01:00.0`; web-server / db-server leave spec.gpus
+    // empty so the no-GPU cohort sinks to the tail in asc and leads in
+    // desc, mirroring the nil-trailing contract on every other nullable
+    // sort axis (ip / image / guest_ip / actor / last_fired_at).
+    await runTest("gpu sort axis reorders the VM list and sinks no-GPU VMs to the tail", async (p) => {
+      await openFilterPanel(p, "vm-list-filters");
+      await p.locator('[data-testid="vm-list-sort-field"]').selectOption("gpu");
+      await p.waitForTimeout(200);
+      // Asc: win-app first (only GPU-bearing VM), then web-server (vm-1)
+      // and db-server (vm-2) tied on empty-trails-in-asc with id tiebreak.
+      const cards1 = await p.locator('[data-testid^="vm-card-"]').all();
+      const firstId1 = await cards1[0].getAttribute('data-testid');
+      const lastId1 = await cards1[cards1.length - 1].getAttribute('data-testid');
+      await assert(firstId1 === 'vm-card-win-app',
+        `expected win-app first under sort=gpu, got ${firstId1}`);
+      await assert(lastId1 === 'vm-card-db-server',
+        `expected db-server last under sort=gpu (empty-trails-in-asc, id tiebreak), got ${lastId1}`);
+      const urlAsc = new URL(p.url());
+      await assert(urlAsc.searchParams.get("sort") === "gpu",
+        `expected ?sort=gpu, got ${urlAsc.searchParams.get("sort")}`);
+
+      // Desc: empty-leads-in-desc inverts the id tiebreak too, so
+      // db-server heads the list and win-app trails at the tail.
+      await p.locator('[data-testid="vm-list-sort-order"]').selectOption("desc");
+      await p.waitForTimeout(200);
+      const cards2 = await p.locator('[data-testid^="vm-card-"]').all();
+      const firstId2 = await cards2[0].getAttribute('data-testid');
+      const lastId2 = await cards2[cards2.length - 1].getAttribute('data-testid');
+      await assert(firstId2 === 'vm-card-db-server',
+        `expected db-server first under sort=gpu&order=desc, got ${firstId2}`);
+      await assert(lastId2 === 'vm-card-win-app',
+        `expected win-app last under sort=gpu&order=desc, got ${lastId2}`);
+
+      // Reset for any subsequent tests on this page.
+      await p.locator('[data-testid="vm-list-sort-field"]').selectOption("id");
+      await p.locator('[data-testid="vm-list-sort-order"]').selectOption("asc");
+      await p.waitForTimeout(200);
+    }, page);
+
     // 5.7.9 — `?gpu=<pci-addr>` filter on the VM list. Seed data: win-app
     // alone carries `0000:01:00.0`; web-server / db-server leave spec.gpus
     // empty so the empty-stored-excludes path is exercised. 250 ms debounce

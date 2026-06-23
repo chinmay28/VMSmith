@@ -20,6 +20,7 @@ const (
 	VMSortIP          = "ip"
 	VMSortImage       = "image"
 	VMSortDefaultUser = "default_user"
+	VMSortGPU         = "gpu"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -31,10 +32,31 @@ func IsValidVMSort(s string) bool {
 	switch s {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
-		VMSortImage, VMSortDefaultUser:
+		VMSortImage, VMSortDefaultUser, VMSortGPU:
 		return true
 	}
 	return false
+}
+
+// smallestGPU returns the lexicographically-smallest canonical PCI address
+// among the VM's requested passthrough GPUs, or "" when none are assigned.
+// Used by the gpu sort axis so a multi-GPU VM has a deterministic position
+// (the smallest slot wins). Short-form entries are normalised to the long
+// form before comparison so a VM persisted with "01:00.0" sorts identically
+// to one persisted with "0000:01:00.0" — matches the alphabet contract on
+// `?gpu=` (5.7.9) and `vmsmith vm create --gpu`.
+func smallestGPU(s VMSpec) string {
+	gpus := s.ResolvedGPUs()
+	if len(gpus) == 0 {
+		return ""
+	}
+	min := gpus[0]
+	for _, g := range gpus[1:] {
+		if g < min {
+			min = g
+		}
+	}
+	return min
 }
 
 // resolveDefaultUser collapses an empty stored `spec.default_user` to "root",
@@ -146,6 +168,29 @@ func SortVMs(vms []*VM, sortField, order string) {
 				less = true
 			case aiImg != ajImg:
 				less = aiImg < ajImg
+			default:
+				less = ai.ID < aj.ID
+			}
+		case VMSortGPU:
+			// Lexicographic sort on the VM's smallest assigned GPU PCI
+			// address (canonical long form via NormalizePCIAddress, so
+			// "01:00.0" collates identically to "0000:01:00.0").
+			// Symmetric sort counterpart to the `?gpu=` filter (5.7.9)
+			// so the same passthrough cohort can be both filtered and
+			// sorted on the same column. VMs with no requested GPUs
+			// sink to the tail in asc / head in desc, mirroring the
+			// nil-trailing semantics on every other nullable axis (ip,
+			// guest_ip, image, last_fired_at, last_delivery_at, actor).
+			aiG, ajG := smallestGPU(ai.Spec), smallestGPU(aj.Spec)
+			switch {
+			case aiG == "" && ajG == "":
+				less = ai.ID < aj.ID
+			case aiG == "":
+				less = false
+			case ajG == "":
+				less = true
+			case aiG != ajG:
+				less = aiG < ajG
 			default:
 				less = ai.ID < aj.ID
 			}

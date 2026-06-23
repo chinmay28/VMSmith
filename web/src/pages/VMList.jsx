@@ -862,6 +862,7 @@ export default function VMList() {
           <option value="ip">IP</option>
           <option value="image">Image</option>
           <option value="default_user">Default user</option>
+          <option value="gpu">GPU</option>
         </select>
         <select
           value={order}
