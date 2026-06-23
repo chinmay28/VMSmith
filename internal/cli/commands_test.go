@@ -1385,6 +1385,107 @@ func TestCLI_VMList_FilterByClockOffset_ComposesWithOSType(t *testing.T) {
 	}
 }
 
+// 5.7.9 — `--gpu` on `vmsmith vm list`. Mirrors the API `?gpu=` filter:
+// any-of exact match against the VM's requested passthrough addresses
+// (normalised long form); accepts the long ('0000:01:00.0') or short
+// ('01:00.0') form; VMs with no requested GPUs drop out when set; garbage
+// fails `IsValidPCIAddress` with an error so a typo surfaces before the
+// daemon is contacted.
+
+func TestCLI_VMList_FilterByGPU_ExactMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "no-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "rtx-4080", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "other-slot", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:02:00.0"}}})
+
+	out, err := runCLI("vm", "list", "--gpu", "0000:01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if !strings.Contains(out, "rtx-4080") || strings.Contains(out, "other-slot") || strings.Contains(out, "no-gpu") {
+		t.Fatalf("expected only rtx-4080, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_ShortFormMatchesLongFormStored(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "long-stored", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+
+	out, err := runCLI("vm", "list", "--gpu", "01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if !strings.Contains(out, "long-stored") {
+		t.Fatalf("expected short-form to match long-form stored, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_AnyOfMatch(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "single", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "dual", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:02:00.0", "0000:03:00.0"}}})
+
+	out, err := runCLI("vm", "list", "--gpu", "0000:03:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if !strings.Contains(out, "dual") || strings.Contains(out, "single") {
+		t.Fatalf("expected only dual, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_ExcludesEmpty(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "no-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "with-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+
+	out, err := runCLI("vm", "list", "--gpu", "0000:01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if !strings.Contains(out, "with-gpu") || strings.Contains(out, "no-gpu") {
+		t.Fatalf("expected only with-gpu, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--gpu", "")
+	if err != nil {
+		t.Fatalf("vm list --gpu empty: %v", err)
+	}
+	if !strings.Contains(out, "a") || !strings.Contains(out, "b") {
+		t.Fatalf("expected empty filter to return all VMs, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_RejectsInvalidValue(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "x", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	_, err := runCLI("vm", "list", "--gpu", "not-a-pci-addr")
+	if err == nil {
+		t.Fatal("expected error for invalid --gpu, got nil")
+	}
+	if !strings.Contains(err.Error(), "--gpu") {
+		t.Fatalf("error should reference --gpu, got %v", err)
+	}
+}
+
 // 5.4.36 — per-network filter on `vmsmith vm list`.
 func cliVMWithNetwork(id, name string, netNames ...string) *types.VM {
 	attachments := make([]types.NetworkAttachment, 0, len(netNames))

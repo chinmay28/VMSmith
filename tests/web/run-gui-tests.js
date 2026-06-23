@@ -379,6 +379,37 @@ async function main() {
       await p.waitForTimeout(400);
     }, page);
 
+    // 5.7.9 — `?gpu=<pci-addr>` filter on the VM list. Seed data: win-app
+    // alone carries `0000:01:00.0`; web-server / db-server leave spec.gpus
+    // empty so the empty-stored-excludes path is exercised. 250 ms debounce
+    // and URL round-trip via `?gpu=`.
+    await runTest("gpu filter narrows the VM list and round-trips through the URL", async (p) => {
+      await openFilterPanel(p, "vm-list-filters");
+      await p.locator('[data-testid="vm-list-gpu-filter"]').fill("0000:01:00.0");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-win-app");
+      await assertNotVisible(p, "vm-card-web-server");
+      await assertNotVisible(p, "vm-card-db-server");
+      const urlAfter = new URL(p.url());
+      await assert(urlAfter.searchParams.get("gpu") === "0000:01:00.0",
+        `expected ?gpu=0000:01:00.0, got ${urlAfter.searchParams.get("gpu")}`);
+
+      // Short form must match the long-form stored VM via normalisation.
+      await p.locator('[data-testid="vm-list-gpu-filter"]').fill("01:00.0");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-win-app");
+
+      // Clearing restores the unfiltered view and drops the URL param.
+      await p.locator('[data-testid="vm-list-gpu-filter-clear"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-web-server");
+      await assertVisible(p, "vm-card-db-server");
+      await assertVisible(p, "vm-card-win-app");
+      const urlCleared = new URL(p.url());
+      await assert(!urlCleared.searchParams.has("gpu"),
+        `expected ?gpu= to be cleared, got ${urlCleared.searchParams.get("gpu")}`);
+    }, page);
+
     await page.close();
 
     // ================== VM Detail Tests ==================

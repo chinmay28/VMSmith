@@ -137,6 +137,10 @@ function seed() {
   // db-server leave spec.machine empty (resolves to "pc-q35-6.2"); win-app
   // is the only VM under "pc-q35-rhel9.6.0".
   vmWin.spec.machine = "pc-q35-rhel9.6.0";
+  // 5.7.9 — Pin a passthrough GPU on win-app so the `?gpu=` filter has a
+  // meaningful cohort to slice (win-app matches `0000:01:00.0`; web-server
+  // / db-server leave spec.gpus empty so the excluded path is exercised).
+  vmWin.spec.gpus = ["0000:01:00.0"];
   vmWin.state = "running";
   vmWin.ip = "192.168.100.12";
   vmWin.created_at = "2026-05-20T00:00:00Z";
@@ -510,6 +514,21 @@ const server = http.createServer(async (req, res) => {
     // (stopped, no lease) drop out. Covers DHCP-assigned VMs that
     // nat_static_ip cannot.
     const ipFilter = (url.searchParams.get("ip") || "").trim().toLowerCase();
+    // 5.7.9 — gpu: any-of exact match on the VM's spec.gpus (normalised
+    // long form). Long ('0000:01:00.0') and short ('01:00.0') forms both
+    // accepted; garbage failing the PCI alphabet returns 400 invalid_gpu.
+    // Empty disables; VMs with no requested GPUs drop out.
+    const pciAddrRe = /^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-1][0-9a-fA-F]\.[0-7]$/;
+    const normalizePCI = (s) => {
+      const v = String(s || "").trim().toLowerCase();
+      if (!pciAddrRe.test(v)) return "";
+      return v.split(":").length === 2 ? `0000:${v}` : v;
+    };
+    const gpuFilterRaw = (url.searchParams.get("gpu") || "").trim();
+    if (gpuFilterRaw && !pciAddrRe.test(gpuFilterRaw)) {
+      return json(res, 400, { code: "invalid_gpu", message: "gpu must be a PCI address in domain:bus:slot.function form" });
+    }
+    const gpuFilter = gpuFilterRaw ? normalizePCI(gpuFilterRaw) : "";
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -701,6 +720,15 @@ const server = http.createServer(async (req, res) => {
         const stored = String(vm.ip || "").trim().toLowerCase();
         if (!stored) return false;
         return stored === ipFilter;
+      });
+    }
+    if (gpuFilter) {
+      // 5.7.9 — any-of exact match against vm.spec.gpus (normalised long
+      // form). VMs with no requested GPUs drop out.
+      list = list.filter(vm => {
+        const stored = Array.isArray(vm?.spec?.gpus) ? vm.spec.gpus : [];
+        if (stored.length === 0) return false;
+        return stored.some(g => normalizePCI(g) === gpuFilter);
       });
     }
     if (autoStart.set) {

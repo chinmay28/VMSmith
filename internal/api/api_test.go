@@ -2660,6 +2660,182 @@ func TestListVMs_FilterByClockOffset_TotalCountReflectsFiltered(t *testing.T) {
 	}
 }
 
+// 5.7.9 — `?gpu=<pci-addr>` exact-match filter on the VM list. Closes the
+// fleet-audit operator query *"which VM has 0000:01:00.0 assigned?"* now that
+// 5.7 GPU passthrough has shipped. Mirrors the empty-stored-excludes
+// contract on `?ip=` / `?nat_static_ip=` and the create-path
+// `IsValidPCIAddress` validation (5.7.4).
+func TestListVMs_FilterByGPU_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "no-gpu", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "rtx-4080", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "other-slot", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "rtx-4080" {
+		t.Fatalf("expected only rtx-4080, got %+v", vms)
+	}
+}
+
+// Short form `01:00.0` and long form `0000:01:00.0` must round-trip via
+// `NormalizePCIAddress`. A VM stored with the short form still surfaces when
+// queried by the long form and vice versa.
+func TestListVMs_FilterByGPU_ShortFormMatchesLongFormStored(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-long", Name: "long", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-short", Name: "short", Spec: types.VMSpec{GPUs: []string{"02:00.0"}}})
+
+	// Filter by short form must match the long-form stored VM.
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "long" {
+		t.Fatalf("expected only the long-form stored VM, got %+v", vms)
+	}
+
+	// Filter by long form must match the short-form stored VM.
+	resp2, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:02:00.0")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp2.StatusCode)
+	}
+	var vms2 []*types.VM
+	decodeJSON(t, resp2, &vms2)
+	if len(vms2) != 1 || vms2[0].Name != "short" {
+		t.Fatalf("expected only the short-form stored VM, got %+v", vms2)
+	}
+}
+
+// Multi-GPU VMs match when any of their requested addresses equals the
+// filter (any-of semantics). Mirrors `?network=` and the 5.4.36 contract.
+func TestListVMs_FilterByGPU_AnyOfMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "single", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "dual", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0", "0000:03:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:03:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "dual" {
+		t.Fatalf("expected only the dual-GPU VM, got %+v", vms)
+	}
+}
+
+// VMs with no requested GPUs drop out whenever the filter is set, mirroring
+// the empty-stored-excludes contract on `?ip=` / `?nat_static_ip=`.
+func TestListVMs_FilterByGPU_ExcludesEmpty(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "no-gpu", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "with-gpu", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].Name != "with-gpu" {
+		t.Fatalf("expected only with-gpu, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "rtx-4080", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=%20%200000%3A01%3A00.0%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+// Garbage that fails `IsValidPCIAddress` returns 400 `invalid_gpu`, mirroring
+// the create-path validation contract (5.7.4) so a typo surfaces before the
+// filter is silently no-op'd.
+func TestListVMs_FilterByGPU_InvalidValueReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=not-a-pci-addr")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_gpu")
+}
+
+func TestListVMs_FilterByGPU_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		var gpus []string
+		if i%2 == 0 {
+			gpus = []string{"0000:01:00.0"}
+		}
+		mockMgr.SeedVM(&types.VM{
+			ID:   fmt.Sprintf("vm-%d", i),
+			Name: fmt.Sprintf("vm-%d", i),
+			Spec: types.VMSpec{GPUs: gpus},
+		})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
+	}
+}
+
 func TestListVMs_FilterByImage_ExactMatch(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
