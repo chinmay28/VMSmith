@@ -3863,6 +3863,58 @@ test.describe("Schedules", () => {
     ]);
   });
 
+  // 5.4.95 — vm_id sort axis orders the runs expander by their target VM
+  // ID with case-sensitive ASCII compare; runs with an empty vm_id sink
+  // to the tail in asc / head in desc. Mirrors the events vm_id sort
+  // axis (5.4.93) and the logs vm_id sort axis (5.4.94).
+  test("vm_id sort axis orders the recent-runs expander by target VM id", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Seeded vm_id distribution:
+    //   run-4 -> vm-2; run-1/2/3/5/6 -> vm-1.
+    const orderOf = async () => {
+      const ids = await page
+        .locator('[data-testid^="schedule-run-run-"]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+      return ids;
+    };
+
+    // sort=vm_id, order=asc: vm-1 runs first (id tiebreak run-1..run-6),
+    // then vm-2 (only run-4).
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("vm_id");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("asc");
+    await expect(page.getByTestId("schedule-run-run-1")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-1",
+      "schedule-run-run-2",
+      "schedule-run-run-3",
+      "schedule-run-run-5",
+      "schedule-run-run-6",
+      "schedule-run-run-4",
+    ]);
+
+    // sort=vm_id, order=desc: vm-2 first (run-4), then vm-1 in reverse
+    // id tiebreak.
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("desc");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-6",
+      "schedule-run-run-5",
+      "schedule-run-run-3",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+    ]);
+
+    // Reset — original newest-started-first ordering restored.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("");
+  });
+
   test("duration sort axis orders the recent-runs expander by finish-minus-start", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

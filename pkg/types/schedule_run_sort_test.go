@@ -175,14 +175,91 @@ func TestSortScheduleRuns_UnknownFieldFallsBackToID(t *testing.T) {
 }
 
 func TestIsValidScheduleRunSort(t *testing.T) {
-	for _, ok := range []string{"id", "started_at", "finished_at", "status", "duration"} {
+	for _, ok := range []string{"id", "started_at", "finished_at", "status", "duration", "vm_id"} {
 		if !IsValidScheduleRunSort(ok) {
 			t.Errorf("expected %q valid", ok)
 		}
 	}
-	for _, bad := range []string{"", "name", "memory", "STARTED_AT", "garbage"} {
+	for _, bad := range []string{"", "name", "memory", "STARTED_AT", "garbage", "VM_ID"} {
 		if IsValidScheduleRunSort(bad) {
 			t.Errorf("expected %q invalid", bad)
 		}
+	}
+}
+
+func TestSortScheduleRuns_ByVMID_AscCaseSensitive(t *testing.T) {
+	// Case-sensitive ASCII compare: uppercase sorts before lowercase
+	// because 'A' (0x41) < 'a' (0x61) in ASCII. Mirrors the events
+	// vm_id sort axis (5.4.93) and the logs vm_id sort axis (5.4.94).
+	runs := []*ScheduleRun{
+		{ID: "run-3", VMID: "vm-c"},
+		{ID: "run-1", VMID: "vm-A"},
+		{ID: "run-2", VMID: "vm-b"},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderAsc)
+	want := []string{"run-1", "run-2", "run-3"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("vm_id asc case-sensitive: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_ByVMID_AscEmptyTrailing(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-empty", VMID: ""},
+		{ID: "run-late", VMID: "vm-z"},
+		{ID: "run-early", VMID: "vm-a"},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderAsc)
+	want := []string{"run-early", "run-late", "run-empty"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("vm_id asc empty-trailing: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_ByVMID_DescEmptyLeading(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-late", VMID: "vm-z"},
+		{ID: "run-empty", VMID: ""},
+		{ID: "run-early", VMID: "vm-a"},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderDesc)
+	// Descending of nil-trailing flips to nil-leading.
+	want := []string{"run-empty", "run-late", "run-early"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("vm_id desc empty-leading: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_ByVMID_TiebreaksOnID(t *testing.T) {
+	// Three runs targeting the same VM tiebreak on run ID alphabetical.
+	runs := []*ScheduleRun{
+		{ID: "run-c", VMID: "vm-shared"},
+		{ID: "run-a", VMID: "vm-shared"},
+		{ID: "run-b", VMID: "vm-shared"},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderAsc)
+	if runs[0].ID != "run-a" || runs[1].ID != "run-b" || runs[2].ID != "run-c" {
+		t.Fatalf("vm_id tiebreak on id: %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
+	}
+}
+
+func TestSortScheduleRuns_ByVMID_AllEmptyTiebreaksOnID(t *testing.T) {
+	// Every run carries an empty vm_id (e.g. queue_full skips on an
+	// all-VMs schedule); comparator must still produce a stable ID
+	// ordering instead of returning -1/1 arbitrarily.
+	runs := []*ScheduleRun{
+		{ID: "run-c", VMID: ""},
+		{ID: "run-a", VMID: ""},
+		{ID: "run-b", VMID: ""},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderAsc)
+	if runs[0].ID != "run-a" || runs[1].ID != "run-b" || runs[2].ID != "run-c" {
+		t.Fatalf("vm_id all-empty tiebreak on id: %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
 	}
 }

@@ -2990,9 +2990,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, maxDuration.err);
     }
     const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
-    const validRunSorts = ["id", "started_at", "finished_at", "status", "duration"];
+    const validRunSorts = ["id", "started_at", "finished_at", "status", "duration", "vm_id"];
     if (sortRaw && !validRunSorts.includes(sortRaw)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status, duration" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status, duration, vm_id" });
     }
     const orderRaw = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (orderRaw && orderRaw !== "asc" && orderRaw !== "desc") {
@@ -3063,6 +3063,19 @@ const server = http.createServer(async (req, res) => {
           const bDur = Date.parse(b.finished_at) - Date.parse(b.started_at);
           cmp = aDur - bDur;
         }
+      } else if (sortField === "vm_id") {
+        // Case-sensitive ASCII compare on vm_id with nil-trailing
+        // semantics (empty vm_id sinks to the tail in asc / head in
+        // desc). Mirrors the Go SortScheduleRuns vm_id branch and the
+        // events / logs vm_id sort axes.
+        const av = String(a.vm_id || "");
+        const bv = String(b.vm_id || "");
+        if (!av && !bv) cmp = 0;
+        else if (!av) cmp = 1;
+        else if (!bv) cmp = -1;
+        else if (av < bv) cmp = -1;
+        else if (av > bv) cmp = 1;
+        else cmp = 0;
       } else { // id
         cmp = String(a.id || "").localeCompare(String(b.id || ""));
       }

@@ -335,12 +335,16 @@ inclusive --min-duration-ms / --max-duration-ms window on each run's
 finished_at - started_at duration (also excludes still-running runs when
 either bound is set — the symmetric range counterpart to the --sort=duration
 axis), and page with --limit / --page. Order with --sort
-(id|started_at|finished_at|status|duration; default started_at) and --order
-(asc|desc; default desc on bare sort to preserve the newest-first contract).
-Still-running runs (nil finished_at) trail an ascending finished_at sort and
-lead a descending one; the duration axis (finished_at - started_at) applies
-the same nil-trailing semantics — still-running runs sink to the tail in
-asc and lead in desc.`,
+(id|started_at|finished_at|status|duration|vm_id; default started_at) and
+--order (asc|desc; default desc on bare sort to preserve the newest-first
+contract). Still-running runs (nil finished_at) trail an ascending
+finished_at sort and lead a descending one; the duration axis
+(finished_at - started_at) applies the same nil-trailing semantics —
+still-running runs sink to the tail in asc and lead in desc. The vm_id
+axis is case-sensitive (VM IDs are opaque vm-<unix-nano> strings) and
+sinks runs with an empty vm_id (e.g. queue_full skips on an all-VMs
+schedule) to the tail in asc / head in desc, mirroring the events vm_id
+sort axis and the logs vm_id sort axis.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -388,7 +392,7 @@ asc and lead in desc.`,
 		}
 		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
 		if sortField != "" && !types.IsValidScheduleRunSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status, duration")
+			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status, duration, vm_id")
 		}
 		order := strings.ToLower(strings.TrimSpace(orderFlag))
 		if order != "" && order != types.SortOrderAsc && order != types.SortOrderDesc {
@@ -687,7 +691,7 @@ func init() {
 	scheduleRunsCmd.Flags().Int("min-duration-ms", 0, "lower bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
 	scheduleRunsCmd.Flags().Int("max-duration-ms", 0, "upper bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
-	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration (default started_at)")
+	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration|vm_id (default started_at)")
 	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")

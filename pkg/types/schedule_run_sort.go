@@ -13,12 +13,18 @@ const (
 	ScheduleRunSortFinishedAt = "finished_at"
 	ScheduleRunSortStatus     = "status"
 	ScheduleRunSortDuration   = "duration"
+	ScheduleRunSortVMID       = "vm_id"
 )
 
 // IsValidScheduleRunSort reports whether field is an accepted sort key.
 func IsValidScheduleRunSort(field string) bool {
 	switch field {
-	case ScheduleRunSortID, ScheduleRunSortStartedAt, ScheduleRunSortFinishedAt, ScheduleRunSortStatus, ScheduleRunSortDuration:
+	case ScheduleRunSortID,
+		ScheduleRunSortStartedAt,
+		ScheduleRunSortFinishedAt,
+		ScheduleRunSortStatus,
+		ScheduleRunSortDuration,
+		ScheduleRunSortVMID:
 		return true
 	default:
 		return false
@@ -58,8 +64,11 @@ func compareRunDuration(a, b *ScheduleRun) int {
 // still-running runs sink to the tail (consistent with compareNullableTime's
 // nil-trailing semantics). The duration axis treats still-running runs
 // (nil finished_at) as unknown-duration and applies the same nil-trailing
-// semantics. All comparators tiebreak on ID so paginated requests are
-// deterministic. Unknown fields fall back to ID.
+// semantics. The vm_id axis is case-sensitive and sinks empty-vm_id runs
+// to the tail of asc / head of desc, mirroring the events vm_id sort axis
+// (5.4.93) and the logs vm_id sort axis (5.4.94). All comparators
+// tiebreak on ID so paginated requests are deterministic. Unknown fields
+// fall back to ID.
 func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
 	desc := order == SortOrderDesc
 	sort.SliceStable(runs, func(i, j int) bool {
@@ -74,6 +83,29 @@ func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
 			cmp = strings.Compare(string(a.Status), string(b.Status))
 		case ScheduleRunSortDuration:
 			cmp = compareRunDuration(a, b)
+		case ScheduleRunSortVMID:
+			// Case-sensitive comparison mirrors the case-sensitive
+			// `?vm_id=` exact-match filter contract — VM IDs are
+			// opaque `vm-<unix-nano>` strings operators reference
+			// verbatim. Runs with an empty `vm_id` (skipped fires
+			// recorded without a resolved target such as a
+			// `queue_full` skip on an all-VMs schedule) sink to the
+			// tail of asc / head of desc, mirroring the nil-trailing
+			// semantics on the events `vm_id` sort axis (5.4.93),
+			// the logs `vm_id` sort axis (5.4.94), and every other
+			// nullable sort axis (ip, guest_ip, last_fired_at,
+			// last_delivery_at, actor, resource_id, image,
+			// default_user, gpu).
+			switch {
+			case a.VMID == "" && b.VMID == "":
+				cmp = 0
+			case a.VMID == "":
+				cmp = 1
+			case b.VMID == "":
+				cmp = -1
+			default:
+				cmp = strings.Compare(a.VMID, b.VMID)
+			}
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}
