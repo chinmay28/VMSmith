@@ -361,6 +361,9 @@ async function main() {
     // runtime by the earlier GPU passthrough test, so the cohort is
     // deterministic regardless of test order. The short form `0a:00.0`
     // canonicalises server-side and matches the same VM.
+    //
+    // FilterPanel is collapsed-by-default since #414, so every filter input
+    // requires expanding the panel first via `vm-list-filters-toggle`.
     await runTest("gpu filter narrows the VM list and round-trips through the URL", async (p) => {
       await p.goto(BASE);
       await p.waitForTimeout(300);
@@ -369,6 +372,9 @@ async function main() {
 
       await assertVisible(p, "vm-card-win-app");
       await assertVisible(p, "vm-card-web-server");
+
+      await p.locator('[data-testid="vm-list-filters-toggle"]').click();
+      await p.waitForTimeout(200);
 
       await p.locator('[data-testid="vm-list-gpu-filter"]').fill("0000:0a:00.0");
       await p.waitForTimeout(400);
