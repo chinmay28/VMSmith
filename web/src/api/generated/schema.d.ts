@@ -4560,6 +4560,15 @@ export interface components {
             cpus: components["schemas"]["QuotaUsageSummary"];
             ram_mb: components["schemas"]["QuotaUsageSummary"];
             disk_gb: components["schemas"]["QuotaUsageSummary"];
+            /**
+             * @description Aggregate GPU passthrough allocation (count of host PCI GPU
+             *     functions assigned across all VMs) and its configured
+             *     `quotas.max_total_gpus` cap (`limit: 0` = uncapped). Lines up
+             *     with the existing CPU / RAM / disk quota dimensions; GPU
+             *     assignment is immutable post-create (5.7.4) so PATCH /vms/{id}
+             *     never affects this counter.
+             */
+            gpus: components["schemas"]["QuotaUsageSummary"];
         };
         Webhook: {
             /** @example wh-1741234567890123 */

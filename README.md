@@ -289,6 +289,7 @@ quotas:
   max_total_cpus: 64
   max_total_ram_mb: 262144
   max_total_disk_gb: 4000
+  max_total_gpus: 4
   max_snapshots_per_vm: 5
 ```
 
@@ -635,6 +636,7 @@ quotas:
   max_total_cpus: 0       # total configured vCPUs across all VMs
   max_total_ram_mb: 0     # total configured RAM across all VMs
   max_total_disk_gb: 0    # total configured disk across all VMs
+  max_total_gpus: 0       # total VFIO passthrough GPUs across all VMs (5.7.11)
   max_snapshots_per_vm: 0 # 0 disables the limit. if set, oldest snapshots are deleted when exceeded
 ```
 

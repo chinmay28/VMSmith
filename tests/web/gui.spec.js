@@ -110,6 +110,18 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("vm-detail-name")).toHaveText("web-server");
   });
 
+  // 5.7.11 — GPU quota card. The mock server seeds win-app with one
+  // passthrough GPU ("0000:01:00.0") and the other VMs with none, so the
+  // /quotas/usage endpoint reports gpus.used = 1 / limit = 0.  The
+  // Dashboard renders a fifth QuotaCard for the new GPU dimension that
+  // must show the seeded count and the "uncapped" subtitle.
+  test("shows the GPU quota card with seeded usage", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const card = page.getByText("GPUs allocated").locator("xpath=ancestor::div[contains(@class,'card-hover')][1]");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("1 GPUs · uncapped");
+  });
+
   test("shows empty-state message when no VMs reported metrics", async ({ page }) => {
     await page.route("**/api/v1/vms/stats/top*", async (route) => {
       await route.fulfill({

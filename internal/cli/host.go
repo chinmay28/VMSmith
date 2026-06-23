@@ -102,6 +102,7 @@ var hostQuotasCmd = &cobra.Command{
 		fmt.Fprintf(tw, "CPUs\t%d\t%s\n", usage.CPUs.Used, quotaLimit(usage.CPUs.Limit, "vCPU"))
 		fmt.Fprintf(tw, "RAM\t%d MB\t%s\n", usage.RAMMB.Used, quotaLimit(usage.RAMMB.Limit, "MB"))
 		fmt.Fprintf(tw, "Disk\t%d GB\t%s\n", usage.DiskGB.Used, quotaLimit(usage.DiskGB.Limit, "GB"))
+		fmt.Fprintf(tw, "GPUs\t%d\t%s\n", usage.GPUs.Used, quotaLimit(usage.GPUs.Limit, ""))
 		return tw.Flush()
 	},
 }

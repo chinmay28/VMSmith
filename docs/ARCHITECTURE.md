@@ -862,6 +862,7 @@ quotas:
   max_total_cpus: 0
   max_total_ram_mb: 0
   max_total_disk_gb: 0
+  max_total_gpus: 0
 
 metrics:
   enabled: true

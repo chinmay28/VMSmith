@@ -54,6 +54,7 @@ quotas:
   max_total_cpus: 0       # aggregate vCPU cap across all VMs
   max_total_ram_mb: 0     # aggregate RAM cap across all VMs
   max_total_disk_gb: 0    # aggregate disk cap across all VMs
+  max_total_gpus: 0       # aggregate passthrough GPU cap across all VMs (5.7.11)
   max_snapshots_per_vm: 0 # 0 = unlimited. if set, auto-deletes oldest when exceeded
 
 metrics:

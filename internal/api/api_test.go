@@ -882,6 +882,57 @@ func TestCreateVM_QuotaExceeded_CPUs(t *testing.T) {
 	assertAPIErrorCode(t, resp, "quota_exceeded")
 }
 
+// TestCreateVM_QuotaExceeded_GPUs verifies the 5.7.11 GPU dimension on the
+// create path: an existing VM consumes the single available GPU slot and a
+// second create request requesting any passthrough GPU is rejected with
+// HTTP 429 / quota_exceeded.
+func TestCreateVM_QuotaExceeded_GPUs(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalGPUs = 1
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}, State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:      "gpu-overflow",
+		Image:     "ubuntu",
+		CPUs:      2,
+		RAMMB:     2048,
+		DiskGB:    20,
+		SSHPubKey: "ssh-rsa AAAA test",
+		GPUs:      []string{"0000:02:00.0"},
+	}))
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "quota_exceeded")
+}
+
+// TestCreateVM_GPUQuota_AllowsNoGPURequest verifies that a create request
+// with no GPU passthrough request still succeeds even when the GPU quota
+// is fully saturated by other VMs.
+func TestCreateVM_GPUQuota_AllowsNoGPURequest(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalGPUs = 1
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "existing", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}, State: types.VMStateRunning})
+
+	resp, _ := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, types.VMSpec{
+		Name:      "no-gpu",
+		Image:     "ubuntu",
+		CPUs:      2,
+		RAMMB:     2048,
+		DiskGB:    20,
+		SSHPubKey: "ssh-rsa AAAA test",
+	}))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (no-GPU VM should not consume GPU quota)", resp.StatusCode)
+	}
+}
+
 func TestListVMs_FilterByTag(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -8281,11 +8332,12 @@ func TestGetQuotaUsage(t *testing.T) {
 		cfg.Quotas.MaxTotalCPUs = 16
 		cfg.Quotas.MaxTotalRAMMB = 32768
 		cfg.Quotas.MaxTotalDiskGB = 500
+		cfg.Quotas.MaxTotalGPUs = 4
 	})
 	defer cleanup()
 
-	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}})
-	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "two", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 40}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "two", Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 40, GPUs: []string{"0000:02:00.0", "02:01.0"}}})
 
 	resp, err := http.Get(ts.URL + "/api/v1/quotas/usage")
 	if err != nil {
@@ -8308,6 +8360,10 @@ func TestGetQuotaUsage(t *testing.T) {
 	}
 	if usage.DiskGB.Used != 60 || usage.DiskGB.Limit != 500 {
 		t.Fatalf("unexpected disk usage: %+v", usage.DiskGB)
+	}
+	// vm-1 = 1 GPU, vm-2 = 2 GPUs ⇒ aggregate 3.
+	if usage.GPUs.Used != 3 || usage.GPUs.Limit != 4 {
+		t.Fatalf("unexpected GPU usage: %+v", usage.GPUs)
 	}
 }
 

@@ -1953,13 +1953,15 @@ const server = http.createServer(async (req, res) => {
       acc.cpus += vm.spec.cpus || 0;
       acc.ram_mb += vm.spec.ram_mb || 0;
       acc.disk_gb += vm.spec.disk_gb || 0;
+      acc.gpus += Array.isArray(vm.spec.gpus) ? vm.spec.gpus.length : 0;
       return acc;
-    }, { cpus: 0, ram_mb: 0, disk_gb: 0 });
+    }, { cpus: 0, ram_mb: 0, disk_gb: 0, gpus: 0 });
     return json(res, 200, {
       vms: { used: list.length, limit: 0 },
       cpus: { used: totals.cpus, limit: 0 },
       ram_mb: { used: totals.ram_mb, limit: 0 },
       disk_gb: { used: totals.disk_gb, limit: 0 },
+      gpus: { used: totals.gpus, limit: 0 },
     });
   }
   if (p === "/api/v1/logs" && method === "GET") {

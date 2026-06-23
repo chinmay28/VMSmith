@@ -12,9 +12,9 @@ import (
 
 func TestCalculateQuotaUsage(t *testing.T) {
 	usage := CalculateQuotaUsage([]*types.VM{
-		{Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20}},
-		{Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 40}},
-	}, config.QuotasConfig{MaxVMs: 5, MaxTotalCPUs: 16, MaxTotalRAMMB: 32768, MaxTotalDiskGB: 500})
+		{Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}},
+		{Spec: types.VMSpec{CPUs: 4, RAMMB: 4096, DiskGB: 40, GPUs: []string{"02:00.0", "0000:02:00.0"}}},
+	}, config.QuotasConfig{MaxVMs: 5, MaxTotalCPUs: 16, MaxTotalRAMMB: 32768, MaxTotalDiskGB: 500, MaxTotalGPUs: 4})
 	if usage.VMs.Used != 2 || usage.VMs.Limit != 5 {
 		t.Fatalf("unexpected VM usage: %+v", usage.VMs)
 	}
@@ -26,6 +26,52 @@ func TestCalculateQuotaUsage(t *testing.T) {
 	}
 	if usage.DiskGB.Used != 60 || usage.DiskGB.Limit != 500 {
 		t.Fatalf("unexpected disk usage: %+v", usage.DiskGB)
+	}
+	// vm-1 has 1 distinct GPU; vm-2 has 2 entries that canonicalise to the
+	// same address ("02:00.0" == "0000:02:00.0"), so ResolvedGPUs dedupes
+	// and the fleet total is 1 + 1 = 2.
+	if usage.GPUs.Used != 2 || usage.GPUs.Limit != 4 {
+		t.Fatalf("unexpected GPU usage: %+v", usage.GPUs)
+	}
+}
+
+func TestQuotaManagerCreateRejectsExceededGPUQuota(t *testing.T) {
+	base := NewMockManager()
+	base.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}})
+	mgr := WithQuotas(base, config.QuotasConfig{MaxTotalGPUs: 1})
+	_, err := mgr.Create(context.Background(), types.VMSpec{
+		Name: "two", Image: "ubuntu", CPUs: 2, RAMMB: 2048, DiskGB: 20,
+		GPUs: []string{"0000:02:00.0"},
+	})
+	if err == nil {
+		t.Fatal("expected quota error")
+	}
+	apiErr, ok := err.(*types.APIError)
+	if !ok || apiErr.Code != "quota_exceeded" {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+	if !strings.Contains(apiErr.Message, "max_total_gpus") {
+		t.Fatalf("unexpected message: %q", apiErr.Message)
+	}
+}
+
+// TestQuotaManagerCreate_GPUQuotaIgnoresUnresolvableAddresses verifies that
+// only canonicalised GPU addresses count toward the quota — a duplicate of
+// an existing assignment (short vs long form) is folded into one slot, and
+// garbage entries do not consume budget.
+func TestQuotaManagerCreate_GPUQuotaCountsCanonicalised(t *testing.T) {
+	base := NewMockManager()
+	base.SeedVM(&types.VM{ID: "vm-1", Name: "one", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}})
+	mgr := WithQuotas(base, config.QuotasConfig{MaxTotalGPUs: 2})
+	// Requesting "01:00.0" + "0000:01:00.0" should canonicalise to a single
+	// new slot, so the fleet total goes 1 → 2 (= limit) and the create
+	// succeeds.
+	_, err := mgr.Create(context.Background(), types.VMSpec{
+		Name: "two", Image: "ubuntu", CPUs: 2, RAMMB: 2048, DiskGB: 20,
+		GPUs: []string{"02:00.0", "0000:02:00.0"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
