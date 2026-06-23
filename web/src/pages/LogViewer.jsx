@@ -242,6 +242,7 @@ export default function LogViewer() {
               <option value="timestamp">Time</option>
               <option value="level">Level</option>
               <option value="source">Source</option>
+              <option value="vm_id">VM ID</option>
             </select>
 
             {/* Sort order */}

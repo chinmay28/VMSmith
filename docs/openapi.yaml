@@ -2924,13 +2924,19 @@ paths:
           required: false
           schema:
             type: string
-            enum: [timestamp, level, source]
+            enum: [timestamp, level, source, vm_id]
             default: timestamp
           description: |
-            Sort entries by `timestamp`, `level`, or `source`. `level`
-            orders by severity rank (debug < info < warn < error), not
-            alphabetically. `source` matches case-insensitively. All
-            comparators tiebreak on timestamp+source so paginated
+            Sort entries by `timestamp`, `level`, `source`, or
+            `vm_id`. `level` orders by severity rank
+            (debug < info < warn < error), not alphabetically.
+            `source` matches case-insensitively. `vm_id` is the
+            symmetric sort counterpart to the `?vm_id=` exact-match
+            filter — case-sensitive (VM IDs are opaque `vm-<unix-nano>`
+            strings); entries with no `vm_id` field sink to the tail
+            of `asc` and the head of `desc`, mirroring the events
+            `vm_id` sort axis and every other nullable sort axis.
+            All comparators tiebreak on timestamp+source so paginated
             responses are deterministic. Unknown values return 400
             `invalid_sort`.
         - name: order

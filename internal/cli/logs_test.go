@@ -368,6 +368,34 @@ func TestCLI_LogsList_RejectsInvalidOrder(t *testing.T) {
 	}
 }
 
+func TestCLI_LogsList_ForwardsSortVMID(t *testing.T) {
+	// 5.4.94 — vm_id sort axis.
+	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	if _, err := runCLI("logs", "list", "--api-url", srv.URL,
+		"--sort", "vm_id", "--order", "desc"); err != nil {
+		t.Fatalf("logs list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=vm_id") {
+		t.Fatalf("expected sort=vm_id, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected order=desc, got %q", state.lastQuery)
+	}
+}
+
+func TestCLI_LogsList_InvalidSortMentionsVMID(t *testing.T) {
+	// 5.4.94 — the error envelope must advertise vm_id so operators
+	// can discover the new axis without reading the docs.
+	srv, _ := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
+	_, err := runCLI("logs", "list", "--api-url", srv.URL, "--sort", "bogus")
+	if err == nil {
+		t.Fatal("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "vm_id") {
+		t.Fatalf("error = %q, want it to advertise vm_id", err.Error())
+	}
+}
+
 func TestCLI_LogsList_EmptySortAndOrderOmitParams(t *testing.T) {
 	srv, state := newFakeLogsDaemon(t, http.StatusOK, `{"entries":[],"total":0}`)
 	if _, err := runCLI("logs", "list", "--api-url", srv.URL,

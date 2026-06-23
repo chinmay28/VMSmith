@@ -9362,6 +9362,111 @@ func TestGetLogs_RejectsInvalidOrder(t *testing.T) {
 	}
 }
 
+// ── vm_id sort axis (5.4.94) ───────────────────────────────────────────────
+
+func TestGetLogs_SortByVMID_AscEmptyTrailing(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-vmid-94 needle bbb", "vm_id", "vm-bbb")
+	logger.Info("daemon", "sort-vmid-94 needle aaa", "vm_id", "vm-aaa")
+	logger.Info("daemon", "sort-vmid-94 needle none")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-vmid-94&sort=vm_id&order=asc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	want := []string{"vm-aaa", "vm-bbb", ""}
+	for i, e := range result.Entries {
+		gotVMID := ""
+		if e.Fields != nil {
+			gotVMID = e.Fields["vm_id"]
+		}
+		if gotVMID != want[i] {
+			t.Fatalf("position %d: want vm_id %q, got %q (msg=%q)",
+				i, want[i], gotVMID, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortByVMID_DescEmptyLeading(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-vmid-94d needle aaa", "vm_id", "vm-aaa")
+	logger.Info("daemon", "sort-vmid-94d needle bbb", "vm_id", "vm-bbb")
+	logger.Info("daemon", "sort-vmid-94d needle none")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-vmid-94d&sort=vm_id&order=desc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(result.Entries))
+	}
+	want := []string{"", "vm-bbb", "vm-aaa"}
+	for i, e := range result.Entries {
+		gotVMID := ""
+		if e.Fields != nil {
+			gotVMID = e.Fields["vm_id"]
+		}
+		if gotVMID != want[i] {
+			t.Fatalf("position %d: want vm_id %q, got %q (msg=%q)",
+				i, want[i], gotVMID, e.Message)
+		}
+	}
+}
+
+func TestGetLogs_SortByVMID_CaseSensitive(t *testing.T) {
+	// VM IDs are opaque case-sensitive strings — capital 'V' (0x56) sorts
+	// before lower-case 'v' (0x76).
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	logger.Info("daemon", "sort-vmid-94c needle lower", "vm_id", "vm-abc")
+	logger.Info("daemon", "sort-vmid-94c needle upper", "vm_id", "VM-abc")
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?level=debug&search=sort-vmid-94c&sort=vm_id&order=asc&per_page=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var result logsResponse
+	decodeJSON(t, resp, &result)
+	if len(result.Entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(result.Entries))
+	}
+	if result.Entries[0].Fields["vm_id"] != "VM-abc" || result.Entries[1].Fields["vm_id"] != "vm-abc" {
+		t.Fatalf("case-sensitive vm_id asc failed: got %v / %v",
+			result.Entries[0].Fields["vm_id"], result.Entries[1].Fields["vm_id"])
+	}
+}
+
+func TestGetLogs_SortByVMID_InvalidSortAdvertisesVMID(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/logs?sort=bogus")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["code"] != "invalid_sort" {
+		t.Errorf("code = %v, want invalid_sort", body["code"])
+	}
+	msg, _ := body["message"].(string)
+	if !strings.Contains(msg, "vm_id") {
+		t.Errorf("invalid_sort message should advertise vm_id; got %q", msg)
+	}
+}
+
 // ── time-range filter (5.4.34) ─────────────────────────────────────────────
 
 func TestGetLogs_FilterByUntil(t *testing.T) {
