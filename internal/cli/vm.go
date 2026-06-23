@@ -186,6 +186,7 @@ var vmListCmd = &cobra.Command{
 		nicModelFilterRaw, _ := cmd.Flags().GetString("nic-model")
 		machineFilterRaw, _ := cmd.Flags().GetString("machine")
 		clockOffsetFilterRaw, _ := cmd.Flags().GetString("clock-offset")
+		gpuFilterRaw, _ := cmd.Flags().GetString("gpu")
 		networkFilter, _ := cmd.Flags().GetString("network")
 		prefixFilter, _ := cmd.Flags().GetString("prefix")
 		natStaticIPRaw, _ := cmd.Flags().GetString("nat-static-ip")
@@ -235,6 +236,10 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 		clockOffsetFilter, clockOffsetSet, err := parseCLIClockOffset(clockOffsetFilterRaw, "--clock-offset")
+		if err != nil {
+			return err
+		}
+		gpuFilter, gpuSet, err := parseCLIGPU(gpuFilterRaw, "--gpu")
 		if err != nil {
 			return err
 		}
@@ -320,7 +325,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || gpuSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -378,6 +383,13 @@ var vmListCmd = &cobra.Command{
 					continue
 				}
 				if clockOffsetSet && !cliVMMatchesClockOffsetFilter(v.Spec, clockOffsetFilter) {
+					continue
+				}
+				// GPU passthrough filter (5.7.9): any-of exact match against the
+				// VM's requested passthrough addresses (normalised long form).
+				// Mirrors the API handler placement (right after the per-VM
+				// device-override quartet, before network).
+				if gpuSet && !cliVMMatchesGPUFilter(v.Spec, gpuFilter) {
 					continue
 				}
 				if networkFilter != "" && !types.VMMatchesNetwork(v, networkFilter) {
@@ -1281,6 +1293,7 @@ Examples:
 	vmListCmd.Flags().String("nic-model", "", "filter VMs by effective NIC model: virtio or e1000e (case-insensitive; 'virtio' also matches Linux VMs with no nic_model override since empty defaults to virtio; 'e1000e' also matches Windows VMs with no nic_model override since empty defaults to e1000e)")
 	vmListCmd.Flags().String("machine", "", "filter VMs by effective libvirt machine type (case-sensitive, free-form; empty spec.machine resolves to the daemon default 'pc-q35-6.2' so --machine pc-q35-6.2 matches both stored value and VMs with no override)")
 	vmListCmd.Flags().String("clock-offset", "", "filter VMs by effective libvirt clock offset: utc or localtime (case-insensitive; 'utc' also matches Linux VMs with no clock_offset override since empty defaults to utc; 'localtime' also matches Windows VMs with no clock_offset override since empty defaults to localtime)")
+	vmListCmd.Flags().String("gpu", "", "filter VMs by requested passthrough GPU PCI address (any-of exact match; accepts the long '0000:01:00.0' or short '01:00.0' form, normalised before matching; VMs with no requested GPUs drop out when the filter is set)")
 	vmListCmd.Flags().String("network", "", "filter VMs attached to a named network (case-insensitive exact match against spec.networks names)")
 	vmListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on VM name (e.g. 'web-prod-' to preview every production web cohort VM)")
 	vmListCmd.Flags().String("nat-static-ip", "", "filter VMs by nat_static_ip (case-insensitive exact match against the stored CIDR or the IP portion; empty disables; DHCP-assigned VMs drop out when the filter is set)")

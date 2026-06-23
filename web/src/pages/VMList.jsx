@@ -94,6 +94,12 @@ export default function VMList() {
   // that `?nat_static_ip=` cannot. 250 ms debounce; URL round-trip via `?ip=`.
   const [ipInput, setIpInput] = useState(searchParams.get('ip') || '');
   const [ipFilter, setIpFilter] = useState(searchParams.get('ip') || '');
+  // 5.7.9 — `?gpu=<pci-addr>` exact-match filter on the VM's requested
+  // passthrough GPUs. Long ('0000:01:00.0') and short ('01:00.0') forms are
+  // both accepted; the daemon normalises before matching. 250 ms debounce;
+  // URL round-trip via `?gpu=`.
+  const [gpuInput, setGpuInput] = useState(searchParams.get('gpu') || '');
+  const [gpuFilter, setGpuFilter] = useState(searchParams.get('gpu') || '');
   const [autoStartFilter, setAutoStartFilter] = useState(searchParams.get('auto_start') || '');
   const [lockedFilter, setLockedFilter] = useState(searchParams.get('locked') || '');
   const [sinceFilter, setSinceFilter] = useState(searchParams.get('since') || '');
@@ -119,8 +125,8 @@ export default function VMList() {
   const sinceParam = useMemo(() => datetimeLocalToISO(sinceFilter), [sinceFilter]);
   const untilParam = useMemo(() => datetimeLocalToISO(untilFilter), [untilFilter]);
   const { data: vmResponse, loading, error, refresh } = useFetch(
-    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, network: networkFilter, prefix: prefixFilter, natStaticIp: natStaticIpFilter, natGateway: natGatewayFilter, ip: ipFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
-    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
+    () => vms.list({ tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, firmware: firmwareFilter, diskBus: diskBusFilter, nicModel: nicModelFilter, machine: machineFilter, clockOffset: clockOffsetFilter, gpu: gpuFilter, network: networkFilter, prefix: prefixFilter, natStaticIp: natStaticIpFilter, natGateway: natGatewayFilter, ip: ipFilter, autoStart: autoStartFilter, locked: lockedFilter, since: sinceParam, until: untilParam, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskFilter, maxDiskGb: maxDiskFilter, sort, order, page, perPage }),
+    [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, gpuFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order, page, perPage],
     30000,
   );
   const handleEvent = useCallback((evt) => {
@@ -153,7 +159,7 @@ export default function VMList() {
 
   useEffect(() => {
     setPage(1);
-  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
+  }, [tagFilter, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, gpuFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceParam, untilParam, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter, sort, order]);
 
   // Debounce the free-text search box. The committed `searchFilter` drives the
   // useFetch dependency above; `searchInput` is what the user types.
@@ -244,6 +250,17 @@ export default function VMList() {
     return () => clearTimeout(handle);
   }, [ipInput]);
 
+  // 5.7.9 — GPU passthrough address filter. Same debounce shape; the daemon
+  // validates the PCI alphabet so garbage surfaces as a server-side error
+  // and the filter is otherwise pass-through.
+  useEffect(() => {
+    const trimmed = gpuInput.trim();
+    const handle = setTimeout(() => {
+      setGpuFilter(trimmed);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [gpuInput]);
+
   // Debounce the vCPU range inputs — the committed filters drive useFetch.
   useEffect(() => {
     const trimmed = minCpusInput.trim();
@@ -297,6 +314,7 @@ export default function VMList() {
     if (nicModelFilter) next.set('nic_model', nicModelFilter); else next.delete('nic_model');
     if (machineFilter) next.set('machine', machineFilter); else next.delete('machine');
     if (clockOffsetFilter) next.set('clock_offset', clockOffsetFilter); else next.delete('clock_offset');
+    if (gpuFilter) next.set('gpu', gpuFilter); else next.delete('gpu');
     if (networkFilter) next.set('network', networkFilter); else next.delete('network');
     if (prefixFilter) next.set('prefix', prefixFilter); else next.delete('prefix');
     if (natStaticIpFilter) next.set('nat_static_ip', natStaticIpFilter); else next.delete('nat_static_ip');
@@ -313,7 +331,7 @@ export default function VMList() {
     if (minDiskFilter) next.set('min_disk_gb', minDiskFilter); else next.delete('min_disk_gb');
     if (maxDiskFilter) next.set('max_disk_gb', maxDiskFilter); else next.delete('max_disk_gb');
     setSearchParams(next, { replace: true });
-  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sort, order, searchFilter, imageFilter, defaultUserFilter, osTypeFilter, osVariantFilter, firmwareFilter, diskBusFilter, nicModelFilter, machineFilter, clockOffsetFilter, gpuFilter, networkFilter, prefixFilter, natStaticIpFilter, natGatewayFilter, ipFilter, autoStartFilter, lockedFilter, sinceFilter, untilFilter, minCpusFilter, maxCpusFilter, minRamFilter, maxRamFilter, minDiskFilter, maxDiskFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSelected = (vmId) => {
     setSelectedIds(prev => prev.includes(vmId) ? prev.filter(id => id !== vmId) : [...prev, vmId]);
@@ -345,6 +363,7 @@ export default function VMList() {
     setNatStaticIpInput(''); setNatStaticIpFilter('');
     setNatGatewayInput(''); setNatGatewayFilter('');
     setIpInput(''); setIpFilter('');
+    setGpuInput(''); setGpuFilter('');
     setAutoStartFilter(''); setLockedFilter('');
     setSinceFilter(''); setUntilFilter('');
     setMinCpusInput(''); setMinCpusFilter(''); setMaxCpusInput(''); setMaxCpusFilter('');
@@ -356,7 +375,7 @@ export default function VMList() {
   const activeFilterCount = [
     tagFilter, imageInput, defaultUserInput, osTypeFilter, osVariantFilter,
     firmwareFilter, diskBusFilter, nicModelFilter, machineInput, clockOffsetFilter,
-    networkInput, prefixInput, natStaticIpInput, natGatewayInput, ipInput,
+    networkInput, prefixInput, natStaticIpInput, natGatewayInput, ipInput, gpuInput,
     autoStartFilter, lockedFilter, sinceFilter, untilFilter,
     minCpusInput, maxCpusInput, minRamInput, maxRamInput, minDiskInput, maxDiskInput,
   ].filter(v => String(v ?? '').trim() !== '').length;
@@ -682,6 +701,31 @@ export default function VMList() {
               onClick={() => setIpInput('')}
               data-testid="vm-list-ip-filter-clear"
               aria-label="Clear IP filter"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        {/* 5.7.9 — GPU passthrough address filter. Accepts long
+            ('0000:01:00.0') or short ('01:00.0') form; the daemon normalises
+            before matching. VMs with no requested GPUs drop out when set. */}
+        <div className="relative w-full sm:w-60">
+          <input
+            type="search"
+            value={gpuInput}
+            onChange={(e) => setGpuInput(e.target.value)}
+            placeholder="Filter by GPU PCI addr…"
+            className="input w-full pr-8 py-1.5 text-sm"
+            data-testid="vm-list-gpu-filter"
+            aria-label="Filter by passthrough GPU PCI address"
+          />
+          {gpuInput && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-200"
+              onClick={() => setGpuInput('')}
+              data-testid="vm-list-gpu-filter-clear"
+              aria-label="Clear GPU filter"
             >
               <X size={13} />
             </button>

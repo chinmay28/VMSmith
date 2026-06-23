@@ -370,7 +370,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	gpuFilter, gpuSet, apiErr := parseGPUFilter(q.Get("gpu"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || gpuSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -428,6 +433,15 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if clockOffsetSet && !vmMatchesClockOffsetFilter(vm.Spec, clockOffsetFilter) {
+				continue
+			}
+			// GPU passthrough filter (5.7.9): any-of exact match against the
+			// VM's requested passthrough addresses (normalised long form).
+			// VMs with no requested GPUs drop out when the filter is set,
+			// mirroring the empty-stored-excludes contract on `?ip=` /
+			// `?nat_static_ip=` / `?nat_gateway=`. Applied right after the
+			// per-VM device-override filter quartet so it composes additively.
+			if gpuSet && !vmMatchesGPUFilter(vm.Spec, gpuFilter) {
 				continue
 			}
 			if autoStartSet && vm.Spec.AutoStart != autoStartFilter {

@@ -42,6 +42,7 @@ paths:
         - $ref: '#/components/parameters/NICModelFilter'
         - $ref: '#/components/parameters/MachineFilter'
         - $ref: '#/components/parameters/ClockOffsetFilter'
+        - $ref: '#/components/parameters/GPUFilter'
         - $ref: '#/components/parameters/NetworkFilter'
         - $ref: '#/components/parameters/PrefixFilter'
         - name: nat_static_ip
@@ -3392,6 +3393,25 @@ components:
       schema:
         type: string
         enum: [utc, localtime]
+    GPUFilter:
+      name: gpu
+      in: query
+      description: |
+        Any-of exact-match filter on the VM's requested passthrough GPUs
+        (`spec.gpus`). Accepts both the long (`0000:01:00.0`) and short
+        (`01:00.0`) PCI address form; the daemon normalises before
+        matching via `NormalizePCIAddress`, so a VM stored with the short
+        form still surfaces when queried by the long form (and vice
+        versa). Surrounding whitespace is trimmed; empty value disables
+        the filter. VMs with no requested GPUs drop out whenever the
+        filter is set, mirroring the empty-stored-excludes contract on
+        `?ip=` / `?nat_static_ip=` / `?nat_gateway=`. Garbage failing
+        `IsValidPCIAddress` returns `400 invalid_gpu`, mirroring the
+        create-path validation contract (5.7.4). Composes additively with
+        every other filter; `X-Total-Count` reflects the post-filter
+        population.
+      schema:
+        type: string
     AutoStartFilter:
       name: auto_start
       in: query

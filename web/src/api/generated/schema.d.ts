@@ -163,6 +163,22 @@ export interface paths {
                      */
                     clock_offset?: components["parameters"]["ClockOffsetFilter"];
                     /**
+                     * @description Any-of exact-match filter on the VM's requested passthrough GPUs
+                     *     (`spec.gpus`). Accepts both the long (`0000:01:00.0`) and short
+                     *     (`01:00.0`) PCI address form; the daemon normalises before
+                     *     matching via `NormalizePCIAddress`, so a VM stored with the short
+                     *     form still surfaces when queried by the long form (and vice
+                     *     versa). Surrounding whitespace is trimmed; empty value disables
+                     *     the filter. VMs with no requested GPUs drop out whenever the
+                     *     filter is set, mirroring the empty-stored-excludes contract on
+                     *     `?ip=` / `?nat_static_ip=` / `?nat_gateway=`. Garbage failing
+                     *     `IsValidPCIAddress` returns `400 invalid_gpu`, mirroring the
+                     *     create-path validation contract (5.7.4). Composes additively with
+                     *     every other filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    gpu?: components["parameters"]["GPUFilter"];
+                    /**
                      * @description Case-insensitive exact-match filter on the name of any of the VM's
                      *     additional network attachments (`spec.networks[].name`). A VM matches
                      *     when any attachment name equals the value (any-of). Whitespace is
@@ -4116,6 +4132,8 @@ export interface components {
              * @enum {string|null}
              */
             nic_model?: "virtio" | "e1000e" | "" | null;
+            /** @description **Immutable post-create.** GPU passthrough is configured only on create via `VMSpec.gpus`; PATCH rejects `gpus` with 400 `gpus_immutable`, and clone clears any inherited GPU assignment so passthrough devices are not silently shared across VMs. This avoids disruptive IOMMU-group rebinding on an existing VM. */
+            gpus?: string[];
         };
         VM: {
             id: string;
@@ -4986,6 +5004,22 @@ export interface components {
          *     other filter; `X-Total-Count` reflects the post-filter population.
          */
         ClockOffsetFilter: "utc" | "localtime";
+        /**
+         * @description Any-of exact-match filter on the VM's requested passthrough GPUs
+         *     (`spec.gpus`). Accepts both the long (`0000:01:00.0`) and short
+         *     (`01:00.0`) PCI address form; the daemon normalises before
+         *     matching via `NormalizePCIAddress`, so a VM stored with the short
+         *     form still surfaces when queried by the long form (and vice
+         *     versa). Surrounding whitespace is trimmed; empty value disables
+         *     the filter. VMs with no requested GPUs drop out whenever the
+         *     filter is set, mirroring the empty-stored-excludes contract on
+         *     `?ip=` / `?nat_static_ip=` / `?nat_gateway=`. Garbage failing
+         *     `IsValidPCIAddress` returns `400 invalid_gpu`, mirroring the
+         *     create-path validation contract (5.7.4). Composes additively with
+         *     every other filter; `X-Total-Count` reflects the post-filter
+         *     population.
+         */
+        GPUFilter: string;
         /**
          * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
          *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
