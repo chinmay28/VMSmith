@@ -49,6 +49,27 @@ async function assertNotVisible(page, testId) {
   if (visible) throw new Error(`${testId} should not be visible`);
 }
 
+// PR #414 collapsed FilterPanel by default and split VM detail into tabs.
+// `openFilterPanel` expands a collapsed FilterPanel so its inputs render in
+// the DOM; `openVMTab` switches the VM detail page to a non-overview tab
+// (snapshots / ports / schedules / metrics / activity).
+async function openFilterPanel(page, panelTestId) {
+  const toggle = page.locator(`[data-testid="${panelTestId}-toggle"]`);
+  await toggle.waitFor({ state: "visible", timeout: 5000 });
+  const expanded = await toggle.getAttribute("aria-expanded");
+  if (expanded !== "true") {
+    await toggle.click();
+    await page.waitForTimeout(150);
+  }
+}
+
+async function openVMTab(page, tab) {
+  const el = page.locator(`[data-testid="tab-${tab}"]`);
+  await el.waitFor({ state: "visible", timeout: 5000 });
+  await el.click();
+  await page.waitForTimeout(200);
+}
+
 async function runTest(name, fn, page) {
   try {
     await fn(page);
@@ -316,6 +337,9 @@ async function main() {
       await assertVisible(p, "vm-card-web-server");
       await assertVisible(p, "vm-card-db-server");
 
+      // FilterPanel is collapsed by default (PR #414); expand before use.
+      await openFilterPanel(p, "vm-list-filters");
+
       await p.locator('[data-testid="vm-list-image-filter"]').fill("ubuntu-22.04");
       await p.waitForTimeout(400);
       await assertVisible(p, "vm-card-web-server");
@@ -375,6 +399,8 @@ async function main() {
     }, page);
 
     await runTest("shows existing snapshots", async (p) => {
+      // PR #414 split VM detail into tabs; snapshots live on tab-snapshots.
+      await openVMTab(p, "snapshots");
       await assertVisible(p, "snap-before-deploy");
       await assertText(p, "snap-desc-before-deploy", "checkpoint before May deploy");
     }, page);
@@ -394,6 +420,7 @@ async function main() {
     }, page);
 
     await runTest("create snapshot", async (p) => {
+      await openVMTab(p, "snapshots");
       await p.locator('[data-testid="btn-new-snapshot"]').click();
       await p.waitForTimeout(300);
       await p.locator('[data-testid="input-snap-name"]').fill("test-snap");
@@ -403,6 +430,7 @@ async function main() {
     }, page);
 
     await runTest("create snapshot with description", async (p) => {
+      await openVMTab(p, "snapshots");
       await p.locator('[data-testid="btn-new-snapshot"]').click();
       await p.waitForTimeout(300);
       await p.locator('[data-testid="input-snap-name"]').fill("noted-snap");
@@ -414,12 +442,14 @@ async function main() {
     }, page);
 
     await runTest("delete snapshot", async (p) => {
+      await openVMTab(p, "snapshots");
       await p.locator('[data-testid="btn-delete-snap-before-deploy"]').click();
       await p.waitForTimeout(1000);
       await assertNotVisible(p, "snap-before-deploy");
     }, page);
 
     await runTest("bulk-delete selected snapshots", async (p) => {
+      await openVMTab(p, "snapshots");
       // Auto- snapshots are seeded alongside the manual one; tick both and
       // confirm they vanish while no surviving non-auto snapshot does.
       await assertVisible(p, "snap-auto-2026-05-06");
@@ -434,6 +464,7 @@ async function main() {
     }, page);
 
     await runTest("create snapshot with tags renders chips and edit clears them", async (p) => {
+      await openVMTab(p, "snapshots");
       // Roadmap 2.2.17 — tags on snapshots.
       await p.locator('[data-testid="btn-new-snapshot"]').click();
       await p.waitForTimeout(300);
@@ -463,6 +494,7 @@ async function main() {
     }, page);
 
     await runTest("sort snapshots by name desc", async (p) => {
+      await openVMTab(p, "snapshots");
       // Re-seed all three snapshots via creates so the prior bulk-delete
       // test doesn't leave the list in an emptied state.
       for (const name of ["before-deploy", "auto-2026-05-06", "auto-2026-05-07"]) {
@@ -493,6 +525,8 @@ async function main() {
     }, page);
 
     await runTest("bulk-delete selected port forwards", async (p) => {
+      // PR #414 split VM detail into tabs; port forwards live on tab-ports.
+      await openVMTab(p, "ports");
       // Two seeded port forwards on web-server: ssh-jumpbox + http.
       // Tick the http row, bulk-delete, confirm only ssh-jumpbox remains.
       await assertVisible(p, "port-row-pf-seed-ssh");
@@ -506,6 +540,7 @@ async function main() {
     }, page);
 
     await runTest("edit port forward description", async (p) => {
+      await openVMTab(p, "ports");
       // ssh-jumpbox seeded rule still exists; click its edit button, rewrite
       // the description, save, and confirm the inline description updated.
       await assertVisible(p, "port-description-pf-seed-ssh");
@@ -519,6 +554,7 @@ async function main() {
     }, page);
 
     await runTest("edit port forward tags renders chips and clears", async (p) => {
+      await openVMTab(p, "ports");
       // Set tags via the edit modal, verify the chips, then clear them.
       await p.locator('[data-testid="btn-edit-port-pf-seed-ssh"]').click();
       await p.waitForTimeout(200);
@@ -539,6 +575,9 @@ async function main() {
     }, page);
 
     await runTest("auto-start summary card and edit toggle", async (p) => {
+      // Summary cards live on the overview tab; the prior port-forward
+      // tests switched to tab-ports.
+      await openVMTab(p, "overview");
       await assertVisible(p, "vm-detail-auto-start");
       // Open the edit modal and flip the checkbox on.
       await p.locator('[data-testid="btn-edit-vm"]').click();
@@ -553,6 +592,7 @@ async function main() {
     }, page);
 
     await runTest("locked summary card and edit toggle", async (p) => {
+      await openVMTab(p, "overview");
       await assertVisible(p, "vm-detail-locked");
       await p.locator('[data-testid="btn-edit-vm"]').click();
       await p.waitForTimeout(200);
@@ -594,6 +634,7 @@ async function main() {
     await guestIPPage.waitForTimeout(500);
 
     await runTest("guest_ip filter narrows the port-forward list (5.4.73)", async (p) => {
+      await openVMTab(p, "ports");
       // All three synthetic rules visible before typing.
       await assertVisible(p, "port-row-pf-gip-ssh");
       await assertVisible(p, "port-row-pf-gip-http");
@@ -785,6 +826,8 @@ async function main() {
       // are present.
       await assertVisible(p, "image-row-ubuntu-base");
       await assertVisible(p, "image-row-rocky-experimental");
+      // FilterPanel is collapsed by default (PR #414); expand before use.
+      await openFilterPanel(p, "image-list-filters");
       await assertVisible(p, "image-list-source-vm");
 
       // Filter by vm-1 — only ubuntu-base survives.
@@ -839,6 +882,8 @@ async function main() {
     }, page);
 
     await runTest("image filter narrows the template list", async (p) => {
+      // FilterPanel is collapsed by default (PR #414); expand before use.
+      await openFilterPanel(p, "template-list-filters");
       await p.locator('[data-testid="template-list-image-filter"]').fill("/images/rocky9.qcow2");
       await p.waitForTimeout(500);
       await assertVisible(p, "template-row-big-rocky");
@@ -1307,6 +1352,9 @@ async function main() {
       const allRows = p.locator('[data-testid^="webhook-row-"]');
       await assert((await allRows.count()) === 3, `expected 3 seeded rows, got ${await allRows.count()}`);
 
+      // FilterPanel is collapsed by default (PR #414); expand before use.
+      await openFilterPanel(p, "webhook-list-filters");
+
       // Filter by vm.created — only the explicit vm subscriber remains.
       await p.locator('[data-testid="webhook-list-event-type-filter"]').fill("vm.created");
       await p.waitForTimeout(450);
@@ -1448,7 +1496,8 @@ async function main() {
       await assertText(p, "vm-detail-name", "e2e-lifecycle");
       await assertText(p, "vm-detail-state", "running");
 
-      // 3. Create snapshot
+      // 3. Create snapshot (PR #414 split VM detail into tabs)
+      await openVMTab(p, "snapshots");
       await p.locator('[data-testid="btn-new-snapshot"]').click();
       await p.waitForTimeout(300);
       await p.locator('[data-testid="input-snap-name"]').fill("e2e-checkpoint");
