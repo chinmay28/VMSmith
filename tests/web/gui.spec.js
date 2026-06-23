@@ -574,6 +574,54 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
+  // 5.4.x — default_user filter on the VM list. The seeded VMs have empty
+  // default_user values, so create one VM with a non-empty default user and
+  // verify the debounced text filter isolates it and round-trips via
+  // ?default_user=.
+  test("default-user filter narrows the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("deploy-box");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
+    await page.getByTestId("tab-advanced").click();
+    await page.getByTestId("input-vm-default-user").fill("deploy");
+    await page.getByTestId("btn-submit-create").click();
+
+    await expect(page.getByTestId("vm-card-deploy-box")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+
+    await page.getByTestId("vm-list-default-user-filter").fill("deploy");
+    await expect(page.getByTestId("vm-card-deploy-box")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).search).toContain("default_user=deploy");
+
+    await page.getByTestId("vm-list-default-user-filter-clear").click();
+    await expect(page.getByTestId("vm-card-deploy-box")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
+    await expect(page.getByTestId("vm-card-db-server")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).search).not.toContain("default_user=");
+  });
+
+  test("default-user filter is case-insensitive", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("ops-box");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
+    await page.getByTestId("tab-advanced").click();
+    await page.getByTestId("input-vm-default-user").fill("ubuntu");
+    await page.getByTestId("btn-submit-create").click();
+
+    await page.getByTestId("vm-list-default-user-filter").fill("UBUNTU");
+    await expect(page.getByTestId("vm-card-ops-box")).toBeVisible();
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
+
   // 5.4.36 — network filter on the VM list. Seed data: web-server is on
   // "data-net", db-server on "storage-net". 250 ms-debounced input with URL
   // round-trip via ?network=.
