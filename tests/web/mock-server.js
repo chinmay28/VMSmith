@@ -376,7 +376,7 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "", disk_bus: spec.disk_bus || "", nic_model: spec.nic_model || "", machine: spec.machine || "", firmware: spec.firmware || "", virtio_win_iso: spec.virtio_win_iso || "" },
+    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "", disk_bus: spec.disk_bus || "", nic_model: spec.nic_model || "", machine: spec.machine || "", firmware: spec.firmware || "", virtio_win_iso: spec.virtio_win_iso || "", gpus: Array.isArray(spec.gpus) ? spec.gpus.slice() : [] },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -3139,6 +3139,31 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, [
       { name: "eth0", ips: ["10.21.100.101/24"], mac: "52:54:00:00:00:01", is_up: true, is_physical: true },
       { name: "eth1", ips: ["192.168.1.16/24"], mac: "52:54:00:00:00:02", is_up: true, is_physical: true },
+    ]);
+  }
+  if (p === "/api/v1/host/gpus" && method === "GET") {
+    return json(res, 200, [
+      {
+        address: "0000:01:00.0",
+        vendor_id: "0x10de",
+        device_id: "0x2704",
+        vendor: "NVIDIA",
+        class: "0x030000",
+        driver: "vfio-pci",
+        iommu_group: 15,
+        group_devices: ["0000:01:00.0", "0000:01:00.1"],
+      },
+      {
+        address: "0000:00:02.0",
+        vendor_id: "0x8086",
+        device_id: "0x4680",
+        vendor: "Intel",
+        class: "0x030000",
+        driver: "i915",
+        boot_vga: true,
+        iommu_group: 2,
+        group_devices: ["0000:00:02.0"],
+      },
     ]);
   }
   if (p === "/api/v1/host/stats" && method === "GET") {

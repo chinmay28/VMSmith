@@ -106,6 +106,68 @@ var hostQuotasCmd = &cobra.Command{
 	},
 }
 
+var hostGPUsCmd = &cobra.Command{
+	Use:   "gpus",
+	Short: "List host GPUs (PCI display controllers) available for passthrough",
+	Long: `List the host's PCI display controllers (GPUs) with their IOMMU group
+membership so you can pick which device(s) to pass through to a VM via
+'vmsmith vm create --gpu <address>'.
+
+The DRIVER column shows the kernel driver currently bound to the GPU:
+"vfio-pci" means it is ready for passthrough; "nvidia"/"nouveau"/"amdgpu"
+means the host still owns it (with managed='yes' passthrough libvirt will
+rebind it to vfio-pci at VM start, provided it is not driving the host
+console). BOOT_VGA marks the firmware-selected primary display adapter;
+operators should avoid passing that device through unless they intentionally
+want the host console to disappear. GROUP lists every device in the same
+IOMMU group — vmsmith attaches the whole group together. See
+ docs/GPU_PASSTHROUGH.md.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		flagAPIKey, _ := cmd.Flags().GetString("api-key")
+		asJSON, _ := cmd.Flags().GetBool("json")
+
+		logger.Info("cli", "host gpus", "api-url", apiURL)
+
+		body, err := hostGET(cmd, apiURL, flagAPIKey, "/api/v1/host/gpus")
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			fmt.Println(strings.TrimSpace(string(body)))
+			return nil
+		}
+		var gpus []types.GPUDevice
+		if err := json.Unmarshal(body, &gpus); err != nil {
+			return fmt.Errorf("decoding /host/gpus response: %w", err)
+		}
+		if len(gpus) == 0 {
+			fmt.Println("No GPUs (PCI display controllers) found on the host.")
+			return nil
+		}
+
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "ADDRESS\tVENDOR\tDEVICE\tDRIVER\tBOOT_VGA\tIOMMU\tGROUP")
+		for _, g := range gpus {
+			driver := g.Driver
+			if driver == "" {
+				driver = "-"
+			}
+			bootVGA := "-"
+			if g.BootVGA {
+				bootVGA = "yes"
+			}
+			group := strings.Join(g.GroupDevices, " ")
+			if group == "" {
+				group = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+				g.Address, g.Vendor, g.DeviceID, driver, bootVGA, g.IOMMUGroup, group)
+		}
+		return tw.Flush()
+	},
+}
+
 // hostGET centralises the shared "build URL, set Authorization, parse
 // daemon error envelope" plumbing.  Returns the raw response body so
 // callers can either re-emit it under --json or unmarshal it into a
@@ -172,11 +234,12 @@ func formatBytes(b uint64) string {
 }
 
 func init() {
-	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd} {
+	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd, hostGPUsCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 		c.Flags().Bool("json", false, "emit the raw JSON response instead of a table")
 	}
 	hostCmd.AddCommand(hostStatsCmd)
 	hostCmd.AddCommand(hostQuotasCmd)
+	hostCmd.AddCommand(hostGPUsCmd)
 }

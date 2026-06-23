@@ -51,6 +51,7 @@ var vmCreateCmd = &cobra.Command{
 		description, _ := cmd.Flags().GetString("description")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 		networkFlags, _ := cmd.Flags().GetStringSlice("network")
+		gpuFlags, _ := cmd.Flags().GetStringSlice("gpu")
 		natIP, _ := cmd.Flags().GetString("nat-ip")
 		natGW, _ := cmd.Flags().GetString("nat-gw")
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
@@ -95,6 +96,7 @@ var vmCreateCmd = &cobra.Command{
 			VirtioWinISO:  strings.TrimSpace(virtioWinISO),
 			CloudInitFile: cloudInit,
 			Networks:      networks,
+			GPUs:          gpuFlags,
 			NatStaticIP:   natIP,
 			NatGateway:    natGW,
 			AutoStart:     autoStart,
@@ -145,6 +147,9 @@ var vmCreateCmd = &cobra.Command{
 		}
 		if result.Spec.Locked {
 			fmt.Printf("  Locked (delete-protected): true\n")
+		}
+		if gpus := result.Spec.ResolvedGPUs(); len(gpus) > 0 {
+			fmt.Printf("  GPU passthrough: %s\n", strings.Join(gpus, ", "))
 		}
 		if len(spec.Networks) > 0 {
 			fmt.Printf("  Extra networks: %d attached\n", len(spec.Networks))
@@ -1230,6 +1235,8 @@ func init() {
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
 	vmCreateCmd.Flags().String("nat-gw", "",
 		"gateway for --nat-ip (e.g. 192.168.100.1); required when --nat-ip is set")
+	vmCreateCmd.Flags().StringSlice("gpu", nil,
+		"host PCI GPU address to pass through via VFIO, e.g. 0000:01:00.0 or 01:00.0 (repeatable; discover with 'vmsmith host gpus'; the GPU's whole IOMMU group is attached)")
 	vmCreateCmd.Flags().StringSlice("network", nil,
 		`attach VM to host network (repeatable)
 Format: iface[:key=val,...]

@@ -221,6 +221,68 @@ func TestCreateVM_Windows(t *testing.T) {
 	}
 }
 
+func TestListHostGPUs(t *testing.T) {
+	old := discoverHostGPUs
+	defer func() { discoverHostGPUs = old }()
+
+	t.Run("success", func(t *testing.T) {
+		discoverHostGPUs = func() ([]types.GPUDevice, error) {
+			return []types.GPUDevice{{
+				Address:      "0000:01:00.0",
+				VendorID:     "0x10de",
+				DeviceID:     "0x2704",
+				Vendor:       "NVIDIA",
+				Class:        "0x030000",
+				Driver:       "vfio-pci",
+				IOMMUGroup:   15,
+				GroupDevices: []string{"0000:01:00.0", "0000:01:00.1"},
+				BootVGA:      true,
+			}}, nil
+		}
+
+		ts, _, cleanup := testServer(t)
+		defer cleanup()
+
+		resp, err := http.Get(ts.URL + "/api/v1/host/gpus")
+		if err != nil {
+			t.Fatalf("GET /host/gpus: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+
+		var got []types.GPUDevice
+		decodeJSON(t, resp, &got)
+		if len(got) != 1 {
+			t.Fatalf("got %d GPUs, want 1", len(got))
+		}
+		if got[0].Address != "0000:01:00.0" || got[0].Driver != "vfio-pci" {
+			t.Fatalf("gpu = %+v, want address 0000:01:00.0 driver vfio-pci", got[0])
+		}
+		if !got[0].BootVGA {
+			t.Fatalf("gpu boot_vga = %v, want true", got[0].BootVGA)
+		}
+	})
+
+	t.Run("discovery error returns 500", func(t *testing.T) {
+		discoverHostGPUs = func() ([]types.GPUDevice, error) {
+			return nil, errors.New("sysfs unreachable")
+		}
+
+		ts, _, cleanup := testServer(t)
+		defer cleanup()
+
+		resp, err := http.Get(ts.URL + "/api/v1/host/gpus")
+		if err != nil {
+			t.Fatalf("GET /host/gpus: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", resp.StatusCode)
+		}
+	})
+}
+
 func TestCreateVM_MixedCaseOSTypeAndVariant(t *testing.T) {
 	ts, _, cleanup := testServer(t)
 	defer cleanup()
@@ -4398,6 +4460,7 @@ func TestCloneVM(t *testing.T) {
 			DiskGB:      80,
 			Description: "source description",
 			Tags:        []string{"prod", "web"},
+			GPUs:        []string{"0000:01:00.0"},
 		},
 	})
 
@@ -4422,6 +4485,9 @@ func TestCloneVM(t *testing.T) {
 	}
 	if cloned.Spec.Name != "clone-a" || cloned.Spec.Image != "ubuntu-24.04" || cloned.Spec.CPUs != 4 || cloned.Spec.RAMMB != 8192 || cloned.Spec.DiskGB != 80 {
 		t.Fatalf("unexpected clone spec: %+v", cloned.Spec)
+	}
+	if len(cloned.Spec.GPUs) != 0 {
+		t.Fatalf("clone spec GPUs = %v, want cleared", cloned.Spec.GPUs)
 	}
 	if len(cloned.Tags) != 2 || cloned.Tags[0] != "prod" || cloned.Tags[1] != "web" {
 		t.Fatalf("clone tags = %#v, want copied tags", cloned.Tags)
@@ -5296,6 +5362,26 @@ func TestUpdateVM_OSVariantRejected(t *testing.T) {
 			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
 		}
 		assertAPIErrorCode(t, resp, "os_type_immutable")
+	}
+}
+
+func TestUpdateVM_GPUsRejected(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-gpu", Name: "gpu-host", Spec: types.VMSpec{CPUs: 2, RAMMB: 2048, DiskGB: 20, GPUs: []string{"0000:01:00.0"}}})
+
+	for _, body := range []string{
+		`{"gpus":["0000:02:00.0"]}`,
+		`{"gpus":[]}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/vms/vm-gpu", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %q: status = %d, want 400", body, resp.StatusCode)
+		}
+		assertAPIErrorCode(t, resp, "gpus_immutable")
 	}
 }
 

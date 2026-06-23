@@ -142,6 +142,7 @@ func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string
 
 	spec := source.Spec
 	spec.Name = newName
+	spec.GPUs = nil
 	spec.Tags = append([]string(nil), source.Spec.Tags...)
 	spec.Networks = append([]types.NetworkAttachment(nil), source.Spec.Networks...)
 

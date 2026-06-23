@@ -161,10 +161,25 @@ type VMSpec struct {
 	// to the Windows guest so the operator can install virtio drivers
 	// in-guest. Empty falls back to the daemon config / probe.
 	VirtioWinISO string `json:"virtio_win_iso,omitempty" yaml:"virtio_win_iso,omitempty"`
+
+	// GPUs lists host PCI GPU addresses to pass through to this VM via VFIO,
+	// in either the long ("0000:01:00.0") or short ("01:00.0") form.
+	// Discover assignable GPUs with GET /api/v1/host/gpus (`vmsmith host
+	// gpus`). vmsmith attaches each requested GPU together with the rest of
+	// its IOMMU group (the GPU plus, typically, its HDMI audio function) as
+	// managed='yes' <hostdev> entries, so libvirt rebinds the devices from
+	// the host driver (nvidia) to vfio-pci at VM start and reattaches them on
+	// stop. The host must have IOMMU enabled (intel_iommu=on / amd_iommu=on)
+	// and the GPU must not be in use by the host's display. See
+	// docs/GPU_PASSTHROUGH.md.
+	GPUs []string `json:"gpus,omitempty" yaml:"gpus,omitempty"`
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
 // Zero / empty values are ignored (no change). Disk can only grow, not shrink.
+// GPU passthrough is intentionally immutable post-create: GPUs uses pointer
+// semantics purely so PATCH can detect and reject a present `gpus` key instead
+// of silently ignoring it.
 type VMUpdateSpec struct {
 	CPUs        int      `json:"cpus,omitempty"`
 	RAMMB       int      `json:"ram_mb,omitempty"`
@@ -225,6 +240,11 @@ type VMUpdateSpec struct {
 	// again at next render. Applying a change triggers a domain redefine
 	// and restarts the VM if it was running.
 	DiskBus *string `json:"disk_bus,omitempty"`
+
+	// GPUs is intentionally a pointer so PATCH can reject any attempt to
+	// change passthrough assignment on an existing VM. GPU/IOMMU rebinding is
+	// disruptive, and clone already clears inherited GPUs.
+	GPUs *[]string `json:"gpus,omitempty"`
 
 	// NICModel flips the model attribute on every libvirt
 	// <interface><model type='...'/></interface> entry on an existing VM —

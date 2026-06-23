@@ -855,6 +855,34 @@ unattended installs from a raw ISO, and a fully paravirtual guest).
 3. **Licensing.** VMSmith does not inject product keys or manage activation/KMS. Document that the base image's licensing/activation is the operator's responsibility; optionally allow a `product_key` passthrough into the cloudbase-init datasource (5.6.15-adjacent).
 4. **Guest-agent dependency (5.6.10).** Windows IP discovery currently relies on the DHCP-lease ping path (works, but slower and can't see additional NICs). qemu-ga would make IP/shutdown/metrics first-class — same trade-off the Linux side documents in §4.1.
 
+### 5.7 GPU Passthrough (VFIO)
+
+Expose host PCI display controllers (NVIDIA / AMD / Intel) to a guest as a
+pass-through device via VFIO so workstation-class GPU workloads (CUDA, gaming,
+ML training) can run inside a VMSmith VM. The host gives up the GPU for the
+lifetime of the assignment; libvirt rebinds the device to `vfio-pci` on VM
+start (`managed='yes'`) and reattaches the host driver on stop.
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 5.7.1 | Discover host GPUs via sysfs (`/sys/bus/pci/devices`) — PCI class display-controller scan with vendor/device id, bound driver, IOMMU group membership, and `boot_vga` flag. Expose as `GET /api/v1/host/gpus` + `vmsmith host gpus`. Bridges are excluded from group membership so passing a GPU doesn't drag a host bridge along | S | ✅ Done — `internal/host/gpu.go` reads sysfs only (no external commands) so it works in the daemon's minimal environment; mandatory reads (vendor / device on a confirmed display controller) log warnings, but optional ones (`boot_vga`, `driver`, `iommu_group`) are silent so a healthy passthrough host doesn't spam warnings per poll. CLI surfaces a `BOOT_VGA` column so operators see when a selected GPU is the host's primary display |
+| 5.7.2 | `VMSpec.gpus[]` (PCI address list, long `0000:01:00.0` or short `01:00.0` form) baked at create time. IOMMU group expansion at apply time pulls in companion functions (HDMI audio, etc.) but excludes bridges so the operator never has to remember the full group | S | ✅ Done — `pkg/types/gpu.go` owns the PCI address alphabet (`IsValidPCIAddress`, `NormalizePCIAddress`, `PCIAddressParts`, `ResolvedGPUs`); `internal/host/gpu.go::ExpandIOMMUGroups` resolves groups at apply time; falls back to the bare requested address with a warn when IOMMU is disabled |
+| 5.7.3 | Render `managed='yes'` `<hostdev>` entries in the domain XML for every expanded GPU function so libvirt rebinds to `vfio-pci` at start and reattaches on stop. Validated against an RTX 4080 | S | ✅ Done — `internal/vm/domain.go` emits `<hostdev>` per expanded address through the existing `DomainParams` flow; `internal/vm/lifecycle.go::applyGPUs` is the only place that calls `host.ExpandIOMMUGroups`, mirroring the existing `applyVirtioWin` shape |
+| 5.7.4 | API edge validation — invalid PCI addresses (wrong format, slot > `1f`, empty / whitespace) return 400 `invalid_gpu`. GPU assignment is immutable: `PATCH /api/v1/vms/{id}` with `gpus` (including `[]`) returns 400 `gpus_immutable` because driver rebinding is too disruptive to do silently on an update | S | ✅ Done — `internal/api/validation.go::validateGPUs` rejects bad addresses strictly; `validateVMUpdateSpec` rejects any GPU mutation; clone clears `Spec.GPUs` in both `LibvirtManager` and `MockManager` to avoid silently sharing passthrough devices |
+| 5.7.5 | CLI: `vmsmith vm create --gpu <pci-addr>` (repeatable). The PCI address parser accepts both the long and short form so operators can paste straight from `lspci` | XS | ✅ Done — `internal/cli/vm.go` wires `--gpu` as a repeatable string flag; `vmsmith host gpus` lists assignable GPUs with a `BOOT_VGA` column |
+| 5.7.6 | GUI: GPU Passthrough section in the New VM modal's Advanced tab — lists `GET /host/gpus` as checkboxes (vendor / address / bound-driver chip / IOMMU group), surfaces a "primary display" warning chip for `boot_vga` GPUs, and VMDetail renders a GPU Passthrough card for VMs with assigned GPUs | S | ✅ Done — `web/src/pages/VMList.jsx` (Create modal) + `web/src/pages/VMDetail.jsx`; mock server mirrors the surface in `tests/web/mock-server.js`; Playwright covers the create-flow + the primary-display warning |
+| 5.7.7 | Operator guide: one-time host setup (BIOS VT-d/IOMMU, `intel_iommu=on iommu=pt` or `amd_iommu=on iommu=pt` kernel params, `vfio-pci.ids=` boot pin, blacklist the host's nouveau/amdgpu, verify with `vmsmith host gpus`) and the consumer-board grouping caveat | S | ✅ Done — `docs/GPU_PASSTHROUGH.md` covers IOMMU/vfio setup, the consumer-board grouping caveat, the `boot_vga` warning, troubleshooting table, and clone-clears-GPUs semantics |
+| 5.7.8 | Test coverage — PCI helpers (long/short, slot range, whitespace, garbage), sysfs discovery against an RTX 4080 fixture (sort, vendor, `boot_vga`, bridge exclusion), IOMMU expansion (short form, dedup, invalid drop, no-IOMMU fallback, unreadable-class skip, optional-attr tolerance), domain XML (passthrough emits hostdevs, no-GPU default doesn't, invalid fails the render), API (`/host/gpus` happy + 500-on-error, `gpus_immutable` PATCH, clone clears GPUs), end-to-end fixture test wiring `applyGPUs` + `GenerateDomainXML` | M | ✅ Done — `internal/host/gpu_test.go`, `internal/api/validation_test.go`, `internal/api/api_test.go`, `internal/vm/domain_gpu_test.go`, plus the GUI test in `tests/web/run-gui-tests.js` |
+
+**Open follow-ups (not yet shipped):**
+
+| # | Task | Effort | Notes |
+|---|------|--------|-------|
+| 5.7.9 | `?gpu=<pci-addr>` exact-match filter on `GET /api/v1/vms` (any-of) so operators can answer *"which VM has 0000:01:00.0 assigned?"* without scanning the list. Mirrors the 5.4.x filter family. CLI: `vmsmith vm list --gpu` | S | Natural next step once 5.7 has landed |
+| 5.7.10 | `vmsmith vm gpu attach/detach <id> <pci-addr>` post-create lifecycle for advanced operators (currently GPU assignment is immutable per 5.7.4). Needs domain XML re-render + warning that the guest typically needs reboot to pick up the change | M | Driver rebinding mid-flight is risky; gate behind an explicit `--force-attach` flag |
+| 5.7.11 | Quota dimension for GPU count — extend the existing CPU/RAM/disk caps in `vm/quota_manager.go` so an operator can pin a single VM to N GPUs of a fleet pool | S | Lines up with the existing `?gpu_count=` style queries |
+| 5.7.12 | E2E test against a real host with a real GPU (gate behind a `--gpu` opt-in like `--rocky-image`): create a VM with `--gpu`, boot, install the proprietary driver in-guest, verify the device appears in `nvidia-smi` / `rocm-smi` | L | Requires a CI runner with a passthrough-eligible GPU |
+
 ---
 
 ## Phase 6: Developer & Community (Ongoing)

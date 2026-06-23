@@ -285,6 +285,35 @@ test.describe("VM List", () => {
     expect(stored.virtio_win_iso).toBe("/tmp/virtio-win.iso");
   });
 
+  test("GPU passthrough selection round-trips through the Advanced tab", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("gpu-box");
+    await page.getByTestId("input-vm-image").fill("rocky9");
+
+    await page.getByTestId("tab-advanced").click();
+
+    // The mock host exposes an NVIDIA GPU; select it for passthrough.
+    await expect(page.getByTestId("gpu-list")).toBeVisible();
+    await expect(page.getByText("primary display")).toBeVisible();
+    await page.getByTestId("gpu-checkbox-0000:01:00.0").check();
+
+    await page.getByTestId("btn-submit-create").click();
+    await expect(page.getByTestId("vm-card-gpu-box")).toBeVisible();
+
+    const stored = await page.evaluate(async () => {
+      const r = await fetch("/api/v1/vms");
+      const list = await r.json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      const match = arr.find((vm) => vm.name === "gpu-box");
+      return match ? match.spec : null;
+    });
+    expect(stored).toBeTruthy();
+    expect(stored.gpus).toEqual(["0000:01:00.0"]);
+  });
+
   test("vm cards render guest OS badges", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

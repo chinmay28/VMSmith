@@ -18,6 +18,7 @@ import (
 
 	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/internal/events"
+	"github.com/vmsmith/vmsmith/internal/host"
 	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/internal/network"
 	"github.com/vmsmith/vmsmith/internal/store"
@@ -274,6 +275,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = resolveMachine(spec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, spec)
+	m.applyGPUs(&params, spec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		return nil, err
@@ -417,6 +419,7 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	params := DomainParamsFromSpec(clonedSpec, clonedDiskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = resolveMachine(clonedSpec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, clonedSpec)
+	m.applyGPUs(&params, clonedSpec)
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		cleanupCloneReservation()
@@ -989,6 +992,7 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		params.UUID = existingUUID
 		params.Machine = resolveMachine(updatedSpec.Machine, func() string { return detectMachineType(m.conn) })
 		m.applyVirtioWin(&params, updatedSpec)
+		m.applyGPUs(&params, updatedSpec)
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
 			return nil, fmt.Errorf("generating domain XML: %w", err)
@@ -1561,6 +1565,7 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 	cloned.Name = newName
 	cloned.NatStaticIP = ""
 	cloned.NatGateway = ""
+	cloned.GPUs = nil
 	cloned.Tags = append([]string(nil), source.Tags...)
 	cloned.Networks = append([]types.NetworkAttachment(nil), source.Networks...)
 	for i := range cloned.Networks {
@@ -1708,6 +1713,23 @@ func (m *LibvirtManager) applyVirtioWin(params *DomainParams, spec types.VMSpec)
 	if iso := m.virtioWinISOPathForSpec(spec); iso != "" {
 		params.VirtioWinISO = iso
 	}
+}
+
+// applyGPUs expands the spec's requested passthrough GPUs to their full IOMMU
+// groups (so a GPU's companion functions — typically its HDMI audio device —
+// are assigned together, as VFIO requires) and sets the resulting PCI
+// addresses on the domain params. The pure DomainParamsFromSpec path already
+// populated params.GPUAddresses with the unexpanded request; we overwrite it
+// here with the host-resolved group membership. No-op when no GPUs requested.
+func (m *LibvirtManager) applyGPUs(params *DomainParams, spec types.VMSpec) {
+	requested := spec.ResolvedGPUs()
+	if len(requested) == 0 {
+		return
+	}
+	expanded := host.ExpandIOMMUGroups(requested)
+	params.GPUAddresses = expanded
+	logger.Info("daemon", "attaching GPU passthrough devices",
+		"vm", spec.Name, "requested", strings.Join(requested, ","), "attached", strings.Join(expanded, ","))
 }
 
 // createProvisioningISO writes the first-boot datasource ISO for a VM. Linux
