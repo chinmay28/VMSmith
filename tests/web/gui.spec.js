@@ -574,10 +574,10 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
-  // 5.4.x — default_user filter on the VM list. The seeded VMs have empty
-  // default_user values, so create one VM with a non-empty default user and
-  // verify the debounced text filter isolates it and round-trips via
-  // ?default_user=.
+  // 5.4.23 — default_user filter on the VM list. Seed data includes
+  // web-server with default_user="ubuntu", so create a VM with a distinct
+  // default user and verify the debounced text filter isolates that
+  // single-VM cohort and round-trips via ?default_user=.
   test("default-user filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
@@ -613,10 +613,10 @@ test.describe("VM List", () => {
     await page.getByTestId("input-vm-name").fill("ops-box");
     await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
     await page.getByTestId("tab-advanced").click();
-    await page.getByTestId("input-vm-default-user").fill("ubuntu");
+    await page.getByTestId("input-vm-default-user").fill("ec2-user");
     await page.getByTestId("btn-submit-create").click();
 
-    await page.getByTestId("vm-list-default-user-filter").fill("UBUNTU");
+    await page.getByTestId("vm-list-default-user-filter").fill("EC2-USER");
     await expect(page.getByTestId("vm-card-ops-box")).toBeVisible();
     await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
