@@ -982,6 +982,17 @@ async function main() {
       await assertVisible(p, "template-row-small-ubuntu");
     }, page);
 
+    await runTest("template time-range filter uses local datetime input and clears cleanly", async (p) => {
+      await p.locator('[data-testid="template-list-since"]').fill("2026-05-10T00:00");
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-big-rocky");
+      await assertNotVisible(p, "template-row-small-ubuntu");
+      await p.locator('[data-testid="template-list-time-range-clear"]').click();
+      await p.waitForTimeout(500);
+      await assertVisible(p, "template-row-small-ubuntu");
+      await assertVisible(p, "template-row-big-rocky");
+    }, page);
+
     await runTest("edit modal updates description and tags", async (p) => {
       await p.locator('[data-testid="btn-edit-template-big-rocky"]').click();
       await p.waitForTimeout(300);

@@ -8,6 +8,13 @@ import { safeArray } from '../utils/normalize';
 
 const DEFAULT_PER_PAGE = 25;
 
+function datetimeLocalToISO(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString();
+}
+
 export default function TemplateList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState(null);
@@ -25,8 +32,8 @@ export default function TemplateList() {
   const [networkFilter, setNetworkFilter] = useState(searchParams.get('network') || '');
   const [prefixInput, setPrefixInput] = useState(searchParams.get('prefix') || '');
   const [prefixFilter, setPrefixFilter] = useState(searchParams.get('prefix') || '');
-  const [since, setSince] = useState(searchParams.get('since') || '');
-  const [until, setUntil] = useState(searchParams.get('until') || '');
+  const [sinceInput, setSinceInput] = useState(searchParams.get('since') || '');
+  const [untilInput, setUntilInput] = useState(searchParams.get('until') || '');
   const [minCpusInput, setMinCpusInput] = useState(searchParams.get('min_cpus') || '');
   const [minCpusFilter, setMinCpusFilter] = useState(searchParams.get('min_cpus') || '');
   const [maxCpusInput, setMaxCpusInput] = useState(searchParams.get('max_cpus') || '');
@@ -45,6 +52,9 @@ export default function TemplateList() {
   const [order, setOrder] = useState(searchParams.get('order') || 'asc');
   const [selected, setSelected] = useState(() => new Set());
   const [bulkResult, setBulkResult] = useState(null);
+
+  const since = useMemo(() => datetimeLocalToISO(sinceInput), [sinceInput]);
+  const until = useMemo(() => datetimeLocalToISO(untilInput), [untilInput]);
 
   const { data: response, loading, error, refresh } = useFetch(
     () => templatesApi.list({ page, perPage, tag: tagFilter, search: searchFilter, image: imageFilter, defaultUser: defaultUserFilter, osType: osTypeFilter, osVariant: osVariantFilter, network: networkFilter, prefix: prefixFilter, since, until, minCpus: minCpusFilter, maxCpus: maxCpusFilter, minRamMb: minRamFilter, maxRamMb: maxRamFilter, minDiskGb: minDiskGbFilter, maxDiskGb: maxDiskGbFilter, sort, order }),
@@ -186,7 +196,7 @@ export default function TemplateList() {
     setOsTypeFilter(''); setOsVariantFilter('');
     setNetworkInput(''); setNetworkFilter('');
     setPrefixInput(''); setPrefixFilter('');
-    setSince(''); setUntil('');
+    setSinceInput(''); setUntilInput('');
     setMinCpusInput(''); setMinCpusFilter(''); setMaxCpusInput(''); setMaxCpusFilter('');
     setMinRamInput(''); setMinRamFilter(''); setMaxRamInput(''); setMaxRamFilter('');
     setMinDiskGbInput(''); setMinDiskGbFilter(''); setMaxDiskGbInput(''); setMaxDiskGbFilter('');
@@ -194,7 +204,7 @@ export default function TemplateList() {
 
   const activeFilterCount = [
     tagFilter, imageInput, defaultUserInput, osTypeFilter, osVariantFilter, networkInput,
-    prefixInput, since, until, minCpusInput, maxCpusInput, minRamInput, maxRamInput,
+    prefixInput, sinceInput, untilInput, minCpusInput, maxCpusInput, minRamInput, maxRamInput,
     minDiskGbInput, maxDiskGbInput,
   ].filter(v => String(v ?? '').trim() !== '').length;
 
@@ -409,8 +419,8 @@ export default function TemplateList() {
             <span>Since</span>
             <input
               type="datetime-local"
-              value={since}
-              onChange={(e) => setSince(e.target.value ? `${e.target.value}:00Z` : '')}
+              value={sinceInput}
+              onChange={(e) => setSinceInput(e.target.value)}
               data-testid="template-list-since"
               aria-label="Templates created on or after"
               className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
@@ -420,18 +430,18 @@ export default function TemplateList() {
             <span>Until</span>
             <input
               type="datetime-local"
-              value={until}
-              onChange={(e) => setUntil(e.target.value ? `${e.target.value}:00Z` : '')}
+              value={untilInput}
+              onChange={(e) => setUntilInput(e.target.value)}
               data-testid="template-list-until"
               aria-label="Templates created on or before"
               className="bg-steel-900/60 border border-steel-700/60 rounded px-1 py-1 text-steel-200"
             />
           </label>
-          {(since || until) && (
+          {(sinceInput || untilInput) && (
             <button
               type="button"
               className="text-steel-500 hover:text-steel-200"
-              onClick={() => { setSince(''); setUntil(''); }}
+              onClick={() => { setSinceInput(''); setUntilInput(''); }}
               data-testid="template-list-time-range-clear"
               aria-label="Clear template time range"
             >
