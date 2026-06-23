@@ -370,7 +370,12 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, apiErr)
 		return
 	}
-	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+	gpuFilter, gpuSet, apiErr := parseGPUFilter(q.Get("gpu"))
+	if apiErr != nil {
+		writeAPIError(w, http.StatusBadRequest, apiErr)
+		return
+	}
+	if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || gpuSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 		filtered := make([]*types.VM, 0, len(vms))
 		for _, vm := range vms {
 			if statusFilter != "" && !strings.EqualFold(string(vm.State), statusFilter) {
@@ -471,6 +476,16 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 			// empty `spec.nat_static_ip`. VMs with an empty IP
 			// (stopped, no lease yet) drop out when the filter is set.
 			if ipSet && !vmMatchesIPFilter(vm, ipFilter) {
+				continue
+			}
+			// GPU filter (5.7.9): any-of exact-match against spec.gpus[],
+			// normalised to the long PCI form so short + long forms round-
+			// trip identically. VMs with no assigned GPUs drop out when
+			// the filter is set, mirroring the empty-stored-excludes
+			// contract on ?nat_static_ip= / ?ip=. Invalid PCI addresses
+			// return 400 invalid_gpu at parse time (same alphabet as the
+			// create path's validateGPUs).
+			if gpuSet && !vmMatchesGPUFilter(vm, gpuFilter) {
 				continue
 			}
 			if !snapshotInTimeRange(vm.CreatedAt, sinceTime, sinceSet, untilTime, untilSet) {

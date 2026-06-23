@@ -355,6 +355,47 @@ async function main() {
       await p.waitForTimeout(400);
     }, page);
 
+    // 5.7.9 — `?gpu=` filter on the VM list narrows to VMs whose
+    // `spec.gpus[]` contains the requested PCI address. Mock pins win-app to
+    // a unique seeded GPU (`0000:0a:00.0`), distinct from any GPU created at
+    // runtime by the earlier GPU passthrough test, so the cohort is
+    // deterministic regardless of test order. The short form `0a:00.0`
+    // canonicalises server-side and matches the same VM.
+    await runTest("gpu filter narrows the VM list and round-trips through the URL", async (p) => {
+      await p.goto(BASE);
+      await p.waitForTimeout(300);
+      await p.locator('[data-testid="nav-vms"]').click();
+      await p.waitForTimeout(300);
+
+      await assertVisible(p, "vm-card-win-app");
+      await assertVisible(p, "vm-card-web-server");
+
+      await p.locator('[data-testid="vm-list-gpu-filter"]').fill("0000:0a:00.0");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-win-app");
+      await assertNotVisible(p, "vm-card-web-server");
+
+      const urlAfter = new URL(p.url());
+      await assert(urlAfter.searchParams.get("gpu") === "0000:0a:00.0",
+        `expected ?gpu=0000:0a:00.0, got ${urlAfter.searchParams.get("gpu")}`);
+
+      // Short-form input matches the same VM (server-side canonicalisation).
+      await p.locator('[data-testid="vm-list-gpu-filter-clear"]').click();
+      await p.waitForTimeout(400);
+      await p.locator('[data-testid="vm-list-gpu-filter"]').fill("0a:00.0");
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-win-app");
+      await assertNotVisible(p, "vm-card-web-server");
+
+      await p.locator('[data-testid="vm-list-gpu-filter-clear"]').click();
+      await p.waitForTimeout(400);
+      await assertVisible(p, "vm-card-web-server");
+
+      const urlCleared = new URL(p.url());
+      await assert(!urlCleared.searchParams.has("gpu"),
+        `expected ?gpu= to be cleared, got ${urlCleared.searchParams.get("gpu")}`);
+    }, page);
+
     await page.close();
 
     // ================== VM Detail Tests ==================

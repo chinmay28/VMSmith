@@ -191,6 +191,7 @@ var vmListCmd = &cobra.Command{
 		natStaticIPRaw, _ := cmd.Flags().GetString("nat-static-ip")
 		natGatewayRaw, _ := cmd.Flags().GetString("nat-gateway")
 		ipRaw, _ := cmd.Flags().GetString("ip")
+		gpuRaw, _ := cmd.Flags().GetString("gpu")
 		autoStartRaw, _ := cmd.Flags().GetString("auto-start")
 		lockedRaw, _ := cmd.Flags().GetString("locked")
 		sortField, _ := cmd.Flags().GetString("sort")
@@ -246,6 +247,10 @@ var vmListCmd = &cobra.Command{
 		natStaticIPFilter, natStaticIPSet := parseCLINATStaticIP(natStaticIPRaw)
 		natGatewayFilter, natGatewaySet := parseCLINATGateway(natGatewayRaw)
 		ipFilter, ipSet := parseCLIIP(ipRaw)
+		gpuFilter, gpuSet, err := parseCLIGPU(gpuRaw)
+		if err != nil {
+			return err
+		}
 		autoStartVal, autoStartSet, err := parseCLITristateBool(autoStartRaw, "--auto-start")
 		if err != nil {
 			return err
@@ -320,7 +325,7 @@ var vmListCmd = &cobra.Command{
 			return err
 		}
 
-		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
+		if tagFilter != "" || statusFilter != "" || searchFilter != "" || imageFilter != "" || defaultUserFilter != "" || networkFilter != "" || prefixFilter != "" || natStaticIPSet || natGatewaySet || ipSet || gpuSet || osTypeSet || osVariantSet || firmwareSet || diskBusSet || nicModelSet || machineSet || clockOffsetSet || autoStartSet || lockedSet || sinceSet || untilSet || minCPUsSet || maxCPUsSet || minRAMSet || maxRAMSet || minDiskSet || maxDiskSet {
 			filtered := make([]*types.VM, 0, len(vms))
 			for _, v := range vms {
 				if statusFilter != "" && !strings.EqualFold(string(v.State), statusFilter) {
@@ -405,6 +410,13 @@ var vmListCmd = &cobra.Command{
 				// when the filter is set, mirroring the empty-stored-excludes
 				// contract on `--nat-static-ip` / `--nat-gateway`.
 				if ipSet && !cliVMMatchesIPFilter(v, ipFilter) {
+					continue
+				}
+				// GPU filter (5.7.9): any-of exact-match against spec.gpus[],
+				// normalised to the long PCI form. VMs with no assigned GPUs
+				// drop out when set, mirroring the empty-stored-excludes
+				// contract on --ip / --nat-static-ip.
+				if gpuSet && !cliVMMatchesGPUFilter(v, gpuFilter) {
 					continue
 				}
 				if autoStartSet && v.Spec.AutoStart != autoStartVal {
@@ -1286,6 +1298,7 @@ Examples:
 	vmListCmd.Flags().String("nat-static-ip", "", "filter VMs by nat_static_ip (case-insensitive exact match against the stored CIDR or the IP portion; empty disables; DHCP-assigned VMs drop out when the filter is set)")
 	vmListCmd.Flags().String("nat-gateway", "", "filter VMs by nat_gateway (case-insensitive exact match against the stored gateway IP; empty disables; VMs with no nat_gateway override drop out when the filter is set)")
 	vmListCmd.Flags().String("ip", "", "filter VMs by the runtime-discovered IP shown in the table (case-insensitive exact match; empty disables; VMs with no IP — stopped or no lease — drop out when the filter is set; covers DHCP VMs that --nat-static-ip cannot)")
+	vmListCmd.Flags().String("gpu", "", "filter VMs by assigned passthrough GPU PCI address (any-of, exact match; accepts long 0000:01:00.0 or short 01:00.0 form and normalises so both round-trip identically; VMs with no GPUs drop out when set; invalid PCI addresses fail before the request with the same error code as `vm create --gpu`)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user")

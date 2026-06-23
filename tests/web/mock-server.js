@@ -141,6 +141,11 @@ function seed() {
   vmWin.ip = "192.168.100.12";
   vmWin.created_at = "2026-05-20T00:00:00Z";
   vmWin.updated_at = "2026-05-20T00:00:00Z";
+  // 5.7.9 — Pin win-app to a GPU passthrough address that's deterministic and
+  // distinct from any address the runtime-created gpu-worker uses, so the
+  // ?gpu= filter has a single-VM cohort whose membership doesn't depend on
+  // which other tests ran first.
+  vmWin.spec.gpus = ["0000:0a:00.0"];
   snapshots.set(vm1.id, [
     {
       id: `${vm1.id}/before-deploy`,
@@ -386,6 +391,19 @@ function createVM(spec) {
   return vm;
 }
 
+// mockNormalisePCIAddress mirrors pkg/types.NormalizePCIAddress: lowercases,
+// trims, and prepends the default `0000` PCI domain when the short
+// bus:slot.function form is passed. Returns "" for anything that isn't a
+// syntactically valid PCI address (long or short form). Used by the GPU
+// list filter (5.7.9) so short and long forms canonicalise to the same key.
+function mockNormalisePCIAddress(s) {
+  const v = String(s || "").trim().toLowerCase();
+  if (!/^([0-9a-f]{4}:)?[0-9a-f]{2}:[0-1][0-9a-f]\.[0-7]$/.test(v)) {
+    return "";
+  }
+  return v.includes(":") && v.split(":").length === 2 ? `0000:${v}` : v;
+}
+
 // mockGenerateAdminPassword returns a 16-character password covering the four
 // Windows complexity classes so Playwright assertions on the one-time reveal
 // banner have a realistic-looking value to display. The mock alphabet matches
@@ -510,6 +528,14 @@ const server = http.createServer(async (req, res) => {
     // (stopped, no lease) drop out. Covers DHCP-assigned VMs that
     // nat_static_ip cannot.
     const ipFilter = (url.searchParams.get("ip") || "").trim().toLowerCase();
+    // 5.7.9 — gpu: any-of exact-match on spec.gpus[], normalised to the
+    // long PCI form so short + long forms canonicalise. Invalid PCI
+    // addresses return 400 invalid_gpu matching the create-time contract.
+    const gpuFilterRaw = (url.searchParams.get("gpu") || "").trim();
+    const gpuFilter = gpuFilterRaw === "" ? "" : mockNormalisePCIAddress(gpuFilterRaw);
+    if (gpuFilterRaw !== "" && gpuFilter === "") {
+      return json(res, 400, { code: "invalid_gpu", message: `gpu "${gpuFilterRaw}" must be a PCI address like 0000:01:00.0 or 01:00.0` });
+    }
     const parseTristate = (name) => {
       const raw = (url.searchParams.get(name) || "").trim().toLowerCase();
       if (raw === "") return { set: false, value: false };
@@ -701,6 +727,15 @@ const server = http.createServer(async (req, res) => {
         const stored = String(vm.ip || "").trim().toLowerCase();
         if (!stored) return false;
         return stored === ipFilter;
+      });
+    }
+    if (gpuFilter) {
+      // 5.7.9 — any-of exact match on spec.gpus[], normalised to the
+      // long PCI form so short/long stored values both match.
+      list = list.filter(vm => {
+        const gpus = Array.isArray(vm?.spec?.gpus) ? vm.spec.gpus : [];
+        if (gpus.length === 0) return false;
+        return gpus.some(g => mockNormalisePCIAddress(g) === gpuFilter);
       });
     }
     if (autoStart.set) {

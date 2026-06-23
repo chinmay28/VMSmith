@@ -17087,3 +17087,202 @@ func TestListVMs_FilterByIP_TotalCountReflectsFiltered(t *testing.T) {
 		t.Fatalf("expected 2 VMs on page 1 (per_page=2), got %+v", vms)
 	}
 }
+
+// --- 5.7.9 ?gpu= filter on the VM list ---
+
+func TestListVMs_FilterByGPU_ExactMatch(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "other-gpu", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "1" {
+		t.Fatalf("X-Total-Count = %q, want 1", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only vm-1, got %+v", vms)
+	}
+}
+
+// Short-form query matches a VM persisted with the long form (and vice
+// versa) — both forms canonicalise to the same long-form key.
+func TestListVMs_FilterByGPU_ShortFormMatchesLongStored(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected short-form to match long-stored, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_LongFormMatchesShortStored(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected long-form to match short-stored, got %+v", vms)
+	}
+}
+
+// VMs with multiple GPUs match when any of them equals the filter.
+func TestListVMs_FilterByGPU_AnyOfMultipleGPUs(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "multi-gpu", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0", "0000:02:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:02:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected any-of match, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_ExcludesVMsWithNoGPU(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected vm-2 (no GPUs) excluded, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_EmptyIsNoOp(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected empty filter to return all VMs, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_TrimsWhitespace(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=%20%200000:01:00.0%20%20")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 {
+		t.Fatalf("expected whitespace-trimmed match, got %+v", vms)
+	}
+}
+
+// Invalid PCI address returns 400 invalid_gpu (same code as the create-time
+// validator) instead of silently matching no VMs.
+func TestListVMs_FilterByGPU_InvalidAddressReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=not-a-pci-address")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_gpu")
+}
+
+func TestListVMs_FilterByGPU_InvalidSlotOver1fReturns400(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:ff.0")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	assertAPIErrorCode(t, resp, "invalid_gpu")
+}
+
+func TestListVMs_FilterByGPU_ComposesWithStatus(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "running-gpu", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "stopped-gpu", State: types.VMStateStopped, Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0&status=running")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 1 || vms[0].ID != "vm-1" {
+		t.Fatalf("expected only running vm-1, got %+v", vms)
+	}
+}
+
+func TestListVMs_FilterByGPU_TotalCountReflectsFiltered(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	for i := 0; i < 6; i++ {
+		spec := types.VMSpec{}
+		if i%2 == 0 {
+			spec.GPUs = []string{"0000:01:00.0"}
+		}
+		mockMgr.SeedVM(&types.VM{ID: fmt.Sprintf("vm-%d", i), Name: fmt.Sprintf("vm-%d", i), Spec: spec})
+	}
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?gpu=0000:01:00.0&per_page=2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Total-Count"); got != "3" {
+		t.Fatalf("expected X-Total-Count=3 (post-filter), got %q", got)
+	}
+	var vms []*types.VM
+	decodeJSON(t, resp, &vms)
+	if len(vms) != 2 {
+		t.Fatalf("expected 2 VMs on page 1, got %+v", vms)
+	}
+}

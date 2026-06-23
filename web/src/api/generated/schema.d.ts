@@ -247,6 +247,29 @@ export interface paths {
                      */
                     ip?: string;
                     /**
+                     * @description Any-of exact-match against the VM's assigned passthrough
+                     *     GPUs (`spec.gpus[]`), normalised to the long PCI form so
+                     *     short (`01:00.0`) and long (`0000:01:00.0`) input forms
+                     *     canonicalise to the same key — operators who paste straight
+                     *     from `lspci` (short form) match the same VMs as operators
+                     *     who paste from `vmsmith host gpus` (long form), without
+                     *     having to remember which form the daemon stored.
+                     *     Whitespace is trimmed; empty disables the filter. VMs with
+                     *     no assigned GPUs drop out whenever the filter is set,
+                     *     mirroring the empty-stored-excludes contract on
+                     *     `?nat_static_ip=` / `?nat_gateway=` / `?ip=`. Invalid PCI
+                     *     addresses return 400 `invalid_gpu`, matching the
+                     *     create-time contract on `VMSpec.gpus` so the filter
+                     *     alphabet stays 1:1 with the create alphabet. Closes the
+                     *     operator query *"which VM has 0000:01:00.0 assigned right
+                     *     now?"* that previously required scanning every VM's
+                     *     `spec.gpus`. Applied right after `ip` and before
+                     *     `since`/`until` so it composes additively with every other
+                     *     VM filter; `X-Total-Count` reflects the post-filter
+                     *     population.
+                     */
+                    gpu?: string;
+                    /**
                      * @description Tristate boolean filter on the VM's `auto_start` flag. Accepts
                      *     `true` / `false` (case-insensitive, plus `1` / `0` aliases);
                      *     absent or whitespace-only disables the filter so every VM is
@@ -4116,6 +4139,8 @@ export interface components {
              * @enum {string|null}
              */
             nic_model?: "virtio" | "e1000e" | "" | null;
+            /** @description **Immutable post-create.** GPU passthrough is configured only on create via `VMSpec.gpus`; PATCH rejects `gpus` with 400 `gpus_immutable`, and clone clears any inherited GPU assignment so passthrough devices are not silently shared across VMs. This avoids disruptive IOMMU-group rebinding on an existing VM. */
+            gpus?: string[];
         };
         VM: {
             id: string;

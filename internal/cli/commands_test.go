@@ -9524,3 +9524,85 @@ func TestCLI_VMList_FilterByIP_EmptyOmitsFilter(t *testing.T) {
 		t.Fatalf("whitespace --ip should be no-op, got %q", out)
 	}
 }
+
+// --- 5.7.9 vmsmith vm list --gpu ---
+
+func TestCLI_VMList_FilterByGPU_Match(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--gpu", "0000:01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if !strings.Contains(out, "gpu-host") {
+		t.Fatalf("expected gpu-host in output, got %q", out)
+	}
+	if strings.Contains(out, "no-gpu") {
+		t.Fatalf("no-gpu should be excluded, got %q", out)
+	}
+}
+
+// Short-form --gpu matches a VM persisted with the long form.
+func TestCLI_VMList_FilterByGPU_ShortFormCanonicalisation(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+
+	out, err := runCLI("vm", "list", "--gpu", "01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu short: %v", err)
+	}
+	if !strings.Contains(out, "gpu-host") {
+		t.Fatalf("expected gpu-host to match short-form filter, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_ExcludesVMsWithNoGPU(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--gpu", "0000:01:00.0")
+	if err != nil {
+		t.Fatalf("vm list --gpu: %v", err)
+	}
+	if strings.Contains(out, "no-gpu") {
+		t.Fatalf("VM with no GPUs should be excluded, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_EmptyOmitsFilter(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "gpu-host", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, GPUs: []string{"0000:01:00.0"}}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{CPUs: 1, RAMMB: 512}})
+
+	out, err := runCLI("vm", "list", "--gpu", "")
+	if err != nil {
+		t.Fatalf("vm list --gpu '': %v", err)
+	}
+	if !strings.Contains(out, "gpu-host") || !strings.Contains(out, "no-gpu") {
+		t.Fatalf("expected both VMs when --gpu omitted, got %q", out)
+	}
+}
+
+func TestCLI_VMList_FilterByGPU_InvalidAddressRejected(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--gpu", "not-a-pci-address")
+	if err == nil {
+		t.Fatalf("expected invalid PCI address to fail before request")
+	}
+	if !strings.Contains(err.Error(), "--gpu") || !strings.Contains(err.Error(), "PCI address") {
+		t.Fatalf("expected --gpu PCI address error, got %v", err)
+	}
+}
