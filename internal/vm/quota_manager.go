@@ -114,6 +114,7 @@ func CalculateQuotaUsage(vms []*types.VM, quotas config.QuotasConfig) types.Quot
 		CPUs:   types.QuotaUsageSummary{Limit: quotas.MaxTotalCPUs},
 		RAMMB:  types.QuotaUsageSummary{Limit: quotas.MaxTotalRAMMB},
 		DiskGB: types.QuotaUsageSummary{Limit: quotas.MaxTotalDiskGB},
+		GPUs:   types.QuotaUsageSummary{Limit: quotas.MaxTotalGPUs},
 	}
 	for _, existing := range vms {
 		if existing == nil {
@@ -123,6 +124,7 @@ func CalculateQuotaUsage(vms []*types.VM, quotas config.QuotasConfig) types.Quot
 		usage.CPUs.Used += existing.Spec.CPUs
 		usage.RAMMB.Used += existing.Spec.RAMMB
 		usage.DiskGB.Used += existing.Spec.DiskGB
+		usage.GPUs.Used += len(existing.Spec.ResolvedGPUs())
 	}
 	return usage
 }
@@ -133,7 +135,7 @@ func (m *quotaManager) ensureCreateWithinQuota(ctx context.Context, spec types.V
 		return err
 	}
 	usage := CalculateQuotaUsage(vms, m.quotas)
-	return validateQuotaDelta(usage, 1, spec.CPUs, spec.RAMMB, spec.DiskGB)
+	return validateQuotaDelta(usage, 1, spec.CPUs, spec.RAMMB, spec.DiskGB, len(spec.ResolvedGPUs()))
 }
 
 func (m *quotaManager) ensureUpdateWithinQuota(ctx context.Context, id string, patch types.VMUpdateSpec) error {
@@ -158,10 +160,13 @@ func (m *quotaManager) ensureUpdateWithinQuota(ctx context.Context, id string, p
 	if patch.DiskGB > 0 {
 		newDisk = patch.DiskGB
 	}
-	return validateQuotaDelta(usage, 0, newCPUs-current.Spec.CPUs, newRAM-current.Spec.RAMMB, newDisk-current.Spec.DiskGB)
+	// GPU assignment is immutable post-create (5.7.4), so the GPU delta on
+	// an update is always zero — passing it through validateQuotaDelta keeps
+	// the predicate uniform with the create path.
+	return validateQuotaDelta(usage, 0, newCPUs-current.Spec.CPUs, newRAM-current.Spec.RAMMB, newDisk-current.Spec.DiskGB, 0)
 }
 
-func validateQuotaDelta(usage types.QuotaUsage, vmDelta, cpuDelta, ramDelta, diskDelta int) error {
+func validateQuotaDelta(usage types.QuotaUsage, vmDelta, cpuDelta, ramDelta, diskDelta, gpuDelta int) error {
 	if usage.VMs.Limit > 0 && usage.VMs.Used+vmDelta > usage.VMs.Limit {
 		return quotaExceededError("max_vms", usage.VMs.Used+vmDelta, usage.VMs.Limit, "VMs")
 	}
@@ -173,6 +178,9 @@ func validateQuotaDelta(usage types.QuotaUsage, vmDelta, cpuDelta, ramDelta, dis
 	}
 	if usage.DiskGB.Limit > 0 && usage.DiskGB.Used+diskDelta > usage.DiskGB.Limit {
 		return quotaExceededError("max_total_disk_gb", usage.DiskGB.Used+diskDelta, usage.DiskGB.Limit, "disk (GB)")
+	}
+	if usage.GPUs.Limit > 0 && usage.GPUs.Used+gpuDelta > usage.GPUs.Limit {
+		return quotaExceededError("max_total_gpus", usage.GPUs.Used+gpuDelta, usage.GPUs.Limit, "GPUs")
 	}
 	return nil
 }

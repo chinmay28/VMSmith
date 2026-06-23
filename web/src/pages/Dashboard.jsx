@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database, TrendingUp } from 'lucide-react';
+import { Server, HardDrive, Activity, Plus, Cpu, MemoryStick, Database, TrendingUp, Microchip } from 'lucide-react';
 import { vms, images as imagesApi, quotas as quotasApi, host as hostApi } from '../api/client';
 import { useFetch } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
@@ -114,11 +114,12 @@ export default function Dashboard() {
         <HostUsageCard label="Host Disk" kind="bytes" resource={hostStats?.disk} icon={Database} loading={hostLoading} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-        <QuotaCard label="Machines allocated" resource={quotaUsage?.vms} unit="VMs" icon={Server} loading={quotaLoading} />
-        <QuotaCard label="vCPUs allocated" resource={quotaUsage?.cpus} unit="vCPU" icon={Cpu} loading={quotaLoading} />
-        <QuotaCard label="RAM allocated" resource={quotaUsage?.ram_mb} unit="MB" icon={MemoryStick} loading={quotaLoading} />
-        <QuotaCard label="Disk allocated" resource={quotaUsage?.disk_gb} unit="GB" icon={Database} loading={quotaLoading} />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
+        <QuotaCard label="Machines allocated" resource={quotaUsage?.vms} unit="VMs" icon={Server} loading={quotaLoading} testId="quota-card-vms" />
+        <QuotaCard label="vCPUs allocated" resource={quotaUsage?.cpus} unit="vCPU" icon={Cpu} loading={quotaLoading} testId="quota-card-cpus" />
+        <QuotaCard label="RAM allocated" resource={quotaUsage?.ram_mb} unit="MB" icon={MemoryStick} loading={quotaLoading} testId="quota-card-ram" />
+        <QuotaCard label="Disk allocated" resource={quotaUsage?.disk_gb} unit="GB" icon={Database} loading={quotaLoading} testId="quota-card-disk" />
+        <QuotaCard label="GPUs allocated" resource={quotaUsage?.gpus} unit="GPUs" icon={Microchip} loading={quotaLoading} testId="quota-card-gpus" />
       </div>
 
       <TopVMsCard
@@ -309,9 +310,9 @@ function TopVMsCard({ metric, onMetricChange, response, loading, error, onSelect
   );
 }
 
-function QuotaCard({ label, resource, unit, icon: Icon, loading }) {
+function QuotaCard({ label, resource, unit, icon: Icon, loading, testId }) {
   if (loading) {
-    return <StatCard label={label} value="—" icon={Icon} />;
+    return <StatCard label={label} value="—" icon={Icon} testId={testId} />;
   }
 
   const used = resource?.used ?? 0;
@@ -328,6 +329,7 @@ function QuotaCard({ label, resource, unit, icon: Icon, loading }) {
       max={capped ? limit : undefined}
       primary={primary}
       subtitle={subtitle}
+      testId={testId}
     />
   );
 }

@@ -137,6 +137,24 @@ async function main() {
       await assertVisible(p, "vm-row-db-server");
     }, page);
 
+    // 5.7.11 — GPU quota card. The mock server seeds win-app with one
+    // passthrough GPU ("0000:01:00.0") and the other VMs with none, so
+    // GET /api/v1/quotas/usage now reports gpus.used = 1 / limit = 0.
+    // The Dashboard renders a fifth QuotaCard for the new GPU dimension
+    // that must surface the seeded count and the "uncapped" subtitle.
+    await runTest("gpu quota card on dashboard", async (p) => {
+      await assertVisible(p, "quota-card-gpus");
+      const text = await p.locator('[data-testid="quota-card-gpus"]').textContent();
+      await assert(
+        text && text.includes("1") && text.includes("GPUs"),
+        `quota-card-gpus expected to surface seeded used=1 GPUs, got: ${text}`,
+      );
+      await assert(
+        text && text.includes("uncapped"),
+        `quota-card-gpus expected the "uncapped" subtitle when limit=0, got: ${text}`,
+      );
+    }, page);
+
     await runTest("layout footer shows mock build version", async (p) => {
       await assertVisible(p, "layout-version");
       await assertText(p, "layout-version", "VM Smith v0.0.0-mock");

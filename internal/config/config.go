@@ -129,6 +129,7 @@ type QuotasConfig struct {
 	MaxTotalCPUs      int `yaml:"max_total_cpus"`
 	MaxTotalRAMMB     int `yaml:"max_total_ram_mb"`
 	MaxTotalDiskGB    int `yaml:"max_total_disk_gb"`
+	MaxTotalGPUs      int `yaml:"max_total_gpus"`
 	MaxSnapshotsPerVM int `yaml:"max_snapshots_per_vm"`
 }
 

@@ -12,6 +12,7 @@ type QuotaUsage struct {
 	CPUs   QuotaUsageSummary `json:"cpus"`
 	RAMMB  QuotaUsageSummary `json:"ram_mb"`
 	DiskGB QuotaUsageSummary `json:"disk_gb"`
+	GPUs   QuotaUsageSummary `json:"gpus"`
 }
 
 // HostResourceUsageSummary describes current host utilization for one resource.

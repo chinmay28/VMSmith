@@ -91,6 +91,44 @@ func TestUpdateVM_QuotaExceeded_EmitsSystemEvent(t *testing.T) {
 	}
 }
 
+// TestCreateVM_QuotaExceeded_GPUs_EmitsSystemEvent verifies the 5.7.11 GPU
+// quota dimension emits the same structured `quota.exceeded` event surface
+// as the existing CPU / RAM / disk dimensions, tagged with the
+// `max_total_gpus` field so operators can filter the events stream the
+// same way.
+func TestCreateVM_QuotaExceeded_GPUs_EmitsSystemEvent(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, func(cfg *config.Config) {
+		cfg.Quotas.MaxTotalGPUs = 1
+	})
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-existing", Name: "existing", Spec: types.VMSpec{CPUs: 1, RAMMB: 512, DiskGB: 10, GPUs: []string{"0000:01:00.0"}}})
+
+	_, ch, stop := wireEventBus(t, ts)
+	defer stop()
+
+	body := []byte(`{"name":"gpu2","image":"rocky9.qcow2","cpus":1,"ram_mb":512,"disk_gb":10,"ssh_pub_key":"ssh-rsa AAAA test","gpus":["0000:02:00.0"]}`)
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for quota_exceeded, got %d", resp.StatusCode)
+	}
+
+	got := drainEvents(t, ch, 1)
+	if len(got) != 1 || got[0].Type != "quota.exceeded" {
+		t.Fatalf("want 1 quota.exceeded event, got %+v", got)
+	}
+	if got[0].Attributes["field"] != "max_total_gpus" {
+		t.Errorf("attributes.field = %q, want max_total_gpus", got[0].Attributes["field"])
+	}
+	if got[0].Attributes["limit"] != "1" || got[0].Attributes["attempted"] != "2" {
+		t.Errorf("attributes = %+v, want limit=1 attempted=2", got[0].Attributes)
+	}
+}
+
 // TestPublishSystemEvent_NoBus must not panic when no bus is wired.
 func TestPublishSystemEvent_NoBus(t *testing.T) {
 	s := &Server{}

@@ -69,6 +69,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Quotas.MaxTotalDiskGB != 0 {
 		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 0", cfg.Quotas.MaxTotalDiskGB)
 	}
+	if cfg.Quotas.MaxTotalGPUs != 0 {
+		t.Errorf("Quotas.MaxTotalGPUs = %d, want 0", cfg.Quotas.MaxTotalGPUs)
+	}
 }
 
 func TestLoadNoFile(t *testing.T) {
@@ -126,6 +129,7 @@ quotas:
   max_total_cpus: 16
   max_total_ram_mb: 32768
   max_total_disk_gb: 500
+  max_total_gpus: 4
 `
 	os.WriteFile(cfgPath, []byte(content), 0644)
 
@@ -202,6 +206,9 @@ quotas:
 	}
 	if cfg.Quotas.MaxTotalDiskGB != 500 {
 		t.Errorf("Quotas.MaxTotalDiskGB = %d, want 500", cfg.Quotas.MaxTotalDiskGB)
+	}
+	if cfg.Quotas.MaxTotalGPUs != 4 {
+		t.Errorf("Quotas.MaxTotalGPUs = %d, want 4", cfg.Quotas.MaxTotalGPUs)
 	}
 	// Non-overridden fields should keep defaults
 	if cfg.Libvirt.URI != "qemu:///system" {

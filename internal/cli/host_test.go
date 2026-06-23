@@ -43,7 +43,8 @@ const sampleQuotasBody = `{
   "vms":    {"used": 7,  "limit": 32},
   "cpus":   {"used": 14, "limit": 64},
   "ram_mb": {"used": 8192, "limit": 65536},
-  "disk_gb":{"used": 50}
+  "disk_gb":{"used": 50},
+  "gpus":   {"used": 2,  "limit": 4}
 }`
 
 func TestCLI_HostStats_HappyPath(t *testing.T) {
@@ -129,6 +130,7 @@ func TestCLI_HostQuotas_HappyPath(t *testing.T) {
 		"CPUs", "14", "64 vCPU",
 		"RAM", "8192 MB", "65536 MB",
 		"Disk", "50 GB",
+		"GPUs", "2", "4",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q: %s", want, out)
@@ -137,12 +139,14 @@ func TestCLI_HostQuotas_HappyPath(t *testing.T) {
 }
 
 func TestCLI_HostQuotas_RendersUnlimitedWhenLimitIsZero(t *testing.T) {
-	// Both ram and disk omit "limit" (== 0) so they should print "unlimited".
+	// CPUs, RAM, Disk, and GPUs all omit "limit" (== 0) so they should
+	// print "unlimited"; VMs is the only configured cap.
 	const body = `{
 		"vms":    {"used": 1, "limit": 5},
 		"cpus":   {"used": 2},
 		"ram_mb": {"used": 1024},
-		"disk_gb":{"used": 10}
+		"disk_gb":{"used": 10},
+		"gpus":   {"used": 0}
 	}`
 	srv, _ := newFakeHostDaemon(t, http.StatusOK, body)
 
@@ -150,9 +154,9 @@ func TestCLI_HostQuotas_RendersUnlimitedWhenLimitIsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host quotas: %v", err)
 	}
-	// Exactly three "unlimited" rows: CPUs, RAM, Disk. VMs has a configured cap.
-	if count := strings.Count(out, "unlimited"); count != 3 {
-		t.Fatalf("expected 3 'unlimited' rows, got %d in %s", count, out)
+	// Exactly four "unlimited" rows: CPUs, RAM, Disk, GPUs. VMs has a configured cap.
+	if count := strings.Count(out, "unlimited"); count != 4 {
+		t.Fatalf("expected 4 'unlimited' rows, got %d in %s", count, out)
 	}
 	if !strings.Contains(out, "VMs") || !strings.Contains(out, " 5") {
 		t.Fatalf("VMs row should still render its configured limit: %s", out)

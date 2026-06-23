@@ -13,6 +13,7 @@ type quotaUsage struct {
 	CPUs   int
 	RAMMB  int
 	DiskGB int
+	GPUs   int
 }
 
 func collectQuotaUsage(vms []*types.VM) quotaUsage {
@@ -25,12 +26,17 @@ func collectQuotaUsage(vms []*types.VM) quotaUsage {
 		usage.CPUs += vm.Spec.CPUs
 		usage.RAMMB += vm.Spec.RAMMB
 		usage.DiskGB += vm.Spec.DiskGB
+		usage.GPUs += len(vm.Spec.ResolvedGPUs())
 	}
 	return usage
 }
 
+func (s *Server) anyQuotaConfigured() bool {
+	return s.quotas.MaxVMs > 0 || s.quotas.MaxTotalCPUs > 0 || s.quotas.MaxTotalRAMMB > 0 || s.quotas.MaxTotalDiskGB > 0 || s.quotas.MaxTotalGPUs > 0
+}
+
 func (s *Server) enforceCreateQuotas(ctx context.Context, spec types.VMSpec) error {
-	if s.quotas.MaxVMs <= 0 && s.quotas.MaxTotalCPUs <= 0 && s.quotas.MaxTotalRAMMB <= 0 && s.quotas.MaxTotalDiskGB <= 0 {
+	if !s.anyQuotaConfigured() {
 		return nil
 	}
 
@@ -43,6 +49,7 @@ func (s *Server) enforceCreateQuotas(ctx context.Context, spec types.VMSpec) err
 	usage.CPUs += spec.CPUs
 	usage.RAMMB += spec.RAMMB
 	usage.DiskGB += spec.DiskGB
+	usage.GPUs += len(spec.ResolvedGPUs())
 
 	return s.validateQuotaUsage(usage)
 }
@@ -51,7 +58,7 @@ func (s *Server) enforceUpdateQuotas(ctx context.Context, current *types.VM, pat
 	if current == nil {
 		return nil
 	}
-	if s.quotas.MaxVMs <= 0 && s.quotas.MaxTotalCPUs <= 0 && s.quotas.MaxTotalRAMMB <= 0 && s.quotas.MaxTotalDiskGB <= 0 {
+	if !s.anyQuotaConfigured() {
 		return nil
 	}
 
@@ -80,6 +87,8 @@ func (s *Server) enforceUpdateQuotas(ctx context.Context, current *types.VM, pat
 	usage.CPUs += nextCPUs
 	usage.RAMMB += nextRAMMB
 	usage.DiskGB += nextDiskGB
+	// GPU assignment is immutable post-create (5.7.4), so the GPU footprint
+	// of an updated VM is unchanged — usage.GPUs already reflects it.
 
 	return s.validateQuotaUsage(usage)
 }
@@ -96,6 +105,9 @@ func (s *Server) validateQuotaUsage(usage quotaUsage) error {
 	}
 	if limit := s.quotas.MaxTotalDiskGB; limit > 0 && usage.DiskGB > limit {
 		return s.quotaExceeded("max_total_disk_gb", usage.DiskGB, limit, fmt.Sprintf("disk quota exceeded: %d GB configured, limit is %d GB", usage.DiskGB, limit))
+	}
+	if limit := s.quotas.MaxTotalGPUs; limit > 0 && usage.GPUs > limit {
+		return s.quotaExceeded("max_total_gpus", usage.GPUs, limit, fmt.Sprintf("GPU quota exceeded: %d configured, limit is %d", usage.GPUs, limit))
 	}
 	return nil
 }

@@ -4546,7 +4546,7 @@ components:
           type: integer
     QuotaUsage:
       type: object
-      required: [vms, cpus, ram_mb, disk_gb]
+      required: [vms, cpus, ram_mb, disk_gb, gpus]
       properties:
         vms:
           $ref: '#/components/schemas/QuotaUsageSummary'
@@ -4556,6 +4556,15 @@ components:
           $ref: '#/components/schemas/QuotaUsageSummary'
         disk_gb:
           $ref: '#/components/schemas/QuotaUsageSummary'
+        gpus:
+          $ref: '#/components/schemas/QuotaUsageSummary'
+          description: |
+            Aggregate GPU passthrough allocation (count of host PCI GPU
+            functions assigned across all VMs) and its configured
+            `quotas.max_total_gpus` cap (`limit: 0` = uncapped). Lines up
+            with the existing CPU / RAM / disk quota dimensions; GPU
+            assignment is immutable post-create (5.7.4) so PATCH /vms/{id}
+            never affects this counter.
     Webhook:
       type: object
       required: [id, url, active, created_at]
