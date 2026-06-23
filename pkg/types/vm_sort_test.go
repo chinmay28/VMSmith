@@ -497,3 +497,123 @@ func TestIsValidVMSort_AcceptsDefaultUser(t *testing.T) {
 		t.Errorf("IsValidVMSort(%q) = true, want false", "Default_User")
 	}
 }
+
+// ============================================================
+// `gpu` sort axis (5.7.13)
+// ============================================================
+
+func TestSortVMs_ByGPU_AscEmptyTrailing(t *testing.T) {
+	// Concrete GPUs sort lexicographically on the canonical long form;
+	// VMs with no requested GPUs sink to the tail in ascending order,
+	// mirroring the nil-trailing contract on every other nullable sort
+	// axis (ip / guest_ip / image / last_fired_at / actor).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{GPUs: []string{"0000:02:00.0"}}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{GPUs: []string{"0000:01:00.0"}}},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderAsc)
+	want := []string{"vm-3", "vm-1", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q gpus=%v, want %q", i, v.ID, v.Spec.GPUs, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByGPU_DescEmptyLeading(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{GPUs: []string{"0000:02:00.0"}}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{GPUs: []string{"0000:01:00.0"}}},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderDesc)
+	// Empty leads in descending; concrete GPUs then sort reverse-lexicographic.
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q gpus=%v, want %q", i, v.ID, v.Spec.GPUs, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByGPU_NormalisesShortForm(t *testing.T) {
+	// A VM persisted with the short PCI form ("01:00.0") must collate
+	// identically to one persisted with the long form ("0000:01:00.0") so
+	// the sort agrees with the same-form alphabet contract on `?gpu=`
+	// (5.7.9) and `vmsmith vm create --gpu`. Without normalisation,
+	// lexicographic compare on the raw string would sort the short form
+	// after every concrete long-form entry, breaking cohort discovery.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{GPUs: []string{"0000:02:00.0"}}},
+		{ID: "vm-2", Spec: VMSpec{GPUs: []string{"01:00.0"}}}, // short form
+		{ID: "vm-3", Spec: VMSpec{GPUs: []string{"0000:03:00.0"}}},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderAsc)
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q gpus=%v, want %q", i, v.ID, v.Spec.GPUs, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByGPU_MultiGPUUsesSmallestSlot(t *testing.T) {
+	// A multi-GPU VM is positioned by its lexicographically-smallest GPU
+	// (the operator's "primary slot"). vm-1 has [02, 04] so its smallest
+	// is 02; vm-2 has [01, 05] so its smallest is 01 and surfaces first
+	// in asc; vm-3 has only [03] so it lands between.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{GPUs: []string{"0000:02:00.0", "0000:04:00.0"}}},
+		{ID: "vm-2", Spec: VMSpec{GPUs: []string{"0000:01:00.0", "0000:05:00.0"}}},
+		{ID: "vm-3", Spec: VMSpec{GPUs: []string{"0000:03:00.0"}}},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderAsc)
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q gpus=%v, want %q", i, v.ID, v.Spec.GPUs, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByGPU_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{GPUs: []string{"0000:01:00.0"}}},
+		{ID: "vm-1", Spec: VMSpec{GPUs: []string{"0000:01:00.0"}}},
+		{ID: "vm-2", Spec: VMSpec{GPUs: []string{"0000:01:00.0"}}},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByGPU_AllEmpty_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortGPU, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsGPU(t *testing.T) {
+	if !IsValidVMSort(VMSortGPU) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortGPU)
+	}
+	for _, axis := range []string{"GPU", "Gpu", "gpus", " gpu "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

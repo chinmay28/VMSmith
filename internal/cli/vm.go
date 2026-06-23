@@ -296,7 +296,7 @@ var vmListCmd = &cobra.Command{
 			sortField = types.VMSortID
 		}
 		if !types.IsValidVMSort(sortField) {
-			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user", sortField)
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu", sortField)
 		}
 		orderField = strings.TrimSpace(strings.ToLower(orderField))
 		if orderField == "" {
@@ -1301,7 +1301,7 @@ Examples:
 	vmListCmd.Flags().String("ip", "", "filter VMs by the runtime-discovered IP shown in the table (case-insensitive exact match; empty disables; VMs with no IP — stopped or no lease — drop out when the filter is set; covers DHCP VMs that --nat-static-ip cannot)")
 	vmListCmd.Flags().String("auto-start", "", "filter VMs by auto-start flag: 'true', 'false', or empty for no filter")
 	vmListCmd.Flags().String("locked", "", "filter VMs by delete-protection flag: 'true', 'false', or empty for no filter")
-	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user")
+	vmListCmd.Flags().String("sort", types.VMSortID, "sort field: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu")
 	vmListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	vmListCmd.Flags().String("since", "", "keep VMs created at or after this RFC3339 timestamp (inclusive; e.g. 2026-05-01T00:00:00Z)")
 	vmListCmd.Flags().String("until", "", "keep VMs created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")

@@ -2210,6 +2210,82 @@ func TestCLI_VMList_InvalidOffset(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `gpu` sort axis (5.7.13)
+// ============================================================
+
+func TestCLI_VMList_SortByGPU_AscEmptyTrailing(t *testing.T) {
+	// Concrete GPUs sort lexicographically on the canonical long form;
+	// VMs with no requested GPUs sink to the tail in ascending order,
+	// mirroring the nil-trailing contract on the runtime IP axis (5.4.85)
+	// and the image axis (5.4.88).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "second-slot", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "first-slot", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "gpu")
+	if err != nil {
+		t.Fatalf("vm list --sort gpu: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"first-slot", "second-slot", "no-gpu"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByGPU_NormalisesShortForm(t *testing.T) {
+	// A VM persisted with the short PCI form ("01:00.0") collates
+	// identically to one persisted with the long form ("0000:01:00.0")
+	// so the sort agrees with the alphabet contract on `?gpu=` (5.7.9).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "long-02", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "short-01", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"01:00.0"}, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "long-03", State: types.VMStateRunning, Spec: types.VMSpec{GPUs: []string{"0000:03:00.0"}, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "gpu", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort gpu: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"short-01", "long-02", "long-03"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
+	// Garbage --sort value must surface a clear error that advertises `gpu`
+	// in the whitelist so operators know it's a valid axis.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "gpus") // typo
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "gpu") {
+		t.Errorf("expected --sort error message to advertise 'gpu' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMStart(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()

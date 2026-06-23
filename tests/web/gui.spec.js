@@ -1218,6 +1218,33 @@ test.describe("VM List", () => {
     await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.7.13 — lexicographic `gpu` sort axis with empty-trails-in-asc semantics.
+  test("gpu sort axis reorders the VM list and sinks no-GPU VMs to the tail", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed: win-app alone carries `0000:01:00.0`; web-server / db-server
+    // leave spec.gpus empty. Asc puts the GPU-bearing VM first and the
+    // two empty-GPU VMs at the tail (id tiebreak: vm-1 < vm-2 so
+    // web-server precedes db-server). Mirrors the nil-trailing contract
+    // on every other nullable sort axis (ip, image, guest_ip, actor).
+    await page.getByTestId("vm-list-sort-field").selectOption("gpu");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=gpu");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips the order — the empty-GPU cohort heads the list
+    // (id tiebreak inverts so db-server precedes web-server) and the
+    // GPU-bearing win-app trails.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   // 5.4.91 — case-insensitive `default_user` sort axis with empty→root resolution.
   test("default_user sort axis reorders the VM list and resolves empty to root", async ({ page }) => {
     await page.goto(BASE_URL);

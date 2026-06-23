@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -811,6 +811,30 @@ const server = http.createServer(async (req, res) => {
           const ra = ((a?.spec?.default_user || "") || "root").toLowerCase();
           const rb = ((b?.spec?.default_user || "") || "root").toLowerCase();
           l = ra < rb ? -1 : ra > rb ? 1 : 0;
+          break;
+        }
+        case "gpu": {
+          // Lexicographic sort on the smallest assigned GPU PCI address,
+          // normalised to the canonical long form first so a VM persisted
+          // with the short form ("01:00.0") collates identically to one
+          // with the long form ("0000:01:00.0") — matches the alphabet
+          // contract on `?gpu=` (5.7.9). VMs with no requested GPUs sink
+          // to the tail in asc / head in desc, mirroring the Go SortVMs
+          // nil-trailing contract on every other nullable sort axis (ip,
+          // image, guest_ip, actor, last_fired_at, last_delivery_at).
+          const smallest = (vm) => {
+            const raw = Array.isArray(vm?.spec?.gpus) ? vm.spec.gpus : [];
+            const norm = raw.map(normalizePCI).filter(Boolean);
+            if (norm.length === 0) return "";
+            let m = norm[0];
+            for (let i = 1; i < norm.length; i++) if (norm[i] < m) m = norm[i];
+            return m;
+          };
+          const ga = smallest(a), gb = smallest(b);
+          if (ga === "" && gb === "") l = 0;
+          else if (ga === "") l = 1;
+          else if (gb === "") l = -1;
+          else l = ga < gb ? -1 : ga > gb ? 1 : 0;
           break;
         }
         default:           l = 0;

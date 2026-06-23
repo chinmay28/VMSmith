@@ -4343,6 +4343,11 @@ func TestListVMs_SortByIP_400InvalidSortMentionsIP(t *testing.T) {
 	if !strings.Contains(apiErr.Message, "default_user") {
 		t.Errorf("message = %q, expected to advertise 'default_user' as a valid sort axis", apiErr.Message)
 	}
+	// 5.7.13 — the error message must also advertise `gpu` now that the VM
+	// list whitelist includes it.
+	if !strings.Contains(apiErr.Message, "gpu") {
+		t.Errorf("message = %q, expected to advertise 'gpu' as a valid sort axis", apiErr.Message)
+	}
 }
 
 // ============================================================
@@ -4520,6 +4525,122 @@ func TestListVMs_SortByDefaultUser_TiebreaksOnID(t *testing.T) {
 	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{DefaultUser: "ops-alice"}})
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=default_user")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+// ============================================================
+// VM list `gpu` sort axis (5.7.13)
+// ============================================================
+
+func TestListVMs_SortByGPU_AscEmptyTrailing(t *testing.T) {
+	// Concrete GPU addresses sort lexicographically on the canonical long
+	// form; VMs with no requested GPUs sink to the tail in ascending order,
+	// mirroring the nil-trailing semantics on every other nullable sort axis
+	// (ip / guest_ip / image / actor / last_fired_at / last_delivery_at).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "second-slot", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "first-slot", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=gpu")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"first-slot", "second-slot", "no-gpu"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByGPUDesc_EmptyLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "second-slot", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "no-gpu", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "first-slot", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=gpu&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// Empty leads in descending; concrete GPUs then sort reverse-lexicographic.
+	want := []string{"no-gpu", "second-slot", "first-slot"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByGPU_NormalisesShortForm(t *testing.T) {
+	// A VM persisted with the short PCI form ("01:00.0") must collate
+	// identically to one persisted with the long form ("0000:01:00.0") so
+	// the sort agrees with the alphabet contract on `?gpu=` (5.7.9). Without
+	// the normalisation hop, lexicographic compare on the raw string would
+	// sort every short-form entry after every long-form entry, breaking
+	// cohort discovery for operators who pasted from `lspci`.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "long-02", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "short-01", Spec: types.VMSpec{GPUs: []string{"01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "long-03", Spec: types.VMSpec{GPUs: []string{"0000:03:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=gpu")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"short-01", "long-02", "long-03"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByGPU_MultiGPUUsesSmallestSlot(t *testing.T) {
+	// A multi-GPU VM is positioned by its smallest assigned PCI slot. vm-1
+	// holds [02, 04] (smallest = 02), vm-2 holds [01, 05] (smallest = 01)
+	// and surfaces first in ascending order, vm-3 holds only [03] and lands
+	// between them. Locks the "primary slot wins" contract documented in
+	// smallestGPU so the position of a multi-GPU VM doesn't depend on the
+	// caller's input order.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "two-and-four", Spec: types.VMSpec{GPUs: []string{"0000:02:00.0", "0000:04:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "one-and-five", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0", "0000:05:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "three-only", Spec: types.VMSpec{GPUs: []string{"0000:03:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=gpu")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"one-and-five", "two-and-four", "three-only"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByGPU_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{GPUs: []string{"0000:01:00.0"}}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=gpu")
 	var got []*types.VM
 	decodeJSON(t, resp, &got)
 	want := []string{"vm-1", "vm-2", "vm-3"}
