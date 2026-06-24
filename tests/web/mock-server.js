@@ -2335,13 +2335,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_active", message: "active must be 'true' or 'false'" });
     }
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
-    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at"]);
+    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at", "delivery_status"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at, delivery_status" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2507,6 +2507,25 @@ const server = http.createServer(async (req, res) => {
           const at = a.last_delivery_at ? new Date(a.last_delivery_at).getTime() : 0;
           const bt = b.last_delivery_at ? new Date(b.last_delivery_at).getTime() : 0;
           cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "delivery_status": {
+          // 5.4.98 — alphabetical: failing < healthy < never. Tiebreak on id.
+          // Mirror pkg/types.WebhookDeliveryStatus classification (which is
+          // closed and total — every webhook resolves to exactly one value).
+          const classify = (wh) => {
+            const zero = !wh.last_delivery_at || wh.last_delivery_at === "" ||
+              new Date(wh.last_delivery_at).getTime() <= 0;
+            if (zero) return "never";
+            const status = typeof wh.last_status === "number" ? wh.last_status : 0;
+            const err = typeof wh.last_error === "string" ? wh.last_error : "";
+            if (err === "" && status >= 200 && status < 300) return "healthy";
+            return "failing";
+          };
+          const sa = classify(a);
+          const sb = classify(b);
+          cmp = sa < sb ? -1 : sa > sb ? 1 : 0;
           if (cmp === 0) cmp = cmpID;
           break;
         }

@@ -143,6 +143,109 @@ func TestSortWebhooks_StableEqualKeys(t *testing.T) {
 	}
 }
 
+// 5.4.98 — delivery_status sort axis. Alphabetical: failing < healthy < never.
+// Tiebreak on `id`.
+
+// buildDeliveryStatusWebhooks returns three webhooks — one of each
+// classification (never / healthy / failing) — laid out in non-sorted order
+// so the test asserts the comparator's effect, not the input order.
+func buildDeliveryStatusWebhooks() []*Webhook {
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	return []*Webhook{
+		// never — LastDeliveryAt zero takes precedence even if LastStatus is set
+		{ID: "wh-never", LastDeliveryAt: time.Time{}, LastStatus: 0, LastError: ""},
+		// healthy — last attempt 2xx with empty LastError
+		{ID: "wh-healthy", LastDeliveryAt: base.Add(1 * time.Hour), LastStatus: 200, LastError: ""},
+		// failing — last attempt non-2xx
+		{ID: "wh-failing", LastDeliveryAt: base.Add(2 * time.Hour), LastStatus: 500, LastError: ""},
+	}
+}
+
+func TestSortWebhooks_ByDeliveryStatus_AscAlphabetical(t *testing.T) {
+	hooks := buildDeliveryStatusWebhooks()
+	SortWebhooks(hooks, WebhookSortDeliveryStatus, SortOrderAsc)
+	// alphabetical: failing < healthy < never
+	want := []string{"wh-failing", "wh-healthy", "wh-never"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("asc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortWebhooks_ByDeliveryStatus_DescAlphabetical(t *testing.T) {
+	hooks := buildDeliveryStatusWebhooks()
+	SortWebhooks(hooks, WebhookSortDeliveryStatus, SortOrderDesc)
+	// reverse alphabetical: never > healthy > failing
+	want := []string{"wh-never", "wh-healthy", "wh-failing"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("desc: got %v, want %v", got, want)
+	}
+}
+
+func TestSortWebhooks_ByDeliveryStatus_TiebreaksOnID(t *testing.T) {
+	// Three failing webhooks with the same classification — must order by id.
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*Webhook{
+		{ID: "wh-3", LastDeliveryAt: base, LastStatus: 500},
+		{ID: "wh-1", LastDeliveryAt: base, LastStatus: 500},
+		{ID: "wh-2", LastDeliveryAt: base, LastStatus: 500},
+	}
+	SortWebhooks(hooks, WebhookSortDeliveryStatus, SortOrderAsc)
+	want := []string{"wh-1", "wh-2", "wh-3"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("tiebreak asc: got %v, want %v", got, want)
+	}
+	// Desc flips the id tiebreaker too — repeated requests stay deterministic.
+	hooks = []*Webhook{
+		{ID: "wh-3", LastDeliveryAt: base, LastStatus: 500},
+		{ID: "wh-1", LastDeliveryAt: base, LastStatus: 500},
+		{ID: "wh-2", LastDeliveryAt: base, LastStatus: 500},
+	}
+	SortWebhooks(hooks, WebhookSortDeliveryStatus, SortOrderDesc)
+	wantDesc := []string{"wh-3", "wh-2", "wh-1"}
+	if got := whIDs(hooks); !equalStrings(got, wantDesc) {
+		t.Errorf("tiebreak desc: got %v, want %v", got, wantDesc)
+	}
+}
+
+func TestSortWebhooks_ByDeliveryStatus_TransportFailureClassifiesAsFailing(t *testing.T) {
+	// A delivery attempt that errored at the transport layer leaves
+	// LastDeliveryAt non-zero, LastStatus == 0, and LastError populated.
+	// WebhookDeliveryStatus classifies this as "failing"; the sort must
+	// order it alongside non-2xx failures, not "healthy".
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*Webhook{
+		{ID: "wh-h", LastDeliveryAt: base, LastStatus: 200},
+		{ID: "wh-t", LastDeliveryAt: base.Add(time.Hour), LastStatus: 0, LastError: "dial tcp: timeout"},
+	}
+	SortWebhooks(hooks, WebhookSortDeliveryStatus, SortOrderAsc)
+	want := []string{"wh-t", "wh-h"} // failing before healthy
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("transport failure: got %v, want %v", got, want)
+	}
+}
+
+func TestIsValidWebhookSort_AcceptsAllAxes(t *testing.T) {
+	for _, s := range []string{
+		WebhookSortID,
+		WebhookSortURL,
+		WebhookSortCreatedAt,
+		WebhookSortLastDelivery,
+		WebhookSortDeliveryStatus,
+	} {
+		if !IsValidWebhookSort(s) {
+			t.Errorf("IsValidWebhookSort(%q) = false, want true", s)
+		}
+	}
+}
+
+func TestIsValidWebhookSort_RejectsUnknown(t *testing.T) {
+	for _, s := range []string{"", "secret", "URL", "Delivery_Status", "active"} {
+		if IsValidWebhookSort(s) {
+			t.Errorf("IsValidWebhookSort(%q) = true, want false", s)
+		}
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

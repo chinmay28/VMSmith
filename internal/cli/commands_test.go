@@ -8439,6 +8439,26 @@ func TestCLI_WebhookList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid --sort") {
 		t.Fatalf("error = %q, want it to mention 'invalid --sort'", err.Error())
 	}
+	if !strings.Contains(err.Error(), "delivery_status") {
+		t.Fatalf("error = %q, want it to advertise 'delivery_status'", err.Error())
+	}
+}
+
+// 5.4.98 — delivery_status sort axis forwarded to the daemon.
+func TestCLI_WebhookList_ForwardsDeliveryStatusSort(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--sort", "  Delivery_Status  ", "--order", "DESC"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	// CLI normalises mixed-case + whitespace into the canonical lowercase axis.
+	if !strings.Contains(state.lastQuery, "sort=delivery_status") {
+		t.Fatalf("expected sort=delivery_status, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected order=desc, got %q", state.lastQuery)
+	}
 }
 
 func TestCLI_WebhookList_RejectsInvalidOrder(t *testing.T) {

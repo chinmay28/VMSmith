@@ -91,7 +91,7 @@ export default function Settings() {
   // Sort field + order — whitelisted to the values the daemon accepts.
   // URL round-trip mirrors the 5.4.x sort dropdown pattern (VMs, images,
   // snapshots, templates, port forwards). Empty == "use the daemon default".
-  const VALID_SORT_FIELDS = ['', 'id', 'url', 'created_at', 'last_delivery_at'];
+  const VALID_SORT_FIELDS = ['', 'id', 'url', 'created_at', 'last_delivery_at', 'delivery_status'];
   const VALID_SORT_ORDERS = ['', 'asc', 'desc'];
   const initialSort = (() => {
     const raw = (searchParams.get('sort') || '').toLowerCase();
@@ -391,6 +391,7 @@ export default function Settings() {
             <option value="url">url</option>
             <option value="created_at">created_at</option>
             <option value="last_delivery_at">last_delivery_at</option>
+            <option value="delivery_status">delivery_status</option>
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">

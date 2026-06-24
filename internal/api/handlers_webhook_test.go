@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2191,6 +2192,136 @@ func TestListWebhooks_SortByLastDelivery_NeverDeliveredSortsFirstDesc(t *testing
 	want := []string{"wh-2", "wh-3", "wh-1"}
 	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
 		t.Fatalf("sort=last_delivery_at desc: got %v, want %v", got, want)
+	}
+}
+
+// 5.4.98 — delivery_status sort axis. Alphabetical: failing < healthy <
+// never. Tiebreak on `id`. Symmetric sort counterpart to the
+// case-insensitive `?delivery_status=` exact-match filter (5.4.35).
+func seedClassifiedWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*types.Webhook{
+		// never — LastDeliveryAt zero takes precedence
+		{ID: "wh-never", URL: "https://never.example.com/h", Secret: "k", Active: true, CreatedAt: base},
+		// healthy — last attempt 2xx + empty LastError
+		{ID: "wh-healthy", URL: "https://healthy.example.com/h", Secret: "k", Active: true,
+			CreatedAt: base, LastDeliveryAt: base.Add(time.Hour), LastStatus: 200},
+		// failing — non-2xx
+		{ID: "wh-failing", URL: "https://failing.example.com/h", Secret: "k", Active: true,
+			CreatedAt: base, LastDeliveryAt: base.Add(2 * time.Hour), LastStatus: 500},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_SortByDeliveryStatus_AscAlphabetical(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedClassifiedWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=delivery_status")
+	want := []string{"wh-failing", "wh-healthy", "wh-never"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=delivery_status asc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDeliveryStatus_DescAlphabetical(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedClassifiedWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=delivery_status&order=desc")
+	want := []string{"wh-never", "wh-healthy", "wh-failing"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=delivery_status desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDeliveryStatus_NormalisesCaseAndWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedClassifiedWebhooks(t, fake)
+
+	// Mixed-case + whitespace must normalise to the canonical lowercase axis.
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=%20Delivery_Status%20")
+	want := []string{"wh-failing", "wh-healthy", "wh-never"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=Delivery_Status: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDeliveryStatus_ComposesWithFilter(t *testing.T) {
+	// Filter narrows the cohort to "failing"; sort still orders within it.
+	// Add a second failing webhook so there's a deterministic id tiebreak.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedClassifiedWebhooks(t, fake)
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	if err := fake.PutWebhook(&types.Webhook{
+		ID: "wh-failing-2", URL: "https://failing2.example.com/h", Secret: "k", Active: true,
+		CreatedAt: base, LastDeliveryAt: base.Add(3 * time.Hour), LastStatus: 502,
+	}); err != nil {
+		t.Fatalf("seed PutWebhook: %v", err)
+	}
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "delivery_status=failing&sort=delivery_status")
+	// All survivors classify as failing; comparator falls through to id-asc.
+	want := []string{"wh-failing", "wh-failing-2"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("filter+sort: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDeliveryStatus_PaginationPreservesTotalCount(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedClassifiedWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?sort=delivery_status&per_page=2&page=1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, b)
+	}
+	if total := resp.Header.Get("X-Total-Count"); total != "3" {
+		t.Fatalf("X-Total-Count = %q, want 3 (post-filter pre-pagination population)", total)
+	}
+	var page1 []*types.Webhook
+	if err := json.NewDecoder(resp.Body).Decode(&page1); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// page 1 takes the first 2 of [wh-failing, wh-healthy, wh-never]
+	want := []string{"wh-failing", "wh-healthy"}
+	if got := webhookIDsInOrder(page1); !equalStringSlice(got, want) {
+		t.Fatalf("page1: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_InvalidSortAdvertisesDeliveryStatus(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?sort=bogus")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+	body, _ := readAllBody(resp)
+	if !strings.Contains(string(body), "delivery_status") {
+		t.Fatalf("400 envelope %q should advertise the new delivery_status axis so operators discover it", body)
 	}
 }
 

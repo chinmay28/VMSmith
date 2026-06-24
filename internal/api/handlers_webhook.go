@@ -202,8 +202,11 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     not free-form name alphabets. Applied between `?active=` and
 //     `?search=` so it composes additively with every other webhook list
 //     filter and `X-Total-Count` reflects the post-filter population. (5.4.83)
-//   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at.
-//     Default `id`. Unknown values return 400 `invalid_sort`.
+//   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at|delivery_status.
+//     Default `id`. Unknown values return 400 `invalid_sort`. `delivery_status`
+//     (5.4.98) orders by the derived classification — alphabetical
+//     failing < healthy < never — and is the symmetric sort counterpart
+//     to the case-insensitive `?delivery_status=` exact-match filter (5.4.35).
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
 //   - page / per_page (see parsePagination) — applied after filter + sort so
 //     the X-Total-Count header reflects the post-filter / pre-pagination
