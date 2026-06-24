@@ -26,11 +26,12 @@ func parseLogSort(r *http.Request) (sortField, order string, err error) {
 	switch sortField {
 	case logger.EntrySortTimestamp,
 		logger.EntrySortLevel,
-		logger.EntrySortSource:
+		logger.EntrySortSource,
+		logger.EntrySortVMID:
 	default:
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: timestamp, level, source",
+			"sort must be one of: timestamp, level, source, vm_id",
 		)
 	}
 

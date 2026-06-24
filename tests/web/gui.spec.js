@@ -5238,6 +5238,26 @@ test.describe("Log Viewer", () => {
     await expect(firstRow).toContainText("api");
   });
 
+  // 5.4.94 — vm_id sort axis on the logs list.
+  test("vm_id sort axis orders the log table and sinks no-vm_id entries to the tail", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-logs").click();
+    await expect(page.getByTestId("log-table")).toBeVisible();
+
+    await page.getByTestId("log-sort-field").selectOption("vm_id");
+    await page.getByTestId("log-sort-order").selectOption("asc");
+
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("sort=vm_id");
+    await expect.poll(() => page.url(), { timeout: 2000 }).toContain("order=asc");
+
+    // Mock seeds: vm-1 (ts1+ts4), vm-2 (ts3), no vm_id (ts2) — asc with
+    // empty-trailing should put vm-1 rows first, then vm-2, then the
+    // no-vm_id row at the tail.
+    const rows = page.locator('[data-testid="log-table"] tbody tr');
+    await expect(rows.first()).toContainText("vm-1");
+    await expect(rows.last()).toContainText("vm list");
+  });
+
   test("sort URL parameters hydrate the dropdowns on page load", async ({ page }) => {
     await page.goto(`${BASE_URL}/logs?sort=level&order=desc`);
     await expect(page.getByTestId("log-table")).toBeVisible();

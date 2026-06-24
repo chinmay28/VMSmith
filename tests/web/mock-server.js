@@ -2002,13 +2002,13 @@ const server = http.createServer(async (req, res) => {
       { ts: ts(4), level: "error", source: "api", msg: "POST /api/v1/vms", fields: { status_code: "500", duration_ms: "5", vm_id: "vm-1" } },
     ];
     // Sort whitelist mirrors internal/api/log_sort.go.
-    const allowedSort = new Set(["timestamp", "level", "source"]);
+    const allowedSort = new Set(["timestamp", "level", "source", "vm_id"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "timestamp";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: timestamp, level, source" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: timestamp, level, source, vm_id" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2086,6 +2086,26 @@ const server = http.createServer(async (req, res) => {
         if (sa !== sb) less = sa < sb;
         else if (a.ts !== b.ts) less = a.ts < b.ts;
         else less = (a.level || "") < (b.level || "");
+      } else if (sortField === "vm_id") {
+        // Mirror internal/logger.SortEntries: case-sensitive on the
+        // structured `vm_id` field; entries with no vm_id sink to the
+        // tail of asc / head of desc, mirroring the events vm_id sort
+        // axis (5.4.93).
+        const va = (a.fields && a.fields.vm_id) || "";
+        const vb = (b.fields && b.fields.vm_id) || "";
+        if (va === "" && vb === "") {
+          if (a.ts !== b.ts) less = a.ts < b.ts;
+          else less = (a.source || "").toLowerCase() < (b.source || "").toLowerCase();
+        } else if (va === "") {
+          less = false;
+        } else if (vb === "") {
+          less = true;
+        } else if (va !== vb) {
+          less = va < vb;
+        } else {
+          if (a.ts !== b.ts) less = a.ts < b.ts;
+          else less = (a.source || "").toLowerCase() < (b.source || "").toLowerCase();
+        }
       } else {
         // timestamp
         if (a.ts !== b.ts) less = a.ts < b.ts;

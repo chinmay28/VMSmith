@@ -3834,14 +3834,20 @@ export interface paths {
                      */
                     search?: string;
                     /**
-                     * @description Sort entries by `timestamp`, `level`, or `source`. `level`
-                     *     orders by severity rank (debug < info < warn < error), not
-                     *     alphabetically. `source` matches case-insensitively. All
-                     *     comparators tiebreak on timestamp+source so paginated
+                     * @description Sort entries by `timestamp`, `level`, `source`, or
+                     *     `vm_id`. `level` orders by severity rank
+                     *     (debug < info < warn < error), not alphabetically.
+                     *     `source` matches case-insensitively. `vm_id` is the
+                     *     symmetric sort counterpart to the `?vm_id=` exact-match
+                     *     filter — case-sensitive (VM IDs are opaque `vm-<unix-nano>`
+                     *     strings); entries with no `vm_id` field sink to the tail
+                     *     of `asc` and the head of `desc`, mirroring the events
+                     *     `vm_id` sort axis and every other nullable sort axis.
+                     *     All comparators tiebreak on timestamp+source so paginated
                      *     responses are deterministic. Unknown values return 400
                      *     `invalid_sort`.
                      */
-                    sort?: "timestamp" | "level" | "source";
+                    sort?: "timestamp" | "level" | "source" | "vm_id";
                     /**
                      * @description Sort order. Default is `asc` — preserves the legacy
                      *     oldest-first contract the GUI's auto-scroll relies on.

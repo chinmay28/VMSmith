@@ -149,6 +149,88 @@ func TestSortEntries_StableOnEqualKeys(t *testing.T) {
 	}
 }
 
+func TestSortEntries_VMIDAsc_CaseSensitive(t *testing.T) {
+	// Case-sensitive ASCII order: capital 'V' (0x56) sorts before
+	// lower-case 'v' (0x76).
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: t0, Level: "info", Source: "api", Message: "lower", Fields: map[string]string{"vm_id": "vm-abc"}},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "upper", Fields: map[string]string{"vm_id": "VM-abc"}},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "mid", Fields: map[string]string{"vm_id": "vm-bcd"}},
+	}
+	SortEntries(entries, EntrySortVMID, EntrySortOrderAsc)
+	want := []string{"upper", "lower", "mid"}
+	for i, e := range entries {
+		if e.Message != want[i] {
+			t.Fatalf("position %d: want %q, got %q", i, want[i], e.Message)
+		}
+	}
+}
+
+func TestSortEntries_VMIDAsc_EmptyTrailing(t *testing.T) {
+	// Entries with no vm_id field (host-level lines like daemon startup)
+	// sink to the tail of asc — mirrors the events vm_id sort axis.
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: t0, Level: "info", Source: "daemon", Message: "no-vmid"},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "vm-2", Fields: map[string]string{"vm_id": "vm-2"}},
+		{Timestamp: t0, Level: "info", Source: "daemon", Message: "empty-fields", Fields: map[string]string{}},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "vm-1", Fields: map[string]string{"vm_id": "vm-1"}},
+	}
+	SortEntries(entries, EntrySortVMID, EntrySortOrderAsc)
+	want := []string{"vm-1", "vm-2", "no-vmid", "empty-fields"}
+	for i, e := range entries {
+		if e.Message != want[i] {
+			t.Fatalf("position %d: want %q, got %q", i, want[i], e.Message)
+		}
+	}
+}
+
+func TestSortEntries_VMIDDesc_EmptyLeading(t *testing.T) {
+	// Entries with no vm_id field head the list on desc.
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: t0, Level: "info", Source: "api", Message: "vm-1", Fields: map[string]string{"vm_id": "vm-1"}},
+		{Timestamp: t0, Level: "info", Source: "daemon", Message: "no-vmid"},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "vm-2", Fields: map[string]string{"vm_id": "vm-2"}},
+	}
+	SortEntries(entries, EntrySortVMID, EntrySortOrderDesc)
+	want := []string{"no-vmid", "vm-2", "vm-1"}
+	for i, e := range entries {
+		if e.Message != want[i] {
+			t.Fatalf("position %d: want %q, got %q", i, want[i], e.Message)
+		}
+	}
+}
+
+func TestSortEntries_VMID_TiebreakOnTimestamp(t *testing.T) {
+	// Two entries share the same vm_id but differ on timestamp — tiebreak
+	// on timestamp (asc), source (case-insensitive).
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: t0.Add(2 * time.Second), Level: "info", Source: "api", Message: "second", Fields: map[string]string{"vm_id": "vm-1"}},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "first", Fields: map[string]string{"vm_id": "vm-1"}},
+	}
+	SortEntries(entries, EntrySortVMID, EntrySortOrderAsc)
+	if entries[0].Message != "first" || entries[1].Message != "second" {
+		t.Fatalf("vm_id tiebreak on timestamp asc failed: got %v", entries)
+	}
+}
+
+func TestSortEntries_VMID_AllEmpty_TiebreaksOnTimestamp(t *testing.T) {
+	// When every entry has no vm_id we collapse into the inner tiebreak
+	// chain (timestamp, then source), preserving deterministic order.
+	t0 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	entries := []Entry{
+		{Timestamp: t0.Add(1 * time.Second), Level: "info", Source: "api", Message: "later"},
+		{Timestamp: t0, Level: "info", Source: "api", Message: "earlier"},
+	}
+	SortEntries(entries, EntrySortVMID, EntrySortOrderAsc)
+	if entries[0].Message != "earlier" || entries[1].Message != "later" {
+		t.Fatalf("all-empty vm_id should tiebreak on timestamp asc: got %v", entries)
+	}
+}
+
 func TestLevelRank_Mapping(t *testing.T) {
 	cases := []struct {
 		level string

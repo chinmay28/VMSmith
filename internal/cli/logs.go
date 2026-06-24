@@ -55,10 +55,12 @@ Filters mirror the API one-to-one:
                        vocabulary (vm_id, method, error, ...) would
                        generate noisy matches against operator-supplied
                        values.
-  --sort <field>       Sort entries by: timestamp | level | source
-                       (default timestamp).  level orders by severity
-                       rank (debug < info < warn < error), not
-                       alphabetically.
+  --sort <field>       Sort entries by: timestamp | level | source |
+                       vm_id (default timestamp).  level orders by
+                       severity rank (debug < info < warn < error),
+                       not alphabetically.  vm_id is case-sensitive
+                       (VM IDs are opaque) and sinks entries with no
+                       vm_id field to the tail in asc / head in desc.
   --order <asc|desc>   Sort order (default asc — oldest first).
   --limit <n>          Max rows to fetch per request (forwarded as the
                        per_page query param; capped at 2000 daemon-side).
@@ -235,9 +237,9 @@ var logsListCmd = &cobra.Command{
 func validateLogSortFlags(sortField, order string) (string, string, error) {
 	canonicalSort := strings.ToLower(strings.TrimSpace(sortField))
 	switch canonicalSort {
-	case "", logger.EntrySortTimestamp, logger.EntrySortLevel, logger.EntrySortSource:
+	case "", logger.EntrySortTimestamp, logger.EntrySortLevel, logger.EntrySortSource, logger.EntrySortVMID:
 	default:
-		return "", "", fmt.Errorf("invalid --sort %q (want one of: timestamp, level, source)", sortField)
+		return "", "", fmt.Errorf("invalid --sort %q (want one of: timestamp, level, source, vm_id)", sortField)
 	}
 
 	canonicalOrder := strings.ToLower(strings.TrimSpace(order))
@@ -305,7 +307,7 @@ func init() {
 	logsListCmd.Flags().String("since", "", "show entries since (Go duration like 5m, or RFC3339 timestamp)")
 	logsListCmd.Flags().String("until", "", "show entries until (Go duration like 5m, or RFC3339 timestamp; inclusive upper bound)")
 	logsListCmd.Flags().String("search", "", "case-insensitive substring match across message, source, level, and structured field values")
-	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source (empty = daemon default = timestamp)")
+	logsListCmd.Flags().String("sort", "", "sort entries by: timestamp|level|source|vm_id (empty = daemon default = timestamp)")
 	logsListCmd.Flags().String("order", "", "sort order: asc|desc (empty = daemon default = asc)")
 	logsListCmd.Flags().Int("limit", 0, "max rows per page (0 = daemon default of 200; capped at 2000)")
 	logsListCmd.Flags().Int("page", 1, "1-indexed page number")
