@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -811,6 +811,23 @@ const server = http.createServer(async (req, res) => {
           const ra = ((a?.spec?.default_user || "") || "root").toLowerCase();
           const rb = ((b?.spec?.default_user || "") || "root").toLowerCase();
           l = ra < rb ? -1 : ra > rb ? 1 : 0;
+          break;
+        }
+        case "os_type": {
+          // 5.4.100: case-insensitive sort on the VM's effective OS family.
+          // Empty stored os_type resolves to "linux" (mirrors the Go
+          // VMSpec.ResolvedOSType and the `?os_type=linux` empty-means-linux
+          // filter contract). Any non-windows value collapses to "linux"
+          // (linux < windows alphabetically). Diverges from the nil-trailing
+          // convention because os_type is a closed two-member axis with a
+          // documented default — same rationale as the `default_user` axis
+          // (5.4.91) collapsing empty to "root".
+          const resolve = (vm) => {
+            const raw = String(vm?.spec?.os_type || "").trim().toLowerCase();
+            return raw === "windows" ? "windows" : "linux";
+          };
+          const oa = resolve(a), ob = resolve(b);
+          l = oa < ob ? -1 : oa > ob ? 1 : 0;
           break;
         }
         case "gpu": {

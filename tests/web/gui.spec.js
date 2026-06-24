@@ -1334,6 +1334,34 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
   });
 
+  // 5.4.100 — case-insensitive `os_type` sort axis with empty→linux resolution.
+  test("os_type sort axis reorders the VM list and resolves empty to linux", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed os_type: web-server="" (resolves to linux), db-server=""
+    // (resolves to linux), win-app="windows". Asc orders alphabetically:
+    // linux < windows, so the linux cohort heads the list (id tiebreak:
+    // vm-1 web-server before vm-2 db-server), then win-app trails.
+    // Validates the empty-means-linux divergence from the nil-trailing
+    // convention on every other nullable sort axis — same rationale as
+    // the `default_user` axis (5.4.91) collapsing empty to "root".
+    await page.getByTestId("vm-list-sort-field").selectOption("os_type");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=os_type");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+
+    // Descending flips everything including the id tiebreak inside the linux
+    // cohort — win-app (windows) heads the list, then db-server, then web-server.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
