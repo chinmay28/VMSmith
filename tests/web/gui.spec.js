@@ -574,10 +574,11 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
   });
 
-  // 5.4.23 — default_user filter on the VM list. Seed data includes
-  // web-server with default_user="ubuntu", so create a VM with a distinct
-  // default user and verify the debounced text filter isolates that
-  // single-VM cohort and round-trips via ?default_user=.
+  // 5.4.23 — default_user filter on the VM list. The filter inputs live in
+  // a collapsed FilterPanel, so expand it before filling the debounced
+  // control. Seed data includes web-server with default_user="ubuntu", so
+  // create a VM with a distinct default user and verify the filter isolates
+  // that single-VM cohort and round-trips via ?default_user=.
   test("default-user filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
@@ -592,6 +593,7 @@ test.describe("VM List", () => {
     await expect(page.getByTestId("vm-card-deploy-box")).toBeVisible();
     await expect(page.getByTestId("vm-card-web-server")).toBeVisible();
 
+    await page.getByTestId("vm-list-filters-toggle").click();
     await page.getByTestId("vm-list-default-user-filter").fill("deploy");
     await expect(page.getByTestId("vm-card-deploy-box")).toBeVisible();
     await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
@@ -616,10 +618,22 @@ test.describe("VM List", () => {
     await page.getByTestId("input-vm-default-user").fill("ec2-user");
     await page.getByTestId("btn-submit-create").click();
 
+    await page.getByTestId("vm-list-filters-toggle").click();
     await page.getByTestId("vm-list-default-user-filter").fill("EC2-USER");
     await expect(page.getByTestId("vm-card-ops-box")).toBeVisible();
     await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
     await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+  });
+
+  test("default-user filter matches no VMs when query has no hits", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    await page.getByTestId("vm-list-filters-toggle").click();
+    await page.getByTestId("vm-list-default-user-filter").fill("nobody");
+    await expect(page.getByTestId("vm-card-web-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-db-server")).toHaveCount(0);
+    await expect(page.getByTestId("vm-card-win-app")).toHaveCount(0);
   });
 
   // 5.4.36 — network filter on the VM list. Seed data: web-server is on
