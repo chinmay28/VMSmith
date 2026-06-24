@@ -52,15 +52,12 @@ async function assertNotVisible(page, testId) {
 async function dismissOpenModal(page) {
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(150);
-  const closeButtons = page.locator('button[aria-label="Close modal"], [data-testid^="btn-cancel-"]');
-  const closeCount = await closeButtons.count().catch(() => 0);
-  for (let i = 0; i < closeCount; i++) {
-    const button = closeButtons.nth(i);
-    if (await button.isVisible().catch(() => false)) {
-      await button.click().catch(() => {});
-      await page.waitForTimeout(150);
-      break;
-    }
+  const closeButton = page
+    .locator('button[aria-label="Close modal"], [data-testid^="btn-cancel-"]')
+    .first();
+  if (await closeButton.isVisible().catch(() => false)) {
+    await closeButton.click().catch(() => {});
+    await page.waitForTimeout(150);
   }
 }
 
