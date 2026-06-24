@@ -2951,10 +2951,16 @@ export interface paths {
                      * @description Field to sort by. `url` matches case-insensitively.
                      *     `last_delivery_at` sorts never-delivered webhooks
                      *     (zero timestamp) at the tail of the ascending list and the
-                     *     head of the descending list. All comparators tiebreak on `id`
-                     *     so repeated requests return a deterministic order.
+                     *     head of the descending list. `delivery_status` (5.4.98)
+                     *     orders by the derived classification — alphabetical
+                     *     `failing < healthy < never` — and is the symmetric sort
+                     *     counterpart to the case-insensitive `?delivery_status=`
+                     *     exact-match filter; operator-triage ASC surfaces broken
+                     *     receivers first and DESC surfaces never-attempted receivers
+                     *     first. All comparators tiebreak on `id` so repeated requests
+                     *     return a deterministic order.
                      */
-                    sort?: "id" | "url" | "created_at" | "last_delivery_at";
+                    sort?: "id" | "url" | "created_at" | "last_delivery_at" | "delivery_status";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**

@@ -195,8 +195,12 @@ Optional filters and ordering:
                         (inclusive).  Same shape as --last-delivery-since.
 
   --sort <field>        Whitelisted to one of:
-                          id, url, created_at, last_delivery_at
-                        Default: id.
+                          id, url, created_at, last_delivery_at,
+                          delivery_status
+                        Default: id.  delivery_status orders by the derived
+                        classification — alphabetical failing < healthy <
+                        never — and is the symmetric sort counterpart to
+                        the --delivery-status exact-match filter.
 
   --order <asc|desc>    Default: asc.  Sort ascending or descending. Unknown
                         values are rejected client-side before contacting the
@@ -248,15 +252,8 @@ Optional filters and ordering:
 		}
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
-		if sortField != "" {
-			switch sortField {
-			case types.WebhookSortID,
-				types.WebhookSortURL,
-				types.WebhookSortCreatedAt,
-				types.WebhookSortLastDelivery:
-			default:
-				return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at")
-			}
+		if sortField != "" && !types.IsValidWebhookSort(sortField) {
+			return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at, delivery_status")
 		}
 		order = strings.TrimSpace(strings.ToLower(order))
 		if order != "" {

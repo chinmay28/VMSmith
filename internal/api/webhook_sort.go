@@ -19,15 +19,10 @@ func parseWebhookSort(r *http.Request) (sortField, order string, err error) {
 	if sortField == "" {
 		sortField = types.WebhookSortID
 	}
-	switch sortField {
-	case types.WebhookSortID,
-		types.WebhookSortURL,
-		types.WebhookSortCreatedAt,
-		types.WebhookSortLastDelivery:
-	default:
+	if !types.IsValidWebhookSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, url, created_at, last_delivery_at",
+			"sort must be one of: id, url, created_at, last_delivery_at, delivery_status",
 		)
 	}
 

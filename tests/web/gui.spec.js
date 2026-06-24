@@ -5179,6 +5179,59 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
   });
 
+  // 5.4.98 — delivery_status sort axis on the webhook list. Seeds three
+  // webhooks via the UI: a fresh untested one (→ never), one tested against
+  // a healthy URL (→ healthy), and one with "fail" in the URL so the mock
+  // /test endpoint reports 500 (→ failing). Asserts the new "delivery_status"
+  // sort option orders alphabetically (failing < healthy < never) and that
+  // descending flips the order so never heads the list. Mirrors the 5.4.35
+  // delivery-status filter seed shape so the cohort is the same; the new
+  // sort axis is the symmetric counterpart to that filter.
+  test("delivery_status sort axis orders the webhook list alphabetically (failing < healthy < never)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    const seed = async (url) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    await seed("https://untouched.example.com/hook"); // never
+    await seed("https://healthy.example.com/hook");   // healthy
+    await seed("https://fail.example.com/hook");      // failing
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    const rowFor = (url) => page.locator(`[data-testid^="webhook-row-"]:has-text("${url}")`);
+    const healthyID = (await rowFor("healthy.example.com").getAttribute("data-testid")).replace("webhook-row-", "");
+    const failingID = (await rowFor("fail.example.com").getAttribute("data-testid")).replace("webhook-row-", "");
+    await page.getByTestId(`webhook-test-${healthyID}`).click();
+    await page.getByTestId(`webhook-test-${failingID}`).click();
+    await expect.poll(async () =>
+      page.locator('[data-testid^="webhook-row-"]').count(),
+    ).toBe(3);
+
+    // Sort by delivery_status ascending — alphabetical: failing → healthy → never.
+    await page.getByTestId("webhook-list-sort-field").selectOption("delivery_status");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("fail.example.com");
+    // URL round-trip honours the new axis.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("sort")).toBe("delivery_status");
+
+    // Flip order — descending: never → healthy → failing.
+    await page.getByTestId("webhook-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("untouched.example.com");
+    await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
+  });
+
   // 2.3.10 — webhook bulk-delete.
   test("bulk delete selected webhooks via checkbox + Delete-selected", async ({ page }) => {
     page.on("dialog", (d) => d.accept());
