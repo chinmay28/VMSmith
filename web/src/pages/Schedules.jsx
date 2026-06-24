@@ -822,6 +822,7 @@ function ScheduleRow({ schedule, onToggle, onEdit, onDelete, onRunNow, runningNo
                   <option value="finished_at">Finished</option>
                   <option value="duration">Duration</option>
                   <option value="status">Status</option>
+                  <option value="vm_id">VM ID</option>
                   <option value="id">ID</option>
                 </select>
                 <select

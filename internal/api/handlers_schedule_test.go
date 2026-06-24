@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1469,6 +1470,130 @@ func TestListScheduleRuns_SortByDuration(t *testing.T) {
 	// "duration" is a valid axis.
 	if _, _, code := list("?sort=memory"); code != http.StatusBadRequest {
 		t.Fatalf("sort=memory should 400, got %d", code)
+	}
+}
+
+// TestListScheduleRuns_SortByVMID covers the ?sort=vm_id axis (5.4.95):
+// the symmetric sort counterpart to the case-sensitive ?vm_id= exact-match
+// filter on /schedules/{id}/runs. Mirrors the events vm_id sort axis
+// (5.4.93) and the logs vm_id sort axis (5.4.94) — case-sensitive ASCII
+// compare with empty vm_id sinking to the tail in asc / head in desc. The
+// 400 invalid_sort envelope must advertise "vm_id".
+func TestListScheduleRuns_SortByVMID(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-vm", Name: "vm", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(id, vmID, started string) {
+		t.Helper()
+		startedAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		finishedAt := startedAt.Add(time.Second)
+		if err := s.AppendRun("sched-vm", &types.ScheduleRun{
+			ID: id, VMID: vmID, StartedAt: startedAt, FinishedAt: &finishedAt,
+			Status: types.ScheduleRunStatusSuccess,
+		}); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	// Four runs: empty vm_id (e.g. queue_full skip on all-VMs), two distinct
+	// VMs case-sensitively offset, and one duplicate that exercises the
+	// id tiebreak.
+	mk("run-empty", "", "2026-05-20T02:00:00Z")
+	mk("run-up", "vm-A", "2026-05-20T02:01:00Z")
+	mk("run-mid", "vm-b", "2026-05-20T02:02:00Z")
+	mk("run-low", "vm-c", "2026-05-20T02:03:00Z")
+
+	list := func(q string) ([]*types.ScheduleRun, int, int, string) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-vm/runs"+q, nil)
+		var out []*types.ScheduleRun
+		_ = json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode, string(data)
+	}
+
+	ids := func(runs []*types.ScheduleRun) []string {
+		out := make([]string, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// sort=vm_id,asc: case-sensitive ASCII ordering ('A' < 'b' < 'c');
+	// empty vm_id sinks to the tail.
+	if runs, _, code, body := list("?sort=vm_id&order=asc"); code != http.StatusOK || !eq(ids(runs), []string{"run-up", "run-mid", "run-low", "run-empty"}) {
+		t.Fatalf("vm_id asc: code=%d ids=%v body=%s", code, ids(runs), body)
+	}
+
+	// sort=vm_id,desc flips: empty vm_id leads, then descending ASCII.
+	if runs, _, _, _ := list("?sort=vm_id&order=desc"); !eq(ids(runs), []string{"run-empty", "run-low", "run-mid", "run-up"}) {
+		t.Fatalf("vm_id desc: %v", ids(runs))
+	}
+
+	// Whitespace + case-insensitive normalisation on the sort param.
+	if runs, _, _, _ := list("?sort=%20VM_ID%20&order=asc"); !eq(ids(runs), []string{"run-up", "run-mid", "run-low", "run-empty"}) {
+		t.Fatalf("vm_id whitespace+upper: %v", ids(runs))
+	}
+
+	// Pagination preserves the post-filter total count.
+	if runs, total, _, _ := list("?sort=vm_id&order=asc&per_page=2"); total != 4 || !eq(ids(runs), []string{"run-up", "run-mid"}) {
+		t.Fatalf("vm_id asc paginated: %v total=%d", ids(runs), total)
+	}
+
+	// Composes with the ?vm_id= filter: filter narrows to one VM, then
+	// the sort tiebreak on id orders deterministically among duplicates.
+	mk("run-dup1", "vm-b", "2026-05-20T02:04:00Z")
+	mk("run-dup2", "vm-b", "2026-05-20T02:05:00Z")
+	if runs, total, _, _ := list("?sort=vm_id&order=asc&vm_id=vm-b"); total != 3 || !eq(ids(runs), []string{"run-dup1", "run-dup2", "run-mid"}) {
+		t.Fatalf("vm_id asc + ?vm_id= filter: %v total=%d", ids(runs), total)
+	}
+}
+
+// TestListScheduleRuns_InvalidSortAdvertisesVMID asserts the 400
+// envelope mentions vm_id so operators discover the new axis from the
+// daemon's error text (5.4.95 ergonomic contract — mirrors the
+// equivalent check on logs / events sort axes).
+func TestListScheduleRuns_InvalidSortAdvertisesVMID(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-err", Name: "err", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-err/runs?sort=garbage", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", resp.StatusCode, string(data))
+	}
+	if !strings.Contains(string(data), "vm_id") {
+		t.Fatalf("invalid_sort message should advertise vm_id, got %s", string(data))
+	}
+	if !strings.Contains(string(data), "invalid_sort") {
+		t.Fatalf("expected invalid_sort code, got %s", string(data))
 	}
 }
 

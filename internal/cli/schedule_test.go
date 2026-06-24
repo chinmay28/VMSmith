@@ -629,6 +629,37 @@ func TestCLI_ScheduleRuns_ForwardsDurationSort(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleRuns_ForwardsVMIDSort asserts the 5.4.95 vm_id sort
+// axis: --sort vm_id (whitespace + case normalised client-side) reaches
+// the daemon as ?sort=vm_id.
+func TestCLI_ScheduleRuns_ForwardsVMIDSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--sort", "  VM_ID  ", "--order", "asc"); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=vm_id") {
+		t.Fatalf("query missing sort=vm_id: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=asc") {
+		t.Fatalf("query missing order=asc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleRuns_InvalidSortAdvertisesVMID asserts the
+// client-side rejection of an unknown --sort value lists vm_id in the
+// error envelope so operators discover the new 5.4.95 axis.
+func TestCLI_ScheduleRuns_InvalidSortAdvertisesVMID(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--sort", "memory")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort memory")
+	}
+	if !strings.Contains(err.Error(), "vm_id") {
+		t.Fatalf("invalid --sort message should advertise vm_id, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleRuns_RejectsInvalidOrder(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--order", "sideways")

@@ -641,7 +641,7 @@ func (s *Server) ListScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		sortField = types.ScheduleRunSortStartedAt
 	}
 	if !types.IsValidScheduleRunSort(sortField) {
-		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, started_at, finished_at, status, duration")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, started_at, finished_at, status, duration, vm_id")
 		return
 	}
 	orderRaw := strings.TrimSpace(q.Get("order"))

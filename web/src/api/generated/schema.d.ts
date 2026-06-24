@@ -3679,11 +3679,16 @@ export interface paths {
                      *     still-running runs (nil `finished_at`) at the tail when ascending
                      *     and at the head when descending. `duration` orders by
                      *     `finished_at - started_at`; runs with no known duration (nil
-                     *     `finished_at`) apply the same nil-trailing semantics. All
-                     *     comparators tiebreak on `id` so paginated requests are
-                     *     deterministic. Unknown values return 400 `invalid_sort`.
+                     *     `finished_at`) apply the same nil-trailing semantics. `vm_id`
+                     *     is case-sensitive (VM IDs are opaque `vm-<unix-nano>` strings)
+                     *     and sinks runs with an empty `vm_id` (e.g. `queue_full` skips
+                     *     on an all-VMs schedule) to the tail in `asc` / head in `desc`,
+                     *     mirroring the events `vm_id` sort axis and the logs `vm_id`
+                     *     sort axis. All comparators tiebreak on `id` so paginated
+                     *     requests are deterministic. Unknown values return 400
+                     *     `invalid_sort`.
                      */
-                    sort?: "id" | "started_at" | "finished_at" | "status" | "duration";
+                    sort?: "id" | "started_at" | "finished_at" | "status" | "duration" | "vm_id";
                     /**
                      * @description Sort order. When `sort` is omitted the default order is `desc`
                      *     (newest first); when `sort` is explicitly supplied the default
