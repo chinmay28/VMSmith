@@ -259,3 +259,83 @@ func TestSortSchedules_ByVMID_AllEmptyTiebreaksOnID(t *testing.T) {
 		t.Fatalf("vm_id all-empty tiebreak: got %v, want %v", got, want)
 	}
 }
+
+// TestIsValidScheduleSort_AcceptsAction covers the 5.4.99 action sort axis
+// on the schedules list — the symmetric sort counterpart to the existing
+// `?action=` exact-match filter on the same column.
+func TestIsValidScheduleSort_AcceptsAction(t *testing.T) {
+	if !IsValidScheduleSort(ScheduleSortAction) {
+		t.Fatal("action must be an accepted sort key")
+	}
+	if !IsValidScheduleSort("action") {
+		t.Fatal("literal 'action' must be accepted")
+	}
+}
+
+// TestSortSchedules_ByAction_AscAlphabetical covers case-insensitive
+// alphabetical ordering on the four-member action enum. Mirrors the
+// webhook delivery_status sort axis (5.4.98) — closed-and-total
+// classification, no nil-trailing branches.
+func TestSortSchedules_ByAction_AscAlphabetical(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-stop", Action: ScheduleActionStop},
+		{ID: "sched-start", Action: ScheduleActionStart},
+		{ID: "sched-snapshot", Action: ScheduleActionSnapshot},
+		{ID: "sched-restart", Action: ScheduleActionRestart},
+	}
+	SortSchedules(items, ScheduleSortAction, SortOrderAsc)
+	want := []string{"sched-restart", "sched-snapshot", "sched-start", "sched-stop"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("action asc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByAction_DescAlphabetical asserts desc flips the
+// asc ordering (stop > start > snapshot > restart).
+func TestSortSchedules_ByAction_DescAlphabetical(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-restart", Action: ScheduleActionRestart},
+		{ID: "sched-snapshot", Action: ScheduleActionSnapshot},
+		{ID: "sched-start", Action: ScheduleActionStart},
+		{ID: "sched-stop", Action: ScheduleActionStop},
+	}
+	SortSchedules(items, ScheduleSortAction, SortOrderDesc)
+	want := []string{"sched-stop", "sched-start", "sched-snapshot", "sched-restart"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("action desc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByAction_CaseInsensitive asserts mixed-case stored
+// action values (`SNAPSHOT`, `Snapshot`) collate identically — mirrors
+// the case-insensitive `?action=` filter contract.
+func TestSortSchedules_ByAction_CaseInsensitive(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-1", Action: ScheduleAction("SNAPSHOT")},
+		{ID: "sched-2", Action: ScheduleAction("Snapshot")},
+		{ID: "sched-3", Action: ScheduleActionSnapshot},
+	}
+	SortSchedules(items, ScheduleSortAction, SortOrderAsc)
+	// All three actions collapse to the same case-folded value, so they
+	// collate purely on the id tiebreak.
+	want := []string{"sched-1", "sched-2", "sched-3"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("action case-insensitive id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByAction_TiebreaksOnID asserts schedules sharing the
+// same action value tiebreak deterministically on id (common case: many
+// snapshot schedules on a tag-selector cohort).
+func TestSortSchedules_ByAction_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", Action: ScheduleActionSnapshot},
+		{ID: "sched-a", Action: ScheduleActionSnapshot},
+		{ID: "sched-m", Action: ScheduleActionSnapshot},
+	}
+	SortSchedules(items, ScheduleSortAction, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("action id-tiebreak: got %v, want %v", got, want)
+	}
+}

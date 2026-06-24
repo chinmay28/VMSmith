@@ -147,7 +147,7 @@ var scheduleListCmd = &cobra.Command{
 
 		sortField = strings.ToLower(strings.TrimSpace(sortField))
 		if sortField != "" && !types.IsValidScheduleSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, name, created_at, next_fire_at, last_fired_at, vm_id")
+			return fmt.Errorf("invalid --sort: must be one of id, name, created_at, next_fire_at, last_fired_at, vm_id, action")
 		}
 		order = strings.ToLower(strings.TrimSpace(order))
 		if order != "" && order != types.SortOrderAsc && order != types.SortOrderDesc {

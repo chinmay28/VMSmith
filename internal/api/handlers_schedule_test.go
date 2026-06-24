@@ -1057,6 +1057,106 @@ func TestListSchedules_SortByVMID_400InvalidSortAdvertisesVMID(t *testing.T) {
 	}
 }
 
+// TestListSchedules_SortByAction covers the 5.4.99 action sort axis on
+// the schedules list — the symmetric sort counterpart to the existing
+// case-insensitive ?action= exact-match filter on the same column.
+// Diverges from the nil-trailing convention because action is closed
+// and total (every schedule resolves to exactly one of the four values
+// at create time), mirroring the webhook delivery_status sort axis
+// (5.4.98) divergence rationale.
+func TestListSchedules_SortByAction(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id string, action types.ScheduleAction) {
+		t.Helper()
+		if err := s.PutSchedule(&types.Schedule{
+			ID: id, Name: id, VMID: "vm-1", Action: action,
+			CronSpec: "0 0 2 * * *", Enabled: true,
+		}); err != nil {
+			t.Fatalf("put schedule: %v", err)
+		}
+	}
+	mk("sched-stop", types.ScheduleActionStop)
+	mk("sched-start", types.ScheduleActionStart)
+	mk("sched-snapshot", types.ScheduleActionSnapshot)
+	mk("sched-restart", types.ScheduleActionRestart)
+
+	list := func(q string) ([]*types.Schedule, int, int, string) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		_ = json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode, string(data)
+	}
+
+	ids := func(items []*types.Schedule) []string {
+		out := make([]string, 0, len(items))
+		for _, x := range items {
+			out = append(out, x.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// sort=action,asc: case-folded alphabetical order
+	// (restart < snapshot < start < stop).
+	if items, _, code, body := list("?sort=action&order=asc"); code != http.StatusOK || !eq(ids(items), []string{"sched-restart", "sched-snapshot", "sched-start", "sched-stop"}) {
+		t.Fatalf("action asc: code=%d ids=%v body=%s", code, ids(items), body)
+	}
+
+	// sort=action,desc flips the asc ordering.
+	if items, _, _, _ := list("?sort=action&order=desc"); !eq(ids(items), []string{"sched-stop", "sched-start", "sched-snapshot", "sched-restart"}) {
+		t.Fatalf("action desc: %v", ids(items))
+	}
+
+	// Whitespace + case-insensitive normalisation on the sort param value.
+	if items, _, _, _ := list("?sort=%20ACTION%20&order=asc"); !eq(ids(items), []string{"sched-restart", "sched-snapshot", "sched-start", "sched-stop"}) {
+		t.Fatalf("action whitespace+upper: %v", ids(items))
+	}
+
+	// Pagination preserves post-filter total count.
+	if items, total, _, _ := list("?sort=action&order=asc&per_page=2"); total != 4 || !eq(ids(items), []string{"sched-restart", "sched-snapshot"}) {
+		t.Fatalf("action paginated: %v total=%d", ids(items), total)
+	}
+
+	// Composes with the ?action= filter: filter narrows to one action,
+	// sort tiebreaks deterministically on id among duplicates.
+	mk("sched-snap-1", types.ScheduleActionSnapshot)
+	mk("sched-snap-2", types.ScheduleActionSnapshot)
+	if items, total, _, _ := list("?sort=action&order=asc&action=snapshot"); total != 3 || !eq(ids(items), []string{"sched-snap-1", "sched-snap-2", "sched-snapshot"}) {
+		t.Fatalf("action asc + ?action= filter: %v total=%d", ids(items), total)
+	}
+}
+
+// TestListSchedules_SortByAction_400InvalidSortAdvertisesAction asserts
+// the 400 envelope mentions action so operators discover the new axis
+// from the daemon's error text (5.4.99 ergonomic contract — mirrors the
+// equivalent check on the vm_id / delivery_status sort axes).
+func TestListSchedules_SortByAction_400InvalidSortAdvertisesAction(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=garbage", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	if !bytes.Contains(data, []byte("action")) {
+		t.Fatalf("invalid_sort envelope must mention action: %s", data)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

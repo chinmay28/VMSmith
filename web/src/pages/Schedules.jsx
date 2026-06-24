@@ -103,7 +103,7 @@ export default function Schedules() {
   })();
   const [enabledFilter, setEnabledFilter] = useState(initialEnabled);
 
-  const VALID_SORT_FIELDS = ['', 'id', 'name', 'created_at', 'next_fire_at', 'last_fired_at', 'vm_id'];
+  const VALID_SORT_FIELDS = ['', 'id', 'name', 'created_at', 'next_fire_at', 'last_fired_at', 'vm_id', 'action'];
   const VALID_SORT_ORDERS = ['', 'asc', 'desc'];
   const initialSort = (() => {
     const raw = (searchParams.get('sort') || '').toLowerCase();
@@ -409,6 +409,7 @@ export default function Schedules() {
             <option value="next_fire_at">next_fire_at</option>
             <option value="last_fired_at">last_fired_at</option>
             <option value="vm_id">vm_id</option>
+            <option value="action">action</option>
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">

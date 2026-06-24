@@ -2724,13 +2724,13 @@ const server = http.createServer(async (req, res) => {
       else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
       else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
     }
-    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id"]);
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id", "action"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2896,6 +2896,24 @@ const server = http.createServer(async (req, res) => {
           else if (aEmpty) cmp = 1;
           else if (bEmpty) cmp = -1;
           else if (av < bv) cmp = -1;
+          else if (av > bv) cmp = 1;
+          else cmp = 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "action": {
+          // 5.4.99: case-insensitive alphabetical compare on the
+          // four-member action enum (restart < snapshot < start <
+          // stop). action is closed-and-total — every schedule
+          // resolves to exactly one of the four values at create
+          // time — so this branch diverges from the nil-trailing
+          // convention the same way the webhook delivery_status
+          // sort axis (5.4.98) does: there is no empty bucket to
+          // sink, just plain alphabetical compare with the id
+          // tiebreak.
+          const av = String(a.action || "").toLowerCase();
+          const bv = String(b.action || "").toLowerCase();
+          if (av < bv) cmp = -1;
           else if (av > bv) cmp = 1;
           else cmp = 0;
           if (cmp === 0) cmp = cmpID;
