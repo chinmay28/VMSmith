@@ -2437,7 +2437,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [id, name, created_at, next_fire_at, last_fired_at]
+            enum: [id, name, created_at, next_fire_at, last_fired_at, vm_id]
             default: id
           description: |
             Field to sort by. `name` matches case-insensitively;
@@ -2447,8 +2447,16 @@ paths:
             backward-looking sort axis to the existing `next_fire_at` —
             schedules with a nil `last_fired_at` (never-fired) also sort at
             the tail in `asc` / head in `desc`, mirroring the webhook
-            `last_delivery_at` sort axis. All comparators tiebreak on `id` so
-            repeated requests return a deterministic order.
+            `last_delivery_at` sort axis. `vm_id` (5.4.97) is the symmetric
+            sort counterpart to the case-sensitive `?vm_id=` exact-match
+            filter on the same column — case-sensitive ASCII compare (VM
+            IDs are opaque `vm-<unix-nano>` strings), and schedules with
+            an empty `vm_id` (tag_selector-targeted or all-VMs schedules)
+            sink to the tail in `asc` / head in `desc`, mirroring the
+            events `vm_id` sort axis (5.4.93), the logs `vm_id` sort axis
+            (5.4.94), and the schedule-runs `vm_id` sort axis (5.4.95).
+            All comparators tiebreak on `id` so repeated requests return
+            a deterministic order.
         - in: query
           name: order
           required: false

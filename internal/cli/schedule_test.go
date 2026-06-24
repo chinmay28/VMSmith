@@ -185,6 +185,37 @@ func TestCLI_ScheduleList_RejectsInvalidSince(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsVMIDSort covers the 5.4.97 vm_id sort axis
+// on the schedules list — whitespace + case normalisation, forwarded as
+// `sort=vm_id` to the daemon's /schedules endpoint.
+func TestCLI_ScheduleList_ForwardsVMIDSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--sort", "  VM_ID  ", "--order", "asc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=vm_id") {
+		t.Fatalf("query missing sort=vm_id: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=asc") {
+		t.Fatalf("query missing order=asc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_InvalidSortAdvertisesVMID asserts the client-side
+// rejection lists vm_id in the error envelope so operators discover the
+// new 5.4.97 axis from the error path.
+func TestCLI_ScheduleList_InvalidSortAdvertisesVMID(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "vm_id") {
+		t.Fatalf("invalid --sort message should advertise vm_id, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--until", "garbage"); err == nil {

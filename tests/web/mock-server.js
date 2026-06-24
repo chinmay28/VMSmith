@@ -2724,13 +2724,13 @@ const server = http.createServer(async (req, res) => {
       else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
       else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
     }
-    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at"]);
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2881,6 +2881,23 @@ const server = http.createServer(async (req, res) => {
           const at = a.last_fired_at ? new Date(a.last_fired_at).getTime() : 0;
           const bt = b.last_fired_at ? new Date(b.last_fired_at).getTime() : 0;
           cmp = at - bt;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "vm_id": {
+          // 5.4.97: case-sensitive ASCII compare on vm_id with empty
+          // trailing in asc / leading in desc. Mirrors the events,
+          // logs, and schedule-runs vm_id sort axes.
+          const av = String(a.vm_id || "");
+          const bv = String(b.vm_id || "");
+          const aEmpty = av === "";
+          const bEmpty = bv === "";
+          if (aEmpty && bEmpty) cmp = 0;
+          else if (aEmpty) cmp = 1;
+          else if (bEmpty) cmp = -1;
+          else if (av < bv) cmp = -1;
+          else if (av > bv) cmp = 1;
+          else cmp = 0;
           if (cmp === 0) cmp = cmpID;
           break;
         }

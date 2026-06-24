@@ -53,12 +53,13 @@ const (
 	ScheduleSortCreatedAt   = "created_at"
 	ScheduleSortNextFire    = "next_fire_at"
 	ScheduleSortLastFiredAt = "last_fired_at"
+	ScheduleSortVMID        = "vm_id"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID:
 		return true
 	default:
 		return false
@@ -126,7 +127,12 @@ func NormalizeScheduleTags(in []string) []string {
 // SortSchedules orders schedules in place by the given whitelisted field and
 // order. All comparators tiebreak on ID so paginated responses are
 // deterministic. Unknown fields fall back to ID; unknown order falls back to
-// ascending.
+// ascending. The vm_id axis is case-sensitive (VM IDs are opaque
+// vm-<unix-nano> strings) and sinks schedules with an empty vm_id
+// (tag_selector-targeted or all-VMs schedules) to the tail of asc / head of
+// desc, mirroring the nil-trailing semantics on the events vm_id sort axis
+// (5.4.93), the logs vm_id sort axis (5.4.94), and the schedule-runs vm_id
+// sort axis (5.4.95).
 func SortSchedules(items []*Schedule, field, order string) {
 	desc := order == SortOrderDesc
 	less := func(i, j int) bool {
@@ -141,6 +147,17 @@ func SortSchedules(items []*Schedule, field, order string) {
 			cmp = compareNullableTime(a.NextFireAt, b.NextFireAt)
 		case ScheduleSortLastFiredAt:
 			cmp = compareNullableTime(a.LastFiredAt, b.LastFiredAt)
+		case ScheduleSortVMID:
+			switch {
+			case a.VMID == "" && b.VMID == "":
+				cmp = 0
+			case a.VMID == "":
+				cmp = 1
+			case b.VMID == "":
+				cmp = -1
+			default:
+				cmp = strings.Compare(a.VMID, b.VMID)
+			}
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}
