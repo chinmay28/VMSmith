@@ -60,7 +60,7 @@ export function Modal({ open, onClose, title, children, wide }) {
       <div className={`relative card border-steel-700/60 shadow-2xl p-0 animate-slide-up ${wide ? 'w-full max-w-2xl' : 'w-full max-w-md'}`}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-steel-800/60">
           <h2 className="font-display font-semibold text-steel-100">{title}</h2>
-          <button onClick={onClose} className="text-steel-500 hover:text-steel-300 transition-colors">
+          <button aria-label="Close modal" onClick={onClose} className="text-steel-500 hover:text-steel-300 transition-colors">
             <X size={18} />
           </button>
         </div>
