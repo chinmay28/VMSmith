@@ -3010,9 +3010,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, maxDuration.err);
     }
     const sortRaw = (url.searchParams.get("sort") || "").trim().toLowerCase();
-    const validRunSorts = ["id", "started_at", "finished_at", "status", "duration", "vm_id"];
+    const validRunSorts = ["id", "started_at", "finished_at", "status", "duration", "vm_id", "skip_reason"];
     if (sortRaw && !validRunSorts.includes(sortRaw)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status, duration, vm_id" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, started_at, finished_at, status, duration, vm_id, skip_reason" });
     }
     const orderRaw = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (orderRaw && orderRaw !== "asc" && orderRaw !== "desc") {
@@ -3096,6 +3096,16 @@ const server = http.createServer(async (req, res) => {
         else if (av < bv) cmp = -1;
         else if (av > bv) cmp = 1;
         else cmp = 0;
+      } else if (sortField === "skip_reason") {
+        const aReason = String(a.skip_reason || "");
+        const bReason = String(b.skip_reason || "");
+        const aEmpty = aReason === "";
+        const bEmpty = bReason === "";
+        // empty-trailing in asc — matches the Go compareRunSkipReason helper.
+        if (aEmpty && bEmpty) cmp = 0;
+        else if (aEmpty) cmp = 1;
+        else if (bEmpty) cmp = -1;
+        else cmp = aReason.localeCompare(bReason);
       } else { // id
         cmp = String(a.id || "").localeCompare(String(b.id || ""));
       }

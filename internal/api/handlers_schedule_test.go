@@ -1597,6 +1597,119 @@ func TestListScheduleRuns_InvalidSortAdvertisesVMID(t *testing.T) {
 	}
 }
 
+// TestListScheduleRuns_SortBySkipReason covers the ?sort=skip_reason axis
+// (5.4.96): runs are ordered alphabetically by their skip_reason field. Runs
+// with an empty skip_reason (every non-skipped run, plus skipped runs
+// persisted without a reason) sink to the tail in asc and head in desc,
+// mirroring the finished_at / duration nil-trailing semantics. The 400
+// invalid_sort message now lists "skip_reason" alongside the other axes.
+func TestListScheduleRuns_SortBySkipReason(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-sr", Name: "sr", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+
+	mk := func(id, started string, status types.ScheduleRunStatus, reason types.ScheduleRunSkipReason) {
+		t.Helper()
+		startedAt, err := time.Parse(time.RFC3339, started)
+		if err != nil {
+			t.Fatalf("parse %q: %v", started, err)
+		}
+		run := &types.ScheduleRun{ID: id, VMID: "vm-1", StartedAt: startedAt, Status: status, SkipReason: reason}
+		if err := s.AppendRun("sched-sr", run); err != nil {
+			t.Fatalf("append run: %v", err)
+		}
+	}
+	mk("run-queue", "2026-05-20T02:00:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonQueueFull)
+	mk("run-success", "2026-05-20T02:01:00Z", types.ScheduleRunStatusSuccess, "")
+	mk("run-catchup", "2026-05-20T02:02:00Z", types.ScheduleRunStatusSkipped, types.ScheduleRunSkipReasonCatchUpSkipped)
+	mk("run-error", "2026-05-20T02:03:00Z", types.ScheduleRunStatusError, "")
+
+	listSR := func(q string) ([]*types.ScheduleRun, int, int) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-sr/runs"+q, nil)
+		var out []*types.ScheduleRun
+		json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode
+	}
+
+	idsSR := func(runs []*types.ScheduleRun) []string {
+		out := make([]string, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+
+	eqSR := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// sort=skip_reason,asc: populated reasons alphabetical (catch_up_skipped < queue_full);
+	// empty-reason runs sink to the tail tiebroken by id.
+	if runs, _, code := listSR("?sort=skip_reason&order=asc"); code != http.StatusOK || !eqSR(idsSR(runs), []string{"run-catchup", "run-queue", "run-error", "run-success"}) {
+		t.Fatalf("skip_reason asc: code=%d ids=%v", code, idsSR(runs))
+	}
+
+	// sort=skip_reason,desc flips: empty-reason runs head the list (tiebroken
+	// by id descending — run-success > run-error), then populated reasons
+	// descending alphabetically.
+	if runs, _, _ := listSR("?sort=skip_reason&order=desc"); !eqSR(idsSR(runs), []string{"run-success", "run-error", "run-queue", "run-catchup"}) {
+		t.Fatalf("skip_reason desc: %v", idsSR(runs))
+	}
+
+	// Whitespace + case-insensitive sort=skip_reason.
+	if runs, _, _ := listSR("?sort=%20SKIP_REASON%20&order=asc"); !eqSR(idsSR(runs), []string{"run-catchup", "run-queue", "run-error", "run-success"}) {
+		t.Fatalf("skip_reason uppercase/whitespace: %v", idsSR(runs))
+	}
+
+	// Composes with the ?skip_reason= filter — only the catch_up_skipped run
+	// remains, ordered by skip_reason (one row).
+	if runs, total, _ := listSR("?sort=skip_reason&order=asc&skip_reason=catch_up_skipped"); total != 1 || !eqSR(idsSR(runs), []string{"run-catchup"}) {
+		t.Fatalf("skip_reason asc + filter: %v total=%d", idsSR(runs), total)
+	}
+
+	// Pagination preserves post-filter total count.
+	if runs, total, _ := listSR("?sort=skip_reason&order=asc&per_page=2"); total != 4 || !eqSR(idsSR(runs), []string{"run-catchup", "run-queue"}) {
+		t.Fatalf("skip_reason asc paginated: %v total=%d", idsSR(runs), total)
+	}
+}
+
+// TestListScheduleRuns_InvalidSortAdvertisesSkipReason asserts the 400
+// invalid_sort envelope advertises `skip_reason` in the supported set so
+// operators discover the new axis from the error path.
+func TestListScheduleRuns_InvalidSortAdvertisesSkipReason(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+	if err := s.PutSchedule(&types.Schedule{
+		ID: "sched-x", Name: "x", Action: types.ScheduleActionSnapshot,
+		CronSpec: "0 0 2 * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("put schedule: %v", err)
+	}
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules/sched-x/runs?sort=memory", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(data), "skip_reason") {
+		t.Fatalf("invalid_sort envelope must mention skip_reason: %s", string(data))
+	}
+}
+
 // TestListScheduleRuns_FilterByFinishedAt covers the ?finished_since= /
 // ?finished_until= filter (5.4.62): inclusive RFC3339 bounds on the run's
 // nullable FinishedAt. Runs with a nil FinishedAt (still-running) are

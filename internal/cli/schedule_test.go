@@ -660,6 +660,34 @@ func TestCLI_ScheduleRuns_InvalidSortAdvertisesVMID(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleRuns_ForwardsSkipReasonSort covers the --sort skip_reason
+// axis (5.4.96): the CLI normalises whitespace + case and forwards
+// `sort=skip_reason` to the daemon's /schedules/{id}/runs endpoint.
+func TestCLI_ScheduleRuns_ForwardsSkipReasonSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL,
+		"--sort", "  SKIP_REASON  ", "--order", "asc"); err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=skip_reason") {
+		t.Fatalf("query missing sort=skip_reason: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=asc") {
+		t.Fatalf("query missing order=asc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleRuns_InvalidSortAdvertisesSkipReason asserts the CLI
+// client-side rejection message advertises the new skip_reason axis so
+// operators discover it from the error path.
+func TestCLI_ScheduleRuns_InvalidSortAdvertisesSkipReason(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--sort", "memory")
+	if err == nil || !strings.Contains(err.Error(), "skip_reason") {
+		t.Fatalf("expected error mentioning skip_reason, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleRuns_RejectsInvalidOrder(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--order", "sideways")

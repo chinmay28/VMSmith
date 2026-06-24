@@ -175,12 +175,12 @@ func TestSortScheduleRuns_UnknownFieldFallsBackToID(t *testing.T) {
 }
 
 func TestIsValidScheduleRunSort(t *testing.T) {
-	for _, ok := range []string{"id", "started_at", "finished_at", "status", "duration", "vm_id"} {
+	for _, ok := range []string{"id", "started_at", "finished_at", "status", "duration", "vm_id", "skip_reason"} {
 		if !IsValidScheduleRunSort(ok) {
 			t.Errorf("expected %q valid", ok)
 		}
 	}
-	for _, bad := range []string{"", "name", "memory", "STARTED_AT", "garbage", "VM_ID"} {
+	for _, bad := range []string{"", "name", "memory", "STARTED_AT", "garbage", "VM_ID", "SKIP_REASON"} {
 		if IsValidScheduleRunSort(bad) {
 			t.Errorf("expected %q invalid", bad)
 		}
@@ -261,5 +261,68 @@ func TestSortScheduleRuns_ByVMID_AllEmptyTiebreaksOnID(t *testing.T) {
 	SortScheduleRuns(runs, ScheduleRunSortVMID, SortOrderAsc)
 	if runs[0].ID != "run-a" || runs[1].ID != "run-b" || runs[2].ID != "run-c" {
 		t.Fatalf("vm_id all-empty tiebreak on id: %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
+	}
+}
+
+func TestSortScheduleRuns_BySkipReason_AscEmptyTrailing(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-a", SkipReason: ScheduleRunSkipReasonQueueFull},
+		{ID: "run-b", SkipReason: ""},
+		{ID: "run-c", SkipReason: ScheduleRunSkipReasonCatchUpSkipped},
+		{ID: "run-d", SkipReason: ""},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortSkipReason, SortOrderAsc)
+	// Populated reasons alphabetical: catch_up_skipped < queue_full; empty trails.
+	want := []string{"run-c", "run-a", "run-b", "run-d"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("skip_reason asc empty-trailing: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_BySkipReason_DescEmptyLeading(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-a", SkipReason: ScheduleRunSkipReasonQueueFull},
+		{ID: "run-b", SkipReason: ""},
+		{ID: "run-c", SkipReason: ScheduleRunSkipReasonCatchUpSkipped},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortSkipReason, SortOrderDesc)
+	// Descending of empty-trailing flips to empty-leading.
+	want := []string{"run-b", "run-a", "run-c"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("skip_reason desc empty-leading: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_BySkipReason_TiebreaksOnID(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-z", SkipReason: ScheduleRunSkipReasonVMNotFound},
+		{ID: "run-x", SkipReason: ScheduleRunSkipReasonVMNotFound},
+		{ID: "run-y", SkipReason: ScheduleRunSkipReasonVMNotFound},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortSkipReason, SortOrderAsc)
+	want := []string{"run-x", "run-y", "run-z"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("skip_reason tiebreak: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
+	}
+}
+
+func TestSortScheduleRuns_BySkipReason_AllEmptyTiebreaksOnID(t *testing.T) {
+	runs := []*ScheduleRun{
+		{ID: "run-c", SkipReason: ""},
+		{ID: "run-a", SkipReason: ""},
+		{ID: "run-b", SkipReason: ""},
+	}
+	SortScheduleRuns(runs, ScheduleRunSortSkipReason, SortOrderAsc)
+	want := []string{"run-a", "run-b", "run-c"}
+	for i, w := range want {
+		if runs[i].ID != w {
+			t.Fatalf("skip_reason all-empty tiebreak: idx=%d got=%s want=%s", i, runs[i].ID, w)
+		}
 	}
 }

@@ -3680,15 +3680,20 @@ export interface paths {
                      *     and at the head when descending. `duration` orders by
                      *     `finished_at - started_at`; runs with no known duration (nil
                      *     `finished_at`) apply the same nil-trailing semantics. `vm_id`
-                     *     is case-sensitive (VM IDs are opaque `vm-<unix-nano>` strings)
-                     *     and sinks runs with an empty `vm_id` (e.g. `queue_full` skips
-                     *     on an all-VMs schedule) to the tail in `asc` / head in `desc`,
-                     *     mirroring the events `vm_id` sort axis and the logs `vm_id`
-                     *     sort axis. All comparators tiebreak on `id` so paginated
-                     *     requests are deterministic. Unknown values return 400
-                     *     `invalid_sort`.
+                     *     (5.4.95) is case-sensitive (VM IDs are opaque `vm-<unix-nano>`
+                     *     strings) and sinks runs with an empty `vm_id` (e.g. `queue_full`
+                     *     skips on an all-VMs schedule) to the tail in `asc` / head in
+                     *     `desc`, mirroring the events `vm_id` sort axis and the logs
+                     *     `vm_id` sort axis. `skip_reason` (5.4.96) is the symmetric sort
+                     *     counterpart to the `?skip_reason=` exact-match filter; runs
+                     *     with an empty `skip_reason` (every non-skipped run, plus
+                     *     skipped runs persisted without a reason) sink to the tail in
+                     *     `asc` and the head in `desc`, mirroring the finished_at /
+                     *     duration nil-trailing semantics. All comparators tiebreak on
+                     *     `id` so paginated requests are deterministic. Unknown values
+                     *     return 400 `invalid_sort`.
                      */
-                    sort?: "id" | "started_at" | "finished_at" | "status" | "duration" | "vm_id";
+                    sort?: "id" | "started_at" | "finished_at" | "status" | "duration" | "vm_id" | "skip_reason";
                     /**
                      * @description Sort order. When `sort` is omitted the default order is `desc`
                      *     (newest first); when `sort` is explicitly supplied the default

@@ -14,6 +14,7 @@ const (
 	ScheduleRunSortStatus     = "status"
 	ScheduleRunSortDuration   = "duration"
 	ScheduleRunSortVMID       = "vm_id"
+	ScheduleRunSortSkipReason = "skip_reason"
 )
 
 // IsValidScheduleRunSort reports whether field is an accepted sort key.
@@ -24,7 +25,8 @@ func IsValidScheduleRunSort(field string) bool {
 		ScheduleRunSortFinishedAt,
 		ScheduleRunSortStatus,
 		ScheduleRunSortDuration,
-		ScheduleRunSortVMID:
+		ScheduleRunSortVMID,
+		ScheduleRunSortSkipReason:
 		return true
 	default:
 		return false
@@ -59,6 +61,27 @@ func compareRunDuration(a, b *ScheduleRun) int {
 	return 0
 }
 
+// compareRunSkipReason orders two runs by their skip_reason field. Runs with
+// an empty skip_reason (every non-skipped run, plus any skipped run persisted
+// without a reason) have no concrete reason and sort after any populated
+// reason in ascending order so empty-reason runs sink to the tail, mirroring
+// the nil-trailing semantics used by finished_at and the events / logs /
+// schedule-runs vm_id axes. Returns -1 / 0 / 1.
+func compareRunSkipReason(a, b *ScheduleRun) int {
+	aEmpty := a.SkipReason == ""
+	bEmpty := b.SkipReason == ""
+	if aEmpty && bEmpty {
+		return 0
+	}
+	if aEmpty {
+		return 1
+	}
+	if bEmpty {
+		return -1
+	}
+	return strings.Compare(string(a.SkipReason), string(b.SkipReason))
+}
+
 // SortScheduleRuns sorts runs in place by the requested field and order.
 // A nil finished_at sorts after any concrete time in ascending order so
 // still-running runs sink to the tail (consistent with compareNullableTime's
@@ -66,7 +89,10 @@ func compareRunDuration(a, b *ScheduleRun) int {
 // (nil finished_at) as unknown-duration and applies the same nil-trailing
 // semantics. The vm_id axis is case-sensitive and sinks empty-vm_id runs
 // to the tail of asc / head of desc, mirroring the events vm_id sort axis
-// (5.4.93) and the logs vm_id sort axis (5.4.94). All comparators
+// (5.4.93) and the logs vm_id sort axis (5.4.94). The skip_reason axis
+// treats runs with no concrete reason (every non-skipped run, plus
+// skipped runs persisted without a reason) as empty-trailing in ascending
+// order, mirroring the same nil-trailing semantics. All comparators
 // tiebreak on ID so paginated requests are deterministic. Unknown fields
 // fall back to ID.
 func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
@@ -106,6 +132,8 @@ func SortScheduleRuns(runs []*ScheduleRun, field, order string) {
 			default:
 				cmp = strings.Compare(a.VMID, b.VMID)
 			}
+		case ScheduleRunSortSkipReason:
+			cmp = compareRunSkipReason(a, b)
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}
