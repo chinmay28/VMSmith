@@ -3963,6 +3963,65 @@ test.describe("Schedules", () => {
     ]);
   });
 
+  test("skip_reason sort axis orders the recent-runs expander and sinks empty-reason runs to the tail", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+
+    await page.getByTestId("schedule-row-toggle-sch-1").click();
+    await expect(page.getByTestId("schedule-runs-sch-1")).toBeVisible();
+
+    // Seeded skip_reasons:
+    //   run-6 = queue_full, run-5 = vm_already_stopped,
+    //   run-1..run-4 = empty (non-skipped success/error runs).
+    const orderOf = async () => {
+      const ids = await page
+        .locator('[data-testid^="schedule-run-run-"]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+      return ids;
+    };
+
+    // sort=skip_reason, order=asc:
+    //   populated reasons alphabetical (queue_full < vm_already_stopped),
+    //   empty-reason runs trail tiebroken ascending by id.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("skip_reason");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("asc");
+    await expect(page.getByTestId("schedule-run-run-6")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-6",
+      "schedule-run-run-5",
+      "schedule-run-run-1",
+      "schedule-run-run-2",
+      "schedule-run-run-3",
+      "schedule-run-run-4",
+    ]);
+
+    // sort=skip_reason, order=desc:
+    //   empty-reason runs lead tiebroken descending by id, populated reasons
+    //   follow descending alphabetically.
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("desc");
+    await expect(page.getByTestId("schedule-run-run-4")).toBeVisible();
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-3",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-5",
+      "schedule-run-run-6",
+    ]);
+
+    // Reset to default — original newest-started-first ordering restored.
+    await page.getByTestId("schedule-runs-sort-sch-1").selectOption("");
+    await page.getByTestId("schedule-runs-order-sch-1").selectOption("");
+    expect(await orderOf()).toEqual([
+      "schedule-run-run-4",
+      "schedule-run-run-2",
+      "schedule-run-run-1",
+      "schedule-run-run-3",
+      "schedule-run-run-5",
+      "schedule-run-run-6",
+    ]);
+  });
+
   test("finished_at range filter narrows the recent-runs expander to runs that finished inside the window", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-schedules").click();

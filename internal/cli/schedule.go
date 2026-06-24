@@ -335,16 +335,20 @@ inclusive --min-duration-ms / --max-duration-ms window on each run's
 finished_at - started_at duration (also excludes still-running runs when
 either bound is set — the symmetric range counterpart to the --sort=duration
 axis), and page with --limit / --page. Order with --sort
-(id|started_at|finished_at|status|duration|vm_id; default started_at) and
---order (asc|desc; default desc on bare sort to preserve the newest-first
-contract). Still-running runs (nil finished_at) trail an ascending
-finished_at sort and lead a descending one; the duration axis
+(id|started_at|finished_at|status|duration|vm_id|skip_reason; default
+started_at) and --order (asc|desc; default desc on bare sort to preserve
+the newest-first contract). Still-running runs (nil finished_at) trail an
+ascending finished_at sort and lead a descending one; the duration axis
 (finished_at - started_at) applies the same nil-trailing semantics —
 still-running runs sink to the tail in asc and lead in desc. The vm_id
 axis is case-sensitive (VM IDs are opaque vm-<unix-nano> strings) and
 sinks runs with an empty vm_id (e.g. queue_full skips on an all-VMs
 schedule) to the tail in asc / head in desc, mirroring the events vm_id
-sort axis and the logs vm_id sort axis.`,
+sort axis and the logs vm_id sort axis. The skip_reason axis sorts runs
+with no concrete reason (every non-skipped run, plus skipped runs
+persisted without a reason) to the tail in asc and the head in desc,
+mirroring the finished_at / duration nil-trailing semantics — the
+symmetric sort counterpart to the --skip-reason exact-match filter.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := strings.TrimSpace(args[0])
@@ -392,7 +396,7 @@ sort axis and the logs vm_id sort axis.`,
 		}
 		sortField := strings.ToLower(strings.TrimSpace(sortFlag))
 		if sortField != "" && !types.IsValidScheduleRunSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status, duration, vm_id")
+			return fmt.Errorf("invalid --sort: must be one of id, started_at, finished_at, status, duration, vm_id, skip_reason")
 		}
 		order := strings.ToLower(strings.TrimSpace(orderFlag))
 		if order != "" && order != types.SortOrderAsc && order != types.SortOrderDesc {
