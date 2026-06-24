@@ -102,17 +102,28 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	storedSpec := spec
 	storedSpec.AdminPassword = ""
 
+	// Mirror the libvirt manager's VNC password derivation (5.1.8): only
+	// synthetic hash/blob markers are stored, never the plaintext.
+	var vncHash, vncEnc string
+	if spec.VNCPassword != "" {
+		vncHash = "mock-bcrypt:" + spec.VNCPassword
+		vncEnc = "mock-aesgcm:" + spec.VNCPassword
+		storedSpec.VNCPassword = ""
+	}
+
 	vm := &types.VM{
-		ID:          id,
-		Name:        spec.Name,
-		Description: spec.Description,
-		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        storedSpec,
-		State:       types.VMStateRunning,
-		IP:          "192.168.100.10",
-		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            spec.Name,
+		Description:     spec.Description,
+		Tags:            append([]string(nil), spec.Tags...),
+		Spec:            storedSpec,
+		State:           types.VMStateRunning,
+		IP:              "192.168.100.10",
+		DiskPath:        fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		VNCPasswordHash: vncHash,
+		VNCPasswordEnc:  vncEnc,
 	}
 
 	m.vms[id] = vm
@@ -221,6 +232,23 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	}
 	if patch.NICModel != nil {
 		vm.Spec.NICModel = strings.ToLower(strings.TrimSpace(*patch.NICModel))
+	}
+
+	// VNC password change mirrors the libvirt manager's contract (5.1.8):
+	// rejected while running, pointer-to-"" clears, otherwise re-derive.
+	if patch.VNCPassword != nil {
+		if *patch.VNCPassword == "" && vm.VNCPasswordHash == "" {
+			// Clearing an unset password is a no-op.
+		} else if vm.State == types.VMStateRunning {
+			return nil, types.NewAPIError("vm_running", "stop the VM before changing the vnc password; the new password takes effect on the next start")
+		} else if *patch.VNCPassword == "" {
+			vm.VNCPasswordHash = ""
+			vm.VNCPasswordEnc = ""
+		} else {
+			vm.VNCPasswordHash = "mock-bcrypt:" + *patch.VNCPassword
+			vm.VNCPasswordEnc = "mock-aesgcm:" + *patch.VNCPassword
+		}
+		vm.Spec.VNCPassword = ""
 	}
 
 	vm.UpdatedAt = time.Now()
