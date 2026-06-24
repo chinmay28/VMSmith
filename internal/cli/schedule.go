@@ -680,7 +680,7 @@ func init() {
 	scheduleListCmd.Flags().String("last-fired-since", "", "RFC3339 lower bound (inclusive) on last_fired_at (never-fired schedules are excluded)")
 	scheduleListCmd.Flags().String("last-fired-until", "", "RFC3339 upper bound (inclusive) on last_fired_at (never-fired schedules are excluded)")
 	scheduleListCmd.Flags().String("prefix", "", "case-sensitive HasPrefix filter on schedule name")
-	scheduleListCmd.Flags().String("sort", "", "sort field: id|name|created_at|next_fire_at (default id)")
+	scheduleListCmd.Flags().String("sort", "", "sort field: id|name|created_at|next_fire_at|last_fired_at|vm_id|action (default id)")
 	scheduleListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	scheduleListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
