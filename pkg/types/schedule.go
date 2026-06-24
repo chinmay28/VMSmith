@@ -54,12 +54,13 @@ const (
 	ScheduleSortNextFire    = "next_fire_at"
 	ScheduleSortLastFiredAt = "last_fired_at"
 	ScheduleSortVMID        = "vm_id"
+	ScheduleSortAction      = "action"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction:
 		return true
 	default:
 		return false
@@ -132,7 +133,15 @@ func NormalizeScheduleTags(in []string) []string {
 // (tag_selector-targeted or all-VMs schedules) to the tail of asc / head of
 // desc, mirroring the nil-trailing semantics on the events vm_id sort axis
 // (5.4.93), the logs vm_id sort axis (5.4.94), and the schedule-runs vm_id
-// sort axis (5.4.95).
+// sort axis (5.4.95). The action axis (5.4.99) is the symmetric sort
+// counterpart to the existing case-insensitive ?action= filter on the same
+// column — case-insensitive alphabetical compare on the four-member action
+// enum (restart < snapshot < start < stop). Action is closed-and-total
+// (every schedule resolves to exactly one of the four values at create
+// time), so the action branch diverges from the nil-trailing convention
+// the same way the webhook delivery_status sort axis (5.4.98) does — there
+// is no empty bucket to sink, just plain alphabetical compare with the id
+// tiebreak.
 func SortSchedules(items []*Schedule, field, order string) {
 	desc := order == SortOrderDesc
 	less := func(i, j int) bool {
@@ -158,6 +167,8 @@ func SortSchedules(items []*Schedule, field, order string) {
 			default:
 				cmp = strings.Compare(a.VMID, b.VMID)
 			}
+		case ScheduleSortAction:
+			cmp = strings.Compare(strings.ToLower(string(a.Action)), strings.ToLower(string(b.Action)))
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}
