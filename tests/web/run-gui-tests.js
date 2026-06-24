@@ -49,6 +49,18 @@ async function assertNotVisible(page, testId) {
   if (visible) throw new Error(`${testId} should not be visible`);
 }
 
+async function dismissOpenModal(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(150);
+  const closeButton = page
+    .locator('button[aria-label="Close modal"], [data-testid^="btn-cancel-"]')
+    .first();
+  if (await closeButton.isVisible().catch(() => false)) {
+    await closeButton.click().catch(() => {});
+    await page.waitForTimeout(150);
+  }
+}
+
 // PR #414 collapsed FilterPanel by default and split VM detail into tabs.
 // `openFilterPanel` expands a collapsed FilterPanel so its inputs render in
 // the DOM; `openVMTab` switches the VM detail page to a non-overview tab
@@ -72,6 +84,7 @@ async function openVMTab(page, tab) {
 
 async function runTest(name, fn, page) {
   try {
+    await dismissOpenModal(page);
     await fn(page);
     passed++;
     console.log(`  ✓ ${name}`);
@@ -80,6 +93,8 @@ async function runTest(name, fn, page) {
     errors.push({ name, error: err.message });
     console.log(`  ✗ ${name}`);
     console.log(`    ${err.message}`);
+  } finally {
+    await dismissOpenModal(page).catch(() => {});
   }
 }
 
