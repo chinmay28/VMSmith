@@ -158,3 +158,104 @@ func TestIsValidScheduleSort_AcceptsLastFiredAt(t *testing.T) {
 		t.Fatal("literal 'last_fired_at' must be accepted")
 	}
 }
+
+// TestIsValidScheduleSort_AcceptsVMID covers the 5.4.97 vm_id sort axis on
+// the schedules list — the symmetric sort counterpart to the existing
+// `?vm_id=` exact-match filter on the same column.
+func TestIsValidScheduleSort_AcceptsVMID(t *testing.T) {
+	if !IsValidScheduleSort(ScheduleSortVMID) {
+		t.Fatal("vm_id must be an accepted sort key")
+	}
+	if !IsValidScheduleSort("vm_id") {
+		t.Fatal("literal 'vm_id' must be accepted")
+	}
+	for _, bad := range []string{"VM_ID", "vmid", "vm-id"} {
+		if IsValidScheduleSort(bad) {
+			t.Fatalf("expected %q invalid (case-sensitive whitelist)", bad)
+		}
+	}
+}
+
+// TestSortSchedules_ByVMID_AscCaseSensitive covers the case-sensitive
+// ASCII comparator on the vm_id axis. Mirrors the events vm_id sort axis
+// (5.4.93), the logs vm_id sort axis (5.4.94), and the schedule-runs
+// vm_id sort axis (5.4.95) — VM IDs are opaque vm-<unix-nano> strings
+// operators reference verbatim.
+func TestSortSchedules_ByVMID_AscCaseSensitive(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-3", VMID: "vm-c"},
+		{ID: "sched-1", VMID: "vm-A"},
+		{ID: "sched-2", VMID: "vm-b"},
+	}
+	SortSchedules(items, ScheduleSortVMID, SortOrderAsc)
+	want := []string{"sched-1", "sched-2", "sched-3"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("vm_id asc case-sensitive: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByVMID_EmptyTrailingAsc asserts schedules with an
+// empty vm_id (tag_selector-targeted or all-VMs schedules) sink to the
+// tail in asc, mirroring the nil-trailing semantics on every other
+// nullable sort axis.
+func TestSortSchedules_ByVMID_EmptyTrailingAsc(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-empty", VMID: ""},
+		{ID: "sched-late", VMID: "vm-z"},
+		{ID: "sched-early", VMID: "vm-a"},
+	}
+	SortSchedules(items, ScheduleSortVMID, SortOrderAsc)
+	want := []string{"sched-early", "sched-late", "sched-empty"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("vm_id asc empty-trailing: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByVMID_EmptyLeadingDesc asserts schedules with an
+// empty vm_id head the list in desc — the descending flip of the
+// empty-trailing asc contract.
+func TestSortSchedules_ByVMID_EmptyLeadingDesc(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-late", VMID: "vm-z"},
+		{ID: "sched-empty", VMID: ""},
+		{ID: "sched-early", VMID: "vm-a"},
+	}
+	SortSchedules(items, ScheduleSortVMID, SortOrderDesc)
+	want := []string{"sched-empty", "sched-late", "sched-early"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("vm_id desc empty-leading: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByVMID_TiebreaksOnID covers the deterministic id
+// tiebreak when multiple schedules share the same vm_id (e.g. one VM
+// targeted by multiple nightly schedules).
+func TestSortSchedules_ByVMID_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", VMID: "vm-shared"},
+		{ID: "sched-a", VMID: "vm-shared"},
+		{ID: "sched-m", VMID: "vm-shared"},
+	}
+	SortSchedules(items, ScheduleSortVMID, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("vm_id id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByVMID_AllEmptyTiebreaksOnID covers the all-empty
+// case: every schedule is tag_selector / all-VMs targeted; the
+// comparator must still produce a stable id ordering rather than
+// returning -1/1 arbitrarily.
+func TestSortSchedules_ByVMID_AllEmptyTiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-c", VMID: ""},
+		{ID: "sched-a", VMID: ""},
+		{ID: "sched-b", VMID: ""},
+	}
+	SortSchedules(items, ScheduleSortVMID, SortOrderAsc)
+	want := []string{"sched-a", "sched-b", "sched-c"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("vm_id all-empty tiebreak: got %v, want %v", got, want)
+	}
+}
