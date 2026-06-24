@@ -173,6 +173,15 @@ type VMSpec struct {
 	// and the GPU must not be in use by the host's display. See
 	// docs/GPU_PASSTHROUGH.md.
 	GPUs []string `json:"gpus,omitempty" yaml:"gpus,omitempty"`
+
+	// VNCPassword protects the VM's VNC console with RFB password
+	// authentication (roadmap 5.1.8). Write-only: the manager hashes
+	// (bcrypt) and encrypts (AES-GCM with daemon.console.password_key)
+	// the value, persists only those derived forms on the VM record, and
+	// redacts this field before the spec is stored or returned. Requires
+	// daemon.console.password_key to be configured. Empty means no VNC
+	// password (the historical behaviour).
+	VNCPassword string `json:"vnc_password,omitempty" yaml:"vnc_password,omitempty"`
 }
 
 // VMUpdateSpec defines fields that can be changed on an existing VM.
@@ -255,6 +264,15 @@ type VMUpdateSpec struct {
 	// DiskBus for the "switch to virtio after installing the in-guest
 	// drivers" workflow (roadmap 5.6.12).
 	NICModel *string `json:"nic_model,omitempty"`
+
+	// VNCPassword sets, rotates, or clears the VNC console password on an
+	// existing VM (roadmap 5.1.8). Pointer semantics: nil = no change;
+	// pointer-to-"" clears the password; any other value becomes the new
+	// password. Write-only — the manager persists only the bcrypt hash +
+	// AES-GCM blob. Rejected with 409 vm_running while the VM is running:
+	// the password is baked into the defined domain XML, so the VM must be
+	// stopped and the change takes effect on the next start.
+	VNCPassword *string `json:"vnc_password,omitempty"`
 }
 
 // ResolvedOSType returns the guest OS family, defaulting an empty value to
@@ -403,4 +421,28 @@ type VM struct {
 	// and never persisted — Get/List will not return it. Empty for every
 	// other path (Linux VMs, explicit admin_password, non-Windows clones).
 	GeneratedAdminPassword string `json:"generated_admin_password,omitempty"`
+
+	// VNCPasswordHash is the bcrypt hash of the VM's VNC console password
+	// (roadmap 5.1.8). Persisted so the daemon can verify a caller-supplied
+	// password without decrypting. Redacted from every API response by the
+	// handlers; present only in bbolt.
+	VNCPasswordHash string `json:"vnc_password_hash,omitempty"`
+
+	// VNCPasswordEnc is the AES-GCM encrypted VNC password blob
+	// (base64; key derived from daemon.console.password_key). The manager
+	// decrypts it when (re)defining the domain XML so the `passwd=`
+	// attribute survives CPU/RAM redefines. Redacted from every API
+	// response by the handlers; present only in bbolt.
+	VNCPasswordEnc string `json:"vnc_password_enc,omitempty"`
+}
+
+// RedactConsoleSecrets returns a copy of the VM with the persisted VNC
+// password artifacts blanked. Every API handler that serialises a VM (or a
+// list of VMs) must call this so bcrypt hashes / encrypted blobs never
+// leave the daemon.
+func (v VM) RedactConsoleSecrets() VM {
+	v.VNCPasswordHash = ""
+	v.VNCPasswordEnc = ""
+	v.Spec.VNCPassword = ""
+	return v
 }

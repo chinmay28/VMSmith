@@ -20,83 +20,83 @@ const domainXMLTemplate = `<domain type='kvm'>
   <memory unit='MiB'>{{.RAMMB}}</memory>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
   <os{{if .FirmwareAttr}} firmware='{{.FirmwareAttr}}'{{end}}>
-    <type arch='x86_64' machine='{{.Machine}}'>hvm</type>
-    <boot dev='hd'/>
+	<type arch='x86_64' machine='{{.Machine}}'>hvm</type>
+	<boot dev='hd'/>
   </os>
   <features>
-    <acpi/>
-    <apic/>
-    {{- if .Hyperv}}
-    <hyperv>
-      <relaxed state='on'/>
-      <vapic state='on'/>
-      <spinlocks state='on' retries='8191'/>
-      <vpindex state='on'/>
-      <synic state='on'/>
-      <stimer state='on'/>
-      <frequencies state='on'/>
-    </hyperv>
-    {{- end}}
+	<acpi/>
+	<apic/>
+	{{- if .Hyperv}}
+	<hyperv>
+	  <relaxed state='on'/>
+	  <vapic state='on'/>
+	  <spinlocks state='on' retries='8191'/>
+	  <vpindex state='on'/>
+	  <synic state='on'/>
+	  <stimer state='on'/>
+	  <frequencies state='on'/>
+	</hyperv>
+	{{- end}}
   </features>
   <cpu mode='host-passthrough'/>
   <clock offset='{{.ClockOffset}}'>
-    <timer name='rtc' tickpolicy='catchup'/>
-    <timer name='pit' tickpolicy='delay'/>
-    <timer name='hpet' present='no'/>
-    {{- if .Hyperv}}
-    <timer name='hypervclock' present='yes'/>
-    {{- end}}
+	<timer name='rtc' tickpolicy='catchup'/>
+	<timer name='pit' tickpolicy='delay'/>
+	<timer name='hpet' present='no'/>
+	{{- if .Hyperv}}
+	<timer name='hypervclock' present='yes'/>
+	{{- end}}
   </clock>
   <devices>
-    <emulator>{{.Emulator}}</emulator>
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' discard='unmap'/>
-      <source file='{{.DiskPath}}'/>
-      <target dev='{{.DiskTarget}}' bus='{{.DiskBus}}'/>
-    </disk>
-    {{- if .CloudInitISO}}
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='{{.CloudInitISO}}'/>
-      <target dev='{{.CloudInitTarget}}' bus='sata'/>
-      <readonly/>
-    </disk>
-    {{- end}}
-    {{- if .VirtioWinISO}}
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='{{.VirtioWinISO}}'/>
-      <target dev='{{.VirtioWinTarget}}' bus='sata'/>
-      <readonly/>
-    </disk>
-    {{- end}}
-    {{- range .Interfaces}}
-    {{.XML}}
-    {{- end}}
-    <serial type='pty'>
-      <target port='0'/>
-    </serial>
-    <console type='pty'>
-      <target type='serial' port='0'/>
-    </console>
-    {{- if .Tablet}}
-    <input type='tablet' bus='usb'/>
-    {{- end}}
-    {{- if .VideoModel}}
-    <video>
-      <model type='{{.VideoModel}}'/>
-    </video>
-    {{- end}}
-    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
-    <channel type='unix'>
-      <target type='virtio' name='org.qemu.guest_agent.0'/>
-    </channel>
-    <rng model='virtio'>
-      <backend model='random'>/dev/urandom</backend>
-    </rng>
-    {{- range .GPUHostdevs}}
-    {{.}}
-    {{- end}}
+	<emulator>{{.Emulator}}</emulator>
+	<disk type='file' device='disk'>
+	  <driver name='qemu' type='qcow2' discard='unmap'/>
+	  <source file='{{.DiskPath}}'/>
+	  <target dev='{{.DiskTarget}}' bus='{{.DiskBus}}'/>
+	</disk>
+	{{- if .CloudInitISO}}
+	<disk type='file' device='cdrom'>
+	  <driver name='qemu' type='raw'/>
+	  <source file='{{.CloudInitISO}}'/>
+	  <target dev='{{.CloudInitTarget}}' bus='sata'/>
+	  <readonly/>
+	</disk>
+	{{- end}}
+	{{- if .VirtioWinISO}}
+	<disk type='file' device='cdrom'>
+	  <driver name='qemu' type='raw'/>
+	  <source file='{{.VirtioWinISO}}'/>
+	  <target dev='{{.VirtioWinTarget}}' bus='sata'/>
+	  <readonly/>
+	</disk>
+	{{- end}}
+	{{- range .Interfaces}}
+	{{.XML}}
+	{{- end}}
+	<serial type='pty'>
+	  <target port='0'/>
+	</serial>
+	<console type='pty'>
+	  <target type='serial' port='0'/>
+	</console>
+	{{- if .Tablet}}
+	<input type='tablet' bus='usb'/>
+	{{- end}}
+	{{- if .VideoModel}}
+	<video>
+	  <model type='{{.VideoModel}}'/>
+	</video>
+	{{- end}}
+	<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'{{if .VNCPasswordAttr}} passwd='{{.VNCPasswordAttr}}'{{end}}/>
+	<channel type='unix'>
+	  <target type='virtio' name='org.qemu.guest_agent.0'/>
+	</channel>
+	<rng model='virtio'>
+	  <backend model='random'>/dev/urandom</backend>
+	</rng>
+	{{- range .GPUHostdevs}}
+	{{.}}
+	{{- end}}
   </devices>
 </domain>`
 
@@ -143,6 +143,11 @@ type DomainParams struct {
 	// embedded only in the rendered interface XML strings) so tests can
 	// assert it without grepping XML.
 	NICModel string
+	// VNCPasswordAttr is the XML-escaped plaintext emitted into the
+	// <graphics passwd='...'> attribute (roadmap 5.1.8). Callers must set
+	// it via SetVNCPassword so escaping cannot be skipped; empty omits
+	// the attribute (no VNC auth — the historical behaviour).
+	VNCPasswordAttr string
 
 	// GPUAddresses lists normalized host PCI addresses to attach as VFIO
 	// passthrough <hostdev> entries — the GPU plus its IOMMU-group
@@ -198,10 +203,10 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	//    than by name (Rocky/RHEL use predictable names like enp1s0, not eth0).
 	ifaces = append(ifaces, InterfaceEntry{
 		XML: fmt.Sprintf(`<interface type='network'>
-      <source network='%s'/>
-      <mac address='%s'/>
-      <model type='%s'/>
-    </interface>`, networkName, natMAC, nicModel),
+	  <source network='%s'/>
+	  <mac address='%s'/>
+	  <model type='%s'/>
+	</interface>`, networkName, natMAC, nicModel),
 	})
 
 	// 2. Attach any additional networks requested by the user.
@@ -220,10 +225,10 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 			}
 			ifaces = append(ifaces, InterfaceEntry{
 				XML: fmt.Sprintf(`<interface type='direct'>
-      <source dev='%s' mode='bridge'/>
-      <mac address='%s'/>
-      <model type='%s'/>
-    </interface>`, iface, mac, nicModel),
+	  <source dev='%s' mode='bridge'/>
+	  <mac address='%s'/>
+	  <model type='%s'/>
+	</interface>`, iface, mac, nicModel),
 			})
 
 		case types.NetworkModeBridge:
@@ -234,20 +239,20 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 			}
 			ifaces = append(ifaces, InterfaceEntry{
 				XML: fmt.Sprintf(`<interface type='bridge'>
-      <source bridge='%s'/>
-      <mac address='%s'/>
-      <model type='%s'/>
-    </interface>`, bridge, mac, nicModel),
+	  <source bridge='%s'/>
+	  <mac address='%s'/>
+	  <model type='%s'/>
+	</interface>`, bridge, mac, nicModel),
 			})
 
 		case types.NetworkModeNAT:
 			// Extra NAT network (unusual but supported)
 			ifaces = append(ifaces, InterfaceEntry{
 				XML: fmt.Sprintf(`<interface type='network'>
-      <source network='%s'/>
-      <mac address='%s'/>
-      <model type='%s'/>
-    </interface>`, networkName, mac, nicModel),
+	  <source network='%s'/>
+	  <mac address='%s'/>
+	  <model type='%s'/>
+	</interface>`, networkName, mac, nicModel),
 			})
 		}
 	}
@@ -316,6 +321,26 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	params.FirmwareAttr = spec.ResolvedFirmwareAttr()
 
 	return params
+}
+
+// SetVNCPassword installs a plaintext VNC password on the params,
+// XML-escaping it so quotes / angle brackets in an operator-chosen
+// password cannot break out of the passwd attribute in the template.
+func (p *DomainParams) SetVNCPassword(password string) {
+	p.VNCPasswordAttr = xmlEscapeAttr(password)
+}
+
+// xmlEscapeAttr escapes the five XML special characters for safe embedding
+// in a single-quoted XML attribute value.
+func xmlEscapeAttr(s string) string {
+	repl := strings.NewReplacer(
+		"&", "&amp;",
+		"'", "&apos;",
+		"\"", "&quot;",
+		"<", "&lt;",
+		">", "&gt;",
+	)
+	return repl.Replace(s)
 }
 
 // GenerateDomainXML renders the libvirt domain XML from the given parameters.
@@ -438,10 +463,10 @@ func gpuHostdevXML(addr string) (string, error) {
 		return "", fmt.Errorf("invalid GPU PCI address %q", addr)
 	}
 	return fmt.Sprintf(`<hostdev mode='subsystem' type='pci' managed='yes'>
-      <source>
-        <address domain='%s' bus='%s' slot='%s' function='%s'/>
-      </source>
-    </hostdev>`, domain, bus, slot, function), nil
+	  <source>
+		<address domain='%s' bus='%s' slot='%s' function='%s'/>
+	  </source>
+	</hostdev>`, domain, bus, slot, function), nil
 }
 
 // generateMAC creates a random MAC address with the local/unicast prefix 52:54:00

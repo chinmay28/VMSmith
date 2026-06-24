@@ -166,7 +166,7 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		"image": spec.Image,
 	})
 
-	writeJSON(w, http.StatusCreated, vm)
+	writeJSON(w, http.StatusCreated, vm.RedactConsoleSecrets())
 }
 
 func mergeVMSpecWithTemplate(spec types.VMSpec, tpl *types.VMTemplate) types.VMSpec {
@@ -251,7 +251,7 @@ func (s *Server) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	s.publishAppEvent("vm.updated", vm.ID, fmt.Sprintf("VM %q updated", vm.Name), map[string]string{
 		"name": vm.Name,
 	})
-	writeJSON(w, http.StatusOK, vm)
+	writeJSON(w, http.StatusOK, vm.RedactConsoleSecrets())
 }
 
 // ListVMs handles GET /api/v1/vms
@@ -508,7 +508,7 @@ func (s *Server) ListVMs(w http.ResponseWriter, r *http.Request) {
 	}
 	setTotalCountHeader(w, total)
 
-	writeJSON(w, http.StatusOK, vms)
+	writeJSON(w, http.StatusOK, redactVMList(vms))
 }
 
 // GetVM handles GET /api/v1/vms/{vmID}
@@ -519,7 +519,7 @@ func (s *Server) GetVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, sanitizeManagerError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, vm)
+	writeJSON(w, http.StatusOK, vm.RedactConsoleSecrets())
 }
 
 // CloneVM handles POST /api/v1/vms/{vmID}/clone
@@ -573,7 +573,17 @@ func (s *Server) CloneVM(w http.ResponseWriter, r *http.Request) {
 		"source_id": id,
 	})
 
-	writeJSON(w, http.StatusCreated, cloned)
+	writeJSON(w, http.StatusCreated, cloned.RedactConsoleSecrets())
+}
+
+// redactVMList applies VM.RedactConsoleSecrets to every entry so the list
+// endpoint never serialises persisted VNC password artifacts (5.1.8).
+func redactVMList(vms []*types.VM) []types.VM {
+	out := make([]types.VM, 0, len(vms))
+	for _, v := range vms {
+		out = append(out, v.RedactConsoleSecrets())
+	}
+	return out
 }
 
 // DeleteVM handles DELETE /api/v1/vms/{vmID}
