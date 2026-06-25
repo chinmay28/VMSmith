@@ -2513,7 +2513,7 @@ func TestCLI_VMList_SortByDiskBus_AscResolvesOSFamilyDefault(t *testing.T) {
 
 	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: types.DiskBusVirtio, CPUs: 1, RAMMB: 1024}})
 	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: types.DiskBusSATA, CPUs: 1, RAMMB: 1024}})
-	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})                                               // empty Linux → virtio
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})                                            // empty Linux → virtio
 	mock.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows, CPUs: 2, RAMMB: 2048, DiskGB: 32}}) // empty Windows → sata
 
 	out, err := runCLI("vm", "list", "--sort", "disk_bus")

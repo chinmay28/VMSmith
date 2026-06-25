@@ -5087,8 +5087,8 @@ func TestListVMs_SortByDiskBus_AscResolvesOSFamilyDefault(t *testing.T) {
 
 	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
 	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
-	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                                                                 // Linux empty → virtio
-	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})                                    // Windows empty → sata
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                                                             // Linux empty → virtio
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})                                // Windows empty → sata
 	mockMgr.SeedVM(&types.VM{ID: "vm-5", Name: "windows-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusVirtio}}) // 5.6.12 switch-to-virtio
 
 	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_bus")
