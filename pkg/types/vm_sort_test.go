@@ -617,3 +617,112 @@ func TestIsValidVMSort_AcceptsGPU(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// `os_type` sort axis (5.4.100)
+// ============================================================
+
+func TestSortVMs_ByOSType_AscEmptyResolvesToLinux(t *testing.T) {
+	// Empty `os_type` resolves to "linux" via VMSpec.ResolvedOSType so the
+	// unset VM collates with the explicit-linux VM in alphabetical order
+	// rather than sinking to the tail. Diverges from the nil-trailing
+	// image-sort contract because `os_type` has a documented default —
+	// same rationale as the `default_user` axis (5.4.91) collapsing empty
+	// to "root".
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSType: OSTypeWindows}},
+		{ID: "vm-2", Spec: VMSpec{OSType: OSTypeLinux}},
+		{ID: "vm-3", Spec: VMSpec{OSType: ""}}, // resolves to "linux"
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},
+	}
+	SortVMs(vms, VMSortOSType, SortOrderAsc)
+	// asc: linux < windows; vm-2 and vm-3 both resolve to "linux" and
+	// tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"vm-2", "vm-3", "vm-1", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_type=%q, want %q", i, v.ID, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSType_DescEmptyResolvesToLinux(t *testing.T) {
+	// Desc reverses the entire compare result so windows VMs head the
+	// list. Empty VMs still resolve to linux (the documented default),
+	// so they sit in the linux bucket reversed (id-desc tiebreak).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSType: OSTypeWindows}},
+		{ID: "vm-2", Spec: VMSpec{OSType: OSTypeLinux}},
+		{ID: "vm-3", Spec: VMSpec{OSType: ""}}, // resolves to "linux"
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},
+	}
+	SortVMs(vms, VMSortOSType, SortOrderDesc)
+	want := []string{"vm-4", "vm-1", "vm-3", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_type=%q, want %q", i, v.ID, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSType_CaseInsensitive(t *testing.T) {
+	// `WINDOWS` and `windows` must collate as identical so the sort
+	// agrees with the case-insensitive `?os_type=` filter (5.6.8). The
+	// comparator lowers the resolved value before compare.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSType: "WINDOWS"}},
+		{ID: "vm-2", Spec: VMSpec{OSType: "linux"}},
+		{ID: "vm-3", Spec: VMSpec{OSType: "windows"}},
+	}
+	SortVMs(vms, VMSortOSType, SortOrderAsc)
+	// asc: linux < windows. Equal-os cohort tiebreaks on id ascending
+	// so vm-1 ("WINDOWS") precedes vm-3 ("windows").
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_type=%q, want %q", i, v.ID, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSType_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{OSType: OSTypeWindows}},
+		{ID: "vm-1", Spec: VMSpec{OSType: OSTypeWindows}},
+		{ID: "vm-2", Spec: VMSpec{OSType: OSTypeWindows}},
+	}
+	SortVMs(vms, VMSortOSType, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSType_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All-empty VMs all resolve to "linux" so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortOSType, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsOSType(t *testing.T) {
+	if !IsValidVMSort(VMSortOSType) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortOSType)
+	}
+	for _, axis := range []string{"OS_TYPE", "Os_Type", "ostype", " os_type "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

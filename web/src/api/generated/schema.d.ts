@@ -5126,10 +5126,22 @@ export interface components {
          *     requested GPUs sink to the tail in ascending order and the head
          *     in descending order, mirroring the nil-trailing semantics on
          *     every other nullable axis (ip, guest_ip, image, actor,
-         *     last_fired_at, last_delivery_at). All comparators tiebreak on
-         *     `id` so pagination is deterministic across backends.
+         *     last_fired_at, last_delivery_at). `os_type` (5.4.100) is a
+         *     case-insensitive sort on the VM's *effective* OS family via
+         *     `VMSpec.ResolvedOSType`, the symmetric sort counterpart to the
+         *     case-insensitive `?os_type=` exact-match filter (5.6.8) so the
+         *     same OS-family cohort can be both filtered and sorted on the
+         *     same column. Alphabetical: `linux` < `windows`. Diverges from
+         *     the nil-trailing convention because os_type has a documented
+         *     default — an empty stored `spec.os_type` resolves to `linux`
+         *     (mirrors the `?os_type=linux` empty-means-linux filter contract
+         *     and the runtime semantics in `lifecycle.go`) so empty VMs
+         *     collate with explicit-linux VMs rather than sinking to the tail,
+         *     mirroring the `default_user` documented-default rationale
+         *     (5.4.91). All comparators tiebreak on `id` so pagination is
+         *     deterministic across backends.
          */
-        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu";
+        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu" | "os_type";
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

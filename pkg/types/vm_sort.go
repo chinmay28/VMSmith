@@ -21,6 +21,7 @@ const (
 	VMSortImage       = "image"
 	VMSortDefaultUser = "default_user"
 	VMSortGPU         = "gpu"
+	VMSortOSType      = "os_type"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -32,7 +33,7 @@ func IsValidVMSort(s string) bool {
 	switch s {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
-		VMSortImage, VMSortDefaultUser, VMSortGPU:
+		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType:
 		return true
 	}
 	return false
@@ -194,6 +195,28 @@ func SortVMs(vms []*VM, sortField, order string) {
 			default:
 				less = ai.ID < aj.ID
 			}
+		case VMSortOSType:
+			// Case-insensitive compare on the VM's *effective* OS family
+			// via ResolvedOSType (5.4.100). Symmetric sort counterpart to
+			// the case-insensitive `?os_type=` exact-match filter (5.6.8)
+			// so the same OS-family cohort can be both filtered and
+			// sorted on the same column. Diverges from the nil-trailing
+			// convention on `ip` / `image` / `actor` because this column
+			// has a documented default — an empty stored `spec.os_type`
+			// resolves to `linux` (mirrors VMSpec.ResolvedOSType and the
+			// `?os_type=linux` empty-means-linux filter contract) so
+			// empty VMs collate with explicit-linux VMs rather than
+			// sinking to the tail. The closed-and-total classification
+			// guarantees every VM resolves to exactly one of `linux` <
+			// `windows`, mirroring the `default_user` documented-default
+			// rationale (5.4.91).
+			aiOS := strings.ToLower(string(ai.Spec.ResolvedOSType()))
+			ajOS := strings.ToLower(string(aj.Spec.ResolvedOSType()))
+			if aiOS != ajOS {
+				less = aiOS < ajOS
+				break
+			}
+			less = ai.ID < aj.ID
 		case VMSortDefaultUser:
 			// Case-insensitive compare mirrors the case-insensitive
 			// `?default_user=` exact-match filter (5.4.23). Diverges

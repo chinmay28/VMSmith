@@ -4651,6 +4651,146 @@ func TestListVMs_SortByGPU_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `os_type` sort axis (5.4.100)
+// ============================================================
+
+func TestListVMs_SortByOSType_AscEmptyResolvesToLinux(t *testing.T) {
+	// Diverges from the nil-trailing convention on `image` / `gpu` because
+	// `os_type` has a documented default — empty stored values resolve to
+	// "linux" via VMSpec.ResolvedOSType so they collate with explicit-linux
+	// VMs in alphabetical order (linux < windows) rather than sinking to
+	// the tail. Same rationale as the `default_user` axis (5.4.91).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-1", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-explicit", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{OSType: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "win-2", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_type")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: linux < windows; vm-2 and vm-3 both resolve to "linux" and
+	// tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"linux-explicit", "linux-empty", "win-1", "win-2"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSTypeDesc_EmptyResolvesToLinux(t *testing.T) {
+	// Desc reverses the entire compare result so the windows cohort heads
+	// the list, then the linux cohort (with the empty-stored vm-3 leading
+	// vm-2 because the id tiebreak also inverts).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win-1", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-explicit", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{OSType: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "win-2", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_type&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"win-2", "win-1", "linux-empty", "linux-explicit"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSType_CaseInsensitive(t *testing.T) {
+	// `WINDOWS` and `windows` must collate as identical so the sort agrees
+	// with the case-insensitive `?os_type=` filter (5.6.8).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{OSType: "WINDOWS"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-stored", Spec: types.VMSpec{OSType: "linux"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{OSType: "windows"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_type&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-stored", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSType_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_type")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByOSType_ComposesWithFilter(t *testing.T) {
+	// `?os_type=windows&sort=os_type` narrows to the Windows cohort and
+	// then orders within it — every row is windows, so the id-tiebreak
+	// determines order. Asserts the filter + sort agree on the
+	// "windows" classification.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux", Spec: types.VMSpec{OSType: types.OSTypeLinux}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win-b", Spec: types.VMSpec{OSType: types.OSTypeWindows}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win-a", Spec: types.VMSpec{OSType: "WINDOWS"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_type=windows&sort=os_type")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (windows-only)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByOSType_400AdvertisesOSType(t *testing.T) {
+	// A nearby misspelling (e.g. `os-type`) must surface the canonical
+	// axis name in the 400 envelope so operators discover the right key.
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os-type")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "os_type") {
+		t.Errorf("error message %q should advertise the os_type axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

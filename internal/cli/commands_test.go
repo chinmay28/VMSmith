@@ -2271,6 +2271,84 @@ func TestCLI_VMList_SortByGPU_NormalisesShortForm(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `os_type` sort axis (5.4.100)
+// ============================================================
+
+func TestCLI_VMList_SortByOSType_AscEmptyResolvesToLinux(t *testing.T) {
+	// Empty `os_type` resolves to "linux" via ResolvedOSType so the unset
+	// VM collates with the explicit-linux VM in alphabetical order rather
+	// than sinking to the tail — diverges from the nil-trailing image-sort
+	// contract because `os_type` has a documented default, same rationale
+	// as the `default_user` axis (5.4.91).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "win-1", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-explicit", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeLinux, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{OSType: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "win-2", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "os_type")
+	if err != nil {
+		t.Fatalf("vm list --sort os_type: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	want := []string{"linux-explicit", "linux-empty", "win-1", "win-2"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByOSType_CaseInsensitive(t *testing.T) {
+	// `WINDOWS` and `windows` must collate as identical so the sort agrees
+	// with the case-insensitive `?os_type=` filter (5.6.8).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{OSType: "WINDOWS", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux", State: types.VMStateRunning, Spec: types.VMSpec{OSType: "linux", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{OSType: "windows", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "os_type", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort os_type: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"linux", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByOSType_RejectsUnknownAxis(t *testing.T) {
+	// A nearby misspelling (e.g. "os-type") must surface a clear error that
+	// advertises `os_type` in the whitelist so operators discover the right
+	// flag.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "os-type")
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "os_type") {
+		t.Errorf("expected --sort error message to advertise 'os_type' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.
