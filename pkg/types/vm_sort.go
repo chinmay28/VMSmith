@@ -22,6 +22,7 @@ const (
 	VMSortDefaultUser = "default_user"
 	VMSortGPU         = "gpu"
 	VMSortOSType      = "os_type"
+	VMSortFirmware    = "firmware"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -33,10 +34,26 @@ func IsValidVMSort(s string) bool {
 	switch s {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
-		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType:
+		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
+		VMSortFirmware:
 		return true
 	}
 	return false
+}
+
+// resolveFirmware collapses an empty stored `spec.firmware` to "bios" (the
+// SeaBIOS default), mirroring the `?firmware=bios` empty-means-bios filter
+// contract on `GET /vms`. uefi and ovmf are preserved as-is (they map to the
+// same libvirt `firmware='efi'` attribute at render time but the operator's
+// chosen alias survives the round-trip — same as the filter contract). Used by
+// the VM list firmware sort axis (5.4.101) so the same documented-default
+// semantics that the filter exposes are honoured on the ordering path.
+func resolveFirmware(s string) string {
+	v := strings.ToLower(strings.TrimSpace(s))
+	if v == "" {
+		return FirmwareBIOS
+	}
+	return v
 }
 
 // smallestGPU returns the lexicographically-smallest canonical PCI address
@@ -214,6 +231,30 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajOS := strings.ToLower(string(aj.Spec.ResolvedOSType()))
 			if aiOS != ajOS {
 				less = aiOS < ajOS
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortFirmware:
+			// Case-insensitive compare on the VM's effective firmware via
+			// resolveFirmware (5.4.101). Symmetric sort counterpart to the
+			// case-insensitive `?firmware=` exact-match filter (5.4.68) so
+			// the same firmware cohort can be both filtered and sorted on
+			// the same column. Alphabetical: bios < ovmf < uefi. Diverges
+			// from the nil-trailing convention on `ip` / `image` / `gpu`
+			// because this column has a documented default — an empty
+			// stored `spec.firmware` resolves to `bios` (mirrors the
+			// `?firmware=bios` empty-means-bios filter contract and the
+			// SeaBIOS default surfaced through ResolvedFirmwareAttr) so
+			// empty VMs collate with explicit-bios VMs rather than sinking
+			// to the tail. Same documented-default rationale as the
+			// `os_type` axis (5.4.100) collapsing empty to `linux` and the
+			// `default_user` axis (5.4.91) collapsing empty to `root`. The
+			// closed-and-total classification guarantees every VM resolves
+			// to exactly one of the three values.
+			aiFW := resolveFirmware(ai.Spec.Firmware)
+			ajFW := resolveFirmware(aj.Spec.Firmware)
+			if aiFW != ajFW {
+				less = aiFW < ajFW
 				break
 			}
 			less = ai.ID < aj.ID

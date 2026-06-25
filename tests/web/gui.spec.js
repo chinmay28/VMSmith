@@ -1362,6 +1362,34 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
   });
 
+  // 5.4.101 — case-insensitive `firmware` sort axis with empty→bios resolution.
+  test("firmware sort axis reorders the VM list and resolves empty to bios", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed firmware: web-server="" (resolves to bios), db-server=""
+    // (resolves to bios), win-app="uefi". Asc orders alphabetically:
+    // bios < uefi, so the bios cohort heads the list (id tiebreak:
+    // vm-1 web-server before vm-2 db-server), then win-app (uefi) trails.
+    // Validates the empty-means-bios divergence from the nil-trailing
+    // convention on every other nullable sort axis — same rationale as
+    // the `os_type` axis (5.4.100) collapsing empty to "linux".
+    await page.getByTestId("vm-list-sort-field").selectOption("firmware");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=firmware");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+
+    // Descending flips everything including the id tiebreak inside the bios
+    // cohort — win-app (uefi) heads the list, then db-server, then web-server.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

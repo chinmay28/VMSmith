@@ -2349,6 +2349,82 @@ func TestCLI_VMList_SortByOSType_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.101 — case-insensitive `firmware` sort axis with empty→bios resolution.
+
+func TestCLI_VMList_SortByFirmware_AscEmptyResolvesToBIOS(t *testing.T) {
+	// Empty `firmware` resolves to "bios" via resolveFirmware so the unset
+	// VM collates with the explicit-bios VM in alphabetical order rather
+	// than sinking to the tail — diverges from the nil-trailing image-sort
+	// contract because `firmware` has a documented default, same rationale
+	// as the `os_type` axis (5.4.100) collapsing empty to "linux".
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uefi-vm", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: types.FirmwareUEFI, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "bios-explicit", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: types.FirmwareBIOS, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "bios-empty", State: types.VMStateStopped, Spec: types.VMSpec{Firmware: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "ovmf-vm", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: types.FirmwareOVMF, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "firmware")
+	if err != nil {
+		t.Fatalf("vm list --sort firmware: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	want := []string{"bios-explicit", "bios-empty", "ovmf-vm", "uefi-vm"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByFirmware_CaseInsensitive(t *testing.T) {
+	// `UEFI` and `uefi` must collate as identical so the sort agrees with
+	// the case-insensitive `?firmware=` filter (5.4.68).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: "UEFI", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "bios", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: "bios", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{Firmware: "uefi", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "firmware", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort firmware: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"bios", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByFirmware_RejectsUnknownAxis(t *testing.T) {
+	// A nearby misspelling (e.g. "fw") must surface a clear error that
+	// advertises `firmware` in the whitelist so operators discover the right
+	// flag.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "fw")
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "firmware") {
+		t.Errorf("expected --sort error message to advertise 'firmware' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

@@ -726,3 +726,111 @@ func TestIsValidVMSort_AcceptsOSType(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.101 — case-insensitive `firmware` sort axis with empty→bios resolution.
+
+func TestSortVMs_ByFirmware_AscEmptyResolvesToBIOS(t *testing.T) {
+	// Empty `firmware` resolves to "bios" via resolveFirmware so the unset
+	// VM collates with the explicit-bios VM in alphabetical order rather
+	// than sinking to the tail. Diverges from the nil-trailing image-sort
+	// contract because `firmware` has a documented default — same rationale
+	// as the `os_type` axis (5.4.100) collapsing empty to "linux" and the
+	// `default_user` axis (5.4.91) collapsing empty to "root".
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Firmware: FirmwareUEFI}},
+		{ID: "vm-2", Spec: VMSpec{Firmware: FirmwareBIOS}},
+		{ID: "vm-3", Spec: VMSpec{Firmware: ""}}, // resolves to "bios"
+		{ID: "vm-4", Spec: VMSpec{Firmware: FirmwareOVMF}},
+	}
+	SortVMs(vms, VMSortFirmware, SortOrderAsc)
+	// asc: bios < ovmf < uefi; vm-2 and vm-3 both resolve to "bios" and
+	// tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"vm-2", "vm-3", "vm-4", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q firmware=%q, want %q", i, v.ID, v.Spec.Firmware, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByFirmware_DescEmptyResolvesToBIOS(t *testing.T) {
+	// Desc reverses the entire compare result so uefi VMs head the list,
+	// then ovmf, then the bios bucket (with the empty-stored vm-3 leading
+	// vm-2 because the id tiebreak also inverts).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Firmware: FirmwareUEFI}},
+		{ID: "vm-2", Spec: VMSpec{Firmware: FirmwareBIOS}},
+		{ID: "vm-3", Spec: VMSpec{Firmware: ""}}, // resolves to "bios"
+		{ID: "vm-4", Spec: VMSpec{Firmware: FirmwareOVMF}},
+	}
+	SortVMs(vms, VMSortFirmware, SortOrderDesc)
+	want := []string{"vm-1", "vm-4", "vm-3", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q firmware=%q, want %q", i, v.ID, v.Spec.Firmware, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByFirmware_CaseInsensitive(t *testing.T) {
+	// `UEFI` and `uefi` must collate as identical so the sort agrees with
+	// the case-insensitive `?firmware=` filter (5.4.68). The resolver
+	// lowers + trims the stored value before compare.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Firmware: "UEFI"}},
+		{ID: "vm-2", Spec: VMSpec{Firmware: "bios"}},
+		{ID: "vm-3", Spec: VMSpec{Firmware: "uefi"}},
+		{ID: "vm-4", Spec: VMSpec{Firmware: " OVMF "}}, // whitespace + uppercase
+	}
+	SortVMs(vms, VMSortFirmware, SortOrderAsc)
+	// asc: bios < ovmf < uefi. Equal-firmware cohort tiebreaks on id
+	// ascending so vm-1 ("UEFI") precedes vm-3 ("uefi").
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q firmware=%q, want %q", i, v.ID, v.Spec.Firmware, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByFirmware_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{Firmware: FirmwareUEFI}},
+		{ID: "vm-1", Spec: VMSpec{Firmware: FirmwareUEFI}},
+		{ID: "vm-2", Spec: VMSpec{Firmware: FirmwareUEFI}},
+	}
+	SortVMs(vms, VMSortFirmware, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByFirmware_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All-empty VMs all resolve to "bios" so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortFirmware, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsFirmware(t *testing.T) {
+	if !IsValidVMSort(VMSortFirmware) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortFirmware)
+	}
+	for _, axis := range []string{"FIRMWARE", "Firmware", "firm", " firmware "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -828,6 +828,24 @@ const server = http.createServer(async (req, res) => {
           };
           const oa = resolve(a), ob = resolve(b);
           l = oa < ob ? -1 : oa > ob ? 1 : 0;
+          break;
+        }
+        case "firmware": {
+          // 5.4.101: case-insensitive sort on the VM's effective firmware.
+          // Empty stored firmware resolves to "bios" (mirrors the Go
+          // resolveFirmware helper and the `?firmware=bios` empty-means-bios
+          // filter contract). Alphabetical: bios < ovmf < uefi. Diverges
+          // from the nil-trailing convention because firmware is a
+          // closed three-member axis with a documented default — same
+          // rationale as the `os_type` axis (5.4.100) collapsing empty to
+          // "linux" and the `default_user` axis (5.4.91) collapsing empty
+          // to "root".
+          const resolve = (vm) => {
+            const raw = String(vm?.spec?.firmware || "").trim().toLowerCase();
+            return raw === "" ? "bios" : raw;
+          };
+          const fa = resolve(a), fb = resolve(b);
+          l = fa < fb ? -1 : fa > fb ? 1 : 0;
           break;
         }
         case "gpu": {
