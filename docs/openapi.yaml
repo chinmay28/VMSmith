@@ -3790,10 +3790,10 @@ components:
           format: password
           writeOnly: true
           description: >-
-            Optional VNC password for the graphical console. Stored as a
-            bcrypt verifier plus an AES-GCM-encrypted blob so the daemon can
-            re-render the libvirt domain XML on later edits without exposing
-            the plaintext in API responses.
+            Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash
+            plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key`
+            so the plaintext can be re-injected into the libvirt domain XML on
+            the next define/start. Redacted from every read path.
         clock_offset:
           type: string
           enum: [utc, localtime]
@@ -3913,10 +3913,10 @@ components:
           writeOnly: true
           nullable: true
           description: >-
-            Optional VNC password update. Omit (null) to leave unchanged;
-            send an explicit empty string to clear the stored password.
-            Updating this field while the VM is running returns 409
-            `vm_running` so the operator can stop the VM first.
+            Optional per-VM VNC password update. Omit/null to leave unchanged;
+            send an empty string to clear the stored VNC password. Returns 409
+            `vm_running` if the VM is running, because password changes require
+            a stop + redefine so libvirt can pick up the new `passwd=` value.
         clock_offset:
           type: string
           enum: [utc, localtime, ""]

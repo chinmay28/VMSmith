@@ -4115,6 +4115,8 @@ export interface components {
             os_variant?: "windows-10" | "windows-11" | "windows-server-2019" | "windows-server-2022" | "windows-server-2025";
             /** @description Windows local Administrator password injected into the cloudbase-init datasource at first boot. Write-only: it is redacted from the stored/returned VM record once the provisioning ISO is written. Ignored for Linux guests. */
             admin_password?: string;
+            /** @description Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key` so the plaintext can be re-injected into the libvirt domain XML on the next define/start. Redacted from every read path. */
+            vnc_password?: string;
             /**
              * @description Override the libvirt domain `<clock offset='...'>`. Empty/omitted resolves to the OS-family default (utc for Linux, localtime for Windows). Lets operators pin "utc" on Windows guests synced with an NTP-driven Linux fleet, or "localtime" on a dual-boot Linux guest sharing an RTC with Windows. Any other value returns 400 `invalid_clock_offset`.
              * @enum {string}
@@ -4161,6 +4163,8 @@ export interface components {
             auto_start?: boolean | null;
             /** @description Toggle delete-protection. Omit to leave unchanged. */
             locked?: boolean | null;
+            /** @description Optional per-VM VNC password update. Omit/null to leave unchanged; send an empty string to clear the stored VNC password. Returns 409 `vm_running` if the VM is running, because password changes require a stop + redefine so libvirt can pick up the new `passwd=` value. */
+            vnc_password?: string | null;
             /**
              * @description Override the libvirt domain `<clock offset='...'>` on an existing VM. Allowed values are `utc` / `localtime` (case-insensitive). An explicit empty string clears the override so the OS-family default (utc for Linux, localtime for Windows) applies again at next render. Omit (null) to leave unchanged. Applying a change triggers a domain redefine + VM restart, mirroring the cpus / ram_mb change path. Any other value returns 400 `invalid_clock_offset`.
              * @enum {string|null}
