@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -828,6 +828,22 @@ const server = http.createServer(async (req, res) => {
           };
           const oa = resolve(a), ob = resolve(b);
           l = oa < ob ? -1 : oa > ob ? 1 : 0;
+          break;
+        }
+        case "os_variant": {
+          // 5.4.103: case-insensitive sort on spec.os_variant. Unlike
+          // os_type (5.4.100) and firmware (5.4.101) it has NO documented
+          // default — an empty stored value means "operator did not specify
+          // an edition" (typically Linux guests), so empty VMs sink to the
+          // tail in asc / head in desc, mirroring the Go SortVMs
+          // nil-trailing contract on every other nullable axis (image, gpu,
+          // ip, guest_ip, actor, last_fired_at, last_delivery_at).
+          const va = String(a?.spec?.os_variant || "").trim().toLowerCase();
+          const vb = String(b?.spec?.os_variant || "").trim().toLowerCase();
+          if (va === "" && vb === "") l = 0;
+          else if (va === "") l = 1;
+          else if (vb === "") l = -1;
+          else l = va < vb ? -1 : va > vb ? 1 : 0;
           break;
         }
         case "firmware": {

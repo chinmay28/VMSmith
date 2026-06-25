@@ -2425,6 +2425,81 @@ func TestCLI_VMList_SortByFirmware_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.103 — case-insensitive `os_variant` sort axis with nil-trailing semantics.
+
+func TestCLI_VMList_SortByOSVariant_AscEmptyTrailing(t *testing.T) {
+	// Diverges from os_type / firmware — `os_variant` has no documented
+	// default so empty stored values (typically Linux guests) sink to the
+	// tail in ascending order, mirroring the nil-trailing semantics on
+	// image / gpu / ip rather than collapsing to a default.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "ws22", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "windows-server-2022", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{OSVariant: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "win10", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "windows-10", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "win11", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "windows-11", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "os_variant")
+	if err != nil {
+		t.Fatalf("vm list --sort os_variant: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	want := []string{"win10", "win11", "ws22", "linux-empty"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByOSVariant_CaseInsensitive(t *testing.T) {
+	// `Windows-11` and `windows-11` must collate as identical so the sort
+	// agrees with the case-insensitive `?os_variant=` filter (5.4.66).
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "WINDOWS-11", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "win10", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "windows-10", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{OSVariant: "windows-11", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "os_variant", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort os_variant: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"win10", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByOSVariant_RejectsUnknownAxis(t *testing.T) {
+	// A nearby misspelling (e.g. "osvariant") must surface a clear error
+	// that advertises `os_variant` in the whitelist so operators discover
+	// the right flag.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "osvariant")
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "os_variant") {
+		t.Errorf("expected --sort error message to advertise 'os_variant' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

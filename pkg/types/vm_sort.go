@@ -23,6 +23,7 @@ const (
 	VMSortGPU         = "gpu"
 	VMSortOSType      = "os_type"
 	VMSortFirmware    = "firmware"
+	VMSortOSVariant   = "os_variant"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -35,7 +36,7 @@ func IsValidVMSort(s string) bool {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
-		VMSortFirmware:
+		VMSortFirmware, VMSortOSVariant:
 		return true
 	}
 	return false
@@ -234,6 +235,34 @@ func SortVMs(vms []*VM, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case VMSortOSVariant:
+			// Case-insensitive compare on the VM's `spec.os_variant` field
+			// (5.4.103). Symmetric sort counterpart to the case-insensitive
+			// `?os_variant=` exact-match filter (5.4.66) so the same Windows
+			// edition cohort can be both filtered and sorted on the same
+			// column. Unlike `os_type` (5.4.100) and `firmware` (5.4.101),
+			// `os_variant` has NO documented default — an empty stored value
+			// means "operator did not specify an edition", typically because
+			// the VM is a Linux guest (where the field is genuinely absent /
+			// not applicable). So empty VMs sink to the tail of asc / head of
+			// desc, mirroring the nil-trailing semantics on `image` /
+			// `default_user` (template) / `actor` / `ip` rather than collapsing
+			// to a default like `os_type` does. Alphabetical Windows edition
+			// ordering: windows-10 < windows-11 < windows-server-2019 <
+			// windows-server-2022 < windows-server-2025.
+			aiV, ajV := strings.ToLower(strings.TrimSpace(ai.Spec.OSVariant)), strings.ToLower(strings.TrimSpace(aj.Spec.OSVariant))
+			switch {
+			case aiV == "" && ajV == "":
+				less = ai.ID < aj.ID
+			case aiV == "":
+				less = false
+			case ajV == "":
+				less = true
+			case aiV != ajV:
+				less = aiV < ajV
+			default:
+				less = ai.ID < aj.ID
+			}
 		case VMSortFirmware:
 			// Case-insensitive compare on the VM's effective firmware via
 			// resolveFirmware (5.4.101). Symmetric sort counterpart to the

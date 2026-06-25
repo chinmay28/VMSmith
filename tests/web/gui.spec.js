@@ -1390,6 +1390,36 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
   });
 
+  // 5.4.103 — case-insensitive `os_variant` sort axis with nil-trailing semantics.
+  test("os_variant sort axis reorders the VM list and sinks empty editions to the tail", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed os_variant: web-server="" (Linux, no edition), db-server=""
+    // (Linux, no edition), win-app="windows-server-2022". Asc orders
+    // alphabetically with empty values trailing (nil-trailing): win-app
+    // heads, then the two empty Linux VMs sink to the tail (id tiebreak:
+    // vm-1 web-server before vm-2 db-server). Validates the divergence
+    // from the os_type/firmware documented-default contract — os_variant
+    // has no default, so empty values genuinely mean "not applicable".
+    await page.getByTestId("vm-list-sort-field").selectOption("os_variant");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=os_variant");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips: empty editions now head the list (nil-leading
+    // in desc is the symmetric counterpart of nil-trailing in asc),
+    // then win-app trails. Inside the empty cohort the id tiebreak
+    // also inverts: db-server precedes web-server.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
