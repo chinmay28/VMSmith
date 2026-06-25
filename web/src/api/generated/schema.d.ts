@@ -4696,7 +4696,7 @@ export interface components {
             /** @description Normalised lowercase tag list selecting target VMs by tag. Mutually exclusive with `vm_id`. */
             tag_selector?: string[];
             /** @enum {string} */
-            action: "snapshot" | "start" | "stop" | "restart";
+            action: "snapshot" | "start" | "stop" | "restart" | "force-stop" | "reboot" | "suspend" | "resume";
             /**
              * @description 6-field cron expression WITH seconds, e.g. "0 0 2 * * *".
              * @example 0 0 2 * * *
@@ -4748,7 +4748,7 @@ export interface components {
             /** @description Mutually exclusive with `vm_id`. */
             tag_selector?: string[];
             /** @enum {string} */
-            action: "snapshot" | "start" | "stop" | "restart";
+            action: "snapshot" | "start" | "stop" | "restart" | "force-stop" | "reboot" | "suspend" | "resume";
             /**
              * @description 6-field cron expression WITH seconds.
              * @example 0 0 2 * * *
@@ -4774,7 +4774,7 @@ export interface components {
             vm_id?: string;
             tag_selector?: string[];
             /** @enum {string} */
-            action?: "snapshot" | "start" | "stop" | "restart";
+            action?: "snapshot" | "start" | "stop" | "restart" | "force-stop" | "reboot" | "suspend" | "resume";
             cron_spec?: string;
             timezone?: string;
             enabled?: boolean;

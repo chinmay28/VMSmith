@@ -14,12 +14,17 @@ const (
 	ScheduleActionStart    ScheduleAction = "start"
 	ScheduleActionStop     ScheduleAction = "stop"
 	ScheduleActionRestart  ScheduleAction = "restart"
+	ScheduleActionForceStop ScheduleAction = "force-stop"
+	ScheduleActionReboot    ScheduleAction = "reboot"
+	ScheduleActionSuspend   ScheduleAction = "suspend"
+	ScheduleActionResume    ScheduleAction = "resume"
 )
 
 // IsValidScheduleAction reports whether a is one of the recognised actions.
 func IsValidScheduleAction(a ScheduleAction) bool {
 	switch a {
-	case ScheduleActionSnapshot, ScheduleActionStart, ScheduleActionStop, ScheduleActionRestart:
+	case ScheduleActionSnapshot, ScheduleActionStart, ScheduleActionStop, ScheduleActionRestart,
+		ScheduleActionForceStop, ScheduleActionReboot, ScheduleActionSuspend, ScheduleActionResume:
 		return true
 	default:
 		return false
@@ -135,13 +140,12 @@ func NormalizeScheduleTags(in []string) []string {
 // (5.4.93), the logs vm_id sort axis (5.4.94), and the schedule-runs vm_id
 // sort axis (5.4.95). The action axis (5.4.99) is the symmetric sort
 // counterpart to the existing case-insensitive ?action= filter on the same
-// column — case-insensitive alphabetical compare on the four-member action
-// enum (restart < snapshot < start < stop). Action is closed-and-total
-// (every schedule resolves to exactly one of the four values at create
-// time), so the action branch diverges from the nil-trailing convention
-// the same way the webhook delivery_status sort axis (5.4.98) does — there
-// is no empty bucket to sink, just plain alphabetical compare with the id
-// tiebreak.
+// column — case-insensitive alphabetical compare on the action enum.
+// Action is closed-and-total (every schedule resolves to exactly one action
+// at create time), so the action branch diverges from the nil-trailing
+// convention the same way the webhook delivery_status sort axis (5.4.98)
+// does — there is no empty bucket to sink, just plain alphabetical compare
+// with the id tiebreak.
 func SortSchedules(items []*Schedule, field, order string) {
 	desc := order == SortOrderDesc
 	less := func(i, j int) bool {
