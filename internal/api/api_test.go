@@ -4791,6 +4791,149 @@ func TestListVMs_SortByOSType_400AdvertisesOSType(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `firmware` sort axis (5.4.101)
+// ============================================================
+
+func TestListVMs_SortByFirmware_AscEmptyResolvesToBIOS(t *testing.T) {
+	// Diverges from the nil-trailing convention on `image` / `gpu` because
+	// `firmware` has a documented default — empty stored values resolve to
+	// "bios" via resolveFirmware so they collate with explicit-bios VMs in
+	// alphabetical order (bios < ovmf < uefi) rather than sinking to the
+	// tail. Same rationale as the `os_type` axis (5.4.100) and the
+	// `default_user` axis (5.4.91).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uefi-vm", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bios-explicit", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "bios-empty", Spec: types.VMSpec{Firmware: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "ovmf-vm", Spec: types.VMSpec{Firmware: types.FirmwareOVMF}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=firmware")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: bios < ovmf < uefi; vm-2 and vm-3 both resolve to "bios" and
+	// tiebreak on id ascending so vm-2 precedes vm-3.
+	want := []string{"bios-explicit", "bios-empty", "ovmf-vm", "uefi-vm"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByFirmwareDesc_EmptyResolvesToBIOS(t *testing.T) {
+	// Desc reverses the entire compare result so uefi VMs head the list,
+	// then ovmf, then bios (with the empty-stored vm-3 leading vm-2 because
+	// the id tiebreak also inverts).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uefi-vm", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bios-explicit", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "bios-empty", Spec: types.VMSpec{Firmware: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "ovmf-vm", Spec: types.VMSpec{Firmware: types.FirmwareOVMF}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=firmware&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"uefi-vm", "ovmf-vm", "bios-empty", "bios-explicit"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByFirmware_CaseInsensitive(t *testing.T) {
+	// `UEFI` and `uefi` must collate as identical so the sort agrees with
+	// the case-insensitive `?firmware=` filter (5.4.68). Trim + lowercase
+	// applied via resolveFirmware before compare.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{Firmware: "UEFI"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bios-stored", Spec: types.VMSpec{Firmware: "bios"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{Firmware: "uefi"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=firmware&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"bios-stored", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByFirmware_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=firmware")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByFirmware_ComposesWithFilter(t *testing.T) {
+	// `?firmware=bios&sort=firmware` narrows to the bios cohort (which
+	// includes the empty-stored VM via empty-means-bios) and then orders
+	// within it — every row resolves to bios, so the id-tiebreak determines
+	// order. Asserts the filter + sort agree on the empty-means-bios
+	// classification.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uefi-vm", Spec: types.VMSpec{Firmware: types.FirmwareUEFI}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bios-explicit", Spec: types.VMSpec{Firmware: types.FirmwareBIOS}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "bios-empty", Spec: types.VMSpec{Firmware: ""}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?firmware=bios&sort=firmware")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (bios-only including empty)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByFirmware_400AdvertisesFirmware(t *testing.T) {
+	// A nearby misspelling (e.g. `fw`) must surface the canonical axis
+	// name in the 400 envelope so operators discover the right key.
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=fw")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "firmware") {
+		t.Errorf("error message %q should advertise the firmware axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
