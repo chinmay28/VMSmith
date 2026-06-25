@@ -3785,6 +3785,15 @@ components:
             cloudbase-init datasource at first boot. Write-only: it is redacted
             from the stored/returned VM record once the provisioning ISO is
             written. Ignored for Linux guests.
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: >-
+            Optional VNC password for the graphical console. Stored as a
+            bcrypt verifier plus an AES-GCM-encrypted blob so the daemon can
+            re-render the libvirt domain XML on later edits without exposing
+            the plaintext in API responses.
         clock_offset:
           type: string
           enum: [utc, localtime]
@@ -3898,6 +3907,16 @@ components:
           type: boolean
           description: Toggle delete-protection. Omit to leave unchanged.
           nullable: true
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          nullable: true
+          description: >-
+            Optional VNC password update. Omit (null) to leave unchanged;
+            send an explicit empty string to clear the stored password.
+            Updating this field while the VM is running returns 409
+            `vm_running` so the operator can stop the VM first.
         clock_offset:
           type: string
           enum: [utc, localtime, ""]
