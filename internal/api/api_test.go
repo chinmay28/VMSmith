@@ -5070,6 +5070,150 @@ func TestListVMs_SortByOSVariant_400AdvertisesOSVariant(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `disk_bus` sort axis (5.4.104)
+// ============================================================
+
+func TestListVMs_SortByDiskBus_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Diverges from the nil-trailing convention on `image` / `gpu` because
+	// `disk_bus` has a documented OS-family-aware default — empty stored
+	// values resolve via VMSpec.ResolvedDiskBus (virtio for Linux, sata
+	// for Windows) so they collate with explicit-bus VMs of the same OS
+	// family in alphabetical order (sata < virtio) rather than sinking to
+	// the tail. Same rationale as the `firmware` axis (5.4.101) and the
+	// `os_type` axis (5.4.100).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                                                             // Linux empty → virtio
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})                                // Windows empty → sata
+	mockMgr.SeedVM(&types.VM{ID: "vm-5", Name: "windows-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, DiskBus: types.DiskBusVirtio}}) // 5.6.12 switch-to-virtio
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_bus")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: sata < virtio. sata cohort (vm-2, vm-4) tiebreaks on id; virtio
+	// cohort (vm-1, vm-3, vm-5) tiebreaks on id.
+	want := []string{"linux-sata", "windows-empty", "linux-virtio", "linux-empty", "windows-virtio"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByDiskBusDesc_ResolvesOSFamilyDefault(t *testing.T) {
+	// Desc reverses the entire compare result so virtio VMs head the list,
+	// then sata. The id tiebreak also inverts within each cohort.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                              // Linux empty → virtio
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}}) // Windows empty → sata
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_bus&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-empty", "linux-virtio", "windows-empty", "linux-sata"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByDiskBus_CaseInsensitive(t *testing.T) {
+	// `VIRTIO` and `virtio` must collate as identical so the sort agrees
+	// with the case-insensitive `?disk_bus=` filter contract. ResolvedDiskBus
+	// already lowers + trims the stored value before fallback.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{DiskBus: "VIRTIO"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "sata-stored", Spec: types.VMSpec{DiskBus: "sata"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{DiskBus: "virtio"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_bus&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"sata-stored", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByDiskBus_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=disk_bus")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDiskBus_ComposesWithFilter(t *testing.T) {
+	// `?disk_bus=virtio&sort=disk_bus` narrows to the virtio cohort (which
+	// includes the empty-stored Linux VM via empty-means-OS-family-default)
+	// and then orders within it — every row resolves to virtio, so the
+	// id-tiebreak determines order. Asserts the filter + sort agree on the
+	// OS-family default resolution.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "sata-vm", Spec: types.VMSpec{DiskBus: types.DiskBusSATA}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "virtio-explicit", Spec: types.VMSpec{DiskBus: types.DiskBusVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "virtio-empty-linux", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?disk_bus=virtio&sort=disk_bus")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (virtio-only including empty Linux)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDiskBus_400AdvertisesDiskBus(t *testing.T) {
+	// A nearby misspelling (e.g. `diskbus`) must surface the canonical axis
+	// name in the 400 envelope so operators discover the right key.
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=diskbus")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "disk_bus") {
+		t.Errorf("error message %q should advertise the disk_bus axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

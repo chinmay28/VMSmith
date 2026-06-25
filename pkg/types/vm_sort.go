@@ -24,6 +24,7 @@ const (
 	VMSortOSType      = "os_type"
 	VMSortFirmware    = "firmware"
 	VMSortOSVariant   = "os_variant"
+	VMSortDiskBus     = "disk_bus"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -36,7 +37,7 @@ func IsValidVMSort(s string) bool {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
-		VMSortFirmware, VMSortOSVariant:
+		VMSortFirmware, VMSortOSVariant, VMSortDiskBus:
 		return true
 	}
 	return false
@@ -284,6 +285,33 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajFW := resolveFirmware(aj.Spec.Firmware)
 			if aiFW != ajFW {
 				less = aiFW < ajFW
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortDiskBus:
+			// Case-insensitive compare on the VM's *effective* system-disk
+			// bus via VMSpec.ResolvedDiskBus (5.4.104). Symmetric sort
+			// counterpart to the case-insensitive `?disk_bus=` exact-match
+			// filter on the same column so the same disk-bus cohort can be
+			// both filtered and sorted on the same column. Alphabetical:
+			// sata < virtio. Diverges from the nil-trailing convention on
+			// `ip` / `image` / `gpu` because this column has a documented
+			// default — an empty stored `spec.disk_bus` resolves to the
+			// OS-family default (`virtio` for Linux, `sata` for Windows)
+			// via ResolvedDiskBus so empty VMs collate with explicit-bus
+			// VMs of the same OS family rather than sinking to the tail.
+			// Mirrors the `?disk_bus=` filter contract that already treats
+			// an empty stored bus as the OS-family default. The
+			// closed-and-total classification guarantees every VM resolves
+			// to exactly one of the two values. An explicit `spec.disk_bus`
+			// always wins over the OS-family default, so a Windows guest
+			// flipped to virtio after the operator installs the virtio-blk
+			// drivers in-guest via 5.6.12 collates with the virtio cohort
+			// rather than the sata cohort.
+			aiDB := strings.ToLower(ai.Spec.ResolvedDiskBus())
+			ajDB := strings.ToLower(aj.Spec.ResolvedDiskBus())
+			if aiDB != ajDB {
+				less = aiDB < ajDB
 				break
 			}
 			less = ai.ID < aj.ID
