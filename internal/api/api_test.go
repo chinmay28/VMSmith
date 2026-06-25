@@ -5214,6 +5214,136 @@ func TestListVMs_SortByDiskBus_400AdvertisesDiskBus(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `nic_model` sort axis (5.4.105)
+// ============================================================
+
+func TestListVMs_SortByNICModel_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Diverges from the nil-trailing convention on `image` / `gpu` because
+	// `nic_model` has a documented OS-family-aware default — empty stored
+	// values resolve via VMSpec.ResolvedNICModel (virtio for Linux, e1000e
+	// for Windows). Same rationale as the `disk_bus` axis (5.4.104).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-e1000e", Spec: types.VMSpec{NICModel: types.NICModelE1000e}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                                                               // Linux empty → virtio
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})                                  // Windows empty → e1000e
+	mockMgr.SeedVM(&types.VM{ID: "vm-5", Name: "windows-virtio", Spec: types.VMSpec{OSType: types.OSTypeWindows, NICModel: types.NICModelVirtio}}) // 5.6.12 switch-to-virtio
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nic_model")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-e1000e", "windows-empty", "linux-virtio", "linux-empty", "windows-virtio"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNICModelDesc_ResolvesOSFamilyDefault(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-e1000e", Spec: types.VMSpec{NICModel: types.NICModelE1000e}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                              // Linux empty → virtio
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}}) // Windows empty → e1000e
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nic_model&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-empty", "linux-virtio", "windows-empty", "linux-e1000e"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNICModel_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{NICModel: "VIRTIO"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "e1000e-stored", Spec: types.VMSpec{NICModel: "e1000e"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{NICModel: "virtio"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nic_model&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"e1000e-stored", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNICModel_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nic_model")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNICModel_ComposesWithFilter(t *testing.T) {
+	// `?nic_model=virtio&sort=nic_model` narrows to the virtio cohort (which
+	// includes the empty-stored Linux VM via empty-means-OS-family-default)
+	// and then orders within it.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "e1000e-vm", Spec: types.VMSpec{NICModel: types.NICModelE1000e}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "virtio-explicit", Spec: types.VMSpec{NICModel: types.NICModelVirtio}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "virtio-empty-linux", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nic_model=virtio&sort=nic_model")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (virtio-only including empty Linux)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNICModel_400AdvertisesNICModel(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nicmodel")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "nic_model") {
+		t.Errorf("error message %q should advertise the nic_model axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

@@ -25,6 +25,7 @@ const (
 	VMSortFirmware    = "firmware"
 	VMSortOSVariant   = "os_variant"
 	VMSortDiskBus     = "disk_bus"
+	VMSortNICModel    = "nic_model"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -37,7 +38,7 @@ func IsValidVMSort(s string) bool {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
-		VMSortFirmware, VMSortOSVariant, VMSortDiskBus:
+		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel:
 		return true
 	}
 	return false
@@ -312,6 +313,33 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajDB := strings.ToLower(aj.Spec.ResolvedDiskBus())
 			if aiDB != ajDB {
 				less = aiDB < ajDB
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortNICModel:
+			// Case-insensitive compare on the VM's *effective* NIC model via
+			// VMSpec.ResolvedNICModel (5.4.105). Symmetric sort counterpart to
+			// the case-insensitive `?nic_model=` exact-match filter on the
+			// same column so the same NIC-model cohort can be both filtered
+			// and sorted on the same column. Alphabetical: e1000e < virtio.
+			// Diverges from the nil-trailing convention on `ip` / `image` /
+			// `gpu` because this column has a documented OS-family-aware
+			// default — an empty stored `spec.nic_model` resolves to `virtio`
+			// for Linux guests and `e1000e` for Windows guests (mirrors the
+			// `?nic_model=virtio` empty-defaults-to-OS-family filter contract
+			// and the runtime semantics in `lifecycle.go`) so empty VMs
+			// collate with explicit-model VMs of the same OS family rather
+			// than sinking to the tail. Same OS-family-aware default
+			// rationale as the `disk_bus` axis (5.4.104). An explicit
+			// `spec.nic_model` always wins over the OS-family default, so a
+			// Windows guest flipped to virtio after the operator installs the
+			// virtio-net drivers in-guest via the 5.6.12 switch-to-virtio
+			// helper collates with the virtio cohort rather than the e1000e
+			// cohort.
+			aiNM := strings.ToLower(ai.Spec.ResolvedNICModel())
+			ajNM := strings.ToLower(aj.Spec.ResolvedNICModel())
+			if aiNM != ajNM {
+				less = aiNM < ajNM
 				break
 			}
 			less = ai.ID < aj.ID
