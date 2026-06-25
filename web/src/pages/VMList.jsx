@@ -865,6 +865,7 @@ export default function VMList() {
           <option value="gpu">GPU</option>
           <option value="os_type">OS type</option>
           <option value="firmware">Firmware</option>
+          <option value="os_variant">OS variant</option>
         </select>
         <select
           value={order}

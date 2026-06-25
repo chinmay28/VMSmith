@@ -4934,6 +4934,142 @@ func TestListVMs_SortByFirmware_400AdvertisesFirmware(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `os_variant` sort axis (5.4.103)
+// ============================================================
+
+func TestListVMs_SortByOSVariant_AscEmptyTrailing(t *testing.T) {
+	// Diverges from os_type (5.4.100) and firmware (5.4.101) — `os_variant`
+	// has NO documented default so empty stored values sink to the tail of
+	// asc / head of desc, mirroring the nil-trailing semantics on image /
+	// gpu / ip / actor rather than collapsing to a default.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "ws22", Spec: types.VMSpec{OSVariant: "windows-server-2022"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{OSVariant: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win10", Spec: types.VMSpec{OSVariant: "windows-10"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "win11", Spec: types.VMSpec{OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_variant")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"win10", "win11", "ws22", "linux-empty"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSVariantDesc_EmptyLeading(t *testing.T) {
+	// Desc reverses so empty VMs head the list, then windows-server-2022,
+	// windows-11, windows-10.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "ws22", Spec: types.VMSpec{OSVariant: "windows-server-2022"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-empty", Spec: types.VMSpec{OSVariant: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win10", Spec: types.VMSpec{OSVariant: "windows-10"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "win11", Spec: types.VMSpec{OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_variant&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-empty", "ws22", "win11", "win10"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSVariant_CaseInsensitive(t *testing.T) {
+	// `Windows-11` and `windows-11` must collate as identical so the sort
+	// agrees with the case-insensitive `?os_variant=` filter (5.4.66).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{OSVariant: "WINDOWS-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "win10", Spec: types.VMSpec{OSVariant: "windows-10"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_variant&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"win10", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByOSVariant_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=os_variant")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByOSVariant_ComposesWithFilter(t *testing.T) {
+	// `?os_variant=windows-11&sort=os_variant` narrows to the windows-11
+	// cohort then orders within it. Every row matches the same edition so
+	// the id-tiebreak determines order; asserts the filter and sort agree
+	// on the same column.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "win11-a", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "ws22", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-server-2022"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "win11-b", Spec: types.VMSpec{OSType: types.OSTypeWindows, OSVariant: "windows-11"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?os_variant=windows-11&sort=os_variant")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (windows-11 only)", len(got))
+	}
+	want := []string{"vm-1", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByOSVariant_400AdvertisesOSVariant(t *testing.T) {
+	// A nearby misspelling (e.g. `osvariant`) must surface the canonical axis
+	// name in the 400 envelope so operators discover the right key.
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=osvariant")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "os_variant") {
+		t.Errorf("error message %q should advertise the os_variant axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

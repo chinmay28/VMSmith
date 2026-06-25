@@ -834,3 +834,109 @@ func TestIsValidVMSort_AcceptsFirmware(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.103 — case-insensitive `os_variant` sort axis with nil-trailing semantics.
+
+func TestSortVMs_ByOSVariant_AscEmptyTrailing(t *testing.T) {
+	// Unlike os_type (5.4.100) and firmware (5.4.101), os_variant has no
+	// documented default — Linux VMs and VMs whose operator never specified
+	// an edition genuinely have no value. Empty VMs sink to the tail in
+	// ascending order, mirroring the nil-trailing semantics on image (5.4.88)
+	// / gpu (5.7.13) / ip (5.4.85) / actor (5.4.87) rather than collapsing
+	// to a default like os_type/firmware do.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSVariant: "windows-server-2022"}},
+		{ID: "vm-2", Spec: VMSpec{OSVariant: ""}},
+		{ID: "vm-3", Spec: VMSpec{OSVariant: "windows-10"}},
+		{ID: "vm-4", Spec: VMSpec{OSVariant: "windows-11"}},
+	}
+	SortVMs(vms, VMSortOSVariant, SortOrderAsc)
+	want := []string{"vm-3", "vm-4", "vm-1", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_variant=%q, want %q", i, v.ID, v.Spec.OSVariant, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSVariant_DescEmptyLeading(t *testing.T) {
+	// Desc reverses the entire compare so empty VMs head the list (nil-leading
+	// in desc is the symmetric counterpart to nil-trailing in asc), then
+	// windows-server-2022, windows-11, windows-10.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSVariant: "windows-server-2022"}},
+		{ID: "vm-2", Spec: VMSpec{OSVariant: ""}},
+		{ID: "vm-3", Spec: VMSpec{OSVariant: "windows-10"}},
+		{ID: "vm-4", Spec: VMSpec{OSVariant: "windows-11"}},
+	}
+	SortVMs(vms, VMSortOSVariant, SortOrderDesc)
+	want := []string{"vm-2", "vm-1", "vm-4", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_variant=%q, want %q", i, v.ID, v.Spec.OSVariant, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSVariant_CaseInsensitive(t *testing.T) {
+	// `Windows-11` and `windows-11` must collate identically so the sort
+	// agrees with the case-insensitive `?os_variant=` filter (5.4.66). The
+	// comparator lowercases + trims the stored value before compare.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{OSVariant: "WINDOWS-11"}},
+		{ID: "vm-2", Spec: VMSpec{OSVariant: "windows-10"}},
+		{ID: "vm-3", Spec: VMSpec{OSVariant: "windows-11"}},
+		{ID: "vm-4", Spec: VMSpec{OSVariant: " Windows-10 "}}, // whitespace + uppercase
+	}
+	SortVMs(vms, VMSortOSVariant, SortOrderAsc)
+	// asc: windows-10 < windows-11. Equal-edition cohort tiebreaks on id
+	// ascending so vm-2 ("windows-10") precedes vm-4 (" Windows-10 ").
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q os_variant=%q, want %q", i, v.ID, v.Spec.OSVariant, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSVariant_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{OSVariant: "windows-11"}},
+		{ID: "vm-1", Spec: VMSpec{OSVariant: "windows-11"}},
+		{ID: "vm-2", Spec: VMSpec{OSVariant: "windows-11"}},
+	}
+	SortVMs(vms, VMSortOSVariant, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByOSVariant_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All-empty VMs all fall into the nil bucket so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortOSVariant, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsOSVariant(t *testing.T) {
+	if !IsValidVMSort(VMSortOSVariant) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortOSVariant)
+	}
+	for _, axis := range []string{"OS_VARIANT", "Os_Variant", "osvariant", " os_variant "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
