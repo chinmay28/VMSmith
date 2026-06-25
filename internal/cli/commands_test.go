@@ -2500,6 +2500,84 @@ func TestCLI_VMList_SortByOSVariant_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.104 — case-insensitive `disk_bus` sort axis with OS-family-aware default.
+
+func TestCLI_VMList_SortByDiskBus_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Empty `disk_bus` resolves to the OS-family default via ResolvedDiskBus
+	// (virtio for Linux, sata for Windows) so empty VMs collate with the
+	// explicit-bus cohort of the same family rather than sinking to the
+	// tail — mirrors the firmware (5.4.101) and os_type (5.4.100) documented
+	// default rationale.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: types.DiskBusVirtio, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-sata", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: types.DiskBusSATA, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})                                               // empty Linux → virtio
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows, CPUs: 2, RAMMB: 2048, DiskGB: 32}}) // empty Windows → sata
+
+	out, err := runCLI("vm", "list", "--sort", "disk_bus")
+	if err != nil {
+		t.Fatalf("vm list --sort disk_bus: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	// asc: sata cohort first (vm-2 linux-sata, vm-4 windows-empty), then
+	// virtio (vm-1 linux-virtio, vm-3 linux-empty). Equal-bus cohort
+	// tiebreaks on id ascending.
+	want := []string{"linux-sata", "windows-empty", "linux-virtio", "linux-empty"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDiskBus_CaseInsensitive(t *testing.T) {
+	// `VIRTIO` and `virtio` must collate as identical so the sort agrees
+	// with the case-insensitive `?disk_bus=` filter contract.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: "VIRTIO", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "sata", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: "sata", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{DiskBus: "virtio", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "disk_bus", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort disk_bus: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"sata", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDiskBus_RejectsUnknownAxis(t *testing.T) {
+	// A nearby misspelling must surface a clear error that advertises
+	// `disk_bus` in the whitelist so operators discover the right axis.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "diskbus") // missing underscore
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "disk_bus") {
+		t.Errorf("expected --sort error message to advertise 'disk_bus' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -862,6 +862,28 @@ const server = http.createServer(async (req, res) => {
           };
           const fa = resolve(a), fb = resolve(b);
           l = fa < fb ? -1 : fa > fb ? 1 : 0;
+          break;
+        }
+        case "disk_bus": {
+          // 5.4.104: case-insensitive sort on the VM's *effective* system-disk
+          // bus. Empty stored disk_bus resolves to the OS-family default
+          // (virtio for Linux, sata for Windows) — mirrors the Go
+          // VMSpec.ResolvedDiskBus helper and the `?disk_bus=virtio`
+          // empty-defaults-to-OS-family filter contract. Alphabetical:
+          // sata < virtio. Diverges from the nil-trailing convention
+          // because disk_bus is a closed two-member axis with a documented
+          // OS-family-aware default — mirrors the `firmware` axis (5.4.101)
+          // collapsing empty to "bios" and the `os_type` axis (5.4.100)
+          // collapsing empty to "linux", though the resolved value here
+          // depends on the VM's OS family rather than being a constant.
+          const resolve = (vm) => {
+            const raw = String(vm?.spec?.disk_bus || "").trim().toLowerCase();
+            if (raw !== "") return raw;
+            const os = String(vm?.spec?.os_type || "").trim().toLowerCase();
+            return os === "windows" ? "sata" : "virtio";
+          };
+          const da = resolve(a), db = resolve(b);
+          l = da < db ? -1 : da > db ? 1 : 0;
           break;
         }
         case "gpu": {

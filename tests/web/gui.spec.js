@@ -1420,6 +1420,40 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.104 — case-insensitive `disk_bus` sort axis with OS-family-aware default.
+  test("disk_bus sort axis reorders the VM list and resolves empty to the OS-family default", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed disk_bus: web-server (vm-1, linux, disk_bus="") resolves to
+    // virtio via the OS-family default, db-server (vm-2, linux, disk_bus="")
+    // also resolves to virtio, win-app (vm-3, windows, disk_bus="")
+    // resolves to sata via the Windows OS-family default. Asc orders
+    // alphabetically: sata < virtio, so the sata cohort heads the list
+    // (only win-app), then the virtio cohort (id tiebreak: vm-1 web-server
+    // before vm-2 db-server). Validates the OS-family-aware empty-means-
+    // default divergence from the nil-trailing convention on every other
+    // nullable sort axis — same rationale as the `firmware` axis (5.4.101)
+    // collapsing empty to "bios" and the `os_type` axis (5.4.100)
+    // collapsing empty to "linux", but the resolved value here depends
+    // on the VM's OS family.
+    await page.getByTestId("vm-list-sort-field").selectOption("disk_bus");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=disk_bus");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips everything including the id tiebreak inside the
+    // virtio cohort — db-server (vm-2) leads vm-1 web-server in the virtio
+    // bucket, then win-app (sata) trails.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

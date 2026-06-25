@@ -940,3 +940,123 @@ func TestIsValidVMSort_AcceptsOSVariant(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.104 — case-insensitive `disk_bus` sort axis with OS-family-aware default.
+
+func TestSortVMs_ByDiskBus_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Empty `disk_bus` resolves to the OS-family default via ResolvedDiskBus —
+	// `virtio` for Linux, `sata` for Windows. The empty Linux VM collates
+	// with explicit-virtio Linux VMs and the empty Windows VM collates with
+	// explicit-sata Windows VMs in alphabetical order rather than sinking
+	// to the tail. Diverges from the nil-trailing image-sort contract
+	// because `disk_bus` has a documented OS-family-aware default — same
+	// rationale as the `firmware` axis (5.4.101) collapsing empty to "bios"
+	// and the `os_type` axis (5.4.100) collapsing empty to "linux".
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DiskBus: DiskBusVirtio}},
+		{ID: "vm-2", Spec: VMSpec{DiskBus: DiskBusSATA}},
+		{ID: "vm-3", Spec: VMSpec{}},                                       // Linux empty → virtio
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},                  // Windows empty → sata
+		{ID: "vm-5", Spec: VMSpec{OSType: OSTypeWindows, DiskBus: "sata"}}, // explicit sata
+	}
+	SortVMs(vms, VMSortDiskBus, SortOrderAsc)
+	// asc: sata < virtio. The sata cohort (vm-2, vm-4, vm-5) tiebreaks on
+	// id ascending; the virtio cohort (vm-1, vm-3) tiebreaks on id.
+	want := []string{"vm-2", "vm-4", "vm-5", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q disk_bus=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.DiskBus, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDiskBus_DescResolvesOSFamilyDefault(t *testing.T) {
+	// Desc reverses the entire compare result so virtio VMs head the list,
+	// then sata. The id tiebreak also inverts so within the virtio cohort
+	// vm-3 (empty Linux → virtio) leads vm-1; within the sata cohort vm-5
+	// leads vm-4 leads vm-2.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DiskBus: DiskBusVirtio}},
+		{ID: "vm-2", Spec: VMSpec{DiskBus: DiskBusSATA}},
+		{ID: "vm-3", Spec: VMSpec{}},                                       // Linux empty → virtio
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},                  // Windows empty → sata
+		{ID: "vm-5", Spec: VMSpec{OSType: OSTypeWindows, DiskBus: "sata"}}, // explicit sata
+	}
+	SortVMs(vms, VMSortDiskBus, SortOrderDesc)
+	want := []string{"vm-3", "vm-1", "vm-5", "vm-4", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q disk_bus=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.DiskBus, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDiskBus_CaseInsensitive(t *testing.T) {
+	// `VIRTIO` and `virtio` must collate as identical so the sort agrees
+	// with the case-insensitive `?disk_bus=` filter contract. ResolvedDiskBus
+	// already lowers + trims the stored value before fallback, and the sort
+	// comparator lowers the result again to guarantee an identical compare.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{DiskBus: "VIRTIO"}},
+		{ID: "vm-2", Spec: VMSpec{DiskBus: "sata"}},
+		{ID: "vm-3", Spec: VMSpec{DiskBus: "virtio"}},
+		{ID: "vm-4", Spec: VMSpec{DiskBus: " SATA "}}, // whitespace + uppercase
+	}
+	SortVMs(vms, VMSortDiskBus, SortOrderAsc)
+	// asc: sata < virtio. Equal-bus cohort tiebreaks on id ascending so
+	// vm-2 precedes vm-4 in the sata bucket and vm-1 precedes vm-3 in the
+	// virtio bucket.
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q disk_bus=%q, want %q", i, v.ID, v.Spec.DiskBus, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDiskBus_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{DiskBus: DiskBusVirtio}},
+		{ID: "vm-1", Spec: VMSpec{DiskBus: DiskBusVirtio}},
+		{ID: "vm-2", Spec: VMSpec{DiskBus: DiskBusVirtio}},
+	}
+	SortVMs(vms, VMSortDiskBus, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDiskBus_AllEmptyLinux_TiebreaksOnID(t *testing.T) {
+	// All-empty Linux VMs all resolve to "virtio" so they tiebreak on id.
+	// Mirrors TestSortVMs_ByFirmware_AllEmpty_TiebreaksOnID for the
+	// OS-family-default flavor: the OS family is also empty (Linux is the
+	// default) so every VM resolves identically.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortDiskBus, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsDiskBus(t *testing.T) {
+	if !IsValidVMSort(VMSortDiskBus) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortDiskBus)
+	}
+	for _, axis := range []string{"DISK_BUS", "Disk_Bus", "diskbus", " disk_bus "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

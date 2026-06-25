@@ -3558,11 +3558,31 @@ components:
         rather than collapsing to a default. Alphabetical Windows
         edition ordering: `windows-10` < `windows-11` <
         `windows-server-2019` < `windows-server-2022` <
-        `windows-server-2025`. All comparators tiebreak on `id` so
-        pagination is deterministic across backends.
+        `windows-server-2025`. `disk_bus` (5.4.104) is a case-insensitive
+        sort on the VM's *effective* system-disk bus via
+        `VMSpec.ResolvedDiskBus`, the symmetric sort counterpart to the
+        case-insensitive `?disk_bus=` exact-match filter so the same
+        disk-bus cohort can be both filtered and sorted on the same
+        column. Alphabetical: `sata` < `virtio`. Diverges from the
+        nil-trailing convention because disk_bus has a documented
+        OS-family-aware default — an empty stored `spec.disk_bus`
+        resolves to `virtio` for Linux guests and `sata` for Windows
+        guests (mirrors the `?disk_bus=virtio` empty-defaults-to-
+        OS-family filter contract and the runtime semantics in
+        `lifecycle.go`) so empty VMs collate with explicit-bus VMs of
+        the same OS family rather than sinking to the tail. Same
+        documented-default rationale as the `firmware` axis (5.4.101)
+        and the `os_type` axis (5.4.100), though the resolved value
+        here depends on the VM's OS family rather than being a
+        constant. An explicit `spec.disk_bus` always wins over the
+        OS-family default, so a Windows guest flipped to virtio after
+        the operator installs the virtio-blk drivers in-guest via
+        5.6.12 collates with the virtio cohort. All comparators
+        tiebreak on `id` so pagination is deterministic across
+        backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus]
         default: id
     ImageSort:
       name: sort
