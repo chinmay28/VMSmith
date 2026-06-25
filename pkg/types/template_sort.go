@@ -16,6 +16,7 @@ const (
 	TemplateSortDiskGB      = "disk_gb"
 	TemplateSortImage       = "image"
 	TemplateSortDefaultUser = "default_user"
+	TemplateSortOSType      = "os_type"
 )
 
 // IsValidTemplateSort reports whether s is an accepted template list sort
@@ -24,7 +25,7 @@ func IsValidTemplateSort(s string) bool {
 	switch s {
 	case TemplateSortID, TemplateSortName, TemplateSortCreatedAt,
 		TemplateSortCPUs, TemplateSortRAMMB, TemplateSortDiskGB,
-		TemplateSortImage, TemplateSortDefaultUser:
+		TemplateSortImage, TemplateSortDefaultUser, TemplateSortOSType:
 		return true
 	}
 	return false
@@ -102,6 +103,28 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 			default:
 				less = ai.ID < aj.ID
 			}
+		case TemplateSortOSType:
+			// Case-insensitive compare on the template's *effective* OS
+			// family via VMTemplate.ResolvedOSType (5.4.102). Symmetric
+			// sort counterpart to the case-insensitive `?os_type=`
+			// exact-match filter on the same column so the same OS-family
+			// cohort can be both filtered and sorted on the same column.
+			// Diverges from the nil-trailing convention on `image` /
+			// `default_user` because this column has a documented default:
+			// an empty stored `OSType` resolves to `linux` via
+			// VMTemplate.ResolvedOSType (mirrors VMSpec.ResolvedOSType and
+			// the `?os_type=linux` empty-means-linux filter contract) so
+			// empty templates collate with explicit-linux templates rather
+			// than sinking to the tail. The closed-and-total classification
+			// guarantees every template resolves to exactly one of `linux`
+			// < `windows`, mirroring the VM list `os_type` axis (5.4.100).
+			aiOS := strings.ToLower(string(ai.ResolvedOSType()))
+			ajOS := strings.ToLower(string(aj.ResolvedOSType()))
+			if aiOS != ajOS {
+				less = aiOS < ajOS
+				break
+			}
+			less = ai.ID < aj.ID
 		case TemplateSortImage:
 			// Case-insensitive compare mirrors the case-insensitive
 			// `?image=` exact-match filter contract so the filter and sort

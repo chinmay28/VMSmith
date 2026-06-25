@@ -3588,12 +3588,22 @@ components:
         cloud-init's `cloud-user` / `ec2-user` / `ubuntu`), not root.
         So templates with an empty `default_user` sort to the tail of
         `asc` / head of `desc`, mirroring the nil-trailing semantics
-        on the template `image` axis (5.4.89). All comparators
-        tiebreak on `id` so paginated requests return the same set
-        across two independent fetches.
+        on the template `image` axis (5.4.89). `os_type` (5.4.102) is
+        the symmetric sort counterpart to the case-insensitive
+        `?os_type=` exact-match filter — case-insensitive alphabetical
+        compare on the two-member enum (`linux` < `windows`). Diverges
+        from the nil-trailing convention on `image` / `default_user`
+        because this column has a documented default: an empty stored
+        `os_type` resolves to `linux` via `VMTemplate.ResolvedOSType`
+        (mirrors `VMSpec.ResolvedOSType` and the `?os_type=linux`
+        empty-means-linux filter contract) so empty templates collate
+        with explicit-linux templates rather than sinking to the tail.
+        Same documented-default rationale as the VM list `os_type`
+        axis (5.4.100). All comparators tiebreak on `id` so paginated
+        requests return the same set across two independent fetches.
       schema:
         type: string
-        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user]
+        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type]
         default: id
     SortOrder:
       name: order

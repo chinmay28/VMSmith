@@ -3344,6 +3344,33 @@ test.describe("Templates", () => {
     await expect(rows.last()).toHaveAttribute("data-testid", "template-row-big-rocky");
   });
 
+  // 5.4.102 — case-insensitive `os_type` sort axis on the template list, the
+  // symmetric sort counterpart to the existing `?os_type=` filter. Diverges
+  // from the nil-trailing convention: empty stored os_type resolves to `linux`
+  // via VMTemplate.ResolvedOSType so empty templates collate with explicit-
+  // linux templates rather than sinking to the tail.
+  test("os_type sort axis reorders the template list and resolves empty to linux", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+
+    // Seed: small-ubuntu (linux empty), big-rocky (linux empty),
+    // windows-2022 (windows), windows-11-desktop (windows). Asc os_type:
+    // linux cohort heads (small-ubuntu < big-rocky by id tpl-1 < tpl-2),
+    // then windows cohort (windows-2022 < windows-11-desktop by id tpl-3 < tpl-4).
+    await page.getByTestId("template-list-sort-field").selectOption("os_type");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=os_type");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-windows-11-desktop");
+
+    // Descending flips the cohorts: windows heads, then linux at the tail.
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-windows-11-desktop");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
+  });
+
   test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();
