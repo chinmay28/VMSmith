@@ -13936,6 +13936,118 @@ func TestListTemplates_RejectsInvalidOrder(t *testing.T) {
 	assertAPIErrorCode(t, resp, "invalid_order")
 }
 
+// 5.4.102 — `os_type` sort axis on the template list. Symmetric sort
+// counterpart to the case-insensitive `?os_type=` exact-match filter on
+// the same column. Diverges from the nil-trailing convention because an
+// empty stored os_type resolves to `linux` (mirrors VMTemplate.ResolvedOSType
+// and the `?os_type=linux` empty-means-linux filter contract).
+
+func TestListTemplates_SortByOSType_AscEmptyResolvesToLinux(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2"})                  // empty → linux
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", OSType: "linux"}) // explicit linux
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_type")
+	got := decodeTemplateList(t, resp)
+	// linux < windows; empty (→linux) and explicit linux interleave by id tiebreak.
+	want := []string{"a", "b", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSType_DescEmptyResolvesToLinux(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", OSType: "linux"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_type&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Desc: windows heads, then linux pair reversed by id tiebreak.
+	want := []string{"c", "b", "a"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSType_CaseInsensitive(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", OSType: "WINDOWS"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", OSType: "windows"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", OSType: "Linux"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_type")
+	got := decodeTemplateList(t, resp)
+	// linux < windows; the two windows entries (regardless of case) tiebreak on id.
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSType_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_type")
+	got := decodeTemplateList(t, resp)
+	want := []string{"a", "b", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSType_ComposesWithFilter(t *testing.T) {
+	// `?os_type=windows&sort=os_type` narrows to the windows cohort, then
+	// orders within it. The empty-→linux template should NOT appear.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2"}) // empty → linux
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", OSType: types.OSTypeWindows})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_type=windows&sort=os_type")
+	got := decodeTemplateList(t, resp)
+	want := []string{"b", "c"} // empty-→linux template filtered out
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (full: %+v)", len(got), len(want), got)
+	}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSType_400AdvertisesOSType(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=bogus")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "os_type") {
+		t.Errorf("400 message %q must advertise os_type in the supported set", string(body))
+	}
+}
+
 func TestListTemplates_FilterBySearch_MatchesName(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()

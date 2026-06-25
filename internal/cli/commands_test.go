@@ -7129,6 +7129,70 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "default_user") {
 		t.Errorf("error = %v, want it to mention `default_user`", err)
 	}
+	if !strings.Contains(err.Error(), "os_type") {
+		t.Errorf("error = %v, want it to mention `os_type`", err)
+	}
+}
+
+// 5.4.102 — case-insensitive `os_type` sort axis on the template list.
+// Diverges from the nil-trailing convention: empty stored os_type resolves
+// to `linux` via VMTemplate.ResolvedOSType, so empty templates collate
+// with explicit-linux templates rather than sinking to the tail.
+
+func TestCLI_TemplateList_SortByOSType_AscEmptyResolvesToLinux(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "win-app", Image: "win.qcow2", OSType: types.OSTypeWindows}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "empty-tpl", Image: "rocky9.qcow2"}); err != nil { // empty → linux
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "linux-tpl", Image: "rocky9.qcow2", OSType: "linux"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "os_type")
+	if err != nil {
+		t.Fatalf("template list --sort os_type: %v", err)
+	}
+	rows := tableRows(t, out)
+	// linux < windows; empty (→linux) and explicit linux interleave by id tiebreak.
+	want := []string{"empty-tpl", "linux-tpl", "win-app"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByOSType_CaseInsensitive(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "WinUpper", Image: "win.qcow2", OSType: "WINDOWS"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "winLower", Image: "win.qcow2", OSType: "windows"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "lin", Image: "rocky9.qcow2", OSType: "Linux"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "os_type")
+	if err != nil {
+		t.Fatalf("template list --sort os_type: %v", err)
+	}
+	rows := tableRows(t, out)
+	// linux < windows; the two windows entries (regardless of case) tiebreak on id.
+	want := []string{"lin", "winLower", "WinUpper"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
 }
 
 func TestCLI_TemplateList_SortByImage_AscEmptyTrailing(t *testing.T) {

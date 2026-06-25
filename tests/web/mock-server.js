@@ -1891,9 +1891,9 @@ const server = http.createServer(async (req, res) => {
     }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
-    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image", "default_user"];
+    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image", "default_user", "os_type"];
     if (!allowedSort.includes(sort)) {
-      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user", code: "invalid_sort" });
+      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type", code: "invalid_sort" });
     }
     if (order !== "asc" && order !== "desc") {
       return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
@@ -1931,6 +1931,21 @@ const server = http.createServer(async (req, res) => {
           cmp = -1;
         } else if (ai !== bi) {
           cmp = ai < bi ? -1 : 1;
+        } else {
+          cmp = String(a.id).localeCompare(String(b.id));
+        }
+      } else if (sort === "os_type") {
+        // 5.4.102: case-insensitive `os_type` sort axis on the template
+        // list. Mirrors the API's empty-resolves-to-linux contract via
+        // VMTemplate.ResolvedOSType — empty stored os_type collapses to
+        // "linux" so empty templates collate with explicit-linux ones
+        // rather than sinking to the tail. The closed-and-total
+        // classification (linux < windows) means no nil-trailing branch
+        // is needed.
+        const aOS = String(a.os_type || "").trim().toLowerCase() === "windows" ? "windows" : "linux";
+        const bOS = String(b.os_type || "").trim().toLowerCase() === "windows" ? "windows" : "linux";
+        if (aOS !== bOS) {
+          cmp = aOS < bOS ? -1 : 1;
         } else {
           cmp = String(a.id).localeCompare(String(b.id));
         }
