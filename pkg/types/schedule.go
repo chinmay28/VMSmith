@@ -10,10 +10,10 @@ import (
 type ScheduleAction string
 
 const (
-	ScheduleActionSnapshot ScheduleAction = "snapshot"
-	ScheduleActionStart    ScheduleAction = "start"
-	ScheduleActionStop     ScheduleAction = "stop"
-	ScheduleActionRestart  ScheduleAction = "restart"
+	ScheduleActionSnapshot  ScheduleAction = "snapshot"
+	ScheduleActionStart     ScheduleAction = "start"
+	ScheduleActionStop      ScheduleAction = "stop"
+	ScheduleActionRestart   ScheduleAction = "restart"
 	ScheduleActionForceStop ScheduleAction = "force-stop"
 	ScheduleActionReboot    ScheduleAction = "reboot"
 	ScheduleActionSuspend   ScheduleAction = "suspend"
