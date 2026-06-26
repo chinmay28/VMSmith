@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked", "nat_static_ip"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked", "nat_static_ip", "nat_gateway"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip, nat_gateway" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -986,6 +986,24 @@ const server = http.createServer(async (req, res) => {
           else if (na === null) l = 1;
           else if (nb === null) l = -1;
           else l = na < nb ? -1 : na > nb ? 1 : 0;
+          break;
+        }
+        case "nat_gateway": {
+          // 5.4.111: numeric IP sort on spec.nat_gateway (a bare IP,
+          // no CIDR dual-form like nat_static_ip). Symmetric sort
+          // counterpart to the `?nat_gateway=` filter (5.4.80) so the
+          // same gateway cohort can be both filtered and sorted on
+          // the same column. Reuses ipKey() so the canonical 16-byte
+          // To16() comparison gives numeric ordering
+          // (192.168.100.2 before 192.168.100.10). VMs with an empty
+          // or unparseable nat_gateway sink to the tail of asc / head
+          // of desc, mirroring the Go SortVMs nil-trailing contract.
+          const ga = ipKey(String(a?.spec?.nat_gateway || "").trim());
+          const gb = ipKey(String(b?.spec?.nat_gateway || "").trim());
+          if (ga === null && gb === null) l = 0;
+          else if (ga === null) l = 1;
+          else if (gb === null) l = -1;
+          else l = ga < gb ? -1 : ga > gb ? 1 : 0;
           break;
         }
         case "gpu": {

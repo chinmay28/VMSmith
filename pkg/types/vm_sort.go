@@ -31,6 +31,7 @@ const (
 	VMSortAutoStart   = "auto_start"
 	VMSortLocked      = "locked"
 	VMSortNatStaticIP = "nat_static_ip"
+	VMSortNatGateway  = "nat_gateway"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -45,7 +46,7 @@ func IsValidVMSort(s string) bool {
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
 		VMSortMachine, VMSortClockOffset, VMSortAutoStart,
-		VMSortLocked, VMSortNatStaticIP:
+		VMSortLocked, VMSortNatStaticIP, VMSortNatGateway:
 		return true
 	}
 	return false
@@ -489,6 +490,32 @@ func SortVMs(vms []*VM, sortField, order string) {
 			// unlike the documented-default boolean axes `auto_start`
 			// / `locked` that have no nil-trailing bucket.
 			cmp := compareVMIP(natStaticIPSortKey(ai.Spec.NatStaticIP), natStaticIPSortKey(aj.Spec.NatStaticIP))
+			if cmp != 0 {
+				less = cmp < 0
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortNatGateway:
+			// Numeric IP compare on `spec.nat_gateway` (the configured
+			// NAT gateway, stored as a bare IP — no CIDR dual-form
+			// like nat_static_ip). Symmetric sort counterpart to the
+			// `?nat_gateway=` exact-match filter (5.4.80) so the same
+			// gateway cohort can be both filtered and sorted on the
+			// same column. Compared byte-wise on the canonical
+			// 16-byte To16() form via compareVMIP so `192.168.100.2`
+			// sorts before `192.168.100.10` instead of
+			// lexicographically — same numeric IP comparator as the
+			// `ip` (5.4.85) and `nat_static_ip` (5.4.110) sort axes.
+			// VMs with an empty or unparseable `nat_gateway` (no
+			// explicit gateway override) sink to the tail of asc /
+			// head of desc, mirroring the nil-trailing semantics on
+			// the `ip` / `nat_static_ip` sort axes and the
+			// empty-stored-excludes contract on the `?nat_gateway=`
+			// filter — same nil-trailing rationale as the nullable
+			// string axes `ip` / `image` / `gpu` / `actor`, unlike
+			// the closed-and-total boolean axes `auto_start` /
+			// `locked` that have no nil-trailing bucket.
+			cmp := compareVMIP(ai.Spec.NatGateway, aj.Spec.NatGateway)
 			if cmp != 0 {
 				less = cmp < 0
 				break

@@ -1421,6 +1421,33 @@ test.describe("VM List", () => {
   });
 
   // 5.4.106 — case-insensitive `clock_offset` sort axis with OS-family-aware default.
+  // 5.4.111 — numeric IP `nat_gateway` sort axis (bare IP, nil-trailing).
+  test("nat_gateway sort axis reorders the VM list numerically and sinks VMs with no gateway to the tail", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed pins web-server (vm-1) to nat_gateway 192.168.100.1 and
+    // leaves db-server (vm-2) and win-app (vm-3) with no explicit
+    // gateway override. Asc numeric: 192.168.100.1 heads the list,
+    // then the no-gateway cohort sinks to the tail with id-tiebreak
+    // ascending (vm-2 db-server before vm-3 win-app).
+    await page.getByTestId("vm-list-sort-field").selectOption("nat_gateway");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=nat_gateway");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+
+    // Desc: no-gateway cohort heads the list (nil-leading on desc)
+    // with inverted id-tiebreak (win-app before db-server), and the
+    // configured cohort (web-server) trails.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+  });
+
   // 5.4.110 — numeric IP `nat_static_ip` sort axis (CIDR-aware, nil-trailing).
   test("nat_static_ip sort axis reorders the VM list numerically and sinks DHCP VMs to the tail", async ({ page }) => {
     await page.goto(BASE_URL);

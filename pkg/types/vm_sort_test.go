@@ -1658,3 +1658,86 @@ func TestIsValidVMSort_AcceptsNatStaticIP(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.111 — numeric IP `nat_gateway` sort axis (bare IP, nil-trailing).
+
+func TestSortVMs_ByNatGateway_AscNumeric(t *testing.T) {
+	// Gateway is stored as a bare IP — no CIDR suffix to strip,
+	// unlike nat_static_ip. Numeric compare on the canonical
+	// 16-byte To16() form so 192.168.100.2 sorts before
+	// 192.168.100.10 instead of lexicographically. The empty
+	// cohort sinks to the tail in asc.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NatGateway: "192.168.100.10"}},
+		{ID: "vm-2", Spec: VMSpec{NatGateway: "192.168.100.2"}},
+		{ID: "vm-3", Spec: VMSpec{}}, // no explicit gateway, sinks to tail
+		{ID: "vm-4", Spec: VMSpec{NatGateway: "10.0.0.1"}},
+	}
+	SortVMs(vms, VMSortNatGateway, SortOrderAsc)
+	want := []string{"vm-4", "vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nat_gateway=%q, want %q",
+				i, v.ID, v.Spec.NatGateway, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatGateway_DescNumeric(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NatGateway: "192.168.100.10"}},
+		{ID: "vm-2", Spec: VMSpec{NatGateway: "192.168.100.2"}},
+		{ID: "vm-3", Spec: VMSpec{}},
+		{ID: "vm-4", Spec: VMSpec{NatGateway: "10.0.0.1"}},
+	}
+	SortVMs(vms, VMSortNatGateway, SortOrderDesc)
+	// desc inverts: empty heads the list, then numeric descending.
+	want := []string{"vm-3", "vm-1", "vm-2", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nat_gateway=%q, want %q",
+				i, v.ID, v.Spec.NatGateway, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatGateway_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{NatGateway: "192.168.100.1"}},
+		{ID: "vm-1", Spec: VMSpec{NatGateway: "192.168.100.1"}},
+		{ID: "vm-2", Spec: VMSpec{NatGateway: "192.168.100.1"}},
+	}
+	SortVMs(vms, VMSortNatGateway, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatGateway_AllEmpty_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortNatGateway, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsNatGateway(t *testing.T) {
+	if !IsValidVMSort(VMSortNatGateway) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortNatGateway)
+	}
+	for _, axis := range []string{"NAT_GATEWAY", "Nat_Gateway", "natgateway", " nat_gateway "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

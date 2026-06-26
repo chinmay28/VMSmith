@@ -5929,6 +5929,112 @@ func TestListVMs_SortByNatStaticIP_400AdvertisesNatStaticIP(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `nat_gateway` sort axis (5.4.111)
+// ============================================================
+
+func TestListVMs_SortByNatGateway_AscNumeric(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "high", Spec: types.VMSpec{NatGateway: "192.168.100.10"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "low-private", Spec: types.VMSpec{NatGateway: "192.168.100.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "no-gw", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "ten-net", Spec: types.VMSpec{NatGateway: "10.0.0.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_gateway")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc numeric: 10.0.0.1 < 192.168.100.2 < 192.168.100.10 < (empty).
+	want := []string{"ten-net", "low-private", "high", "no-gw"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNatGatewayDesc_NumericNilLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "high", Spec: types.VMSpec{NatGateway: "192.168.100.10"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "low", Spec: types.VMSpec{NatGateway: "192.168.100.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "no-gw", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_gateway&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// desc: empty heads, then numeric descending.
+	want := []string{"no-gw", "high", "low"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNatGateway_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_gateway")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNatGateway_ComposesWithFilter(t *testing.T) {
+	// `?nat_gateway=192.168.100.1&sort=nat_gateway` narrows to the
+	// configured cohort and orders within it on id.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "no-gw", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "alpha", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "bravo", Spec: types.VMSpec{NatGateway: "192.168.100.1"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_gateway=192.168.100.1&sort=nat_gateway")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (configured-cohort only)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNatGateway_400AdvertisesNatGateway(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=natgateway")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "nat_gateway") {
+		t.Errorf("error message %q should advertise the nat_gateway axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
