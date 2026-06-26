@@ -31,10 +31,10 @@ type actionFunc func(ctx context.Context, mgr vm.Manager, sched *types.Schedule,
 // defaultActions returns the v1 action registry.
 func defaultActions() map[types.ScheduleAction]actionFunc {
 	return map[types.ScheduleAction]actionFunc{
-		types.ScheduleActionSnapshot: snapshotAction,
-		types.ScheduleActionStart:    startAction,
-		types.ScheduleActionStop:     stopAction,
-		types.ScheduleActionRestart:  restartAction,
+		types.ScheduleActionSnapshot:  snapshotAction,
+		types.ScheduleActionStart:     startAction,
+		types.ScheduleActionStop:      stopAction,
+		types.ScheduleActionRestart:   restartAction,
 		types.ScheduleActionForceStop: forceStopAction,
 		types.ScheduleActionReboot:    rebootAction,
 		types.ScheduleActionSuspend:   suspendAction,

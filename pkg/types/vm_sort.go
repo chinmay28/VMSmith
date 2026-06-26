@@ -27,6 +27,7 @@ const (
 	VMSortDiskBus     = "disk_bus"
 	VMSortNICModel    = "nic_model"
 	VMSortMachine     = "machine"
+	VMSortClockOffset = "clock_offset"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -40,7 +41,7 @@ func IsValidVMSort(s string) bool {
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
-		VMSortMachine:
+		VMSortMachine, VMSortClockOffset:
 		return true
 	}
 	return false
@@ -370,6 +371,36 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajM := aj.Spec.ResolvedMachine()
 			if aiM != ajM {
 				less = aiM < ajM
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortClockOffset:
+			// Case-insensitive compare on the VM's *effective* clock offset
+			// via VMSpec.ResolvedClockOffset (5.4.106). Symmetric sort
+			// counterpart to the case-insensitive `?clock_offset=` exact-match
+			// filter on the same column so the same clock-offset cohort can be
+			// both filtered and sorted on the same column. Alphabetical:
+			// localtime < utc. Diverges from the nil-trailing convention on
+			// `ip` / `image` / `gpu` because this column has a documented
+			// OS-family-aware default — an empty stored `spec.clock_offset`
+			// resolves to the OS-family default (`utc` for Linux, `localtime`
+			// for Windows) via ResolvedClockOffset so empty VMs collate with
+			// explicit-offset VMs of the same OS family rather than sinking
+			// to the tail. Mirrors the `?clock_offset=` filter contract that
+			// already treats an empty stored offset as the OS-family default.
+			// Same documented-default rationale as the `disk_bus` axis
+			// (5.4.104) and the `nic_model` axis (5.4.105), though the
+			// resolved value depends on the VM's OS family rather than being
+			// a constant — the closed-and-total classification (`utc` /
+			// `localtime`) guarantees every VM resolves to exactly one of
+			// the two values. An explicit `spec.clock_offset` always wins
+			// over the OS-family default, so a Windows guest pinned to utc
+			// for an NTP-synced fleet collates with the utc cohort rather
+			// than the localtime cohort.
+			aiCO := strings.ToLower(ai.Spec.ResolvedClockOffset())
+			ajCO := strings.ToLower(aj.Spec.ResolvedClockOffset())
+			if aiCO != ajCO {
+				less = aiCO < ajCO
 				break
 			}
 			less = ai.ID < aj.ID

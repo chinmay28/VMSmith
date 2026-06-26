@@ -12,11 +12,11 @@ import (
 func TestLifecycleScheduleActions(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
-		name       string
-		seedState  types.VMState
-		action     func(context.Context, vm.Manager, *types.Schedule, string, time.Time) error
-		wantState  types.VMState
-		wantSkip   types.ScheduleRunSkipReason
+		name      string
+		seedState types.VMState
+		action    func(context.Context, vm.Manager, *types.Schedule, string, time.Time) error
+		wantState types.VMState
+		wantSkip  types.ScheduleRunSkipReason
 	}{
 		{name: "force-stop running vm", seedState: types.VMStateRunning, action: forceStopAction, wantState: types.VMStateStopped},
 		{name: "force-stop stopped vm skips", seedState: types.VMStateStopped, action: forceStopAction, wantSkip: types.ScheduleRunSkipReasonVMAlreadyStopped},

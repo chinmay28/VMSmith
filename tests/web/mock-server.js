@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -926,6 +926,21 @@ const server = http.createServer(async (req, res) => {
           };
           const ma = resolve(a), mb = resolve(b);
           l = ma < mb ? -1 : ma > mb ? 1 : 0;
+          break;
+        }
+        case "clock_offset": {
+          // 5.4.106: case-insensitive sort on the VM's *effective* clock
+          // offset. Empty stored clock_offset resolves to the OS-family
+          // default (utc for Linux, localtime for Windows). Alphabetical:
+          // localtime < utc.
+          const resolve = (vm) => {
+            const raw = String(vm?.spec?.clock_offset || "").trim().toLowerCase();
+            if (raw !== "") return raw;
+            const os = String(vm?.spec?.os_type || "").trim().toLowerCase();
+            return os === "windows" ? "localtime" : "utc";
+          };
+          const ca = resolve(a), cb = resolve(b);
+          l = ca < cb ? -1 : ca > cb ? 1 : 0;
           break;
         }
         case "gpu": {

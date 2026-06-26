@@ -1275,3 +1275,105 @@ func TestIsValidVMSort_AcceptsMachine(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.106 — case-insensitive `clock_offset` sort axis with OS-family-aware default.
+
+func TestSortVMs_ByClockOffset_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Empty `clock_offset` resolves to the OS-family default via
+	// ResolvedClockOffset — `utc` for Linux, `localtime` for Windows. The
+	// empty Linux VM collates with explicit-utc Linux VMs and the empty
+	// Windows VM collates with explicit-localtime Windows VMs in
+	// alphabetical order rather than sinking to the tail. Diverges from
+	// the nil-trailing image-sort contract because `clock_offset` has a
+	// documented OS-family-aware default — same rationale as the
+	// `disk_bus` axis (5.4.104) and the `nic_model` axis (5.4.105).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{ClockOffset: ClockOffsetUTC}},
+		{ID: "vm-2", Spec: VMSpec{ClockOffset: ClockOffsetLocaltime}},
+		{ID: "vm-3", Spec: VMSpec{}},                                                   // Linux empty → utc
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},                              // Windows empty → localtime
+		{ID: "vm-5", Spec: VMSpec{OSType: OSTypeWindows, ClockOffset: ClockOffsetUTC}}, // Windows pinned to utc (NTP-synced fleet)
+	}
+	SortVMs(vms, VMSortClockOffset, SortOrderAsc)
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3", "vm-5"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q clock_offset=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.ClockOffset, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByClockOffset_DescResolvesOSFamilyDefault(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{ClockOffset: ClockOffsetUTC}},
+		{ID: "vm-2", Spec: VMSpec{ClockOffset: ClockOffsetLocaltime}},
+		{ID: "vm-3", Spec: VMSpec{}},                      // Linux empty → utc
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}}, // Windows empty → localtime
+	}
+	SortVMs(vms, VMSortClockOffset, SortOrderDesc)
+	want := []string{"vm-3", "vm-1", "vm-4", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q clock_offset=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.ClockOffset, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByClockOffset_CaseInsensitive(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{ClockOffset: "UTC"}},
+		{ID: "vm-2", Spec: VMSpec{ClockOffset: "localtime"}},
+		{ID: "vm-3", Spec: VMSpec{ClockOffset: "utc"}},
+		{ID: "vm-4", Spec: VMSpec{ClockOffset: " LOCALTIME "}},
+	}
+	SortVMs(vms, VMSortClockOffset, SortOrderAsc)
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q clock_offset=%q, want %q", i, v.ID, v.Spec.ClockOffset, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByClockOffset_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{ClockOffset: ClockOffsetUTC}},
+		{ID: "vm-1", Spec: VMSpec{ClockOffset: ClockOffsetUTC}},
+		{ID: "vm-2", Spec: VMSpec{ClockOffset: ClockOffsetUTC}},
+	}
+	SortVMs(vms, VMSortClockOffset, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByClockOffset_AllEmptyLinux_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortClockOffset, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsClockOffset(t *testing.T) {
+	if !IsValidVMSort(VMSortClockOffset) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortClockOffset)
+	}
+	for _, axis := range []string{"CLOCK_OFFSET", "Clock_Offset", "clockoffset", " clock_offset "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
