@@ -303,6 +303,80 @@ func TestProxyConsole_RejectsInsecureWebsocketWhenTLSConfigured(t *testing.T) {
 	}
 }
 
+func TestProxyConsole_BulkStopClosesActiveSession(t *testing.T) {
+	ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	bus := events.New(&testEventStore{})
+	bus.Start()
+	defer bus.Stop()
+	apiServer.SetEventBus(bus)
+	ch, cancel := bus.Subscribe("console-bulk-close-test")
+	defer cancel()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+		}
+	}()
+
+	ticket, _, err := store.IssueTicket("vm-running", "")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console?ticket="+ticket)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	conn, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+	backend := <-accepted
+	defer backend.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/bulk", "application/json", strings.NewReader(`{"action":"stop","ids":["vm-running"]}`))
+	if err != nil {
+		t.Fatalf("bulk stop: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	readDeadline := time.Now().Add(2 * time.Second)
+	if err := conn.SetReadDeadline(readDeadline); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, _, err = conn.ReadMessage()
+	if err == nil {
+		t.Fatal("websocket stayed open after bulk stop")
+	}
+
+	events := drainEvents(t, ch, 2)
+	for _, evt := range events {
+		if evt.Type != "console.session_terminated" {
+			continue
+		}
+		if evt.VMID != "vm-running" {
+			t.Fatalf("event VMID = %q, want vm-running", evt.VMID)
+		}
+		if evt.Attributes["reason"] != "vm_stopped" {
+			t.Fatalf("reason = %q, want vm_stopped", evt.Attributes["reason"])
+		}
+		return
+	}
+	t.Fatalf("missing console.session_terminated event: %+v", events)
+}
+
 func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
