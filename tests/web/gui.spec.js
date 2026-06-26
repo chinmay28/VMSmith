@@ -1421,6 +1421,38 @@ test.describe("VM List", () => {
   });
 
   // 5.4.106 — case-insensitive `clock_offset` sort axis with OS-family-aware default.
+  // 5.4.109 — boolean `locked` sort axis with closed-and-total classification.
+  test("locked sort axis reorders the VM list by the closed boolean classification", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Flip locked=true on db-server (vm-2) so the delete-protection
+    // axis has a meaningful cohort to slice — vm-2 alone in the locked
+    // bucket; web-server (vm-1) and win-app (vm-3) stay unlocked. Asc
+    // collation is false < true, so the unlocked cohort heads the list
+    // (id tiebreak: vm-1 web-server before vm-3 win-app) and db-server
+    // trails. Closed-and-total boolean has no nil-trailing bucket —
+    // mirrors the `auto_start` axis (5.4.108) and the `state` axis on
+    // the closed running/stopped/paused enum.
+    await page.request.patch(`${BASE_URL}/api/v1/vms/vm-2`, { data: { locked: true } });
+
+    await page.getByTestId("vm-list-sort-field").selectOption("locked");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=locked");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips the cohort order so the locked cohort heads
+    // the list (vm-2 db-server) and the unlocked cohort follows with
+    // an inverted id tiebreak (vm-3 win-app before vm-1 web-server).
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+  });
+
   // 5.4.108 — boolean `auto_start` sort axis with closed-and-total classification.
   test("auto_start sort axis reorders the VM list by the closed boolean classification", async ({ page }) => {
     await page.goto(BASE_URL);
