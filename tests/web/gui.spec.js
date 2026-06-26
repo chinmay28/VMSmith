@@ -4786,6 +4786,41 @@ test.describe("Schedules", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBeNull();
     await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBeNull();
   });
+
+  // --- 5.4.112: timezone sort axis on the schedule list ---
+  // Seed data: sch-1 timezone="UTC", sch-2 timezone="America/New_York",
+  // sch-3 timezone="UTC". asc: America/New_York < UTC alphabetical, then
+  // sch-1 before sch-3 by id tiebreak among matched UTC entries.
+  test("timezone sort axis reorders the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    // asc: America/New_York (sch-2) → UTC (sch-1, sch-3 by id tiebreak)
+    await page.getByTestId("schedule-list-sort-field").selectOption("timezone");
+    await page.getByTestId("schedule-list-sort-order").selectOption("asc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-2", "schedule-row-sch-1", "schedule-row-sch-3"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("timezone");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // desc: UTC entries head the list (sch-3 then sch-1 by id desc tiebreak),
+    // America/New_York (sch-2) sinks last.
+    await page.getByTestId("schedule-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-3", "schedule-row-sch-1", "schedule-row-sch-2"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("desc");
+
+    // Reset to default — sort param drops from the URL, default id-asc returns.
+    await page.getByTestId("schedule-list-sort-field").selectOption("");
+    await page.getByTestId("schedule-list-sort-order").selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBeNull();
+  });
 });
 
 test.describe("Navigation", () => {

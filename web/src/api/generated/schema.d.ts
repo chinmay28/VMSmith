@@ -3412,7 +3412,7 @@ export interface paths {
                      *     — there is no empty bucket to sink. All comparators tiebreak
                      *     on `id` so repeated requests return a deterministic order.
                      */
-                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action";
+                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action" | "timezone";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**

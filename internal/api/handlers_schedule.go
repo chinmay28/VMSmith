@@ -208,7 +208,7 @@ func (s *Server) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		sortField = types.ScheduleSortID
 	}
 	if !types.IsValidScheduleSort(sortField) {
-		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_sort", "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action, timezone")
 		return
 	}
 	order := strings.ToLower(strings.TrimSpace(q.Get("order")))

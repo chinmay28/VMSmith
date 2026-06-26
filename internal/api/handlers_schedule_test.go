@@ -1157,6 +1157,100 @@ func TestListSchedules_SortByAction_400InvalidSortAdvertisesAction(t *testing.T)
 	}
 }
 
+// TestListSchedules_SortByTimezone covers the 5.4.112 timezone sort axis on
+// the schedule list — the symmetric sort counterpart to the existing
+// case-sensitive ?timezone= exact-match filter on the same column. Mirrors
+// the vm_id axis (5.4.97) nil-trailing semantics — schedules with an
+// empty timezone (the daemon's effective default is the host-dependent
+// time.Local) sink to the tail in asc / head in desc.
+func TestListSchedules_SortByTimezone(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id, tz string) {
+		t.Helper()
+		if err := s.PutSchedule(&types.Schedule{
+			ID: id, Name: id, VMID: "vm-1", Action: types.ScheduleActionSnapshot,
+			CronSpec: "0 0 2 * * *", Enabled: true, Timezone: tz,
+		}); err != nil {
+			t.Fatalf("put schedule: %v", err)
+		}
+	}
+	mk("sched-utc", "UTC")
+	mk("sched-empty", "")
+	mk("sched-la", "America/Los_Angeles")
+	mk("sched-london", "Europe/London")
+
+	list := func(q string) ([]*types.Schedule, int, int, string) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		_ = json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode, string(data)
+	}
+
+	ids := func(items []*types.Schedule) []string {
+		out := make([]string, 0, len(items))
+		for _, x := range items {
+			out = append(out, x.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// sort=timezone,asc: case-sensitive alphabetical IANA ordering;
+	// empty trailing.
+	if items, _, code, body := list("?sort=timezone&order=asc"); code != http.StatusOK || !eq(ids(items), []string{"sched-la", "sched-london", "sched-utc", "sched-empty"}) {
+		t.Fatalf("timezone asc: code=%d ids=%v body=%s", code, ids(items), body)
+	}
+
+	// sort=timezone,desc: empty leads, then reverse IANA order.
+	if items, _, _, _ := list("?sort=timezone&order=desc"); !eq(ids(items), []string{"sched-empty", "sched-utc", "sched-london", "sched-la"}) {
+		t.Fatalf("timezone desc: %v", ids(items))
+	}
+
+	// Whitespace + case-folding on the sort param itself (the stored
+	// timezone is still compared case-sensitively per the IANA contract).
+	if items, _, _, _ := list("?sort=%20TIMEZONE%20&order=asc"); !eq(ids(items), []string{"sched-la", "sched-london", "sched-utc", "sched-empty"}) {
+		t.Fatalf("timezone whitespace+upper sort param: %v", ids(items))
+	}
+
+	// Composes with the ?timezone= filter: filter narrows to one zone,
+	// sort is essentially a no-op but the request must still succeed.
+	mk("sched-utc-2", "UTC")
+	if items, total, _, _ := list("?sort=timezone&order=asc&timezone=UTC"); total != 2 || !eq(ids(items), []string{"sched-utc", "sched-utc-2"}) {
+		t.Fatalf("timezone asc + ?timezone= filter: %v total=%d", ids(items), total)
+	}
+}
+
+// TestListSchedules_SortByTimezone_400InvalidSortAdvertisesTimezone asserts
+// the 400 envelope mentions timezone so operators discover the new axis
+// (5.4.112) from the daemon's error text — mirrors the equivalent check on
+// the vm_id / action sort axes.
+func TestListSchedules_SortByTimezone_400InvalidSortAdvertisesTimezone(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=garbage", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	if !bytes.Contains(data, []byte("timezone")) {
+		t.Fatalf("invalid_sort envelope must mention timezone: %s", data)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))
