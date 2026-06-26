@@ -339,3 +339,101 @@ func TestSortSchedules_ByAction_TiebreaksOnID(t *testing.T) {
 		t.Fatalf("action id-tiebreak: got %v, want %v", got, want)
 	}
 }
+
+// TestIsValidScheduleSort_AcceptsTimezone covers the 5.4.112 timezone sort
+// axis — the symmetric sort counterpart to the case-sensitive `?timezone=`
+// exact-match filter on the same column.
+func TestIsValidScheduleSort_AcceptsTimezone(t *testing.T) {
+	if !IsValidScheduleSort(ScheduleSortTimezone) {
+		t.Fatal("timezone must be an accepted sort key")
+	}
+	if !IsValidScheduleSort("timezone") {
+		t.Fatal("literal 'timezone' must be accepted")
+	}
+}
+
+// TestSortSchedules_ByTimezone_AscCaseSensitive asserts alphabetical IANA
+// ordering with case-sensitive compare. IANA zone names are case-sensitive
+// (`America/New_York`, not `america/new_york`) so the comparator preserves
+// stored casing — `America/Los_Angeles` collates before `Europe/London`
+// before `UTC`, exactly the same order operators see when paging through
+// `tzdata`.
+func TestSortSchedules_ByTimezone_AscCaseSensitive(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-3", Timezone: "UTC"},
+		{ID: "sched-1", Timezone: "America/Los_Angeles"},
+		{ID: "sched-2", Timezone: "Europe/London"},
+	}
+	SortSchedules(items, ScheduleSortTimezone, SortOrderAsc)
+	want := []string{"sched-1", "sched-2", "sched-3"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("timezone asc case-sensitive: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByTimezone_EmptyTrailsInAsc asserts schedules with an
+// empty timezone (the daemon's effective default `time.Local`) sink to the
+// tail in ascending order, mirroring the nil-trailing semantics on the
+// vm_id axis (5.4.97) and every other nullable string axis (ip, image, gpu,
+// actor, last_fired_at).
+func TestSortSchedules_ByTimezone_EmptyTrailsInAsc(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-a", Timezone: ""},
+		{ID: "sched-b", Timezone: "UTC"},
+		{ID: "sched-c", Timezone: "Asia/Tokyo"},
+	}
+	SortSchedules(items, ScheduleSortTimezone, SortOrderAsc)
+	want := []string{"sched-c", "sched-b", "sched-a"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("timezone asc empty-trailing: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByTimezone_EmptyLeadsInDesc asserts schedules with an
+// empty timezone head the list in desc — the descending flip of the
+// nil-trailing contract above.
+func TestSortSchedules_ByTimezone_EmptyLeadsInDesc(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-a", Timezone: "UTC"},
+		{ID: "sched-b", Timezone: ""},
+		{ID: "sched-c", Timezone: "Asia/Tokyo"},
+	}
+	SortSchedules(items, ScheduleSortTimezone, SortOrderDesc)
+	want := []string{"sched-b", "sched-a", "sched-c"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("timezone desc empty-leading: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByTimezone_TiebreaksOnID covers schedules sharing the
+// same timezone tiebreak deterministically on id (common case: every
+// nightly-backup schedule pinned to UTC).
+func TestSortSchedules_ByTimezone_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", Timezone: "UTC"},
+		{ID: "sched-a", Timezone: "UTC"},
+		{ID: "sched-m", Timezone: "UTC"},
+	}
+	SortSchedules(items, ScheduleSortTimezone, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("timezone id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByTimezone_AllEmpty_TiebreaksOnID asserts the tiebreak
+// path when every schedule has an empty timezone (operator hasn't pinned
+// any zone). All schedules collapse to the same nil-trailing bucket and
+// collate purely on the id tiebreak.
+func TestSortSchedules_ByTimezone_AllEmpty_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", Timezone: ""},
+		{ID: "sched-a", Timezone: ""},
+		{ID: "sched-m", Timezone: ""},
+	}
+	SortSchedules(items, ScheduleSortTimezone, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("timezone all-empty id-tiebreak: got %v, want %v", got, want)
+	}
+}

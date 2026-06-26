@@ -247,6 +247,38 @@ func TestCLI_ScheduleList_InvalidSortAdvertisesAction(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsTimezoneSort covers the 5.4.112 timezone
+// sort axis on the schedule list — whitespace + case normalisation on the
+// `--sort` value (the daemon validates the stored timezone case-sensitively
+// per IANA, but the sort *param* itself is lowercased before forwarding).
+func TestCLI_ScheduleList_ForwardsTimezoneSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--sort", "  TIMEZONE  ", "--order", "desc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=timezone") {
+		t.Fatalf("query missing sort=timezone: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_InvalidSortAdvertisesTimezone asserts the
+// client-side rejection lists timezone in the error envelope so operators
+// discover the new 5.4.112 axis from the error path.
+func TestCLI_ScheduleList_InvalidSortAdvertisesTimezone(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "timezone") {
+		t.Fatalf("invalid --sort message should advertise timezone, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--until", "garbage"); err == nil {

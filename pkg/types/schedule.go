@@ -60,12 +60,13 @@ const (
 	ScheduleSortLastFiredAt = "last_fired_at"
 	ScheduleSortVMID        = "vm_id"
 	ScheduleSortAction      = "action"
+	ScheduleSortTimezone    = "timezone"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction, ScheduleSortTimezone:
 		return true
 	default:
 		return false
@@ -173,6 +174,33 @@ func SortSchedules(items []*Schedule, field, order string) {
 			}
 		case ScheduleSortAction:
 			cmp = strings.Compare(strings.ToLower(string(a.Action)), strings.ToLower(string(b.Action)))
+		case ScheduleSortTimezone:
+			// Case-sensitive compare on `schedule.timezone` (5.4.112).
+			// Symmetric sort counterpart to the case-sensitive `?timezone=`
+			// exact-match filter on the same column. IANA timezone names
+			// are case-sensitive (`America/New_York`, not
+			// `america/new_york`) so the comparator preserves the operator's
+			// stored casing, mirroring the filter contract. Schedules with
+			// an empty `timezone` (the daemon's effective default is the
+			// host-dependent `time.Local`, so an empty stored value means
+			// "operator did not pin a zone") sink to the tail of asc / head
+			// of desc, mirroring the nil-trailing semantics on the
+			// `vm_id` axis (5.4.97) and every other nullable string axis
+			// (ip, image, gpu, actor, last_fired_at, next_fire_at) rather
+			// than collapsing to a default like the documented-default
+			// boolean axes (auto_start / locked) — there is no documented
+			// default for timezone because the runtime default is
+			// host-dependent.
+			switch {
+			case a.Timezone == "" && b.Timezone == "":
+				cmp = 0
+			case a.Timezone == "":
+				cmp = 1
+			case b.Timezone == "":
+				cmp = -1
+			default:
+				cmp = strings.Compare(a.Timezone, b.Timezone)
+			}
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}

@@ -2443,7 +2443,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [id, name, created_at, next_fire_at, last_fired_at, vm_id, action]
+            enum: [id, name, created_at, next_fire_at, last_fired_at, vm_id, action, timezone]
             default: id
           description: |
             Field to sort by. `name` matches case-insensitively;
@@ -2469,8 +2469,19 @@ paths:
             to exactly one of the four values at create time), so the
             `action` branch diverges from the nil-trailing convention the
             same way the webhook `delivery_status` sort axis (5.4.98) does
-            — there is no empty bucket to sink. All comparators tiebreak
-            on `id` so repeated requests return a deterministic order.
+            — there is no empty bucket to sink. `timezone` (5.4.112) is
+            the symmetric sort counterpart to the existing case-sensitive
+            `?timezone=` exact-match filter on the same column —
+            case-sensitive compare (IANA timezone names are case-sensitive:
+            `America/New_York`, not `america/new_york`); schedules with an
+            empty `timezone` (the daemon's effective default is the
+            host-dependent `time.Local`, so an empty stored value means
+            "operator did not pin a zone") sink to the tail in `asc` /
+            head in `desc`, mirroring the `vm_id` axis nil-trailing
+            semantics and every other nullable string axis (ip, image,
+            gpu, actor, last_fired_at, next_fire_at). All comparators
+            tiebreak on `id` so repeated requests return a deterministic
+            order.
         - in: query
           name: order
           required: false

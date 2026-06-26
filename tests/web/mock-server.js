@@ -2933,13 +2933,13 @@ const server = http.createServer(async (req, res) => {
       else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
       else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
     }
-    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id", "action"]);
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id", "action", "timezone"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action, timezone" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -3123,6 +3123,28 @@ const server = http.createServer(async (req, res) => {
           const av = String(a.action || "").toLowerCase();
           const bv = String(b.action || "").toLowerCase();
           if (av < bv) cmp = -1;
+          else if (av > bv) cmp = 1;
+          else cmp = 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "timezone": {
+          // 5.4.112: case-sensitive compare on schedule.timezone
+          // (IANA timezone names are case-sensitive). Empty zones
+          // sink to the tail of asc / head of desc, mirroring the
+          // vm_id axis nil-trailing semantics. The daemon's effective
+          // default is host-dependent time.Local, so an empty stored
+          // value means "operator did not pin a zone" — no documented
+          // default, unlike the auto_start / locked closed-and-total
+          // boolean axes.
+          const av = String(a.timezone || "");
+          const bv = String(b.timezone || "");
+          const aEmpty = av === "";
+          const bEmpty = bv === "";
+          if (aEmpty && bEmpty) cmp = 0;
+          else if (aEmpty) cmp = 1;
+          else if (bEmpty) cmp = -1;
+          else if (av < bv) cmp = -1;
           else if (av > bv) cmp = 1;
           else cmp = 0;
           if (cmp === 0) cmp = cmpID;
