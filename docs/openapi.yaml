@@ -3665,11 +3665,29 @@ components:
         no nil-trailing bucket — same rationale as the
         `auto_start` axis (5.4.108) and the `state` axis on the
         closed running/stopped/paused enum.
+        `nat_static_ip` (5.4.110) is a numeric IP sort axis on
+        the IP portion of `spec.nat_static_ip` (the configured
+        static NAT address — stored as CIDR `192.168.100.10/24`
+        but the sort key strips the suffix so the comparator sees
+        a bare address). The symmetric sort counterpart to the
+        `?nat_static_ip=` exact-match filter (5.4.79) which
+        accepts the filter as either the full CIDR or just the
+        IP portion. Compared byte-wise on the canonical 16-byte
+        `To16()` form via `compareVMIP` so `192.168.100.2` sorts
+        before `192.168.100.10` instead of lexicographically.
+        VMs with an empty or unparseable `nat_static_ip`
+        (DHCP-assigned) sink to the tail of `asc` and the head of
+        `desc`, mirroring the nil-trailing semantics on the
+        `ip` sort axis and the empty-stored-excludes contract on
+        the `?nat_static_ip=` filter — same nil-trailing rationale
+        as the nullable string axes `ip` / `image` / `gpu` /
+        `actor`, unlike the closed-and-total boolean axes
+        `auto_start` / `locked` that have no nil-trailing bucket.
         All comparators tiebreak on `id` so pagination is deterministic
         across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip]
         default: id
     ImageSort:
       name: sort

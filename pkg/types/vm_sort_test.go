@@ -1550,3 +1550,111 @@ func TestIsValidVMSort_AcceptsLocked(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.110 — numeric IP `nat_static_ip` sort axis (CIDR-aware, nil-trailing).
+
+func TestSortVMs_ByNatStaticIP_AscNumeric(t *testing.T) {
+	// Stored value is CIDR; the sort key strips the suffix so
+	// net.ParseIP can lift the bare address. Numeric compare on the
+	// canonical 16-byte To16() form so 192.168.100.2 sorts before
+	// 192.168.100.10 instead of lexicographically. The empty cohort
+	// sinks to the tail in asc, mirroring the `ip` sort axis and
+	// every other nullable axis.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NatStaticIP: "192.168.100.10/24"}},
+		{ID: "vm-2", Spec: VMSpec{NatStaticIP: "192.168.100.2/24"}},
+		{ID: "vm-3", Spec: VMSpec{}}, // DHCP — empty, sinks to tail
+		{ID: "vm-4", Spec: VMSpec{NatStaticIP: "10.0.0.5/8"}},
+	}
+	SortVMs(vms, VMSortNatStaticIP, SortOrderAsc)
+	// asc numeric: 10.0.0.5 < 192.168.100.2 < 192.168.100.10 < (empty)
+	want := []string{"vm-4", "vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nat_static_ip=%q, want %q",
+				i, v.ID, v.Spec.NatStaticIP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatStaticIP_DescNumeric(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NatStaticIP: "192.168.100.10/24"}},
+		{ID: "vm-2", Spec: VMSpec{NatStaticIP: "192.168.100.2/24"}},
+		{ID: "vm-3", Spec: VMSpec{}},
+		{ID: "vm-4", Spec: VMSpec{NatStaticIP: "10.0.0.5/8"}},
+	}
+	SortVMs(vms, VMSortNatStaticIP, SortOrderDesc)
+	// desc inverts: empty heads the list, then numeric descending.
+	want := []string{"vm-3", "vm-1", "vm-2", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nat_static_ip=%q, want %q",
+				i, v.ID, v.Spec.NatStaticIP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatStaticIP_AcceptsBareIP(t *testing.T) {
+	// The sort key strips the `/CIDR` suffix when present but
+	// also accepts a bare address operators may have stored
+	// directly. Mirrors the `?nat_static_ip=` filter contract
+	// (5.4.79) which matches either form.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NatStaticIP: "192.168.100.10"}},     // bare IP
+		{ID: "vm-2", Spec: VMSpec{NatStaticIP: "192.168.100.2/24"}},   // CIDR
+		{ID: "vm-3", Spec: VMSpec{NatStaticIP: "192.168.100.100/24"}}, // CIDR
+	}
+	SortVMs(vms, VMSortNatStaticIP, SortOrderAsc)
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nat_static_ip=%q, want %q",
+				i, v.ID, v.Spec.NatStaticIP, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatStaticIP_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{NatStaticIP: "192.168.100.10/24"}},
+		{ID: "vm-1", Spec: VMSpec{NatStaticIP: "192.168.100.10/24"}},
+		{ID: "vm-2", Spec: VMSpec{NatStaticIP: "192.168.100.10/24"}},
+	}
+	SortVMs(vms, VMSortNatStaticIP, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNatStaticIP_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All-empty cohort tiebreaks on id and stays head-of-list
+	// in asc (the nil-trailing rule only matters when a non-empty
+	// peer exists in the same sort).
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortNatStaticIP, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsNatStaticIP(t *testing.T) {
+	if !IsValidVMSort(VMSortNatStaticIP) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortNatStaticIP)
+	}
+	for _, axis := range []string{"NAT_STATIC_IP", "Nat_Static_IP", "natstaticip", " nat_static_ip "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

@@ -30,6 +30,7 @@ const (
 	VMSortClockOffset = "clock_offset"
 	VMSortAutoStart   = "auto_start"
 	VMSortLocked      = "locked"
+	VMSortNatStaticIP = "nat_static_ip"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -44,10 +45,24 @@ func IsValidVMSort(s string) bool {
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
 		VMSortMachine, VMSortClockOffset, VMSortAutoStart,
-		VMSortLocked:
+		VMSortLocked, VMSortNatStaticIP:
 		return true
 	}
 	return false
+}
+
+// natStaticIPSortKey strips the optional CIDR suffix from a stored
+// `spec.nat_static_ip` so the numeric IP comparator (compareVMIP) sees a
+// bare address. Matches the matching contract on the `?nat_static_ip=`
+// filter (5.4.79) which accepts the filter as either the full CIDR OR
+// just the IP portion — so the sort uses the IP portion as the sort key
+// to keep filter and sort in agreement on the same column.
+func natStaticIPSortKey(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, "/"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // resolveFirmware collapses an empty stored `spec.firmware` to "bios" (the
@@ -449,6 +464,33 @@ func SortVMs(vms []*VM, sortField, order string) {
 			// / `gpu` that sink empty stored values to the tail.
 			if ai.Spec.Locked != aj.Spec.Locked {
 				less = !ai.Spec.Locked && aj.Spec.Locked
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortNatStaticIP:
+			// Numeric IP compare on the IP portion of `spec.nat_static_ip`.
+			// The symmetric sort counterpart to the `?nat_static_ip=`
+			// exact-match filter (5.4.79) so the same configured-static
+			// cohort can be both filtered and sorted on the same column.
+			// The stored value is a CIDR (e.g. `192.168.100.10/24`) but
+			// natStaticIPSortKey strips the suffix so the comparator
+			// sees a bare address that net.ParseIP can lift — mirrors
+			// the `?nat_static_ip=` filter contract which accepts the
+			// filter as either the full CIDR OR just the IP portion.
+			// Compared byte-wise on the canonical 16-byte To16() form
+			// via compareVMIP so `192.168.100.2` sorts before
+			// `192.168.100.10` instead of lexicographically. VMs with
+			// an empty or unparseable `nat_static_ip` (DHCP-assigned)
+			// sink to the tail of asc / head of desc, mirroring the
+			// nil-trailing semantics on the `ip` sort axis and the
+			// empty-stored-excludes contract on the `?nat_static_ip=`
+			// filter. Same nil-trailing rationale as the nullable
+			// string axes `ip` / `image` / `guest_ip` / `actor`,
+			// unlike the documented-default boolean axes `auto_start`
+			// / `locked` that have no nil-trailing bucket.
+			cmp := compareVMIP(natStaticIPSortKey(ai.Spec.NatStaticIP), natStaticIPSortKey(aj.Spec.NatStaticIP))
+			if cmp != 0 {
+				less = cmp < 0
 				break
 			}
 			less = ai.ID < aj.ID

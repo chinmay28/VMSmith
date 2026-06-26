@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked", "nat_static_ip"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -962,6 +962,30 @@ const server = http.createServer(async (req, res) => {
           const la = Boolean(a?.spec?.locked);
           const lb = Boolean(b?.spec?.locked);
           l = la === lb ? 0 : (la ? 1 : -1);
+          break;
+        }
+        case "nat_static_ip": {
+          // 5.4.110: numeric IP sort on the IP portion of
+          // spec.nat_static_ip. The stored value is a CIDR
+          // ("192.168.100.10/24") but the sort key is the bare
+          // address — mirrors the `?nat_static_ip=` filter (5.4.79)
+          // which accepts either form. Reuses ipKey() so the
+          // canonical 16-byte To16() comparison gives numeric
+          // ordering (192.168.100.2 before 192.168.100.10). VMs
+          // with an empty or unparseable nat_static_ip sink to the
+          // tail of asc / head of desc, mirroring the Go SortVMs
+          // nil-trailing contract on every other nullable IP axis.
+          const stripCIDR = (s) => {
+            const v = String(s || "").trim();
+            const i = v.indexOf("/");
+            return i >= 0 ? v.slice(0, i) : v;
+          };
+          const na = ipKey(stripCIDR(a?.spec?.nat_static_ip));
+          const nb = ipKey(stripCIDR(b?.spec?.nat_static_ip));
+          if (na === null && nb === null) l = 0;
+          else if (na === null) l = 1;
+          else if (nb === null) l = -1;
+          else l = na < nb ? -1 : na > nb ? 1 : 0;
           break;
         }
         case "gpu": {

@@ -2920,6 +2920,73 @@ func TestCLI_VMList_SortByLocked_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.110 — numeric IP `nat_static_ip` sort axis (CIDR-aware, nil-trailing).
+
+func TestCLI_VMList_SortByNatStaticIP_AscNumeric(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "high", State: types.VMStateRunning, Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "low", State: types.VMStateRunning, Spec: types.VMSpec{NatStaticIP: "192.168.100.2/24", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "dhcp", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "nat_static_ip")
+	if err != nil {
+		t.Fatalf("vm list --sort nat_static_ip: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// asc numeric: 192.168.100.2 < 192.168.100.10 < (empty)
+	want := []string{"low", "high", "dhcp"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByNatStaticIP_DescNilLeading(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "high", State: types.VMStateRunning, Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "low", State: types.VMStateRunning, Spec: types.VMSpec{NatStaticIP: "192.168.100.2/24", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "dhcp", State: types.VMStateRunning, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "nat_static_ip", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list --sort nat_static_ip --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// desc: empty heads, then numeric descending.
+	want := []string{"dhcp", "high", "low"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByNatStaticIP_RejectsUnknownAxis(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "natstaticip") // missing underscores
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "nat_static_ip") {
+		t.Errorf("expected --sort error message to advertise 'nat_static_ip' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

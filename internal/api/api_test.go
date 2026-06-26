@@ -5821,6 +5821,114 @@ func TestListVMs_SortByLocked_400AdvertisesLocked(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `nat_static_ip` sort axis (5.4.110)
+// ============================================================
+
+func TestListVMs_SortByNatStaticIP_AscNumeric(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "high", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "low-private", Spec: types.VMSpec{NatStaticIP: "192.168.100.2/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "dhcp", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "ten-net", Spec: types.VMSpec{NatStaticIP: "10.0.0.5/8"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_static_ip")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc numeric: 10.0.0.5 < 192.168.100.2 < 192.168.100.10 < (empty).
+	want := []string{"ten-net", "low-private", "high", "dhcp"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNatStaticIPDesc_NumericNilLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "high", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "low", Spec: types.VMSpec{NatStaticIP: "192.168.100.2/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "dhcp", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_static_ip&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// desc: empty heads, then numeric descending.
+	want := []string{"dhcp", "high", "low"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByNatStaticIP_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=nat_static_ip")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNatStaticIP_ComposesWithFilter(t *testing.T) {
+	// `?nat_static_ip=192.168.100.10&sort=nat_static_ip` narrows to
+	// the configured cohort using just the IP portion (mirrors the
+	// filter contract that accepts either CIDR or bare IP) and
+	// orders within it on id.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "dhcp", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "alpha", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "bravo", Spec: types.VMSpec{NatStaticIP: "192.168.100.10/24"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?nat_static_ip=192.168.100.10&sort=nat_static_ip")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (configured-cohort only)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByNatStaticIP_400AdvertisesNatStaticIP(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=natstaticip")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "nat_static_ip") {
+		t.Errorf("error message %q should advertise the nat_static_ip axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
