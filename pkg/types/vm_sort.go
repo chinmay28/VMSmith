@@ -29,6 +29,7 @@ const (
 	VMSortMachine     = "machine"
 	VMSortClockOffset = "clock_offset"
 	VMSortAutoStart   = "auto_start"
+	VMSortLocked      = "locked"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -42,7 +43,8 @@ func IsValidVMSort(s string) bool {
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
-		VMSortMachine, VMSortClockOffset, VMSortAutoStart:
+		VMSortMachine, VMSortClockOffset, VMSortAutoStart,
+		VMSortLocked:
 		return true
 	}
 	return false
@@ -424,6 +426,29 @@ func SortVMs(vms []*VM, sortField, order string) {
 			// the tail when empty.
 			if ai.Spec.AutoStart != aj.Spec.AutoStart {
 				less = !ai.Spec.AutoStart && aj.Spec.AutoStart
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortLocked:
+			// Boolean compare on `spec.locked` (delete-protection).
+			// The symmetric sort counterpart to the tristate
+			// `?locked=true|false` exact-match filter on the same
+			// column so the same delete-protection cohort can be both
+			// filtered and sorted on the same column. Asc collation:
+			// false < true — unlocked cohort heads the list, the
+			// locked cohort (operators routinely audit before a fleet
+			// rebuild) sinks to the tail; desc surfaces the locked
+			// cohort first, the natural ordering for safety review.
+			// Closed-and-total: `VMSpec.Locked` is `json:"locked"`
+			// without `omitempty` so a missing wire key resolves to
+			// the zero value (false) and every VM belongs to exactly
+			// one of the two buckets. Same rationale as the
+			// `auto_start` axis (5.4.108) and the `state` axis on the
+			// closed running/stopped/paused enum — no nil-trailing
+			// bucket, unlike the nullable string axes `ip` / `image`
+			// / `gpu` that sink empty stored values to the tail.
+			if ai.Spec.Locked != aj.Spec.Locked {
+				less = !ai.Spec.Locked && aj.Spec.Locked
 				break
 			}
 			less = ai.ID < aj.ID

@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -951,6 +951,17 @@ const server = http.createServer(async (req, res) => {
           const aa = Boolean(a?.spec?.auto_start);
           const ab = Boolean(b?.spec?.auto_start);
           l = aa === ab ? 0 : (aa ? 1 : -1);
+          break;
+        }
+        case "locked": {
+          // 5.4.109: boolean sort on `spec.locked` (delete-protection).
+          // Asc: false < true — unlocked cohort heads the list; desc
+          // surfaces the locked cohort first for safety-review triage.
+          // Closed-and-total — every VM resolves to exactly one of
+          // the two values, so there is no nil-trailing bucket.
+          const la = Boolean(a?.spec?.locked);
+          const lb = Boolean(b?.spec?.locked);
+          l = la === lb ? 0 : (la ? 1 : -1);
           break;
         }
         case "gpu": {

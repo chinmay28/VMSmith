@@ -1464,3 +1464,89 @@ func TestIsValidVMSort_AcceptsAutoStart(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.109 — boolean `locked` sort axis with closed-and-total classification.
+
+func TestSortVMs_ByLocked_AscPutsFalseFirst(t *testing.T) {
+	// Asc collation: false < true. Unlocked cohort (vm-2, vm-3) tiebreaks
+	// on id; locked cohort (vm-1, vm-4) tiebreaks on id. Mirrors the
+	// `auto_start` axis (5.4.108) — closed-and-total boolean, no
+	// nil-trailing bucket.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Locked: true}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{Locked: false}},
+		{ID: "vm-4", Spec: VMSpec{Locked: true}},
+	}
+	SortVMs(vms, VMSortLocked, SortOrderAsc)
+	want := []string{"vm-2", "vm-3", "vm-1", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q locked=%v, want %q",
+				i, v.ID, v.Spec.Locked, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByLocked_DescPutsTrueFirst(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Locked: true}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{Locked: true}},
+		{ID: "vm-4", Spec: VMSpec{Locked: false}},
+	}
+	SortVMs(vms, VMSortLocked, SortOrderDesc)
+	// Desc reverses the entire compare result including the id
+	// tiebreak — locked cohort (vm-1, vm-3) leads with vm-3 first,
+	// then unlocked (vm-2, vm-4) with vm-4 first.
+	want := []string{"vm-3", "vm-1", "vm-4", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q locked=%v, want %q",
+				i, v.ID, v.Spec.Locked, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByLocked_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{Locked: true}},
+		{ID: "vm-1", Spec: VMSpec{Locked: true}},
+		{ID: "vm-2", Spec: VMSpec{Locked: true}},
+	}
+	SortVMs(vms, VMSortLocked, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByLocked_AllFalse_TiebreaksOnID(t *testing.T) {
+	// Empty / zero-value cohort collapses to false — closed boolean
+	// has no nil-trailing bucket.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortLocked, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsLocked(t *testing.T) {
+	if !IsValidVMSort(VMSortLocked) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortLocked)
+	}
+	for _, axis := range []string{"LOCKED", "Locked", "lock", " locked "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

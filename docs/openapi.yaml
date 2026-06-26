@@ -3648,11 +3648,28 @@ components:
         nil-trailing bucket, mirroring the `state` enum sort
         rationale rather than the nullable string axes `ip` /
         `image` / `gpu` that sink empty stored values to the tail.
+        `locked` (5.4.109) is a boolean sort axis on
+        `spec.locked` (the delete-protection flag), the symmetric
+        sort counterpart to the tristate `?locked=true|false`
+        exact-match filter on the same column so the same
+        delete-protection cohort can be both filtered and sorted
+        on the same column. Asc collates the unlocked cohort
+        (`false`) at the head and the locked cohort (`true`) at
+        the tail; desc surfaces the locked cohort first, the
+        natural ordering for the safety-review operator query
+        *"which VMs are delete-protected against a fleet
+        rebuild"*. Closed-and-total — `spec.locked` is
+        non-nullable (`json:"locked"` without `omitempty`) so a
+        missing key resolves to the zero value (`false`) and
+        every VM belongs to exactly one of the two buckets, with
+        no nil-trailing bucket — same rationale as the
+        `auto_start` axis (5.4.108) and the `state` axis on the
+        closed running/stopped/paused enum.
         All comparators tiebreak on `id` so pagination is deterministic
         across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked]
         default: id
     ImageSort:
       name: sort
