@@ -5603,6 +5603,115 @@ func TestListVMs_SortByClockOffset_400AdvertisesClockOffset(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `auto_start` sort axis (5.4.108)
+// ============================================================
+
+func TestListVMs_SortByAutoStart_AscPutsFalseFirst(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "enabled-a", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "disabled-empty", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "disabled-explicit", Spec: types.VMSpec{AutoStart: false}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "enabled-b", Spec: types.VMSpec{AutoStart: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=auto_start")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: false cohort (vm-2, vm-3) then true cohort (vm-1, vm-4),
+	// each tiebreaking on id.
+	want := []string{"disabled-empty", "disabled-explicit", "enabled-a", "enabled-b"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByAutoStartDesc_PutsTrueFirst(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "enabled-a", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "disabled", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "enabled-b", Spec: types.VMSpec{AutoStart: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=auto_start&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// desc reverses the cohort order and inverts the id tiebreak,
+	// so enabled-b precedes enabled-a within the true cohort.
+	want := []string{"enabled-b", "enabled-a", "disabled"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByAutoStart_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{AutoStart: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=auto_start")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByAutoStart_ComposesWithFilter(t *testing.T) {
+	// `?auto_start=true&sort=auto_start` narrows to the enabled cohort
+	// and orders within it on id. Asserts the filter and sort agree on
+	// the boolean classification.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "disabled", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "enabled-a", Spec: types.VMSpec{AutoStart: true}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "enabled-b", Spec: types.VMSpec{AutoStart: true}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?auto_start=true&sort=auto_start")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (enabled-only)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByAutoStart_400AdvertisesAutoStart(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=autostart")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "auto_start") {
+		t.Errorf("error message %q should advertise the auto_start axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

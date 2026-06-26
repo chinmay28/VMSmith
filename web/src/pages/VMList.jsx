@@ -870,6 +870,7 @@ export default function VMList() {
           <option value="nic_model">NIC model</option>
           <option value="machine">Machine</option>
           <option value="clock_offset">Clock offset</option>
+          <option value="auto_start">Auto-start</option>
         </select>
         <select
           value={order}

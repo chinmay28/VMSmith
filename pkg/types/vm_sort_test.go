@@ -1377,3 +1377,90 @@ func TestIsValidVMSort_AcceptsClockOffset(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.108 — boolean `auto_start` sort axis with closed-and-total classification.
+
+func TestSortVMs_ByAutoStart_AscPutsFalseFirst(t *testing.T) {
+	// Asc collation: false < true. Disabled cohort (vm-2, vm-3) tiebreaks
+	// on id; enabled cohort (vm-1, vm-4) tiebreaks on id. Mirrors the
+	// `state` axis's closed-enum compare — boolean is closed-and-total
+	// so there is no nil-trailing bucket.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{AutoStart: true}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{AutoStart: false}},
+		{ID: "vm-4", Spec: VMSpec{AutoStart: true}},
+	}
+	SortVMs(vms, VMSortAutoStart, SortOrderAsc)
+	want := []string{"vm-2", "vm-3", "vm-1", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q auto_start=%v, want %q",
+				i, v.ID, v.Spec.AutoStart, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByAutoStart_DescPutsTrueFirst(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{AutoStart: true}},
+		{ID: "vm-2", Spec: VMSpec{}},
+		{ID: "vm-3", Spec: VMSpec{AutoStart: true}},
+		{ID: "vm-4", Spec: VMSpec{AutoStart: false}},
+	}
+	SortVMs(vms, VMSortAutoStart, SortOrderDesc)
+	// Desc reverses the entire compare result including the id tiebreak,
+	// so the enabled cohort comes out vm-3 before vm-1 and the disabled
+	// cohort vm-4 before vm-2.
+	want := []string{"vm-3", "vm-1", "vm-4", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q auto_start=%v, want %q",
+				i, v.ID, v.Spec.AutoStart, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByAutoStart_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{AutoStart: true}},
+		{ID: "vm-1", Spec: VMSpec{AutoStart: true}},
+		{ID: "vm-2", Spec: VMSpec{AutoStart: true}},
+	}
+	SortVMs(vms, VMSortAutoStart, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByAutoStart_AllFalse_TiebreaksOnID(t *testing.T) {
+	// Empty / zero-value cohort collapses to false — closed boolean
+	// has no nil-trailing bucket, so every VM belongs to one cohort
+	// and tiebreaks on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortAutoStart, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsAutoStart(t *testing.T) {
+	if !IsValidVMSort(VMSortAutoStart) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortAutoStart)
+	}
+	for _, axis := range []string{"AUTO_START", "Auto_Start", "autostart", " auto_start "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
