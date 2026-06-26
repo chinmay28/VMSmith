@@ -50,6 +50,9 @@ func validateVMSpec(spec types.VMSpec) error {
 	if err := validateGPUs(spec.GPUs); err != nil {
 		return err
 	}
+	if err := validateVNCPassword(spec.VNCPassword); err != nil {
+		return err
+	}
 	if spec.NatStaticIP != "" {
 		if err := validateCIDR(spec.NatStaticIP, "nat_static_ip"); err != nil {
 			return err
@@ -106,8 +109,24 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 			return err
 		}
 	}
+	if patch.VNCPassword != nil {
+		if err := validateVNCPassword(*patch.VNCPassword); err != nil {
+			return err
+		}
+	}
 	if _, err := normalizeTags(patch.Tags); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateVNCPassword bounds the VNC console password (5.1.8). Empty is
+// always allowed (no password / clear). QEMU only honours the first 8
+// characters of an RFB password; we cap at 64 to bound bcrypt input while
+// leaving room for operators who paste longer secrets anyway.
+func validateVNCPassword(v string) error {
+	if len(v) > 64 {
+		return types.NewAPIError("invalid_vnc_password", "vnc_password must be at most 64 characters (QEMU honours only the first 8)")
 	}
 	return nil
 }
@@ -478,13 +497,15 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "invalid_vnc_password", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
 		return 400
+	case "vnc_password_key_missing", "vnc_password_undecryptable":
+		return 422
 	case "service_unavailable", "network_unavailable":
 		return 503
 	case "quota_exceeded":
 		return 429
-	case "vm_locked", "vm_already_stopped", "vm_not_running", "vm_not_paused", "vm_already_paused":
+	case "vm_locked", "vm_running", "vm_already_stopped", "vm_not_running", "vm_not_paused", "vm_already_paused":
 		return 409
 	default:
 		return fallback

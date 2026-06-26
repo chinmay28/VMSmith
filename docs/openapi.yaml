@@ -3785,6 +3785,15 @@ components:
             cloudbase-init datasource at first boot. Write-only: it is redacted
             from the stored/returned VM record once the provisioning ISO is
             written. Ignored for Linux guests.
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: >-
+            Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash
+            plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key`
+            so the plaintext can be re-injected into the libvirt domain XML on
+            the next define/start. Redacted from every read path.
         clock_offset:
           type: string
           enum: [utc, localtime]
@@ -3898,6 +3907,16 @@ components:
           type: boolean
           description: Toggle delete-protection. Omit to leave unchanged.
           nullable: true
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          nullable: true
+          description: >-
+            Optional per-VM VNC password update. Omit/null to leave unchanged;
+            send an empty string to clear the stored VNC password. Returns 409
+            `vm_running` if the VM is running, because password changes require
+            a stop + redefine so libvirt can pick up the new `passwd=` value.
         clock_offset:
           type: string
           enum: [utc, localtime, ""]
