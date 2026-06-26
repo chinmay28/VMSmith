@@ -1454,6 +1454,34 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.105 — case-insensitive `nic_model` sort axis with OS-family-aware default.
+  test("nic_model sort axis reorders the VM list and resolves empty to the OS-family default", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed nic_model: web-server (vm-1, linux, nic_model="") resolves to
+    // virtio via the OS-family default, db-server (vm-2, linux, nic_model="")
+    // also resolves to virtio, win-app (vm-3, windows, nic_model="")
+    // resolves to e1000e via the Windows OS-family default. Asc orders
+    // alphabetically: e1000e < virtio, so win-app heads the list, then the
+    // virtio cohort (id tiebreak: vm-1 web-server before vm-2 db-server).
+    // Mirrors the disk_bus axis (5.4.104) one column over.
+    await page.getByTestId("vm-list-sort-field").selectOption("nic_model");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=nic_model");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips: virtio cohort heads (db-server first), then e1000e
+    // (win-app) trails.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();

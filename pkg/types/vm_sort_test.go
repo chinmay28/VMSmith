@@ -1060,3 +1060,104 @@ func TestIsValidVMSort_AcceptsDiskBus(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.105 — case-insensitive `nic_model` sort axis with OS-family-aware default.
+
+func TestSortVMs_ByNICModel_AscResolvesOSFamilyDefault(t *testing.T) {
+	// Empty `nic_model` resolves to the OS-family default via ResolvedNICModel —
+	// `virtio` for Linux, `e1000e` for Windows. Same OS-family-aware default
+	// rationale as the `disk_bus` axis (5.4.104).
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NICModel: NICModelVirtio}},
+		{ID: "vm-2", Spec: VMSpec{NICModel: NICModelE1000e}},
+		{ID: "vm-3", Spec: VMSpec{}},                                          // Linux empty → virtio
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},                     // Windows empty → e1000e
+		{ID: "vm-5", Spec: VMSpec{OSType: OSTypeWindows, NICModel: "e1000e"}}, // explicit e1000e
+	}
+	SortVMs(vms, VMSortNICModel, SortOrderAsc)
+	// asc: e1000e < virtio. e1000e cohort (vm-2, vm-4, vm-5) tiebreaks on id;
+	// virtio cohort (vm-1, vm-3) tiebreaks on id.
+	want := []string{"vm-2", "vm-4", "vm-5", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nic_model=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.NICModel, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNICModel_DescResolvesOSFamilyDefault(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NICModel: NICModelVirtio}},
+		{ID: "vm-2", Spec: VMSpec{NICModel: NICModelE1000e}},
+		{ID: "vm-3", Spec: VMSpec{}},                                          // Linux empty → virtio
+		{ID: "vm-4", Spec: VMSpec{OSType: OSTypeWindows}},                     // Windows empty → e1000e
+		{ID: "vm-5", Spec: VMSpec{OSType: OSTypeWindows, NICModel: "e1000e"}}, // explicit e1000e
+	}
+	SortVMs(vms, VMSortNICModel, SortOrderDesc)
+	want := []string{"vm-3", "vm-1", "vm-5", "vm-4", "vm-2"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nic_model=%q os_type=%q, want %q",
+				i, v.ID, v.Spec.NICModel, v.Spec.OSType, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNICModel_CaseInsensitive(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{NICModel: "VIRTIO"}},
+		{ID: "vm-2", Spec: VMSpec{NICModel: "e1000e"}},
+		{ID: "vm-3", Spec: VMSpec{NICModel: "virtio"}},
+		{ID: "vm-4", Spec: VMSpec{NICModel: " E1000E "}}, // whitespace + uppercase
+	}
+	SortVMs(vms, VMSortNICModel, SortOrderAsc)
+	want := []string{"vm-2", "vm-4", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q nic_model=%q, want %q", i, v.ID, v.Spec.NICModel, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNICModel_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{NICModel: NICModelVirtio}},
+		{ID: "vm-1", Spec: VMSpec{NICModel: NICModelVirtio}},
+		{ID: "vm-2", Spec: VMSpec{NICModel: NICModelVirtio}},
+	}
+	SortVMs(vms, VMSortNICModel, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByNICModel_AllEmptyLinux_TiebreaksOnID(t *testing.T) {
+	// All-empty Linux VMs all resolve to "virtio" so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortNICModel, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsNICModel(t *testing.T) {
+	if !IsValidVMSort(VMSortNICModel) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortNICModel)
+	}
+	for _, axis := range []string{"NIC_MODEL", "Nic_Model", "nicmodel", " nic_model "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

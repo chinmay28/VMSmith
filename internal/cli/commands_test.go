@@ -2578,6 +2578,73 @@ func TestCLI_VMList_SortByDiskBus_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.105 — case-insensitive `nic_model` sort axis with OS-family-aware default.
+
+func TestCLI_VMList_SortByNICModel_AscResolvesOSFamilyDefault(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "linux-virtio", State: types.VMStateRunning, Spec: types.VMSpec{NICModel: types.NICModelVirtio, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "linux-e1000e", State: types.VMStateRunning, Spec: types.VMSpec{NICModel: types.NICModelE1000e, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})                                            // empty Linux → virtio
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", State: types.VMStateRunning, Spec: types.VMSpec{OSType: types.OSTypeWindows, CPUs: 2, RAMMB: 2048, DiskGB: 32}}) // empty Windows → e1000e
+
+	out, err := runCLI("vm", "list", "--sort", "nic_model")
+	if err != nil {
+		t.Fatalf("vm list --sort nic_model: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	// asc: e1000e cohort first (vm-2, vm-4), then virtio (vm-1, vm-3).
+	want := []string{"linux-e1000e", "windows-empty", "linux-virtio", "linux-empty"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByNICModel_CaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", State: types.VMStateRunning, Spec: types.VMSpec{NICModel: "VIRTIO", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "e1000e", State: types.VMStateRunning, Spec: types.VMSpec{NICModel: "e1000e", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", State: types.VMStateRunning, Spec: types.VMSpec{NICModel: "virtio", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "nic_model", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort nic_model: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	want := []string{"e1000e", "uppercase", "lowercase"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByNICModel_RejectsUnknownAxis(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "nicmodel") // missing underscore
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "nic_model") {
+		t.Errorf("expected --sort error message to advertise 'nic_model' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

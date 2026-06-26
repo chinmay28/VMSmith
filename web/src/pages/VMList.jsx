@@ -867,6 +867,7 @@ export default function VMList() {
           <option value="firmware">Firmware</option>
           <option value="os_variant">OS variant</option>
           <option value="disk_bus">Disk bus</option>
+          <option value="nic_model">NIC model</option>
         </select>
         <select
           value={order}
