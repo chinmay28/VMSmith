@@ -28,6 +28,7 @@ const (
 	VMSortNICModel    = "nic_model"
 	VMSortMachine     = "machine"
 	VMSortClockOffset = "clock_offset"
+	VMSortAutoStart   = "auto_start"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -41,7 +42,7 @@ func IsValidVMSort(s string) bool {
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
-		VMSortMachine, VMSortClockOffset:
+		VMSortMachine, VMSortClockOffset, VMSortAutoStart:
 		return true
 	}
 	return false
@@ -401,6 +402,28 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajCO := strings.ToLower(aj.Spec.ResolvedClockOffset())
 			if aiCO != ajCO {
 				less = aiCO < ajCO
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortAutoStart:
+			// Boolean compare on `spec.auto_start`. The symmetric sort
+			// counterpart to the tristate `?auto_start=true|false`
+			// exact-match filter on the same column so the same
+			// auto-start cohort can be both filtered and sorted on the
+			// same column. Asc collation: false < true (disabled cohort
+			// at the head, enabled at the tail); desc inverts so the
+			// auto-starting VMs operators actually care about at boot
+			// surface first. The column is a non-nullable boolean — the
+			// JSON tag is `json:"auto_start"` without `omitempty` so an
+			// absent payload key is treated as the zero value (false).
+			// Closed-and-total: every VM resolves to exactly one of the
+			// two values, so there is no nil-trailing bucket — same
+			// rationale as the `state` axis on the closed `running` /
+			// `stopped` / `paused` enum and unlike the nullable string
+			// axes `ip` / `image` / `guest_ip` / `actor` that sink to
+			// the tail when empty.
+			if ai.Spec.AutoStart != aj.Spec.AutoStart {
+				less = !ai.Spec.AutoStart && aj.Spec.AutoStart
 				break
 			}
 			less = ai.ID < aj.ID

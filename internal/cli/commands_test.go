@@ -2782,6 +2782,75 @@ func TestCLI_VMList_SortByClockOffset_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.108 — boolean `auto_start` sort axis.
+
+func TestCLI_VMList_SortByAutoStart_AscPutsFalseFirst(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "enabled-a", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: true, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "disabled", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "enabled-b", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: true, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "auto_start")
+	if err != nil {
+		t.Fatalf("vm list --sort auto_start: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// asc: false cohort first (vm-2 disabled), then true cohort
+	// (vm-1 enabled-a, vm-3 enabled-b) — id tiebreak ascending.
+	want := []string{"disabled", "enabled-a", "enabled-b"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByAutoStart_DescPutsTrueFirst(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "enabled-a", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: true, CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "disabled", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "enabled-b", State: types.VMStateRunning, Spec: types.VMSpec{AutoStart: true, CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "auto_start", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list --sort auto_start --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// desc inverts id tiebreak so enabled-b precedes enabled-a in
+	// the true cohort, and the disabled cohort sinks to the tail.
+	want := []string{"enabled-b", "enabled-a", "disabled"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByAutoStart_RejectsUnknownAxis(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "autostart") // missing underscore
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "auto_start") {
+		t.Errorf("expected --sort error message to advertise 'auto_start' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

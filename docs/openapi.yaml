@@ -3634,11 +3634,25 @@ components:
         `spec.clock_offset` always wins over the OS-family default,
         so a Windows guest pinned to utc for an NTP-synced fleet
         appears under the utc cohort rather than the localtime cohort.
+        `auto_start` (5.4.108) is a boolean sort axis on
+        `spec.auto_start`, the symmetric sort counterpart to the
+        tristate `?auto_start=true|false` exact-match filter on the
+        same column so the same auto-start cohort can be both
+        filtered and sorted on the same column. Asc collates the
+        disabled cohort (`false`) at the head and the enabled cohort
+        (`true`) at the tail; desc surfaces the auto-starting cohort
+        operators care about at boot first. The column is a
+        non-nullable boolean — a missing `spec.auto_start` key on
+        the wire is treated as the zero value (`false`) — so the
+        classification is closed-and-total and the axis has no
+        nil-trailing bucket, mirroring the `state` enum sort
+        rationale rather than the nullable string axes `ip` /
+        `image` / `gpu` that sink empty stored values to the tail.
         All comparators tiebreak on `id` so pagination is deterministic
         across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start]
         default: id
     ImageSort:
       name: sort

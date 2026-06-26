@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -941,6 +941,16 @@ const server = http.createServer(async (req, res) => {
           };
           const ca = resolve(a), cb = resolve(b);
           l = ca < cb ? -1 : ca > cb ? 1 : 0;
+          break;
+        }
+        case "auto_start": {
+          // 5.4.108: boolean sort on `spec.auto_start`. Asc: false < true
+          // (disabled cohort at the head); desc surfaces the auto-starting
+          // cohort first. Closed-and-total — every VM resolves to exactly
+          // one of the two values, so there is no nil-trailing bucket.
+          const aa = Boolean(a?.spec?.auto_start);
+          const ab = Boolean(b?.spec?.auto_start);
+          l = aa === ab ? 0 : (aa ? 1 : -1);
           break;
         }
         case "gpu": {
