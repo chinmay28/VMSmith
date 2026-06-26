@@ -5344,6 +5344,142 @@ func TestListVMs_SortByNICModel_400AdvertisesNICModel(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `machine` sort axis (5.4.107)
+// ============================================================
+
+func TestListVMs_SortByMachine_AscResolvesDefault(t *testing.T) {
+	// Empty `spec.machine` resolves to the daemon default `pc-q35-6.2` via
+	// VMSpec.ResolvedMachine — mirrors the `?machine=pc-q35-6.2`
+	// empty-defaults-to-default filter contract and the SeaBIOS-style
+	// documented-default rationale of the `firmware` axis (5.4.101).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "virt", Spec: types.VMSpec{Machine: "virt-7.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "q35", Spec: types.VMSpec{Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "empty", Spec: types.VMSpec{}}) // empty → pc-q35-6.2
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "old-pc-q35", Spec: types.VMSpec{Machine: "pc-q35-5.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-5", Name: "default-explicit", Spec: types.VMSpec{Machine: "pc-q35-6.2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=machine")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc alphabetical: pc-q35-5.2 < pc-q35-6.2 < q35 < virt-7.2.
+	// vm-3 (empty → pc-q35-6.2) and vm-5 (explicit pc-q35-6.2) tiebreak on id.
+	want := []string{"old-pc-q35", "empty", "default-explicit", "q35", "virt"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByMachineDesc_ResolvesDefault(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "virt", Spec: types.VMSpec{Machine: "virt-7.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "q35", Spec: types.VMSpec{Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "empty", Spec: types.VMSpec{}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "old-pc-q35", Spec: types.VMSpec{Machine: "pc-q35-5.2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=machine&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"virt", "q35", "empty", "old-pc-q35"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByMachine_CaseSensitive(t *testing.T) {
+	// libvirt machine names are case-sensitive at the QEMU layer; mirror
+	// the case-sensitive `?machine=` filter contract: ASCII uppercase
+	// (0x50) sorts before lowercase (0x70).
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "lower-q35", Spec: types.VMSpec{Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "upper-q35", Spec: types.VMSpec{Machine: "Q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "upper-pc", Spec: types.VMSpec{Machine: "PC-Q35-6.2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=machine&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: "PC-Q35-6.2" < "Q35" < "q35" (ASCII uppercase < lowercase)
+	want := []string{"upper-pc", "upper-q35", "lower-q35"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByMachine_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{Machine: "pc-q35-6.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Machine: "pc-q35-6.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Machine: "pc-q35-6.2"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=machine")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByMachine_ComposesWithFilter(t *testing.T) {
+	// `?machine=pc-q35-6.2&sort=machine` narrows to the default cohort
+	// (which includes empty-stored via empty-means-default) and orders
+	// within it. Mirrors the `?nic_model=` compose-with-sort contract.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "q35", Spec: types.VMSpec{Machine: "q35"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "default-explicit", Spec: types.VMSpec{Machine: "pc-q35-6.2"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "default-empty", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?machine=pc-q35-6.2&sort=machine")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (default-only including empty)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByMachine_400AdvertisesMachine(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=machinetype")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "machine") {
+		t.Errorf("error message %q should advertise the machine axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()

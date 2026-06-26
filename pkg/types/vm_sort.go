@@ -26,6 +26,7 @@ const (
 	VMSortOSVariant   = "os_variant"
 	VMSortDiskBus     = "disk_bus"
 	VMSortNICModel    = "nic_model"
+	VMSortMachine     = "machine"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -38,7 +39,8 @@ func IsValidVMSort(s string) bool {
 	case VMSortID, VMSortName, VMSortCreatedAt, VMSortState,
 		VMSortCPUs, VMSortRAMMB, VMSortDiskGB, VMSortIP,
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
-		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel:
+		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
+		VMSortMachine:
 		return true
 	}
 	return false
@@ -340,6 +342,34 @@ func SortVMs(vms []*VM, sortField, order string) {
 			ajNM := strings.ToLower(aj.Spec.ResolvedNICModel())
 			if aiNM != ajNM {
 				less = aiNM < ajNM
+				break
+			}
+			less = ai.ID < aj.ID
+		case VMSortMachine:
+			// Case-sensitive compare on the VM's *effective* libvirt machine
+			// type via VMSpec.ResolvedMachine (5.4.107). Symmetric sort
+			// counterpart to the case-sensitive `?machine=` exact-match
+			// filter (5.4.69) on the same column so the same machine-type
+			// cohort can be both filtered and sorted on the same column.
+			// Diverges from the nil-trailing convention on `ip` / `image` /
+			// `gpu` because this column has a documented default — an empty
+			// stored `spec.machine` resolves to `DefaultMachine`
+			// (`pc-q35-6.2`) via ResolvedMachine so empty VMs collate with
+			// explicit-default VMs rather than sinking to the tail. Mirrors
+			// the `?machine=pc-q35-6.2` empty-defaults-to-default filter
+			// contract and the SeaBIOS-style documented-default rationale
+			// of the `firmware` axis (5.4.101), though unlike the
+			// closed-and-total enums on `disk_bus` / `nic_model` /
+			// `clock_offset`, machine is a free-form bounded-alphabet
+			// value (`[A-Za-z0-9._-]+`) so case-sensitive ordering
+			// preserves the operator's chosen casing — libvirt machine
+			// names like `pc-q35-6.2`, `q35`, and `virt-7.2` are
+			// case-sensitive at the QEMU layer, mirroring the
+			// case-sensitive filter contract on the same column.
+			aiM := ai.Spec.ResolvedMachine()
+			ajM := aj.Spec.ResolvedMachine()
+			if aiM != ajM {
+				less = aiM < ajM
 				break
 			}
 			less = ai.ID < aj.ID

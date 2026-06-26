@@ -1161,3 +1161,117 @@ func TestIsValidVMSort_AcceptsNICModel(t *testing.T) {
 		}
 	}
 }
+
+// 5.4.107 — case-sensitive `machine` sort axis with documented-default fallback.
+
+func TestSortVMs_ByMachine_AscResolvesDefault(t *testing.T) {
+	// Empty `machine` resolves to the daemon default `pc-q35-6.2` via
+	// ResolvedMachine — mirrors the `?machine=pc-q35-6.2` empty-defaults-to-
+	// default filter contract and the SeaBIOS-style documented-default
+	// rationale of the `firmware` axis (5.4.101), but unlike the closed
+	// enums on `disk_bus` / `nic_model` / `clock_offset` the compare is
+	// case-sensitive — libvirt machine names like `pc-q35-6.2` and `q35`
+	// are case-sensitive at the QEMU layer.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Machine: "virt-7.2"}},
+		{ID: "vm-2", Spec: VMSpec{Machine: "q35"}},
+		{ID: "vm-3", Spec: VMSpec{}}, // empty → pc-q35-6.2
+		{ID: "vm-4", Spec: VMSpec{Machine: "pc-q35-5.2"}},
+		{ID: "vm-5", Spec: VMSpec{Machine: "pc-q35-6.2"}}, // explicit default
+	}
+	SortVMs(vms, VMSortMachine, SortOrderAsc)
+	// asc alphabetical (case-sensitive): pc-q35-5.2 < pc-q35-6.2 < q35 < virt-7.2
+	// The pc-q35-6.2 cohort holds vm-3 (empty → default) and vm-5 (explicit),
+	// tiebreaking on id.
+	want := []string{"vm-4", "vm-3", "vm-5", "vm-2", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q machine=%q, want %q",
+				i, v.ID, v.Spec.Machine, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByMachine_DescResolvesDefault(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Machine: "virt-7.2"}},
+		{ID: "vm-2", Spec: VMSpec{Machine: "q35"}},
+		{ID: "vm-3", Spec: VMSpec{}}, // empty → pc-q35-6.2
+		{ID: "vm-4", Spec: VMSpec{Machine: "pc-q35-5.2"}},
+		{ID: "vm-5", Spec: VMSpec{Machine: "pc-q35-6.2"}}, // explicit default
+	}
+	SortVMs(vms, VMSortMachine, SortOrderDesc)
+	// desc reverses the entire compare result including the id tiebreak,
+	// so the pc-q35-6.2 cohort comes out vm-5 before vm-3.
+	want := []string{"vm-1", "vm-2", "vm-5", "vm-3", "vm-4"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q machine=%q, want %q",
+				i, v.ID, v.Spec.Machine, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByMachine_CaseSensitive(t *testing.T) {
+	// libvirt machine names are case-sensitive at the QEMU layer, so the
+	// compare preserves the operator's chosen casing — mirroring the
+	// case-sensitive `?machine=` filter contract on the same column. ASCII
+	// uppercase < lowercase, so `Q35` sorts before `q35`.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Machine: "q35"}},
+		{ID: "vm-2", Spec: VMSpec{Machine: "Q35"}},
+		{ID: "vm-3", Spec: VMSpec{Machine: "PC-Q35-6.2"}},
+		{ID: "vm-4", Spec: VMSpec{Machine: "pc-q35-6.2"}},
+	}
+	SortVMs(vms, VMSortMachine, SortOrderAsc)
+	// asc: ASCII uppercase < lowercase. "PC-Q35-6.2" < "Q35" < "pc-q35-6.2" < "q35"
+	want := []string{"vm-3", "vm-2", "vm-4", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q machine=%q, want %q",
+				i, v.ID, v.Spec.Machine, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByMachine_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{Machine: "pc-q35-6.2"}},
+		{ID: "vm-1", Spec: VMSpec{Machine: "pc-q35-6.2"}},
+		{ID: "vm-2", Spec: VMSpec{Machine: "pc-q35-6.2"}},
+	}
+	SortVMs(vms, VMSortMachine, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByMachine_AllEmptyResolveToDefault_TiebreaksOnID(t *testing.T) {
+	// All-empty VMs all resolve to "pc-q35-6.2" so they tiebreak on id.
+	vms := []*VM{
+		{ID: "vm-3"},
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	SortVMs(vms, VMSortMachine, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsMachine(t *testing.T) {
+	if !IsValidVMSort(VMSortMachine) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortMachine)
+	}
+	for _, axis := range []string{"MACHINE", "Machine", "machinetype", " machine "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
