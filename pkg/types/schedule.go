@@ -61,12 +61,13 @@ const (
 	ScheduleSortVMID        = "vm_id"
 	ScheduleSortAction      = "action"
 	ScheduleSortTimezone    = "timezone"
+	ScheduleSortEnabled     = "enabled"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction, ScheduleSortTimezone:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction, ScheduleSortTimezone, ScheduleSortEnabled:
 		return true
 	default:
 		return false
@@ -200,6 +201,31 @@ func SortSchedules(items []*Schedule, field, order string) {
 				cmp = -1
 			default:
 				cmp = strings.Compare(a.Timezone, b.Timezone)
+			}
+		case ScheduleSortEnabled:
+			// Boolean compare on `Schedule.Enabled` (5.4.113). The symmetric
+			// sort counterpart to the tristate `?enabled=true|false`
+			// exact-match filter on the same column so the same enabled
+			// cohort can be both filtered and sorted on the same column.
+			// Asc collation: false < true — disabled schedules at the
+			// head, enabled cohort at the tail; desc surfaces the enabled
+			// schedules (the cohort that actually fires) first, the natural
+			// ordering for the operator query *"surface every live schedule
+			// before I audit the cron landscape"*. Closed-and-total:
+			// `Schedule.Enabled` is `json:"enabled"` without `omitempty` so
+			// an absent payload key resolves to the zero value (false) and
+			// every schedule belongs to exactly one of the two buckets.
+			// Same rationale as the VM `auto_start` axis (5.4.108) and the
+			// VM `locked` axis (5.4.109) — no nil-trailing bucket, unlike
+			// the nullable string axes (`vm_id`, `timezone`) that sink
+			// empty stored values to the tail.
+			switch {
+			case a.Enabled == b.Enabled:
+				cmp = 0
+			case !a.Enabled && b.Enabled:
+				cmp = -1
+			default:
+				cmp = 1
 			}
 		default:
 			cmp = strings.Compare(a.ID, b.ID)

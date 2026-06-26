@@ -411,6 +411,7 @@ export default function Schedules() {
             <option value="vm_id">vm_id</option>
             <option value="action">action</option>
             <option value="timezone">timezone</option>
+            <option value="enabled">enabled</option>
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">

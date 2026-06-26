@@ -3409,10 +3409,31 @@ export interface paths {
                      *     to exactly one of the four values at create time), so the
                      *     `action` branch diverges from the nil-trailing convention the
                      *     same way the webhook `delivery_status` sort axis (5.4.98) does
-                     *     — there is no empty bucket to sink. All comparators tiebreak
-                     *     on `id` so repeated requests return a deterministic order.
+                     *     — there is no empty bucket to sink. `timezone` (5.4.112) is
+                     *     the symmetric sort counterpart to the existing case-sensitive
+                     *     `?timezone=` exact-match filter on the same column —
+                     *     case-sensitive compare (IANA timezone names are case-sensitive:
+                     *     `America/New_York`, not `america/new_york`); schedules with an
+                     *     empty `timezone` (the daemon's effective default is the
+                     *     host-dependent `time.Local`, so an empty stored value means
+                     *     "operator did not pin a zone") sink to the tail in `asc` /
+                     *     head in `desc`, mirroring the `vm_id` axis nil-trailing
+                     *     semantics and every other nullable string axis (ip, image,
+                     *     gpu, actor, last_fired_at, next_fire_at). `enabled` (5.4.113)
+                     *     is the symmetric sort counterpart to the tristate `?enabled=
+                     *     true|false` exact-match filter on the same column — boolean
+                     *     compare with asc collation `false < true` so disabled
+                     *     schedules cluster at the head of `asc` and the enabled cohort
+                     *     (the schedules that actually fire) at the head of `desc`.
+                     *     Closed-and-total: `Schedule.enabled` is `json:"enabled"`
+                     *     without `omitempty` so a missing wire key resolves to the
+                     *     zero value (false) and every schedule belongs to exactly one
+                     *     of the two buckets — no nil-trailing bucket, mirroring the
+                     *     VM `auto_start` axis (5.4.108) and `locked` axis (5.4.109).
+                     *     All comparators tiebreak on `id` so repeated requests return
+                     *     a deterministic order.
                      */
-                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action" | "timezone";
+                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action" | "timezone" | "enabled";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**
