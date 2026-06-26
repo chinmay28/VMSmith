@@ -872,6 +872,7 @@ export default function VMList() {
           <option value="clock_offset">Clock offset</option>
           <option value="auto_start">Auto-start</option>
           <option value="locked">Locked</option>
+          <option value="nat_static_ip">NAT static IP</option>
         </select>
         <select
           value={order}
