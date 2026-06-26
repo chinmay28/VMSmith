@@ -5161,10 +5161,26 @@ export interface components {
          *     `ResolvedFirmwareAttr`) so empty VMs collate with explicit-bios
          *     VMs rather than sinking to the tail, mirroring the `os_type`
          *     documented-default rationale (5.4.100) and the `default_user`
-         *     rationale (5.4.91). All comparators tiebreak on `id` so
-         *     pagination is deterministic across backends.
+         *     rationale (5.4.91). `clock_offset` (5.4.106) is a
+         *     case-insensitive sort on the VM's *effective* clock offset
+         *     via `VMSpec.ResolvedClockOffset`, the symmetric sort
+         *     counterpart to the case-insensitive `?clock_offset=`
+         *     exact-match filter (5.4.72) so the same clock-offset cohort
+         *     can be both filtered and sorted on the same column.
+         *     Alphabetical: `localtime` < `utc`. Diverges from the
+         *     nil-trailing convention because clock_offset has a
+         *     documented OS-family-aware default — an empty stored
+         *     `spec.clock_offset` resolves to `utc` for Linux guests and
+         *     `localtime` for Windows guests (mirrors the
+         *     `?clock_offset=utc` empty-defaults-to-OS-family filter
+         *     contract). Same documented-default rationale as the
+         *     `disk_bus` axis (5.4.104) and the `nic_model` axis
+         *     (5.4.105), though the resolved value depends on the VM's
+         *     OS family rather than being a constant. All comparators
+         *     tiebreak on `id` so pagination is deterministic across
+         *     backends.
          */
-        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu" | "os_type" | "firmware" | "os_variant" | "disk_bus" | "nic_model" | "machine";
+        VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu" | "os_type" | "firmware" | "os_variant" | "disk_bus" | "nic_model" | "machine" | "clock_offset";
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so

@@ -1420,6 +1420,39 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.106 — case-insensitive `clock_offset` sort axis with OS-family-aware default.
+  test("clock_offset sort axis reorders the VM list and resolves empty to the OS-family default", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed clock_offset: web-server (vm-1, linux, clock_offset="") resolves to
+    // utc via the OS-family default, db-server (vm-2, linux, clock_offset="")
+    // also resolves to utc, win-app (vm-3, windows, clock_offset="")
+    // resolves to localtime via the Windows OS-family default. Asc orders
+    // alphabetically: localtime < utc, so the localtime cohort heads the list
+    // (only win-app), then the utc cohort (id tiebreak: vm-1 web-server
+    // before vm-2 db-server). Validates the OS-family-aware empty-means-
+    // default divergence from the nil-trailing convention on every other
+    // nullable sort axis — same rationale as the `disk_bus` axis (5.4.104)
+    // and the `nic_model` axis (5.4.105), but the resolved value here
+    // depends on the VM's OS family.
+    await page.getByTestId("vm-list-sort-field").selectOption("clock_offset");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=clock_offset");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // Descending flips everything including the id tiebreak inside the
+    // utc cohort — db-server (vm-2) leads vm-1 web-server in the utc
+    // bucket, then win-app (localtime) trails.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   // 5.4.104 — case-insensitive `disk_bus` sort axis with OS-family-aware default.
   test("disk_bus sort axis reorders the VM list and resolves empty to the OS-family default", async ({ page }) => {
     await page.goto(BASE_URL);

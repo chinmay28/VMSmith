@@ -869,6 +869,7 @@ export default function VMList() {
           <option value="disk_bus">Disk bus</option>
           <option value="nic_model">NIC model</option>
           <option value="machine">Machine</option>
+          <option value="clock_offset">Clock offset</option>
         </select>
         <select
           value={order}

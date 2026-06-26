@@ -5480,6 +5480,129 @@ func TestListVMs_SortByMachine_400AdvertisesMachine(t *testing.T) {
 	}
 }
 
+// ============================================================
+// VM list `clock_offset` sort axis (5.4.106)
+// ============================================================
+
+func TestListVMs_SortByClockOffset_AscResolvesOSFamilyDefault(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-utc", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-localtime", Spec: types.VMSpec{ClockOffset: types.ClockOffsetLocaltime}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                                                               // Linux empty → utc
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}})                                  // Windows empty → localtime
+	mockMgr.SeedVM(&types.VM{ID: "vm-5", Name: "windows-utc", Spec: types.VMSpec{OSType: types.OSTypeWindows, ClockOffset: types.ClockOffsetUTC}}) // Windows pinned to utc
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=clock_offset")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-localtime", "windows-empty", "linux-utc", "linux-empty", "windows-utc"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByClockOffsetDesc_ResolvesOSFamilyDefault(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "linux-utc", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "linux-localtime", Spec: types.VMSpec{ClockOffset: types.ClockOffsetLocaltime}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "linux-empty", Spec: types.VMSpec{}})                              // Linux empty → utc
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "windows-empty", Spec: types.VMSpec{OSType: types.OSTypeWindows}}) // Windows empty → localtime
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=clock_offset&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"linux-empty", "linux-utc", "windows-empty", "linux-localtime"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByClockOffset_CaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "uppercase", Spec: types.VMSpec{ClockOffset: "UTC"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "localtime-stored", Spec: types.VMSpec{ClockOffset: "localtime"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "lowercase", Spec: types.VMSpec{ClockOffset: "utc"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=clock_offset&order=asc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"localtime-stored", "uppercase", "lowercase"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByClockOffset_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=clock_offset")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByClockOffset_ComposesWithFilter(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "localtime-vm", Spec: types.VMSpec{ClockOffset: types.ClockOffsetLocaltime}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "utc-explicit", Spec: types.VMSpec{ClockOffset: types.ClockOffsetUTC}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "utc-empty-linux", Spec: types.VMSpec{}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?clock_offset=utc&sort=clock_offset")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 {
+		t.Fatalf("filter+sort returned %d rows, want 2 (utc-only including empty Linux)", len(got))
+	}
+	want := []string{"vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByClockOffset_400AdvertisesClockOffset(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=clockoffset")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "clock_offset") {
+		t.Errorf("error message %q should advertise the clock_offset axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
