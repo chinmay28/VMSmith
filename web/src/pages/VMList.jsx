@@ -873,6 +873,7 @@ export default function VMList() {
           <option value="auto_start">Auto-start</option>
           <option value="locked">Locked</option>
           <option value="nat_static_ip">NAT static IP</option>
+          <option value="nat_gateway">NAT gateway</option>
         </select>
         <select
           value={order}
