@@ -21,7 +21,7 @@ var scheduleCmd = &cobra.Command{
 	Use:   "schedule",
 	Short: "Manage recurring VM-action schedules",
 	Long: `Create and manage recurring schedules that fire VM actions
-(snapshot, start, stop, restart) on a cron timer.  Schedules are evaluated
+(snapshot, start, stop, restart, force-stop, reboot, suspend, resume) on a cron timer.  Schedules are evaluated
 by the daemon; see docs/SCHEDULES.md for the cron-spec syntax (6-field,
 seconds-required), timezone / DST rules, catch-up policies, and retention
 semantics.`,
@@ -80,7 +80,7 @@ var scheduleCreateCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 		if !types.IsValidScheduleAction(types.ScheduleAction(action)) {
-			return fmt.Errorf("--action must be one of: snapshot, start, stop, restart")
+			return fmt.Errorf("--action must be one of: snapshot, start, stop, restart, force-stop, reboot, suspend, resume")
 		}
 		if strings.TrimSpace(cron) == "" {
 			return fmt.Errorf("--cron is required")
@@ -516,7 +516,7 @@ var scheduleEditCmd = &cobra.Command{
 		if f := cmd.Flags().Lookup("action"); f != nil && f.Changed {
 			v, _ := cmd.Flags().GetString("action")
 			if !types.IsValidScheduleAction(types.ScheduleAction(v)) {
-				return fmt.Errorf("--action must be one of: snapshot, start, stop, restart")
+				return fmt.Errorf("--action must be one of: snapshot, start, stop, restart, force-stop, reboot, suspend, resume")
 			}
 			a := types.ScheduleAction(v)
 			spec.Action = &a
@@ -658,7 +658,7 @@ func init() {
 	scheduleCreateCmd.Flags().String("name", "", "schedule name (required)")
 	scheduleCreateCmd.Flags().String("vm", "", "target VM id (mutually exclusive with --tag; empty = all VMs)")
 	scheduleCreateCmd.Flags().StringSlice("tag", nil, "tag selector (repeatable; fans out to matching VMs)")
-	scheduleCreateCmd.Flags().String("action", "", "action: snapshot|start|stop|restart (required)")
+	scheduleCreateCmd.Flags().String("action", "", "action: snapshot|start|stop|restart|force-stop|reboot|suspend|resume (required)")
 	scheduleCreateCmd.Flags().String("cron", "", "6-field cron spec with seconds, e.g. \"0 0 2 * * *\" (required)")
 	scheduleCreateCmd.Flags().String("timezone", "", "IANA timezone (default: daemon local)")
 	scheduleCreateCmd.Flags().Bool("enabled", true, "whether the schedule is active")
@@ -668,7 +668,7 @@ func init() {
 
 	scheduleListCmd.Flags().String("vm", "", "filter by exact VM id")
 	scheduleListCmd.Flags().String("tag-selector", "", "filter by exact tag-selector membership (case-insensitive)")
-	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart)")
+	scheduleListCmd.Flags().String("action", "", "filter by action (snapshot|start|stop|restart|force-stop|reboot|suspend|resume)")
 	scheduleListCmd.Flags().String("catch-up", "", "filter by catch-up policy (skip|run_once|run_all)")
 	scheduleListCmd.Flags().String("timezone", "", "filter by exact IANA timezone (case-sensitive, e.g. UTC, America/New_York)")
 	scheduleListCmd.Flags().String("enabled", "", "filter by enabled flag: true|false")

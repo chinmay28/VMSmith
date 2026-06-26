@@ -10,7 +10,7 @@ import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls
 
 const DEFAULT_SCHEDULE_PER_PAGE = 25;
 
-const ACTIONS = ['snapshot', 'start', 'stop', 'restart'];
+const ACTIONS = ['snapshot', 'start', 'stop', 'restart', 'force-stop', 'reboot', 'suspend', 'resume'];
 const CATCH_UP_POLICIES = ['skip', 'run_once', 'run_all'];
 
 // Cron preset helper chips — clicking one fills the cron_spec field with a
@@ -259,7 +259,7 @@ export default function Schedules() {
     <div data-testid="schedules-page">
       <PageHeader
         title="Schedules"
-        subtitle="Recurring VM operations — snapshots, start/stop, restart"
+        subtitle="Recurring VM operations — snapshots and VM lifecycle actions"
         actions={
           <button className="btn-primary" onClick={() => setShowAdd(true)} data-testid="add-schedule-btn">
             <Plus size={15} /> Add schedule

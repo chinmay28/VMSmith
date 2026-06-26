@@ -35,6 +35,10 @@ func defaultActions() map[types.ScheduleAction]actionFunc {
 		types.ScheduleActionStart:    startAction,
 		types.ScheduleActionStop:     stopAction,
 		types.ScheduleActionRestart:  restartAction,
+		types.ScheduleActionForceStop: forceStopAction,
+		types.ScheduleActionReboot:    rebootAction,
+		types.ScheduleActionSuspend:   suspendAction,
+		types.ScheduleActionResume:    resumeAction,
 	}
 }
 
@@ -65,6 +69,50 @@ func restartAction(ctx context.Context, mgr vm.Manager, _ *types.Schedule, vmID 
 		return skip(types.ScheduleRunSkipReasonVMNotFound)
 	}
 	return mgr.Restart(ctx, vmID)
+}
+
+func forceStopAction(ctx context.Context, mgr vm.Manager, _ *types.Schedule, vmID string, _ time.Time) error {
+	v, err := mgr.Get(ctx, vmID)
+	if err != nil {
+		return skip(types.ScheduleRunSkipReasonVMNotFound)
+	}
+	if v.State == types.VMStateStopped {
+		return skip(types.ScheduleRunSkipReasonVMAlreadyStopped)
+	}
+	return mgr.ForceStop(ctx, vmID)
+}
+
+func rebootAction(ctx context.Context, mgr vm.Manager, _ *types.Schedule, vmID string, _ time.Time) error {
+	v, err := mgr.Get(ctx, vmID)
+	if err != nil {
+		return skip(types.ScheduleRunSkipReasonVMNotFound)
+	}
+	if v.State != types.VMStateRunning {
+		return skip(types.ScheduleRunSkipReasonVMAlreadyStopped)
+	}
+	return mgr.Reboot(ctx, vmID)
+}
+
+func suspendAction(ctx context.Context, mgr vm.Manager, _ *types.Schedule, vmID string, _ time.Time) error {
+	v, err := mgr.Get(ctx, vmID)
+	if err != nil {
+		return skip(types.ScheduleRunSkipReasonVMNotFound)
+	}
+	if v.State != types.VMStateRunning {
+		return skip(types.ScheduleRunSkipReasonVMAlreadyStopped)
+	}
+	return mgr.Suspend(ctx, vmID)
+}
+
+func resumeAction(ctx context.Context, mgr vm.Manager, _ *types.Schedule, vmID string, _ time.Time) error {
+	v, err := mgr.Get(ctx, vmID)
+	if err != nil {
+		return skip(types.ScheduleRunSkipReasonVMNotFound)
+	}
+	if v.State != types.VMStatePaused {
+		return skip(types.ScheduleRunSkipReasonVMAlreadyRunning)
+	}
+	return mgr.Resume(ctx, vmID)
 }
 
 // snapshotPrefix is the auto-generated snapshot name prefix scoped to a

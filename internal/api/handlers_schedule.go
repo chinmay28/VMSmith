@@ -74,7 +74,7 @@ func (s *Server) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !types.IsValidScheduleAction(req.Action) {
-		writeErrorCode(w, http.StatusBadRequest, "invalid_action", "action must be one of: snapshot, start, stop, restart")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_action", "action must be one of: snapshot, start, stop, restart, force-stop, reboot, suspend, resume")
 		return
 	}
 	if strings.TrimSpace(req.CronSpec) == "" {
@@ -433,7 +433,7 @@ func (s *Server) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Action != nil {
 		if !types.IsValidScheduleAction(*req.Action) {
-			writeErrorCode(w, http.StatusBadRequest, "invalid_action", "action must be one of: snapshot, start, stop, restart")
+			writeErrorCode(w, http.StatusBadRequest, "invalid_action", "action must be one of: snapshot, start, stop, restart, force-stop, reboot, suspend, resume")
 			return
 		}
 		updated.Action = *req.Action

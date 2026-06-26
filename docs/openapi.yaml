@@ -2286,7 +2286,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [snapshot, start, stop, restart]
+            enum: [snapshot, start, stop, restart, force-stop, reboot, suspend, resume]
           description: |
             Exact-match filter on the schedule's `action`.
             Whitespace-trimmed; empty disables the filter.
@@ -4861,7 +4861,7 @@ components:
             Mutually exclusive with `vm_id`.
         action:
           type: string
-          enum: [snapshot, start, stop, restart]
+          enum: [snapshot, start, stop, restart, force-stop, reboot, suspend, resume]
         cron_spec:
           type: string
           description: 6-field cron expression WITH seconds, e.g. "0 0 2 * * *".
@@ -4940,7 +4940,7 @@ components:
           description: Mutually exclusive with `vm_id`.
         action:
           type: string
-          enum: [snapshot, start, stop, restart]
+          enum: [snapshot, start, stop, restart, force-stop, reboot, suspend, resume]
         cron_spec:
           type: string
           description: 6-field cron expression WITH seconds.
@@ -4980,7 +4980,7 @@ components:
             type: string
         action:
           type: string
-          enum: [snapshot, start, stop, restart]
+          enum: [snapshot, start, stop, restart, force-stop, reboot, suspend, resume]
         cron_spec:
           type: string
         timezone:

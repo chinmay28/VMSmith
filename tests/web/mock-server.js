@@ -3071,8 +3071,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_name", message: "name must be 1-128 characters" });
     }
     const action = typeof body.action === "string" ? body.action.trim() : "";
-    if (!["snapshot", "start", "stop", "restart"].includes(action)) {
-      return json(res, 400, { code: "invalid_action", message: "action must be one of: snapshot, start, stop, restart" });
+    if (!["snapshot", "start", "stop", "restart", "force-stop", "reboot", "suspend", "resume"].includes(action)) {
+      return json(res, 400, { code: "invalid_action", message: "action must be one of: snapshot, start, stop, restart, force-stop, reboot, suspend, resume" });
     }
     const cronSpec = typeof body.cron_spec === "string" ? body.cron_spec.trim() : "";
     if (!cronSpec || cronSpec.split(/\s+/).length !== 6) {
@@ -3335,7 +3335,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (Object.prototype.hasOwnProperty.call(body, "action")) {
       const next = typeof body.action === "string" ? body.action.trim() : "";
-      if (!["snapshot", "start", "stop", "restart"].includes(next)) {
+      if (!["snapshot", "start", "stop", "restart", "force-stop", "reboot", "suspend", "resume"].includes(next)) {
         return json(res, 400, { code: "invalid_action", message: "invalid action" });
       }
       schedule.action = next;
