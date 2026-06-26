@@ -584,8 +584,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -905,6 +905,27 @@ const server = http.createServer(async (req, res) => {
           };
           const na = resolve(a), nb = resolve(b);
           l = na < nb ? -1 : na > nb ? 1 : 0;
+          break;
+        }
+        case "machine": {
+          // 5.4.107: case-sensitive sort on the VM's *effective* libvirt
+          // machine type. Empty stored machine resolves to the daemon
+          // default "pc-q35-6.2" — mirrors the Go VMSpec.ResolvedMachine
+          // helper and the `?machine=pc-q35-6.2` empty-defaults-to-default
+          // filter contract. Diverges from the nil-trailing convention
+          // because machine has a documented default (same rationale as
+          // the `firmware` axis at 5.4.101) — but unlike the closed
+          // enums on `disk_bus` / `nic_model`, machine is a free-form
+          // bounded-alphabet value (e.g. "pc-q35-6.2", "q35",
+          // "virt-7.2"). The compare is case-sensitive to preserve the
+          // operator's chosen casing, mirroring the case-sensitive
+          // `?machine=` filter contract on the same column.
+          const resolve = (vm) => {
+            const raw = String(vm?.spec?.machine || "").trim();
+            return raw !== "" ? raw : "pc-q35-6.2";
+          };
+          const ma = resolve(a), mb = resolve(b);
+          l = ma < mb ? -1 : ma > mb ? 1 : 0;
           break;
         }
         case "gpu": {

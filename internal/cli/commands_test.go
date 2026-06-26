@@ -2645,6 +2645,77 @@ func TestCLI_VMList_SortByNICModel_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// 5.4.107 — case-sensitive `machine` sort axis with documented-default fallback.
+
+func TestCLI_VMList_SortByMachine_AscResolvesDefault(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "virt", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "virt-7.2", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "q35", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "q35", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "empty", State: types.VMStateStopped, Spec: types.VMSpec{CPUs: 1, RAMMB: 1024}}) // empty → pc-q35-6.2
+	mock.SeedVM(&types.VM{ID: "vm-4", Name: "old-pc-q35", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "pc-q35-5.2", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "machine")
+	if err != nil {
+		t.Fatalf("vm list --sort machine: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 5 {
+		t.Fatalf("expected header + 4 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1], rows[4][1]}
+	// asc alphabetical: pc-q35-5.2 < pc-q35-6.2 < q35 < virt-7.2.
+	// vm-3 (empty → pc-q35-6.2) sits in the default bucket between vm-4 and vm-2.
+	want := []string{"old-pc-q35", "empty", "q35", "virt"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByMachine_CaseSensitive(t *testing.T) {
+	// libvirt machine names are case-sensitive at the QEMU layer. Mirror the
+	// case-sensitive `?machine=` filter contract: ASCII uppercase < lowercase.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "lower-q35", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "q35", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "upper-q35", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "Q35", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "upper-pc", State: types.VMStateRunning, Spec: types.VMSpec{Machine: "PC-Q35-6.2", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "machine", "--order", "asc")
+	if err != nil {
+		t.Fatalf("vm list --sort machine: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// asc: "PC-Q35-6.2" < "Q35" < "q35" (ASCII uppercase < lowercase)
+	want := []string{"upper-pc", "upper-q35", "lower-q35"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByMachine_RejectsUnknownAxis(t *testing.T) {
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "machinetype") // not an axis
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "machine") {
+		t.Errorf("expected --sort error message to advertise 'machine' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

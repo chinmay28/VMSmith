@@ -3596,11 +3596,29 @@ components:
         An explicit `spec.nic_model` always wins over the OS-family
         default, so a Windows guest flipped to virtio after the
         operator installs the virtio-net drivers in-guest via 5.6.12
-        collates with the virtio cohort. All comparators tiebreak on
-        `id` so pagination is deterministic across backends.
+        collates with the virtio cohort. `machine` (5.4.107) is a
+        case-sensitive sort on the VM's *effective* libvirt machine
+        type via `VMSpec.ResolvedMachine`, the symmetric sort
+        counterpart to the case-sensitive `?machine=` exact-match
+        filter so the same machine-type cohort can be both filtered
+        and sorted on the same column. Diverges from the nil-trailing
+        convention because machine has a documented default — an
+        empty stored `spec.machine` resolves to the daemon default
+        `pc-q35-6.2` via `ResolvedMachine` so empty VMs collate with
+        explicit-default VMs rather than sinking to the tail,
+        mirroring the `?machine=pc-q35-6.2` empty-defaults-to-default
+        filter contract and the documented-default rationale of the
+        `firmware` axis (5.4.101). Unlike the closed-and-total enums
+        on `disk_bus` / `nic_model`, machine is a free-form
+        bounded-alphabet value (`[A-Za-z0-9._-]+`) — `pc-q35-6.2`,
+        `q35`, `virt-7.2` — so the compare is case-sensitive,
+        preserving the operator's chosen casing and mirroring the
+        case-sensitive `?machine=` filter contract on the same
+        column. All comparators tiebreak on `id` so pagination is
+        deterministic across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine]
         default: id
     ImageSort:
       name: sort

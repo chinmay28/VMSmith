@@ -1482,6 +1482,34 @@ test.describe("VM List", () => {
     await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
   });
 
+  // 5.4.107 — case-sensitive `machine` sort axis with documented-default fallback.
+  test("machine sort axis reorders the VM list and resolves empty to the daemon default", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    // Seed machine: web-server (vm-1, empty) and db-server (vm-2, empty) both
+    // resolve to the daemon default "pc-q35-6.2"; win-app (vm-3, explicit
+    // "pc-q35-rhel9.6.0") is the only VM in its own bucket. Asc alphabetical
+    // (case-sensitive): "pc-q35-6.2" < "pc-q35-rhel9.6.0" — so the default
+    // cohort (vm-1 web-server, vm-2 db-server, tiebreaking on id) comes
+    // first, then win-app trails. Mirrors the `?machine=pc-q35-6.2`
+    // empty-defaults-to-default filter contract.
+    await page.getByTestId("vm-list-sort-field").selectOption("machine");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=machine");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-web-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+
+    // Descending flips: win-app heads, then db-server (vm-2) before
+    // web-server (vm-1) — the id tiebreak inverts with the descending wrapper.
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-web-server");
+  });
+
   test("auto-start filter narrows the VM list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
