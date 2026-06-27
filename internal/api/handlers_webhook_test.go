@@ -2325,6 +2325,110 @@ func TestListWebhooks_InvalidSortAdvertisesDeliveryStatus(t *testing.T) {
 	}
 }
 
+// 5.4.114 — active sort axis. Boolean compare false < true with id tiebreak.
+// Closed-and-total: every webhook resolves to true or false so there is no
+// nil-trailing bucket — mirrors the VM auto_start (5.4.108) / locked
+// (5.4.109) and schedule enabled (5.4.113) axes.
+//
+// seedActiveSortWebhooks lays out two active and two inactive webhooks in
+// non-sorted ID order so the tests assert the comparator's effect, not the
+// input order. Distinct from `seedActiveWebhooks` (5.4.37 filter fixture)
+// which only has 3 entries and asymmetric cohorts.
+func seedActiveSortWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*types.Webhook{
+		{ID: "wh-sort-1", URL: "https://a.example.com/h", Secret: "k", Active: true, CreatedAt: base},
+		{ID: "wh-sort-2", URL: "https://b.example.com/h", Secret: "k", Active: false, CreatedAt: base},
+		{ID: "wh-sort-3", URL: "https://c.example.com/h", Secret: "k", Active: true, CreatedAt: base},
+		{ID: "wh-sort-4", URL: "https://d.example.com/h", Secret: "k", Active: false, CreatedAt: base},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_SortByActive_AscPutsInactiveFirst(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveSortWebhooks(t, fake)
+
+	// asc: inactive cohort heads (id tiebreak: wh-sort-2, wh-sort-4),
+	// then active cohort (id tiebreak: wh-sort-1, wh-sort-3).
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=active&order=asc")
+	want := []string{"wh-sort-2", "wh-sort-4", "wh-sort-1", "wh-sort-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=active asc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByActive_DescPutsActiveFirst(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveSortWebhooks(t, fake)
+
+	// desc flips the entire compare result including the id tiebreak, so
+	// within each cohort the higher id comes first.
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=active&order=desc")
+	want := []string{"wh-sort-3", "wh-sort-1", "wh-sort-4", "wh-sort-2"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=active desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByActive_NormalisesCaseAndWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveSortWebhooks(t, fake)
+
+	// Mixed-case + whitespace must normalise to the canonical lowercase
+	// axis (the parser trims + lowercases before validating).
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=%20ACTIVE%20&order=asc")
+	want := []string{"wh-sort-2", "wh-sort-4", "wh-sort-1", "wh-sort-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=ACTIVE: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByActive_ComposesWithFilter(t *testing.T) {
+	// Filter narrows the cohort to active=true; sort still orders within
+	// it. The comparator falls through to id-asc because every survivor
+	// has Active=true.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedActiveSortWebhooks(t, fake)
+
+	hooks := listWebhooksWithQuery(t, ts.URL, "active=true&sort=active&order=asc")
+	want := []string{"wh-sort-1", "wh-sort-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("filter+sort: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_InvalidSortAdvertisesActive(t *testing.T) {
+	// 5.4.114 — the 400 envelope must advertise active so operators discover
+	// the new axis from the daemon's error text.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?sort=bogus-active-axis")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+	body, _ := readAllBody(resp)
+	if !strings.Contains(string(body), "active") {
+		t.Fatalf("400 envelope %q should advertise the new active axis so operators discover it", body)
+	}
+}
+
 func TestListWebhooks_SortComposesWithSearch(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()

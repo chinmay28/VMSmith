@@ -5668,6 +5668,63 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
   });
 
+  // 5.4.114 — active sort axis on the webhook list. Seeds three webhooks
+  // via the UI (all default to active=true), then flips one inactive via
+  // the edit modal so the cohorts split 2-active / 1-inactive. Asserts the
+  // new "active" sort option clusters the inactive cohort at the head of
+  // asc and the live cohort at the head of desc, and that the dropdown
+  // round-trips through ?sort=active in the URL. Mirrors the schedule
+  // enabled (5.4.113) sort-axis test one resource over.
+  test("active sort axis reorders the webhook list (inactive heads asc, live heads desc)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    const seed = async (url) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    // All three default to active=true at create time.
+    await seed("https://active-a.example.com/hook");
+    await seed("https://active-b.example.com/hook");
+    await seed("https://inactive-c.example.com/hook");
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Flip the "inactive-c" webhook to active=false via the edit modal so
+    // the cohorts split 2-active / 1-inactive — gives the comparator
+    // something to discriminate.
+    const inactiveRow = page.locator('[data-testid^="webhook-row-"]:has-text("inactive-c.example.com")');
+    const inactiveID = (await inactiveRow.getAttribute("data-testid")).replace("webhook-row-", "");
+    await page.getByTestId(`webhook-edit-${inactiveID}`).click();
+    await expect(page.getByTestId("edit-webhook-form")).toBeVisible();
+    await page.getByTestId("edit-webhook-active-toggle").uncheck();
+    await page.getByTestId("edit-webhook-submit").click();
+    await expect(page.getByTestId("edit-webhook-form")).not.toBeVisible();
+
+    // Sort by active asc — inactive cohort heads, then the active cohort.
+    // The inactive row must surface first.
+    await page.getByTestId("webhook-list-sort-field").selectOption("active");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("inactive-c.example.com");
+    // URL round-trip honours the new axis.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("sort")).toBe("active");
+
+    // Flip order — desc surfaces the active cohort first; the inactive row
+    // sinks to the tail (i.e. is no longer the first row).
+    await page.getByTestId("webhook-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).not.toContain("inactive-c.example.com");
+    await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
+  });
+
   // 2.3.10 — webhook bulk-delete.
   test("bulk delete selected webhooks via checkbox + Delete-selected", async ({ page }) => {
     page.on("dialog", (d) => d.accept());

@@ -13,6 +13,7 @@ const (
 	WebhookSortCreatedAt      = "created_at"
 	WebhookSortLastDelivery   = "last_delivery_at"
 	WebhookSortDeliveryStatus = "delivery_status"
+	WebhookSortActive         = "active"
 )
 
 // IsValidWebhookSort reports whether the given string is one of the
@@ -25,7 +26,8 @@ func IsValidWebhookSort(s string) bool {
 		WebhookSortURL,
 		WebhookSortCreatedAt,
 		WebhookSortLastDelivery,
-		WebhookSortDeliveryStatus:
+		WebhookSortDeliveryStatus,
+		WebhookSortActive:
 		return true
 	}
 	return false
@@ -102,6 +104,29 @@ func SortWebhooks(hooks []*Webhook, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case WebhookSortActive:
+			// 5.4.114 — boolean compare on `Webhook.Active`. The symmetric
+			// sort counterpart to the tristate `?active=true|false`
+			// exact-match filter (5.4.37) on the same column so the same
+			// active cohort can be both filtered and sorted on the same
+			// column. Asc collation: false < true — inactive webhooks
+			// cluster at the head, the live cohort (webhooks that actually
+			// deliver) sinks to the tail; desc surfaces the live cohort
+			// first, the natural ordering for the operator query *"surface
+			// every live webhook before I audit the delivery landscape"*.
+			// Closed-and-total: `Webhook.Active` is `json:"active"`
+			// without `omitempty` so a missing wire key resolves to the
+			// zero value (false) and every webhook belongs to exactly one
+			// of the two buckets — no nil-trailing bucket, mirroring the
+			// VM `auto_start` axis (5.4.108), `locked` axis (5.4.109),
+			// and schedule `enabled` axis (5.4.113), unlike the nullable
+			// `url` / `last_delivery_at` axes. Tiebreak on `id` so
+			// paginated responses are deterministic.
+			if ai.Active == aj.Active {
+				less = ai.ID < aj.ID
+				break
+			}
+			less = !ai.Active && aj.Active
 		default: // WebhookSortID
 			less = ai.ID < aj.ID
 		}

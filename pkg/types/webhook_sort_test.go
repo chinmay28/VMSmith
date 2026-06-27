@@ -231,6 +231,7 @@ func TestIsValidWebhookSort_AcceptsAllAxes(t *testing.T) {
 		WebhookSortCreatedAt,
 		WebhookSortLastDelivery,
 		WebhookSortDeliveryStatus,
+		WebhookSortActive,
 	} {
 		if !IsValidWebhookSort(s) {
 			t.Errorf("IsValidWebhookSort(%q) = false, want true", s)
@@ -239,10 +240,99 @@ func TestIsValidWebhookSort_AcceptsAllAxes(t *testing.T) {
 }
 
 func TestIsValidWebhookSort_RejectsUnknown(t *testing.T) {
-	for _, s := range []string{"", "secret", "URL", "Delivery_Status", "active"} {
+	for _, s := range []string{"", "secret", "URL", "Delivery_Status", "Active"} {
 		if IsValidWebhookSort(s) {
 			t.Errorf("IsValidWebhookSort(%q) = true, want false", s)
 		}
+	}
+}
+
+// 5.4.114 — boolean `active` sort axis with closed-and-total classification.
+// Mirrors the VM auto_start (5.4.108) / locked (5.4.109) and schedule
+// enabled (5.4.113) boolean axes one resource over: every webhook belongs
+// to exactly one of the two buckets (true or false) so there is no
+// nil-trailing branch — the comparator just orders false before true in
+// asc and tiebreaks on id within each cohort.
+
+// TestIsValidWebhookSort_AcceptsActive covers the 5.4.114 active sort
+// axis — the symmetric sort counterpart to the tristate `?active=true|
+// false` exact-match filter (5.4.37) on the same column.
+func TestIsValidWebhookSort_AcceptsActive(t *testing.T) {
+	if !IsValidWebhookSort(WebhookSortActive) {
+		t.Fatal("active must be an accepted sort key")
+	}
+	if !IsValidWebhookSort("active") {
+		t.Fatal("literal 'active' must be accepted")
+	}
+}
+
+// TestSortWebhooks_ByActive_AscPutsFalseFirst asserts asc collation
+// false < true: the inactive cohort heads the list, the active cohort
+// (the webhooks that actually deliver) sinks to the tail. Within each
+// cohort the id tiebreak preserves a deterministic order.
+func TestSortWebhooks_ByActive_AscPutsFalseFirst(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-1", Active: true},
+		{ID: "wh-2", Active: false},
+		{ID: "wh-3"}, // zero-value Active == false
+		{ID: "wh-4", Active: true},
+	}
+	SortWebhooks(hooks, WebhookSortActive, SortOrderAsc)
+	want := []string{"wh-2", "wh-3", "wh-1", "wh-4"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Fatalf("active asc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortWebhooks_ByActive_DescPutsTrueFirst flips the asc ordering —
+// the active cohort (live webhooks) heads the list, the inactive cohort
+// sinks to the tail. Desc reverses the entire compare result including
+// the id tiebreak so within each cohort the higher id comes first.
+func TestSortWebhooks_ByActive_DescPutsTrueFirst(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-1", Active: true},
+		{ID: "wh-2", Active: false},
+		{ID: "wh-3", Active: true},
+		{ID: "wh-4", Active: false},
+	}
+	SortWebhooks(hooks, WebhookSortActive, SortOrderDesc)
+	want := []string{"wh-3", "wh-1", "wh-4", "wh-2"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Fatalf("active desc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortWebhooks_ByActive_TiebreaksOnID covers webhooks sharing the
+// same active state tiebreak deterministically on id (common case: many
+// active production webhooks).
+func TestSortWebhooks_ByActive_TiebreaksOnID(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-z", Active: true},
+		{ID: "wh-a", Active: true},
+		{ID: "wh-m", Active: true},
+	}
+	SortWebhooks(hooks, WebhookSortActive, SortOrderAsc)
+	want := []string{"wh-a", "wh-m", "wh-z"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Fatalf("active id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortWebhooks_ByActive_AllFalse_TiebreaksOnID covers the zero-value
+// cohort tiebreak — every webhook has the default false Active (e.g. a
+// wire payload that omitted the field), so all of them collapse to the
+// inactive bucket and the id tiebreak takes over. Mirrors the schedule
+// enabled AllFalse_TiebreaksOnID test (5.4.113).
+func TestSortWebhooks_ByActive_AllFalse_TiebreaksOnID(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-z"},
+		{ID: "wh-a"},
+		{ID: "wh-m"},
+	}
+	SortWebhooks(hooks, WebhookSortActive, SortOrderAsc)
+	want := []string{"wh-a", "wh-m", "wh-z"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Fatalf("active all-false id-tiebreak: got %v, want %v", got, want)
 	}
 }
 
