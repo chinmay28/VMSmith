@@ -365,6 +365,7 @@ export default function ImageList() {
           <option value="name">Name</option>
           <option value="size">Size</option>
           <option value="created_at">Created</option>
+          <option value="source_vm">Source VM</option>
         </select>
         <select
           value={order}

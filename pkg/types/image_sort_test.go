@@ -94,6 +94,70 @@ func TestSortImages_UnknownFieldFallsBackToID(t *testing.T) {
 	}
 }
 
+// 5.4.117 — `source_vm` sort axis is the symmetric counterpart to the
+// case-insensitive `?source_vm=` exact-match filter on the same column.
+func TestSortImages_BySourceVM_AscCaseInsensitive(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-3", Name: "c", SourceVM: "VM-Beta"},
+		{ID: "img-1", Name: "a", SourceVM: "vm-alpha"},
+		{ID: "img-2", Name: "b", SourceVM: "vm-gamma"},
+	}
+	SortImages(imgs, ImageSortSourceVM, SortOrderAsc)
+	want := []string{"img-1", "img-3", "img-2"} // alpha < Beta < gamma (case-insensitive)
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_BySourceVM_EmptyTrailsInAsc(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-1", Name: "a", SourceVM: ""}, // uploaded, no source VM
+		{ID: "img-2", Name: "b", SourceVM: "vm-alpha"},
+		{ID: "img-3", Name: "c", SourceVM: ""},
+	}
+	SortImages(imgs, ImageSortSourceVM, SortOrderAsc)
+	want := []string{"img-2", "img-1", "img-3"} // non-empty first; empties tiebreak on id
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_BySourceVM_EmptyHeadsInDesc(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-2", Name: "b", SourceVM: "vm-alpha"},
+		{ID: "img-1", Name: "a", SourceVM: ""},
+		{ID: "img-3", Name: "c", SourceVM: ""},
+	}
+	SortImages(imgs, ImageSortSourceVM, SortOrderDesc)
+	// In asc: img-2 (alpha), img-1 (empty), img-3 (empty) — empties tail.
+	// Desc inverts the entire compare, so img-3, img-1 head and img-2 tails.
+	want := []string{"img-3", "img-1", "img-2"}
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_BySourceVM_TiebreaksOnID(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-3", Name: "c", SourceVM: "vm-alpha"},
+		{ID: "img-1", Name: "a", SourceVM: "vm-alpha"},
+		{ID: "img-2", Name: "b", SourceVM: "vm-alpha"},
+	}
+	SortImages(imgs, ImageSortSourceVM, SortOrderAsc)
+	want := []string{"img-1", "img-2", "img-3"}
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
 func TestSortImages_StablePagination(t *testing.T) {
 	// Repeated sorts on equal-key data must produce the same order so page-2
 	// of a paginated query matches page-1's continuation.

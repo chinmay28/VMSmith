@@ -4603,6 +4603,62 @@ func TestCLI_ImageList_RejectsInvalidSort(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
 		t.Fatalf("expected invalid --sort error, got %v", err)
 	}
+	// 5.4.117 — the rejection message must advertise source_vm so scripts
+	// can discover the full supported axis set from the CLI alone.
+	if !strings.Contains(err.Error(), "source_vm") {
+		t.Errorf("invalid --sort error %q must advertise source_vm", err.Error())
+	}
+}
+
+// 5.4.117 — case-insensitive sort axis on `source_vm` mirroring the existing
+// case-insensitive `?source_vm=` exact-match filter; empty `source_vm`
+// (uploaded images) sinks to the tail of asc / head of desc.
+func TestCLI_ImageList_SortBySourceVM_Asc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-uploaded", Name: "uploaded", Path: "/t/u.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-from-beta", Name: "from-beta", Path: "/t/b.qcow2", SizeBytes: 100, Format: "qcow2", SourceVM: "VM-BETA", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-from-alpha", Name: "from-alpha", Path: "/t/a.qcow2", SizeBytes: 100, Format: "qcow2", SourceVM: "vm-alpha", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "source_vm")
+	if err != nil {
+		t.Fatalf("image list --sort source_vm: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	// alpha < BETA (case-insensitive) < (empty tail)
+	want := []string{"img-from-alpha", "img-from-beta", "img-uploaded"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_ImageList_SortBySourceVM_DescEmptyHeads(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-from-alpha", Name: "from-alpha", Path: "/t/a.qcow2", SizeBytes: 100, Format: "qcow2", SourceVM: "vm-alpha", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-uploaded", Name: "uploaded", Path: "/t/u.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "source_vm", "--order", "desc")
+	if err != nil {
+		t.Fatalf("image list --sort source_vm --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 3 {
+		t.Fatalf("expected header + 2 rows, got %d: %v", len(rows), rows)
+	}
+	if rows[1][0] != "img-uploaded" {
+		t.Errorf("first row id = %q, want img-uploaded (empty source_vm heads desc)", rows[1][0])
+	}
 }
 
 func TestCLI_ImageList_RejectsInvalidOrder(t *testing.T) {

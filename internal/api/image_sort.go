@@ -21,11 +21,12 @@ func parseImageSort(r *http.Request) (sortField, order string, err error) {
 		sortField = types.ImageSortID
 	}
 	switch sortField {
-	case types.ImageSortID, types.ImageSortName, types.ImageSortSize, types.ImageSortCreatedAt:
+	case types.ImageSortID, types.ImageSortName, types.ImageSortSize, types.ImageSortCreatedAt,
+		types.ImageSortSourceVM:
 	default:
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, name, size, created_at",
+			"sort must be one of: id, name, size, created_at, source_vm",
 		)
 	}
 

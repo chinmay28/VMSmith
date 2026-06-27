@@ -5229,9 +5229,16 @@ export interface components {
         /**
          * @description Field to sort the image list by. Defaults to `id`. Unknown values
          *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
-         *     pagination is deterministic across backends.
+         *     pagination is deterministic across backends. `source_vm` (5.4.117)
+         *     is the symmetric sort counterpart to the case-insensitive
+         *     `?source_vm=` exact-match filter — case-insensitive comparison
+         *     mirrors the filter contract; images with an empty `source_vm`
+         *     (uploaded images, never exported from a VM) sink to the tail of
+         *     `asc` and the head of `desc`, mirroring the nil-trailing semantics
+         *     on every other nullable sort axis (ip, guest_ip, image,
+         *     last_fired_at, last_delivery_at, actor).
          */
-        ImageSort: "id" | "name" | "size" | "created_at";
+        ImageSort: "id" | "name" | "size" | "created_at" | "source_vm";
         /**
          * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
          *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to

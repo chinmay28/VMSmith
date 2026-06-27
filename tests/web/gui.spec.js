@@ -3150,6 +3150,30 @@ test.describe("Images", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
 
+  // 5.4.117 — `source_vm` sort axis on the image list. The mock seeds img-1
+  // (ubuntu-base) with source_vm = "vm-1" and img-2 (rocky-experimental) with
+  // no source_vm. asc: img-1 (vm-1) heads, img-2 (empty) tails. desc: empty
+  // heads (the descending wrapper inverts the full compare).
+  test("source_vm sort axis reorders the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    const rows = () => page.getByTestId(/^image-row-/);
+    await expect(rows()).toHaveCount(2);
+
+    await page.getByTestId("image-list-sort-field").selectOption("source_vm");
+    // asc: non-empty source_vm first, then the uploaded (no source_vm) image.
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-ubuntu-base");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=source_vm");
+
+    // desc: empty heads.
+    await page.getByTestId("image-list-sort-order").selectOption("desc");
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "image-row-ubuntu-base");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
+
   test("search input filters the image list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-images").click();
