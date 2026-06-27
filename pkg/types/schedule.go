@@ -53,15 +53,15 @@ func IsValidCatchUpPolicy(p ScheduleCatchUpPolicy) bool {
 
 // Schedule list sort fields.
 const (
-	ScheduleSortID          = "id"
-	ScheduleSortName        = "name"
-	ScheduleSortCreatedAt   = "created_at"
-	ScheduleSortNextFire    = "next_fire_at"
-	ScheduleSortLastFiredAt = "last_fired_at"
-	ScheduleSortVMID        = "vm_id"
-	ScheduleSortAction      = "action"
-	ScheduleSortTimezone    = "timezone"
-	ScheduleSortEnabled     = "enabled"
+	ScheduleSortID            = "id"
+	ScheduleSortName          = "name"
+	ScheduleSortCreatedAt     = "created_at"
+	ScheduleSortNextFire      = "next_fire_at"
+	ScheduleSortLastFiredAt   = "last_fired_at"
+	ScheduleSortVMID          = "vm_id"
+	ScheduleSortAction        = "action"
+	ScheduleSortTimezone      = "timezone"
+	ScheduleSortEnabled       = "enabled"
 	ScheduleSortCatchUpPolicy = "catch_up_policy"
 )
 
