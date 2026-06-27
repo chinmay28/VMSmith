@@ -242,6 +242,7 @@ func TestIsValidTemplateSort_AcceptsImage(t *testing.T) {
 		{TemplateSortImage, true},
 		{TemplateSortDefaultUser, true},
 		{TemplateSortOSType, true},
+		{TemplateSortOSVariant, true},
 		{"bogus", false},
 		{"", false},
 	}
@@ -457,5 +458,89 @@ func TestSortTemplates_StablePagination(t *testing.T) {
 		if a[i].ID != b[i].ID {
 			t.Fatalf("idx %d: a=%q b=%q — equal-name tie not deterministic", i, a[i].ID, b[i].ID)
 		}
+	}
+}
+
+// 5.4.115 — case-insensitive `os_variant` sort axis on the template list.
+// Mirrors the VM list `os_variant` sort axis (5.4.103) — empty stored values
+// sink to the tail of asc / head of desc (no documented default unlike
+// `os_type` which collapses empty → linux).
+
+func TestSortTemplates_ByOSVariant_AscNilTrailing(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", OSType: OSTypeWindows, OSVariant: "windows-server-2025"},
+		{ID: "tpl-2", OSType: OSTypeWindows, OSVariant: "windows-10"},
+		{ID: "tpl-3"}, // empty → trails in asc
+		{ID: "tpl-4", OSType: OSTypeWindows, OSVariant: "windows-11"},
+	}
+	SortTemplates(templates, TemplateSortOSVariant, SortOrderAsc)
+	// Asc alphabetical: windows-10 < windows-11 < windows-server-2025; empty trails.
+	want := []string{"tpl-2", "tpl-4", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByOSVariant_DescNilLeading(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", OSType: OSTypeWindows, OSVariant: "windows-server-2025"},
+		{ID: "tpl-2", OSType: OSTypeWindows, OSVariant: "windows-10"},
+		{ID: "tpl-3"}, // empty → leads in desc
+		{ID: "tpl-4", OSType: OSTypeWindows, OSVariant: "windows-11"},
+	}
+	SortTemplates(templates, TemplateSortOSVariant, SortOrderDesc)
+	// Desc: empty heads, then windows-server-2025 > windows-11 > windows-10.
+	want := []string{"tpl-3", "tpl-1", "tpl-4", "tpl-2"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByOSVariant_CaseInsensitive(t *testing.T) {
+	// Mirrors the case-insensitive `?os_variant=` filter contract — case
+	// shouldn't split the windows-11 cohort regardless of how it was stored.
+	templates := []*VMTemplate{
+		{ID: "tpl-3", OSType: OSTypeWindows, OSVariant: "Windows-11"},
+		{ID: "tpl-1", OSType: OSTypeWindows, OSVariant: "WINDOWS-11"},
+		{ID: "tpl-2", OSType: OSTypeWindows, OSVariant: "windows-10"},
+	}
+	SortTemplates(templates, TemplateSortOSVariant, SortOrderAsc)
+	// windows-10 < windows-11; the two windows-11 entries tiebreak on id.
+	want := []string{"tpl-2", "tpl-1", "tpl-3"}
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByOSVariant_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", OSType: OSTypeWindows, OSVariant: "windows-11"},
+		{ID: "tpl-1", OSType: OSTypeWindows, OSVariant: "windows-11"},
+		{ID: "tpl-2", OSType: OSTypeWindows, OSVariant: "windows-11"},
+	}
+	SortTemplates(templates, TemplateSortOSVariant, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3",
+			templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+func TestSortTemplates_ByOSVariant_AllEmpty_TiebreaksOnID(t *testing.T) {
+	// All empty → all sink (no documented default), so id tiebreak determines order.
+	templates := []*VMTemplate{
+		{ID: "tpl-3"},
+		{ID: "tpl-1"},
+		{ID: "tpl-2"},
+	}
+	SortTemplates(templates, TemplateSortOSVariant, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3 — all-empty must tiebreak on id",
+			templates[0].ID, templates[1].ID, templates[2].ID)
 	}
 }

@@ -3669,6 +3669,32 @@ test.describe("Templates", () => {
     await expect(rows.last()).toHaveAttribute("data-testid", "template-row-small-ubuntu");
   });
 
+  // 5.4.115 — case-insensitive `os_variant` sort axis on the template list,
+  // the symmetric sort counterpart to the existing `?os_variant=` filter.
+  // Mirrors the VM list `os_variant` sort axis (5.4.103) — empty stored
+  // values sink to the tail of asc / head of desc (no documented default).
+  test("os_variant sort axis reorders the template list (empty trails asc, leads desc)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+
+    // Seed: small-ubuntu (empty os_variant), big-rocky (empty), windows-2022
+    // (windows-server-2022), windows-11-desktop (windows-11). Asc alphabetical:
+    // windows-11 < windows-server-2022; empty trails (id tpl-1 < tpl-2).
+    await page.getByTestId("template-list-sort-field").selectOption("os_variant");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=os_variant");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-windows-11-desktop");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-big-rocky");
+
+    // Descending: empty heads (tpl-2 > tpl-1 by id desc); then
+    // windows-server-2022 > windows-11.
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-big-rocky");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-windows-11-desktop");
+  });
+
   test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

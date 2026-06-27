@@ -3797,11 +3797,25 @@ components:
         empty-means-linux filter contract) so empty templates collate
         with explicit-linux templates rather than sinking to the tail.
         Same documented-default rationale as the VM list `os_type`
-        axis (5.4.100). All comparators tiebreak on `id` so paginated
-        requests return the same set across two independent fetches.
+        axis (5.4.100). `os_variant` (5.4.115) is the symmetric sort
+        counterpart to the case-insensitive `?os_variant=` exact-match
+        filter on the same column so the same Windows-edition cohort can
+        be both filtered and sorted on the same column. Unlike `os_type`
+        which collapses empty → `linux`, `os_variant` has NO documented
+        default — an empty stored value means "operator did not specify
+        an edition" (typically because the template provisions a Linux
+        guest where the field is genuinely absent / not applicable). So
+        templates with an empty `os_variant` sort to the tail of `asc` /
+        head of `desc`, mirroring the nil-trailing semantics on `image`
+        / `default_user` and the VM list `os_variant` axis (5.4.103).
+        Alphabetical Windows edition ordering: `windows-10 <
+        windows-11 < windows-server-2019 < windows-server-2022 <
+        windows-server-2025`. All comparators tiebreak on `id` so
+        paginated requests return the same set across two independent
+        fetches.
       schema:
         type: string
-        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type]
+        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant]
         default: id
     SortOrder:
       name: order

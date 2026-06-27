@@ -7761,6 +7761,9 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "os_type") {
 		t.Errorf("error = %v, want it to mention `os_type`", err)
 	}
+	if !strings.Contains(err.Error(), "os_variant") {
+		t.Errorf("error = %v, want it to mention `os_variant`", err)
+	}
 }
 
 // 5.4.102 — case-insensitive `os_type` sort axis on the template list.
@@ -7817,6 +7820,69 @@ func TestCLI_TemplateList_SortByOSType_CaseInsensitive(t *testing.T) {
 	rows := tableRows(t, out)
 	// linux < windows; the two windows entries (regardless of case) tiebreak on id.
 	want := []string{"lin", "winLower", "WinUpper"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+// 5.4.115 — case-insensitive `os_variant` sort axis on the template list.
+// Mirrors the VM list `os_variant` sort axis (5.4.103) — empty stored values
+// sink to the tail (no documented default, unlike `os_type`).
+
+func TestCLI_TemplateList_SortByOSVariant_AscNilTrailing(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "srv-2025", Image: "win-2025.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2025"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "win10", Image: "win-10.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "rocky", Image: "rocky9.qcow2"}); err != nil { // empty → trails
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-4", Name: "win11", Image: "win-11.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "os_variant")
+	if err != nil {
+		t.Fatalf("template list --sort os_variant: %v", err)
+	}
+	rows := tableRows(t, out)
+	// Asc alphabetical: windows-10 < windows-11 < windows-server-2025; empty trails.
+	want := []string{"win10", "win11", "srv-2025", "rocky"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByOSVariant_DescNilLeading(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "srv-2025", Image: "win-2025.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2025"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "win10", Image: "win-10.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "rocky", Image: "rocky9.qcow2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "os_variant", "--order", "desc")
+	if err != nil {
+		t.Fatalf("template list --sort os_variant --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	// Desc: empty heads, then windows-server-2025 > windows-10.
+	want := []string{"rocky", "srv-2025", "win10"}
 	for i, name := range want {
 		if rows[i+1][1] != name {
 			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)

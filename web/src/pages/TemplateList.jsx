@@ -577,6 +577,7 @@ export default function TemplateList() {
           <option value="image">Image</option>
           <option value="default_user">Default user</option>
           <option value="os_type">OS type</option>
+          <option value="os_variant">OS variant</option>
         </select>
         <select
           value={order}
