@@ -2967,10 +2967,21 @@ export interface paths {
                      *     counterpart to the case-insensitive `?delivery_status=`
                      *     exact-match filter; operator-triage ASC surfaces broken
                      *     receivers first and DESC surfaces never-attempted receivers
-                     *     first. All comparators tiebreak on `id` so repeated requests
-                     *     return a deterministic order.
+                     *     first. `active` (5.4.114) is the symmetric sort counterpart
+                     *     to the tristate `?active=true|false` exact-match filter
+                     *     (5.4.37) on the same column — boolean compare with asc
+                     *     collation `false < true` so inactive webhooks cluster at the
+                     *     head of `asc` and the live cohort (webhooks that actually
+                     *     deliver) heads `desc`. Closed-and-total: `Webhook.active` is
+                     *     `json:"active"` without `omitempty` so a missing wire key
+                     *     resolves to the zero value (false) and every webhook belongs
+                     *     to exactly one of the two buckets — no nil-trailing bucket,
+                     *     mirroring the VM `auto_start` axis (5.4.108) / `locked` axis
+                     *     (5.4.109) and the schedule `enabled` axis (5.4.113). All
+                     *     comparators tiebreak on `id` so repeated requests return a
+                     *     deterministic order.
                      */
-                    sort?: "id" | "url" | "created_at" | "last_delivery_at" | "delivery_status";
+                    sort?: "id" | "url" | "created_at" | "last_delivery_at" | "delivery_status" | "active";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**

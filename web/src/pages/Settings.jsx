@@ -392,6 +392,7 @@ export default function Settings() {
             <option value="created_at">created_at</option>
             <option value="last_delivery_at">last_delivery_at</option>
             <option value="delivery_status">delivery_status</option>
+            <option value="active">active</option>
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">

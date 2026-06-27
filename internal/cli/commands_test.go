@@ -9308,6 +9308,38 @@ func TestCLI_WebhookList_ForwardsDeliveryStatusSort(t *testing.T) {
 	}
 }
 
+// 5.4.114 — active sort axis forwarded to the daemon. Whitespace +
+// case-folding on the --sort value (the daemon validates server-side;
+// the CLI just lowercases + trims before forwarding).
+func TestCLI_WebhookList_ForwardsActiveSort(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--sort", "  ACTIVE  ", "--order", "desc"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=active") {
+		t.Fatalf("expected sort=active, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected order=desc, got %q", state.lastQuery)
+	}
+}
+
+// TestCLI_WebhookList_InvalidSortAdvertisesActive asserts the client-side
+// rejection lists active in the error envelope so operators discover the
+// new 5.4.114 axis from the error path.
+func TestCLI_WebhookList_InvalidSortAdvertisesActive(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "active") {
+		t.Fatalf("invalid --sort message should advertise active, got %v", err)
+	}
+}
+
 func TestCLI_WebhookList_RejectsInvalidOrder(t *testing.T) {
 	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
 

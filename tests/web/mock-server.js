@@ -2543,13 +2543,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_active", message: "active must be 'true' or 'false'" });
     }
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
-    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at", "delivery_status"]);
+    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at", "delivery_status", "active"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at, delivery_status" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at, delivery_status, active" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2734,6 +2734,22 @@ const server = http.createServer(async (req, res) => {
           const sa = classify(a);
           const sb = classify(b);
           cmp = sa < sb ? -1 : sa > sb ? 1 : 0;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "active": {
+          // 5.4.114 — boolean compare on Webhook.active. Closed-and-total
+          // (every webhook resolves to true or false) so this branch
+          // diverges from the nil-trailing convention the same way the
+          // VM auto_start (5.4.108) / locked (5.4.109) and schedule
+          // enabled (5.4.113) axes do: no empty bucket to sink. Asc
+          // puts false before true so the inactive cohort heads asc and
+          // the live cohort heads desc.
+          const av = a.active === true;
+          const bv = b.active === true;
+          if (av === bv) cmp = 0;
+          else if (!av && bv) cmp = -1;
+          else cmp = 1;
           if (cmp === 0) cmp = cmpID;
           break;
         }

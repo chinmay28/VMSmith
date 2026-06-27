@@ -202,11 +202,20 @@ func (s *Server) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 //     not free-form name alphabets. Applied between `?active=` and
 //     `?search=` so it composes additively with every other webhook list
 //     filter and `X-Total-Count` reflects the post-filter population. (5.4.83)
-//   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at|delivery_status.
+//   - sort=<field>   whitelisted to id|url|created_at|last_delivery_at|delivery_status|active.
 //     Default `id`. Unknown values return 400 `invalid_sort`. `delivery_status`
 //     (5.4.98) orders by the derived classification — alphabetical
 //     failing < healthy < never — and is the symmetric sort counterpart
 //     to the case-insensitive `?delivery_status=` exact-match filter (5.4.35).
+//     `active` (5.4.114) orders by the boolean `Active` flag — false < true
+//     in `asc`, so the inactive cohort heads the list and the live cohort
+//     (webhooks that actually deliver) heads `desc`. Closed-and-total —
+//     `Webhook.Active` is `json:"active"` without `omitempty` so every
+//     webhook resolves to exactly one of the two buckets — no nil-trailing
+//     bucket, mirroring the VM `auto_start` axis (5.4.108), `locked` axis
+//     (5.4.109), and schedule `enabled` axis (5.4.113). Symmetric sort
+//     counterpart to the tristate `?active=true|false` exact-match filter
+//     (5.4.37).
 //   - order=<asc|desc>  default `asc`. Unknown values return 400 `invalid_order`.
 //   - page / per_page (see parsePagination) — applied after filter + sort so
 //     the X-Total-Count header reflects the post-filter / pre-pagination
