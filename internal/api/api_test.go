@@ -15149,6 +15149,82 @@ func TestListTemplates_SortByOSType_400AdvertisesOSType(t *testing.T) {
 	}
 }
 
+// 5.4.115 — case-insensitive `os_variant` sort axis on the template list.
+// Mirrors the VM list `os_variant` sort axis (5.4.103). Empty stored values
+// sink to the tail of asc / head of desc — no documented default unlike
+// `os_type` which collapses empty → linux.
+
+func TestListTemplates_SortByOSVariant_AscNilTrailing(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "win-2025.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2025"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "win-10.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2"}) // empty → trails
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-4", Name: "d", Image: "win-11.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_variant")
+	got := decodeTemplateList(t, resp)
+	want := []string{"b", "d", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSVariant_DescNilLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "win-2025.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-server-2025"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "win-10.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-4", Name: "d", Image: "win-11.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=os_variant&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Desc: empty heads, then windows-server-2025 > windows-11 > windows-10.
+	want := []string{"c", "a", "d", "b"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSVariant_ComposesWithFilter(t *testing.T) {
+	// `?os_variant=windows-11&sort=os_variant` narrows to the windows-11 cohort.
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "win-10.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-10"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "win-11.qcow2", OSType: types.OSTypeWindows, OSVariant: "windows-11"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?os_variant=windows-11&sort=os_variant")
+	got := decodeTemplateList(t, resp)
+	want := []string{"b"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (full: %+v)", len(got), len(want), got)
+	}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByOSVariant_400AdvertisesOSVariant(t *testing.T) {
+	ts, _, _, cleanup := testServerFull(t)
+	defer cleanup()
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=bogus")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "os_variant") {
+		t.Errorf("400 message %q must advertise os_variant in the supported set", string(body))
+	}
+}
+
 func TestListTemplates_FilterBySearch_MatchesName(t *testing.T) {
 	ts, _, s, cleanup := testServerFull(t)
 	defer cleanup()

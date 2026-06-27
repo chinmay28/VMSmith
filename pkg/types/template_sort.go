@@ -17,6 +17,7 @@ const (
 	TemplateSortImage       = "image"
 	TemplateSortDefaultUser = "default_user"
 	TemplateSortOSType      = "os_type"
+	TemplateSortOSVariant   = "os_variant"
 )
 
 // IsValidTemplateSort reports whether s is an accepted template list sort
@@ -25,7 +26,8 @@ func IsValidTemplateSort(s string) bool {
 	switch s {
 	case TemplateSortID, TemplateSortName, TemplateSortCreatedAt,
 		TemplateSortCPUs, TemplateSortRAMMB, TemplateSortDiskGB,
-		TemplateSortImage, TemplateSortDefaultUser, TemplateSortOSType:
+		TemplateSortImage, TemplateSortDefaultUser, TemplateSortOSType,
+		TemplateSortOSVariant:
 		return true
 	}
 	return false
@@ -125,6 +127,35 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case TemplateSortOSVariant:
+			// 5.4.115 — case-insensitive compare on the template's
+			// `OSVariant` field. Symmetric sort counterpart to the
+			// case-insensitive `?os_variant=` exact-match filter on the
+			// same column so the same Windows-edition cohort can be both
+			// filtered and sorted on the same column — mirrors the VM list
+			// `os_variant` sort axis (5.4.103). Unlike `os_type` (5.4.102)
+			// `os_variant` has NO documented default — an empty stored
+			// value means "operator did not specify an edition", typically
+			// because the template provisions a Linux guest (where the
+			// field is genuinely absent / not applicable). So empty
+			// templates sink to the tail of asc / head of desc, mirroring
+			// the nil-trailing semantics on `image` / `default_user` and
+			// the VM list `os_variant` axis. Alphabetical Windows edition
+			// ordering: windows-10 < windows-11 < windows-server-2019 <
+			// windows-server-2022 < windows-server-2025.
+			aiV, ajV := strings.ToLower(strings.TrimSpace(ai.OSVariant)), strings.ToLower(strings.TrimSpace(aj.OSVariant))
+			switch {
+			case aiV == "" && ajV == "":
+				less = ai.ID < aj.ID
+			case aiV == "":
+				less = false
+			case ajV == "":
+				less = true
+			case aiV != ajV:
+				less = aiV < ajV
+			default:
+				less = ai.ID < aj.ID
+			}
 		case TemplateSortImage:
 			// Case-insensitive compare mirrors the case-insensitive
 			// `?image=` exact-match filter contract so the filter and sort
