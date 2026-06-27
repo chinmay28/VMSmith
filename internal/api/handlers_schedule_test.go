@@ -1251,6 +1251,101 @@ func TestListSchedules_SortByTimezone_400InvalidSortAdvertisesTimezone(t *testin
 	}
 }
 
+// TestListSchedules_SortByEnabled covers the 5.4.113 enabled sort axis on
+// the schedule list — the symmetric sort counterpart to the existing
+// tristate ?enabled=true|false exact-match filter on the same column.
+// Mirrors the VM auto_start (5.4.108) and locked (5.4.109) boolean sort
+// axes one resource over: closed-and-total compare with false < true in
+// asc, id tiebreak within each cohort, no nil-trailing bucket because
+// Schedule.Enabled is `json:"enabled"` without `omitempty` so a missing
+// wire key resolves to the zero value (false).
+func TestListSchedules_SortByEnabled(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id string, enabled bool) {
+		t.Helper()
+		if err := s.PutSchedule(&types.Schedule{
+			ID: id, Name: id, VMID: "vm-1", Action: types.ScheduleActionSnapshot,
+			CronSpec: "0 0 2 * * *", Enabled: enabled,
+		}); err != nil {
+			t.Fatalf("put schedule: %v", err)
+		}
+	}
+	mk("sched-1", true)
+	mk("sched-2", false)
+	mk("sched-3", true)
+	mk("sched-4", false)
+
+	list := func(q string) ([]*types.Schedule, int, int, string) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		_ = json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode, string(data)
+	}
+
+	ids := func(items []*types.Schedule) []string {
+		out := make([]string, 0, len(items))
+		for _, x := range items {
+			out = append(out, x.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// asc: disabled cohort heads (id tiebreak: sched-2, sched-4), then
+	// enabled cohort (id tiebreak: sched-1, sched-3).
+	if items, _, code, body := list("?sort=enabled&order=asc"); code != http.StatusOK || !eq(ids(items), []string{"sched-2", "sched-4", "sched-1", "sched-3"}) {
+		t.Fatalf("enabled asc: code=%d ids=%v body=%s", code, ids(items), body)
+	}
+
+	// desc flips the entire compare result including the id tiebreak,
+	// so within each cohort the higher id comes first.
+	if items, _, _, _ := list("?sort=enabled&order=desc"); !eq(ids(items), []string{"sched-3", "sched-1", "sched-4", "sched-2"}) {
+		t.Fatalf("enabled desc: %v", ids(items))
+	}
+
+	// Whitespace + case-folding on the sort param itself.
+	if items, _, _, _ := list("?sort=%20ENABLED%20&order=asc"); !eq(ids(items), []string{"sched-2", "sched-4", "sched-1", "sched-3"}) {
+		t.Fatalf("enabled whitespace+upper sort param: %v", ids(items))
+	}
+
+	// Composes additively with the ?enabled= filter: narrow to the
+	// enabled cohort, sort within it (essentially id tiebreak).
+	if items, total, _, _ := list("?sort=enabled&order=asc&enabled=true"); total != 2 || !eq(ids(items), []string{"sched-1", "sched-3"}) {
+		t.Fatalf("enabled asc + ?enabled=true: %v total=%d", ids(items), total)
+	}
+}
+
+// TestListSchedules_SortByEnabled_400InvalidSortAdvertisesEnabled asserts
+// the 400 envelope mentions enabled so operators discover the new axis
+// (5.4.113) from the daemon's error text — mirrors the equivalent check
+// on the timezone / action / vm_id sort axes.
+func TestListSchedules_SortByEnabled_400InvalidSortAdvertisesEnabled(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=garbage", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	if !bytes.Contains(data, []byte("enabled")) {
+		t.Fatalf("invalid_sort envelope must mention enabled: %s", data)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

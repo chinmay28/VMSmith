@@ -4821,6 +4821,40 @@ test.describe("Schedules", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBeNull();
     await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBeNull();
   });
+
+  // --- 5.4.113: enabled sort axis on the schedule list ---
+  // Seed data: sch-1 enabled=true, sch-2 enabled=false, sch-3 enabled=true.
+  // asc: disabled cohort heads (sch-2), then enabled cohort id-tiebreak
+  // (sch-1 before sch-3). desc: enabled cohort heads (sch-3 then sch-1 by
+  // reverse id-tiebreak), disabled cohort (sch-2) sinks last.
+  test("enabled sort axis reorders the schedule list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-schedules").click();
+    await expect(page.getByTestId("schedule-row-sch-1")).toBeVisible();
+
+    await page.getByTestId("schedule-list-sort-field").selectOption("enabled");
+    await page.getByTestId("schedule-list-sort-order").selectOption("asc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-2", "schedule-row-sch-1", "schedule-row-sch-3"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBe("enabled");
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("asc");
+
+    // desc flips the entire compare result including the id tiebreak.
+    await page.getByTestId("schedule-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const rows = await page.locator("tr[data-testid^=\"schedule-row-\"]").elementHandles();
+      return Promise.all(rows.map((r) => r.getAttribute("data-testid")));
+    }).toEqual(["schedule-row-sch-3", "schedule-row-sch-1", "schedule-row-sch-2"]);
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBe("desc");
+
+    // Reset to default — sort param drops from the URL, default id-asc returns.
+    await page.getByTestId("schedule-list-sort-field").selectOption("");
+    await page.getByTestId("schedule-list-sort-order").selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.get("sort")).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get("order")).toBeNull();
+  });
 });
 
 test.describe("Navigation", () => {

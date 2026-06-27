@@ -437,3 +437,92 @@ func TestSortSchedules_ByTimezone_AllEmpty_TiebreaksOnID(t *testing.T) {
 		t.Fatalf("timezone all-empty id-tiebreak: got %v, want %v", got, want)
 	}
 }
+
+// 5.4.113 — boolean `enabled` sort axis with closed-and-total classification.
+// Mirrors the VM auto_start (5.4.108) and locked (5.4.109) boolean axes one
+// resource over: every schedule belongs to exactly one of the two buckets
+// (true or false) so there is no nil-trailing branch — the comparator just
+// orders false before true in asc and tiebreaks on id within each cohort.
+
+// TestIsValidScheduleSort_AcceptsEnabled covers the 5.4.113 enabled sort
+// axis — the symmetric sort counterpart to the tristate `?enabled=true|
+// false` exact-match filter on the same column.
+func TestIsValidScheduleSort_AcceptsEnabled(t *testing.T) {
+	if !IsValidScheduleSort(ScheduleSortEnabled) {
+		t.Fatal("enabled must be an accepted sort key")
+	}
+	if !IsValidScheduleSort("enabled") {
+		t.Fatal("literal 'enabled' must be accepted")
+	}
+}
+
+// TestSortSchedules_ByEnabled_AscPutsFalseFirst asserts asc collation
+// false < true: the disabled cohort heads the list, the enabled cohort
+// (the schedules that actually fire) sinks to the tail. Within each
+// cohort the id tiebreak preserves a deterministic order.
+func TestSortSchedules_ByEnabled_AscPutsFalseFirst(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-1", Enabled: true},
+		{ID: "sched-2", Enabled: false},
+		{ID: "sched-3"}, // zero-value Enabled == false
+		{ID: "sched-4", Enabled: true},
+	}
+	SortSchedules(items, ScheduleSortEnabled, SortOrderAsc)
+	want := []string{"sched-2", "sched-3", "sched-1", "sched-4"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("enabled asc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByEnabled_DescPutsTrueFirst flips the asc ordering
+// — the enabled cohort (live schedules) heads the list, the disabled
+// cohort sinks to the tail. Desc reverses the entire compare result
+// including the id tiebreak so within each cohort the higher id comes
+// first.
+func TestSortSchedules_ByEnabled_DescPutsTrueFirst(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-1", Enabled: true},
+		{ID: "sched-2", Enabled: false},
+		{ID: "sched-3", Enabled: true},
+		{ID: "sched-4", Enabled: false},
+	}
+	SortSchedules(items, ScheduleSortEnabled, SortOrderDesc)
+	want := []string{"sched-3", "sched-1", "sched-4", "sched-2"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("enabled desc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByEnabled_TiebreaksOnID covers schedules sharing
+// the same enabled state tiebreak deterministically on id (common
+// case: many enabled nightly-backup schedules).
+func TestSortSchedules_ByEnabled_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", Enabled: true},
+		{ID: "sched-a", Enabled: true},
+		{ID: "sched-m", Enabled: true},
+	}
+	SortSchedules(items, ScheduleSortEnabled, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("enabled id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByEnabled_AllFalse_TiebreaksOnID covers the
+// zero-value cohort tiebreak — every schedule has the default false
+// Enabled (e.g. a wire payload that omitted the field), so all of
+// them collapse to the disabled bucket and the id tiebreak takes
+// over. Mirrors the auto_start AllFalse_TiebreaksOnID test on VMs.
+func TestSortSchedules_ByEnabled_AllFalse_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z"},
+		{ID: "sched-a"},
+		{ID: "sched-m"},
+	}
+	SortSchedules(items, ScheduleSortEnabled, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("enabled all-false id-tiebreak: got %v, want %v", got, want)
+	}
+}

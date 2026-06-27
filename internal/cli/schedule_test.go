@@ -279,6 +279,38 @@ func TestCLI_ScheduleList_InvalidSortAdvertisesTimezone(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsEnabledSort covers the 5.4.113 enabled
+// sort axis on the schedule list — whitespace + case normalisation on
+// the `--sort` value (the daemon validates server-side; the CLI just
+// lowercases + trims before forwarding).
+func TestCLI_ScheduleList_ForwardsEnabledSort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--sort", "  ENABLED  ", "--order", "desc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=enabled") {
+		t.Fatalf("query missing sort=enabled: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=desc") {
+		t.Fatalf("query missing order=desc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_InvalidSortAdvertisesEnabled asserts the
+// client-side rejection lists enabled in the error envelope so
+// operators discover the new 5.4.113 axis from the error path.
+func TestCLI_ScheduleList_InvalidSortAdvertisesEnabled(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "enabled") {
+		t.Fatalf("invalid --sort message should advertise enabled, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--until", "garbage"); err == nil {
