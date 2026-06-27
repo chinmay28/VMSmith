@@ -1742,8 +1742,8 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/images" && method === "GET") {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
-    if (!["id", "name", "size", "created_at"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, size, created_at" });
+    if (!["id", "name", "size", "created_at", "source_vm"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, size, created_at, source_vm" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -1825,6 +1825,19 @@ const server = http.createServer(async (req, res) => {
         case "name":       l = (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()); break;
         case "size":       l = (a.size_bytes || 0) - (b.size_bytes || 0); break;
         case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
+        case "source_vm": {
+          // Case-insensitive compare mirrors the case-insensitive
+          // `?source_vm=` exact-match filter; empty `source_vm` sinks
+          // to the tail of asc / head of desc (the descending wrapper
+          // inverts the entire compare so `+1` here yields head-of-desc).
+          const ai = (a.source_vm || "").toLowerCase();
+          const bi = (b.source_vm || "").toLowerCase();
+          if (ai === "" && bi === "") l = 0;
+          else if (ai === "") l = 1;
+          else if (bi === "") l = -1;
+          else l = ai.localeCompare(bi);
+          break;
+        }
         default:           l = 0;
       }
       if (l === 0) l = (a.id || "").localeCompare(b.id || "");

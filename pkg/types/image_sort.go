@@ -14,6 +14,7 @@ const (
 	ImageSortName      = "name"
 	ImageSortSize      = "size"
 	ImageSortCreatedAt = "created_at"
+	ImageSortSourceVM  = "source_vm"
 )
 
 // SortImages sorts the given images in place by the requested field and order.
@@ -47,6 +48,28 @@ func SortImages(imgs []*Image, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case ImageSortSourceVM:
+			// Case-insensitive compare mirrors the case-insensitive
+			// `?source_vm=` exact-match filter contract so the filter
+			// and sort agree on the same column. Images with an empty
+			// `source_vm` (uploaded images, never exported from a VM)
+			// sink to the tail of asc / head of desc — mirrors the
+			// nil-trailing semantics on every other nullable sort axis
+			// (ip, guest_ip, image, last_fired_at, last_delivery_at,
+			// actor).
+			aiSrc, ajSrc := strings.ToLower(ai.SourceVM), strings.ToLower(aj.SourceVM)
+			switch {
+			case aiSrc == "" && ajSrc == "":
+				less = ai.ID < aj.ID
+			case aiSrc == "":
+				less = false
+			case ajSrc == "":
+				less = true
+			case aiSrc != ajSrc:
+				less = aiSrc < ajSrc
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // ImageSortID
 			less = ai.ID < aj.ID
 		}

@@ -13018,7 +13018,76 @@ func TestListImages_RejectsInvalidSort(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	assertAPIErrorCode(t, resp, "invalid_sort")
+	errResp := assertAPIErrorCode(t, resp, "invalid_sort")
+	// 5.4.117 — the error envelope must advertise the source_vm axis so CLI
+	// clients can surface the full supported set.
+	if !strings.Contains(errResp.Message, "source_vm") {
+		t.Errorf("invalid_sort message %q must advertise source_vm", errResp.Message)
+	}
+}
+
+// 5.4.117 — symmetric sort counterpart to the case-insensitive `?source_vm=`
+// exact-match filter on the same column. Asserts case-insensitive ordering,
+// the empty-source-VM nil-trailing semantics in asc + desc, and that the
+// invalid_sort error envelope advertises the new axis.
+func TestListImages_SortBySourceVM(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImageWithSourceVM(t, s, "img-uploaded", "uploaded", "", nil)
+	seedStoredImageWithSourceVM(t, s, "img-from-alpha", "from-alpha", "vm-alpha", nil)
+	seedStoredImageWithSourceVM(t, s, "img-from-beta", "from-beta", "VM-BETA", nil)
+	seedStoredImageWithSourceVM(t, s, "img-from-gamma", "from-gamma", "vm-gamma", nil)
+
+	// Asc: alphabetical case-insensitive (alpha < BETA < gamma) then empty.
+	resp, err := http.Get(ts.URL + "/api/v1/images?sort=source_vm&order=asc")
+	if err != nil {
+		t.Fatalf("GET asc: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("asc status = %d, want 200", resp.StatusCode)
+	}
+	var asc []*types.Image
+	decodeJSON(t, resp, &asc)
+	wantAsc := []string{"img-from-alpha", "img-from-beta", "img-from-gamma", "img-uploaded"}
+	if len(asc) != len(wantAsc) {
+		t.Fatalf("asc len = %d, want %d", len(asc), len(wantAsc))
+	}
+	for i, img := range asc {
+		if img.ID != wantAsc[i] {
+			t.Errorf("asc idx %d: id = %q, want %q (full %+v)", i, img.ID, wantAsc[i], asc)
+		}
+	}
+
+	// Desc: empty heads (the descending wrapper inverts the full compare).
+	resp2, _ := http.Get(ts.URL + "/api/v1/images?sort=source_vm&order=desc")
+	var desc []*types.Image
+	decodeJSON(t, resp2, &desc)
+	wantDesc := []string{"img-uploaded", "img-from-gamma", "img-from-beta", "img-from-alpha"}
+	if len(desc) != len(wantDesc) {
+		t.Fatalf("desc len = %d, want %d", len(desc), len(wantDesc))
+	}
+	for i, img := range desc {
+		if img.ID != wantDesc[i] {
+			t.Errorf("desc idx %d: id = %q, want %q (full %+v)", i, img.ID, wantDesc[i], desc)
+		}
+	}
+}
+
+func TestListImages_SortBySourceVM_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// Two images carry the same source VM; tiebreak must be id-asc.
+	seedStoredImageWithSourceVM(t, s, "img-b", "b", "vm-shared", nil)
+	seedStoredImageWithSourceVM(t, s, "img-a", "a", "vm-shared", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?sort=source_vm&order=asc")
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 || got[0].ID != "img-a" || got[1].ID != "img-b" {
+		t.Errorf("tiebreak order = %v, want [img-a img-b]", got)
+	}
 }
 
 func TestListImages_RejectsInvalidOrder(t *testing.T) {
