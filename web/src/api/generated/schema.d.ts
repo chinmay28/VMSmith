@@ -3441,10 +3441,23 @@ export interface paths {
                      *     zero value (false) and every schedule belongs to exactly one
                      *     of the two buckets — no nil-trailing bucket, mirroring the
                      *     VM `auto_start` axis (5.4.108) and `locked` axis (5.4.109).
+                     *     `catch_up_policy` (5.4.116) is the symmetric sort counterpart
+                     *     to the existing case-insensitive `?catch_up_policy=`
+                     *     exact-match filter on the same column — case-insensitive
+                     *     alphabetical compare on the three-member enum
+                     *     (`run_all` < `run_once` < `skip`). **Diverges from the
+                     *     nil-trailing convention** because this column has a
+                     *     documented default — an empty stored `catch_up_policy`
+                     *     resolves to `skip` (mirrors the `?catch_up_policy=skip`
+                     *     empty-means-skip filter contract and the engine's default)
+                     *     so empty schedules collate with explicit-skip schedules in
+                     *     alphabetical order rather than sinking to the tail, same
+                     *     documented-default rationale as the VM `os_type` axis
+                     *     (5.4.100) and VM `firmware` axis (5.4.101).
                      *     All comparators tiebreak on `id` so repeated requests return
                      *     a deterministic order.
                      */
-                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action" | "timezone" | "enabled";
+                    sort?: "id" | "name" | "created_at" | "next_fire_at" | "last_fired_at" | "vm_id" | "action" | "timezone" | "enabled" | "catch_up_policy";
                     /** @description Sort direction. Default `asc`. */
                     order?: "asc" | "desc";
                     /**
