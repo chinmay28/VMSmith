@@ -3174,6 +3174,31 @@ test.describe("Images", () => {
     await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
   });
 
+  // 5.4.118 — `description` sort axis on the image list. The mock seeds
+  // img-1 (ubuntu-base) with description "Stock Ubuntu cloud image" and
+  // img-2 (rocky-experimental) with description "Lab build". Case-
+  // insensitive asc: "lab build" < "stock ubuntu cloud image", so the
+  // rocky row heads. Desc inverts the entire compare.
+  test("description sort axis reorders the image list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-images").click();
+
+    const rows = () => page.getByTestId(/^image-row-/);
+    await expect(rows()).toHaveCount(2);
+
+    await page.getByTestId("image-list-sort-field").selectOption("description");
+    // asc: "Lab build" < "Stock Ubuntu cloud image" (case-insensitive).
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "image-row-ubuntu-base");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=description");
+
+    // desc: ubuntu (Stock...) heads.
+    await page.getByTestId("image-list-sort-order").selectOption("desc");
+    await expect(rows().first()).toHaveAttribute("data-testid", "image-row-ubuntu-base");
+    await expect(rows().nth(1)).toHaveAttribute("data-testid", "image-row-rocky-experimental");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+  });
+
   test("search input filters the image list and round-trips through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-images").click();

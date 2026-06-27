@@ -158,6 +158,72 @@ func TestSortImages_BySourceVM_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+// 5.4.118 — `description` sort axis on the image list. Case-insensitive
+// compare so operators can paste a description verbatim; images with an
+// empty `description` (the common case) sink to the tail of asc / head
+// of desc — same nil-trailing semantics as the `source_vm` axis above.
+func TestSortImages_ByDescription_AscCaseInsensitive(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-3", Name: "c", Description: "Rocky 9 base"},
+		{ID: "img-1", Name: "a", Description: "alpine 3.19 minimal"},
+		{ID: "img-2", Name: "b", Description: "Ubuntu 24.04 LTS"},
+	}
+	SortImages(imgs, ImageSortDescription, SortOrderAsc)
+	want := []string{"img-1", "img-3", "img-2"} // alpine < Rocky < Ubuntu (case-insensitive)
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_ByDescription_EmptyTrailsInAsc(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-1", Name: "a", Description: ""},
+		{ID: "img-2", Name: "b", Description: "rocky 9"},
+		{ID: "img-3", Name: "c", Description: ""},
+	}
+	SortImages(imgs, ImageSortDescription, SortOrderAsc)
+	want := []string{"img-2", "img-1", "img-3"} // non-empty first; empties tiebreak on id
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_ByDescription_EmptyHeadsInDesc(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-2", Name: "b", Description: "rocky 9"},
+		{ID: "img-1", Name: "a", Description: ""},
+		{ID: "img-3", Name: "c", Description: ""},
+	}
+	SortImages(imgs, ImageSortDescription, SortOrderDesc)
+	// asc would be img-2 (rocky), img-1 (empty), img-3 (empty); desc
+	// inverts the entire compare so empties head and img-2 tails.
+	want := []string{"img-3", "img-1", "img-2"}
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, v.ID, want[i], imgs)
+		}
+	}
+}
+
+func TestSortImages_ByDescription_TiebreaksOnID(t *testing.T) {
+	imgs := []*Image{
+		{ID: "img-3", Name: "c", Description: "shared"},
+		{ID: "img-1", Name: "a", Description: "shared"},
+		{ID: "img-2", Name: "b", Description: "shared"},
+	}
+	SortImages(imgs, ImageSortDescription, SortOrderAsc)
+	want := []string{"img-1", "img-2", "img-3"}
+	for i, v := range imgs {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
 func TestSortImages_StablePagination(t *testing.T) {
 	// Repeated sorts on equal-key data must produce the same order so page-2
 	// of a paginated query matches page-1's continuation.
