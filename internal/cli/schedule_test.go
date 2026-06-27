@@ -311,6 +311,38 @@ func TestCLI_ScheduleList_InvalidSortAdvertisesEnabled(t *testing.T) {
 	}
 }
 
+// TestCLI_ScheduleList_ForwardsCatchUpPolicySort covers the 5.4.116
+// catch_up_policy sort axis on the schedule list — whitespace + case
+// normalisation on the `--sort` value (the daemon validates server-side;
+// the CLI just lowercases + trims before forwarding).
+func TestCLI_ScheduleList_ForwardsCatchUpPolicySort(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL,
+		"--sort", "  CATCH_UP_POLICY  ", "--order", "asc"); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(d.lastQuery, "sort=catch_up_policy") {
+		t.Fatalf("query missing sort=catch_up_policy: %s", d.lastQuery)
+	}
+	if !strings.Contains(d.lastQuery, "order=asc") {
+		t.Fatalf("query missing order=asc: %s", d.lastQuery)
+	}
+}
+
+// TestCLI_ScheduleList_InvalidSortAdvertisesCatchUpPolicy asserts the
+// client-side rejection lists catch_up_policy in the error envelope so
+// operators discover the new 5.4.116 axis from the error path.
+func TestCLI_ScheduleList_InvalidSortAdvertisesCatchUpPolicy(t *testing.T) {
+	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "catch_up_policy") {
+		t.Fatalf("invalid --sort message should advertise catch_up_policy, got %v", err)
+	}
+}
+
 func TestCLI_ScheduleList_RejectsInvalidUntil(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	if _, err := runCLI("schedule", "list", "--api-url", d.server.URL, "--until", "garbage"); err == nil {

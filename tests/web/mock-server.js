@@ -2988,13 +2988,13 @@ const server = http.createServer(async (req, res) => {
       else if (enabledRaw === "false" || enabledRaw === "0") enabledFilter = false;
       else return json(res, 400, { code: "invalid_enabled", message: "enabled must be 'true' or 'false'" });
     }
-    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id", "action", "timezone", "enabled"]);
+    const allowedSort = new Set(["id", "name", "created_at", "next_fire_at", "last_fired_at", "vm_id", "action", "timezone", "enabled", "catch_up_policy"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action, timezone, enabled" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, next_fire_at, last_fired_at, vm_id, action, timezone, enabled, catch_up_policy" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -3218,6 +3218,29 @@ const server = http.createServer(async (req, res) => {
           if (av === bv) cmp = 0;
           else if (!av && bv) cmp = -1;
           else cmp = 1;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "catch_up_policy": {
+          // 5.4.116: case-insensitive alphabetical compare on
+          // schedule.catch_up_policy. Documented-default contract —
+          // an empty stored value resolves to "skip" before
+          // comparison, mirroring the ?catch_up_policy=skip
+          // empty-means-skip filter contract and the engine's
+          // default. Diverges from the nil-trailing convention the
+          // same way the VM os_type (5.4.100) and firmware (5.4.101)
+          // axes do — empty schedules collate with explicit-skip
+          // schedules in alphabetical order rather than sinking to
+          // the tail.
+          const resolve = (v) => {
+            const t = String(v || "").trim().toLowerCase();
+            return t === "" ? "skip" : t;
+          };
+          const av = resolve(a.catch_up_policy);
+          const bv = resolve(b.catch_up_policy);
+          if (av < bv) cmp = -1;
+          else if (av > bv) cmp = 1;
+          else cmp = 0;
           if (cmp === 0) cmp = cmpID;
           break;
         }

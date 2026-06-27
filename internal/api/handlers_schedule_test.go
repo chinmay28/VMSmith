@@ -1346,6 +1346,102 @@ func TestListSchedules_SortByEnabled_400InvalidSortAdvertisesEnabled(t *testing.
 	}
 }
 
+// TestListSchedules_SortByCatchUpPolicy covers the 5.4.116 catch_up_policy
+// sort axis on the schedule list — the symmetric sort counterpart to the
+// existing case-insensitive ?catch_up_policy= exact-match filter on the
+// same column. Documented-default contract: an empty stored
+// catch_up_policy resolves to "skip" before comparison, mirroring the
+// ?catch_up_policy=skip empty-means-skip filter contract. Alphabetical
+// compare on the three-member enum: run_all < run_once < skip.
+func TestListSchedules_SortByCatchUpPolicy(t *testing.T) {
+	ts, s, cleanup := testScheduleServerStore(t)
+	defer cleanup()
+
+	mk := func(id string, policy types.ScheduleCatchUpPolicy) {
+		t.Helper()
+		if err := s.PutSchedule(&types.Schedule{
+			ID: id, Name: id, VMID: "vm-1", Action: types.ScheduleActionSnapshot,
+			CronSpec: "0 0 2 * * *", Enabled: true, CatchUpPolicy: policy,
+		}); err != nil {
+			t.Fatalf("put schedule: %v", err)
+		}
+	}
+	mk("sched-1", types.ScheduleCatchUpRunAll)
+	mk("sched-2", types.ScheduleCatchUpRunOnce)
+	mk("sched-3", types.ScheduleCatchUpSkip)
+	mk("sched-4", "") // empty resolves to skip via the documented default
+
+	list := func(q string) ([]*types.Schedule, int, int, string) {
+		t.Helper()
+		resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules"+q, nil)
+		var out []*types.Schedule
+		_ = json.Unmarshal(data, &out)
+		total, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
+		return out, total, resp.StatusCode, string(data)
+	}
+
+	ids := func(items []*types.Schedule) []string {
+		out := make([]string, 0, len(items))
+		for _, x := range items {
+			out = append(out, x.ID)
+		}
+		return out
+	}
+
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// asc: run_all (sched-1), run_once (sched-2), skip cohort tied on
+	// id (sched-3, sched-4 — empty resolves to "skip" via the
+	// documented default and collates with explicit-skip).
+	if items, _, code, body := list("?sort=catch_up_policy&order=asc"); code != http.StatusOK || !eq(ids(items), []string{"sched-1", "sched-2", "sched-3", "sched-4"}) {
+		t.Fatalf("catch_up_policy asc: code=%d ids=%v body=%s", code, ids(items), body)
+	}
+
+	// desc flips the entire compare result including the id tiebreak,
+	// so within the skip cohort the higher id comes first.
+	if items, _, _, _ := list("?sort=catch_up_policy&order=desc"); !eq(ids(items), []string{"sched-4", "sched-3", "sched-2", "sched-1"}) {
+		t.Fatalf("catch_up_policy desc: %v", ids(items))
+	}
+
+	// Whitespace + case-folding on the sort param itself.
+	if items, _, _, _ := list("?sort=%20CATCH_UP_POLICY%20&order=asc"); !eq(ids(items), []string{"sched-1", "sched-2", "sched-3", "sched-4"}) {
+		t.Fatalf("catch_up_policy whitespace+upper sort param: %v", ids(items))
+	}
+
+	// Composes additively with the ?catch_up_policy= filter: narrow to
+	// the skip cohort (matches both explicit "skip" and empty stored
+	// per the documented default), sort within it.
+	if items, total, _, _ := list("?sort=catch_up_policy&order=asc&catch_up_policy=skip"); total != 2 || !eq(ids(items), []string{"sched-3", "sched-4"}) {
+		t.Fatalf("catch_up_policy asc + ?catch_up_policy=skip: %v total=%d", ids(items), total)
+	}
+}
+
+// TestListSchedules_SortByCatchUpPolicy_400AdvertisesCatchUpPolicy asserts
+// the 400 envelope mentions catch_up_policy so operators discover the
+// new axis (5.4.116) from the daemon's error text — mirrors the
+// equivalent check on the timezone / enabled sort axes.
+func TestListSchedules_SortByCatchUpPolicy_400AdvertisesCatchUpPolicy(t *testing.T) {
+	ts, _, cleanup := testScheduleServer(t)
+	defer cleanup()
+	resp, data := schedDo(t, http.MethodGet, ts.URL+"/api/v1/schedules?sort=garbage", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	if !bytes.Contains(data, []byte("catch_up_policy")) {
+		t.Fatalf("invalid_sort envelope must mention catch_up_policy: %s", data)
+	}
+}
+
 func TestScheduleEndpoints_503WhenDisabled(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.New(filepath.Join(dir, "test.db"))

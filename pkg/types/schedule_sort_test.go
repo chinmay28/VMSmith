@@ -526,3 +526,126 @@ func TestSortSchedules_ByEnabled_AllFalse_TiebreaksOnID(t *testing.T) {
 		t.Fatalf("enabled all-false id-tiebreak: got %v, want %v", got, want)
 	}
 }
+
+// 5.4.116 — case-insensitive `catch_up_policy` sort axis with documented
+// default semantics. Diverges from the nil-trailing convention because
+// an empty stored `catch_up_policy` resolves to `skip` (mirrors the
+// `?catch_up_policy=skip` empty-means-skip filter contract and the
+// engine's default in `internal/scheduler/engine.go`). Alphabetical
+// compare on the three-member enum: `run_all` < `run_once` < `skip`.
+
+// TestIsValidScheduleSort_AcceptsCatchUpPolicy covers the 5.4.116
+// catch_up_policy sort axis — the symmetric sort counterpart to the
+// existing case-insensitive `?catch_up_policy=` exact-match filter.
+func TestIsValidScheduleSort_AcceptsCatchUpPolicy(t *testing.T) {
+	if !IsValidScheduleSort(ScheduleSortCatchUpPolicy) {
+		t.Fatal("catch_up_policy must be an accepted sort key")
+	}
+	if !IsValidScheduleSort("catch_up_policy") {
+		t.Fatal("literal 'catch_up_policy' must be accepted")
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_AscAlphabetical asserts asc collation
+// run_all < run_once < skip. Within the skip cohort the id tiebreak
+// preserves a deterministic order.
+func TestSortSchedules_ByCatchUpPolicy_AscAlphabetical(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-3", CatchUpPolicy: ScheduleCatchUpSkip},
+		{ID: "sched-1", CatchUpPolicy: ScheduleCatchUpRunAll},
+		{ID: "sched-2", CatchUpPolicy: ScheduleCatchUpRunOnce},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderAsc)
+	want := []string{"sched-1", "sched-2", "sched-3"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy asc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_EmptyResolvesToSkip asserts the
+// documented-default contract — an empty stored `catch_up_policy`
+// resolves to `skip` and collates with explicit-skip schedules rather
+// than sinking to the tail. Mirrors the `?catch_up_policy=skip`
+// empty-means-skip filter contract.
+func TestSortSchedules_ByCatchUpPolicy_EmptyResolvesToSkip(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-skip-z", CatchUpPolicy: ScheduleCatchUpSkip},
+		{ID: "sched-empty", CatchUpPolicy: ""},
+		{ID: "sched-runonce", CatchUpPolicy: ScheduleCatchUpRunOnce},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderAsc)
+	// run_once < skip; within the skip cohort the empty-stored entry
+	// collates with the explicit skip entry on the id tiebreak —
+	// "sched-empty" < "sched-skip-z" alphabetically.
+	want := []string{"sched-runonce", "sched-empty", "sched-skip-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy empty-resolves-to-skip asc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_DescAlphabetical flips the asc
+// ordering. Desc reverses the entire compare result including the id
+// tiebreak so within the skip cohort the higher id comes first.
+func TestSortSchedules_ByCatchUpPolicy_DescAlphabetical(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-1", CatchUpPolicy: ScheduleCatchUpRunAll},
+		{ID: "sched-2", CatchUpPolicy: ScheduleCatchUpRunOnce},
+		{ID: "sched-3", CatchUpPolicy: ScheduleCatchUpSkip},
+		{ID: "sched-4", CatchUpPolicy: ScheduleCatchUpSkip},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderDesc)
+	want := []string{"sched-4", "sched-3", "sched-2", "sched-1"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy desc: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_CaseInsensitive asserts the
+// comparator folds case + whitespace before comparing — operators paste
+// values verbatim from the create-time `--catch-up` flag (`skip`, `SKIP`,
+// `Run_Once`) and a case-sensitive comparator would split the cohort.
+func TestSortSchedules_ByCatchUpPolicy_CaseInsensitive(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-1", CatchUpPolicy: ScheduleCatchUpPolicy(" SKIP ")},
+		{ID: "sched-2", CatchUpPolicy: ScheduleCatchUpPolicy("Run_Once")},
+		{ID: "sched-3", CatchUpPolicy: ScheduleCatchUpPolicy("run_all")},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderAsc)
+	want := []string{"sched-3", "sched-2", "sched-1"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy case-insensitive: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_TiebreaksOnID covers schedules
+// sharing the same catch-up policy tiebreak deterministically on id
+// (common case: every nightly-backup schedule pinned to `skip`).
+func TestSortSchedules_ByCatchUpPolicy_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z", CatchUpPolicy: ScheduleCatchUpSkip},
+		{ID: "sched-a", CatchUpPolicy: ScheduleCatchUpSkip},
+		{ID: "sched-m", CatchUpPolicy: ScheduleCatchUpSkip},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy id-tiebreak: got %v, want %v", got, want)
+	}
+}
+
+// TestSortSchedules_ByCatchUpPolicy_AllEmptyResolveToSkip_TiebreaksOnID
+// asserts the tiebreak path when every schedule has an empty
+// `catch_up_policy` — they all resolve to `skip` via the documented
+// default and collate purely on the id tiebreak.
+func TestSortSchedules_ByCatchUpPolicy_AllEmptyResolveToSkip_TiebreaksOnID(t *testing.T) {
+	items := []*Schedule{
+		{ID: "sched-z"},
+		{ID: "sched-a"},
+		{ID: "sched-m"},
+	}
+	SortSchedules(items, ScheduleSortCatchUpPolicy, SortOrderAsc)
+	want := []string{"sched-a", "sched-m", "sched-z"}
+	if got := collectScheduleIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catch_up_policy all-empty id-tiebreak: got %v, want %v", got, want)
+	}
+}

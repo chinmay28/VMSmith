@@ -62,12 +62,13 @@ const (
 	ScheduleSortAction      = "action"
 	ScheduleSortTimezone    = "timezone"
 	ScheduleSortEnabled     = "enabled"
+	ScheduleSortCatchUpPolicy = "catch_up_policy"
 )
 
 // IsValidScheduleSort reports whether field is an accepted sort key.
 func IsValidScheduleSort(field string) bool {
 	switch field {
-	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction, ScheduleSortTimezone, ScheduleSortEnabled:
+	case ScheduleSortID, ScheduleSortName, ScheduleSortCreatedAt, ScheduleSortNextFire, ScheduleSortLastFiredAt, ScheduleSortVMID, ScheduleSortAction, ScheduleSortTimezone, ScheduleSortEnabled, ScheduleSortCatchUpPolicy:
 		return true
 	default:
 		return false
@@ -227,6 +228,35 @@ func SortSchedules(items []*Schedule, field, order string) {
 			default:
 				cmp = 1
 			}
+		case ScheduleSortCatchUpPolicy:
+			// Case-insensitive compare on `schedule.catch_up_policy`
+			// (5.4.116). Symmetric sort counterpart to the existing
+			// case-insensitive `?catch_up_policy=` exact-match filter on
+			// the same column so the same catch-up cohort can be both
+			// filtered and sorted on the same column. Alphabetical
+			// compare on the three-member enum: `run_all` < `run_once` <
+			// `skip`. **Diverges from the nil-trailing convention**
+			// because this column has a documented default — an empty
+			// stored `catch_up_policy` resolves to `skip` (mirrors the
+			// `?catch_up_policy=skip` empty-means-skip filter contract
+			// and the engine's default in `internal/scheduler/engine.go`)
+			// so empty schedules collate with explicit-skip schedules in
+			// alphabetical order rather than sinking to the tail.
+			// Same documented-default rationale as the VM `os_type` axis
+			// (5.4.100) collapsing empty → `linux`, the VM `firmware`
+			// axis (5.4.101) collapsing empty → `bios`, and the VM
+			// `default_user` axis (5.4.91) collapsing empty → `root`,
+			// unlike the nullable string axes (`vm_id`, `timezone`)
+			// that sink empty stored values to the tail.
+			ap := strings.ToLower(strings.TrimSpace(string(a.CatchUpPolicy)))
+			if ap == "" {
+				ap = string(ScheduleCatchUpSkip)
+			}
+			bp := strings.ToLower(strings.TrimSpace(string(b.CatchUpPolicy)))
+			if bp == "" {
+				bp = string(ScheduleCatchUpSkip)
+			}
+			cmp = strings.Compare(ap, bp)
 		default:
 			cmp = strings.Compare(a.ID, b.ID)
 		}

@@ -412,6 +412,7 @@ export default function Schedules() {
             <option value="action">action</option>
             <option value="timezone">timezone</option>
             <option value="enabled">enabled</option>
+            <option value="catch_up_policy">catch_up_policy</option>
           </select>
         </label>
         <label className="text-xs text-steel-400 flex items-center gap-1.5">
