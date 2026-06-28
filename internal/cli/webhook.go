@@ -196,7 +196,7 @@ Optional filters and ordering:
 
   --sort <field>        Whitelisted to one of:
                           id, url, created_at, last_delivery_at,
-                          delivery_status, active
+                          delivery_status, active, description
                         Default: id.  delivery_status orders by the derived
                         classification — alphabetical failing < healthy <
                         never — and is the symmetric sort counterpart to
@@ -206,6 +206,11 @@ Optional filters and ordering:
                         heads asc and the live cohort heads desc; closed-
                         and-total (no nil-trailing bucket).  Symmetric sort
                         counterpart to the --active exact-match filter.
+                        description (5.4.122) is a case-insensitive sort
+                        over the webhook's description field; webhooks
+                        with no description sink to the tail of asc / head
+                        of desc (mirrors the VM / image / template /
+                        snapshot description sort axes one resource over).
 
   --order <asc|desc>    Default: asc.  Sort ascending or descending. Unknown
                         values are rejected client-side before contacting the
@@ -258,7 +263,7 @@ Optional filters and ordering:
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField != "" && !types.IsValidWebhookSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at, delivery_status, active")
+			return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at, delivery_status, active, description")
 		}
 		order = strings.TrimSpace(strings.ToLower(order))
 		if order != "" {

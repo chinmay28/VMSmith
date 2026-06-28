@@ -336,6 +336,91 @@ func TestSortWebhooks_ByActive_AllFalse_TiebreaksOnID(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `description` sort axis (5.4.122)
+// ============================================================
+//
+// Case-insensitive compare on Webhook.Description with empty-trailing
+// nil-handling. Mirrors the VM (5.4.120) / template (5.4.119) / image
+// (5.4.118) / snapshot (5.4.121) description axes one resource over.
+
+func TestSortWebhooks_ByDescription_AscCaseInsensitive(t *testing.T) {
+	// Mixed-case descriptions sort case-insensitively so `Slack #ops` and
+	// `slack #ops` collate as identical. Mirrors the case-insensitive
+	// haystack in the `?search=` filter on the same column.
+	hooks := []*Webhook{
+		{ID: "wh-1", Description: "Slack #ops"},
+		{ID: "wh-2", Description: "alpha"},
+		{ID: "wh-3", Description: "slack #ops"},
+	}
+	SortWebhooks(hooks, WebhookSortDescription, SortOrderAsc)
+	// asc: `alpha` < `slack #ops` (case-folded). The two `slack #ops`
+	// entries tiebreak on id ascending (wh-1 before wh-3).
+	want := []string{"wh-2", "wh-1", "wh-3"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestSortWebhooks_ByDescription_EmptyTrailsInAsc(t *testing.T) {
+	// Webhooks with no description sink to the tail in ascending order —
+	// operators looking for "which webhooks have a description" want them
+	// at the head of asc, not buried among the unset majority. Mirrors
+	// the VM (5.4.120) / template (5.4.119) / image (5.4.118) /
+	// snapshot (5.4.121) description axes one resource over.
+	hooks := []*Webhook{
+		{ID: "wh-1", Description: ""},
+		{ID: "wh-2", Description: "z"},
+		{ID: "wh-3", Description: "a"},
+	}
+	SortWebhooks(hooks, WebhookSortDescription, SortOrderAsc)
+	want := []string{"wh-3", "wh-2", "wh-1"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestSortWebhooks_ByDescription_EmptyHeadsInDesc(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-1", Description: "a"},
+		{ID: "wh-2", Description: ""},
+		{ID: "wh-3", Description: ""},
+	}
+	SortWebhooks(hooks, WebhookSortDescription, SortOrderDesc)
+	// Empty heads in desc. The two empty-description entries tiebreak on
+	// id — and because the outer desc-wrapper inverts the tiebreak,
+	// wh-3 (id=c) heads wh-2 (id=b), then wh-1 (the only concrete
+	// description) trails. Matches the VM `_DescEmptyHeads` contract.
+	want := []string{"wh-3", "wh-2", "wh-1"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestSortWebhooks_ByDescription_TiebreaksOnID(t *testing.T) {
+	hooks := []*Webhook{
+		{ID: "wh-3", Description: "same"},
+		{ID: "wh-1", Description: "same"},
+		{ID: "wh-2", Description: "same"},
+	}
+	SortWebhooks(hooks, WebhookSortDescription, SortOrderAsc)
+	want := []string{"wh-1", "wh-2", "wh-3"}
+	if got := whIDs(hooks); !equalStrings(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestIsValidWebhookSort_AcceptsDescription(t *testing.T) {
+	if !IsValidWebhookSort(WebhookSortDescription) {
+		t.Fatalf("IsValidWebhookSort(%q) = false, want true", WebhookSortDescription)
+	}
+	for _, axis := range []string{"DESCRIPTION", "Description", " description "} {
+		if IsValidWebhookSort(axis) {
+			t.Errorf("IsValidWebhookSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

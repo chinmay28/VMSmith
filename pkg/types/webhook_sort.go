@@ -14,6 +14,7 @@ const (
 	WebhookSortLastDelivery   = "last_delivery_at"
 	WebhookSortDeliveryStatus = "delivery_status"
 	WebhookSortActive         = "active"
+	WebhookSortDescription    = "description"
 )
 
 // IsValidWebhookSort reports whether the given string is one of the
@@ -27,7 +28,8 @@ func IsValidWebhookSort(s string) bool {
 		WebhookSortCreatedAt,
 		WebhookSortLastDelivery,
 		WebhookSortDeliveryStatus,
-		WebhookSortActive:
+		WebhookSortActive,
+		WebhookSortDescription:
 		return true
 	}
 	return false
@@ -127,6 +129,36 @@ func SortWebhooks(hooks []*Webhook, sortField, order string) {
 				break
 			}
 			less = !ai.Active && aj.Active
+		case WebhookSortDescription:
+			// 5.4.122 — case-insensitive compare on `Webhook.Description`.
+			// Mirrors the case-insensitive haystack in the existing
+			// `?search=` filter on the same column so the same
+			// description-based query surface is filtered (substring) and
+			// sorted (alphabetical) on the same semantics. Webhooks with
+			// an empty description (the common case — most webhooks get
+			// no description) sink to the tail of asc / head of desc,
+			// mirroring the nullable-string nil-trailing convention on
+			// every other nullable axis (url, last_delivery_at) and the
+			// VM list `description` axis (5.4.120), template `description`
+			// axis (5.4.119), image `description` axis (5.4.118), and
+			// snapshot `description` axis (5.4.121) one resource over.
+			// Unlike the documented-default axes (`delivery_status` →
+			// closed enum, `active` → bool), description has no
+			// documented default — an empty stored value genuinely means
+			// "operator did not bother to write one".
+			aiD, ajD := strings.ToLower(ai.Description), strings.ToLower(aj.Description)
+			switch {
+			case aiD == "" && ajD == "":
+				less = ai.ID < aj.ID
+			case aiD == "":
+				less = false
+			case ajD == "":
+				less = true
+			case aiD != ajD:
+				less = aiD < ajD
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // WebhookSortID
 			less = ai.ID < aj.ID
 		}
