@@ -20,12 +20,10 @@ func parseSnapshotSort(r *http.Request) (sortField, order string, err error) {
 	if sortField == "" {
 		sortField = types.SnapshotSortID
 	}
-	switch sortField {
-	case types.SnapshotSortID, types.SnapshotSortName, types.SnapshotSortCreatedAt:
-	default:
+	if !types.IsValidSnapshotSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, name, created_at",
+			"sort must be one of: id, name, created_at, description",
 		)
 	}
 

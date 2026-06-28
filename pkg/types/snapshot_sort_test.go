@@ -91,12 +91,116 @@ func TestSortSnapshots_UnknownFieldFallsBackToName(t *testing.T) {
 		{Name: "alpha"},
 		{Name: "bravo"},
 	}
-	SortSnapshots(snaps, "description", SortOrderAsc)
+	SortSnapshots(snaps, "no_such_field", SortOrderAsc)
 	got := snapNames(snaps)
 	want := []string{"alpha", "bravo", "charlie"}
 	for i, n := range got {
 		if n != want[i] {
 			t.Errorf("idx %d: name = %q, want %q (full: %v)", i, n, want[i], got)
+		}
+	}
+}
+
+// ============================================================
+// `description` sort axis (5.4.121)
+// ============================================================
+
+func TestSortSnapshots_ByDescription_AscCaseInsensitive(t *testing.T) {
+	// Mixed-case descriptions sort case-insensitively so `Pre upgrade`
+	// and `pre upgrade` collate as identical. Mirrors the case-insensitive
+	// haystack in the `?search=` filter — the same description-based
+	// query surface is filtered (substring) and sorted (alphabetical)
+	// on the same semantics.
+	snaps := []*Snapshot{
+		{Name: "snap-1", Description: "Pre upgrade"},
+		{Name: "snap-2", Description: "audit"},
+		{Name: "snap-3", Description: "pre upgrade"},
+	}
+	SortSnapshots(snaps, SnapshotSortDescription, SortOrderAsc)
+	// asc: `audit` < `pre upgrade` (case-folded). The two `pre upgrade`
+	// entries tiebreak on name ascending (snap-1 before snap-3).
+	want := []string{"snap-2", "snap-1", "snap-3"}
+	for i, s := range snaps {
+		if s.Name != want[i] {
+			t.Errorf("idx %d: name=%q description=%q, want %q", i, s.Name, s.Description, want[i])
+		}
+	}
+}
+
+func TestSortSnapshots_ByDescription_EmptyTrailsInAsc(t *testing.T) {
+	// Snapshots with no description sink to the tail in ascending order —
+	// operators looking for "which snapshots have a description" want them
+	// at the head of asc, not buried among the unset majority. Mirrors the
+	// image (5.4.118) / template (5.4.119) / VM (5.4.120) `description`
+	// axes one resource over.
+	snaps := []*Snapshot{
+		{Name: "snap-1", Description: ""},
+		{Name: "snap-2", Description: "z"},
+		{Name: "snap-3", Description: "a"},
+	}
+	SortSnapshots(snaps, SnapshotSortDescription, SortOrderAsc)
+	want := []string{"snap-3", "snap-2", "snap-1"}
+	for i, s := range snaps {
+		if s.Name != want[i] {
+			t.Errorf("idx %d: name=%q description=%q, want %q", i, s.Name, s.Description, want[i])
+		}
+	}
+}
+
+func TestSortSnapshots_ByDescription_EmptyHeadsInDesc(t *testing.T) {
+	snaps := []*Snapshot{
+		{Name: "snap-1", Description: "a"},
+		{Name: "snap-2", Description: ""},
+		{Name: "snap-3", Description: ""},
+	}
+	SortSnapshots(snaps, SnapshotSortDescription, SortOrderDesc)
+	// Empty heads in desc. The two empty-description entries tiebreak on
+	// name — and because the outer desc-wrapper inverts the tiebreak,
+	// snap-3 heads snap-2, then snap-1 (the only concrete description)
+	// trails. Matches the image / template / VM `description` axes.
+	want := []string{"snap-3", "snap-2", "snap-1"}
+	for i, s := range snaps {
+		if s.Name != want[i] {
+			t.Errorf("idx %d: name=%q description=%q, want %q", i, s.Name, s.Description, want[i])
+		}
+	}
+}
+
+func TestSortSnapshots_ByDescription_TiebreaksOnName(t *testing.T) {
+	snaps := []*Snapshot{
+		{Name: "snap-c", Description: "same"},
+		{Name: "snap-a", Description: "same"},
+		{Name: "snap-b", Description: "same"},
+	}
+	SortSnapshots(snaps, SnapshotSortDescription, SortOrderAsc)
+	want := []string{"snap-a", "snap-b", "snap-c"}
+	for i, s := range snaps {
+		if s.Name != want[i] {
+			t.Errorf("idx %d: name=%q, want %q", i, s.Name, want[i])
+		}
+	}
+}
+
+func TestIsValidSnapshotSort_AcceptsDescription(t *testing.T) {
+	if !IsValidSnapshotSort(SnapshotSortDescription) {
+		t.Fatalf("IsValidSnapshotSort(%q) = false, want true", SnapshotSortDescription)
+	}
+	for _, axis := range []string{"DESCRIPTION", "Description", " description "} {
+		if IsValidSnapshotSort(axis) {
+			t.Errorf("IsValidSnapshotSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}
+
+func TestIsValidSnapshotSort_AcceptsExistingAxes(t *testing.T) {
+	for _, axis := range []string{
+		SnapshotSortID,
+		SnapshotSortName,
+		SnapshotSortCreatedAt,
+		SnapshotSortDescription,
+	} {
+		if !IsValidSnapshotSort(axis) {
+			t.Errorf("IsValidSnapshotSort(%q) = false, want true", axis)
 		}
 	}
 }
