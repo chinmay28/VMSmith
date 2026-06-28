@@ -13024,6 +13024,10 @@ func TestListImages_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(errResp.Message, "source_vm") {
 		t.Errorf("invalid_sort message %q must advertise source_vm", errResp.Message)
 	}
+	// 5.4.118 — the error envelope must also advertise the description axis.
+	if !strings.Contains(errResp.Message, "description") {
+		t.Errorf("invalid_sort message %q must advertise description", errResp.Message)
+	}
 }
 
 // 5.4.117 — symmetric sort counterpart to the case-insensitive `?source_vm=`
@@ -13083,6 +13087,69 @@ func TestListImages_SortBySourceVM_TiebreaksOnID(t *testing.T) {
 	seedStoredImageWithSourceVM(t, s, "img-a", "a", "vm-shared", nil)
 
 	resp, _ := http.Get(ts.URL + "/api/v1/images?sort=source_vm&order=asc")
+	var got []*types.Image
+	decodeJSON(t, resp, &got)
+	if len(got) != 2 || got[0].ID != "img-a" || got[1].ID != "img-b" {
+		t.Errorf("tiebreak order = %v, want [img-a img-b]", got)
+	}
+}
+
+// 5.4.118 — symmetric sort counterpart to the case-insensitive description
+// substring filter on the `?search=` haystack. Asserts case-insensitive
+// ordering and the empty-description nil-trailing semantics in asc + desc.
+func TestListImages_SortByDescription(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	seedStoredImage(t, s, "img-no-desc", "no-desc", "", nil)
+	seedStoredImage(t, s, "img-alpine", "alpine", "alpine 3.19 minimal", nil)
+	seedStoredImage(t, s, "img-rocky", "rocky", "Rocky 9 base", nil)
+	seedStoredImage(t, s, "img-ubuntu", "ubuntu", "ubuntu 24.04 LTS", nil)
+
+	// Asc: case-insensitive alphabetical (alpine < Rocky < ubuntu) then empty.
+	resp, err := http.Get(ts.URL + "/api/v1/images?sort=description&order=asc")
+	if err != nil {
+		t.Fatalf("GET asc: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("asc status = %d, want 200", resp.StatusCode)
+	}
+	var asc []*types.Image
+	decodeJSON(t, resp, &asc)
+	wantAsc := []string{"img-alpine", "img-rocky", "img-ubuntu", "img-no-desc"}
+	if len(asc) != len(wantAsc) {
+		t.Fatalf("asc len = %d, want %d", len(asc), len(wantAsc))
+	}
+	for i, img := range asc {
+		if img.ID != wantAsc[i] {
+			t.Errorf("asc idx %d: id = %q, want %q (full %+v)", i, img.ID, wantAsc[i], asc)
+		}
+	}
+
+	// Desc: empty heads (the descending wrapper inverts the entire compare).
+	resp2, _ := http.Get(ts.URL + "/api/v1/images?sort=description&order=desc")
+	var desc []*types.Image
+	decodeJSON(t, resp2, &desc)
+	wantDesc := []string{"img-no-desc", "img-ubuntu", "img-rocky", "img-alpine"}
+	if len(desc) != len(wantDesc) {
+		t.Fatalf("desc len = %d, want %d", len(desc), len(wantDesc))
+	}
+	for i, img := range desc {
+		if img.ID != wantDesc[i] {
+			t.Errorf("desc idx %d: id = %q, want %q (full %+v)", i, img.ID, wantDesc[i], desc)
+		}
+	}
+}
+
+func TestListImages_SortByDescription_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+
+	// Two images carry the same description; tiebreak must be id-asc.
+	seedStoredImage(t, s, "img-b", "b", "shared", nil)
+	seedStoredImage(t, s, "img-a", "a", "shared", nil)
+
+	resp, _ := http.Get(ts.URL + "/api/v1/images?sort=description&order=asc")
 	var got []*types.Image
 	decodeJSON(t, resp, &got)
 	if len(got) != 2 || got[0].ID != "img-a" || got[1].ID != "img-b" {

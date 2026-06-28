@@ -64,9 +64,9 @@ var imageListCmd = &cobra.Command{
 		}
 		switch sortField {
 		case types.ImageSortID, types.ImageSortName, types.ImageSortSize, types.ImageSortCreatedAt,
-			types.ImageSortSourceVM:
+			types.ImageSortSourceVM, types.ImageSortDescription:
 		default:
-			return fmt.Errorf("invalid --sort %q: must be one of id, name, size, created_at, source_vm", sortField)
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, size, created_at, source_vm, description", sortField)
 		}
 		order = strings.TrimSpace(strings.ToLower(order))
 		if order == "" {
@@ -425,7 +425,7 @@ func init() {
 	imageListCmd.Flags().String("until", "", "keep images created at or before this RFC3339 timestamp (inclusive; e.g. 2026-05-01T23:59:59Z)")
 	imageListCmd.Flags().String("min-size", "", "keep images whose size in bytes is at least this value (inclusive)")
 	imageListCmd.Flags().String("max-size", "", "keep images whose size in bytes is at most this value (inclusive)")
-	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at, source_vm")
+	imageListCmd.Flags().String("sort", "id", "sort by: id, name, size, created_at, source_vm, description")
 	imageListCmd.Flags().String("order", "asc", "order: asc or desc")
 
 	imageEditCmd.Flags().String("description", "", "new description (omit to leave unchanged; empty value cannot clear the field)")

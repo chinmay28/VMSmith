@@ -10,11 +10,12 @@ import (
 // (`VMSortID` / `VMSortName` / `VMSortCreatedAt`) plus `size` for "biggest
 // images first" — common when freeing host disk space.
 const (
-	ImageSortID        = "id"
-	ImageSortName      = "name"
-	ImageSortSize      = "size"
-	ImageSortCreatedAt = "created_at"
-	ImageSortSourceVM  = "source_vm"
+	ImageSortID          = "id"
+	ImageSortName        = "name"
+	ImageSortSize        = "size"
+	ImageSortCreatedAt   = "created_at"
+	ImageSortSourceVM    = "source_vm"
+	ImageSortDescription = "description"
 )
 
 // SortImages sorts the given images in place by the requested field and order.
@@ -67,6 +68,32 @@ func SortImages(imgs []*Image, sortField, order string) {
 				less = true
 			case aiSrc != ajSrc:
 				less = aiSrc < ajSrc
+			default:
+				less = ai.ID < aj.ID
+			}
+		case ImageSortDescription:
+			// Case-insensitive compare so operators can paste a
+			// description verbatim — descriptions are free-form text
+			// the operator chose, and matching `Rocky 9 base` against
+			// `rocky 9 base` should land in the same bucket. Images
+			// with an empty `description` (the common case — most
+			// images get no description) sink to the tail of asc /
+			// head of desc, mirroring the nil-trailing semantics on
+			// every other nullable string sort axis (source_vm, ip,
+			// guest_ip, image, last_fired_at, last_delivery_at,
+			// actor) — operators looking for "which images have a
+			// description" want them at the head of asc, not buried
+			// among the unset majority.
+			aiD, ajD := strings.ToLower(ai.Description), strings.ToLower(aj.Description)
+			switch {
+			case aiD == "" && ajD == "":
+				less = ai.ID < aj.ID
+			case aiD == "":
+				less = false
+			case ajD == "":
+				less = true
+			case aiD != ajD:
+				less = aiD < ajD
 			default:
 				less = ai.ID < aj.ID
 			}

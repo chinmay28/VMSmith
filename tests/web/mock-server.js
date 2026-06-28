@@ -1742,8 +1742,8 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/images" && method === "GET") {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
-    if (!["id", "name", "size", "created_at", "source_vm"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, size, created_at, source_vm" });
+    if (!["id", "name", "size", "created_at", "source_vm", "description"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, size, created_at, source_vm, description" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -1832,6 +1832,18 @@ const server = http.createServer(async (req, res) => {
           // inverts the entire compare so `+1` here yields head-of-desc).
           const ai = (a.source_vm || "").toLowerCase();
           const bi = (b.source_vm || "").toLowerCase();
+          if (ai === "" && bi === "") l = 0;
+          else if (ai === "") l = 1;
+          else if (bi === "") l = -1;
+          else l = ai.localeCompare(bi);
+          break;
+        }
+        case "description": {
+          // 5.4.118 — case-insensitive compare on the image's
+          // `description` field; empty descriptions sink to the tail
+          // of asc / head of desc, mirroring the `source_vm` axis.
+          const ai = (a.description || "").toLowerCase();
+          const bi = (b.description || "").toLowerCase();
           if (ai === "" && bi === "") l = 0;
           else if (ai === "") l = 1;
           else if (bi === "") l = -1;

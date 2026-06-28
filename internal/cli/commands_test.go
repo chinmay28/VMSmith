@@ -4608,6 +4608,62 @@ func TestCLI_ImageList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "source_vm") {
 		t.Errorf("invalid --sort error %q must advertise source_vm", err.Error())
 	}
+	// 5.4.118 — likewise must advertise the description axis.
+	if !strings.Contains(err.Error(), "description") {
+		t.Errorf("invalid --sort error %q must advertise description", err.Error())
+	}
+}
+
+// 5.4.118 — case-insensitive sort axis on the image `description` field.
+// Empty descriptions (the common case) sink to the tail of asc / head of
+// desc, mirroring every other nullable string sort axis (source_vm, ip,
+// guest_ip, image, last_fired_at, last_delivery_at, actor).
+func TestCLI_ImageList_SortByDescription_Asc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-no-desc", Name: "no-desc", Path: "/t/n.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-rocky", Name: "rocky", Path: "/t/r.qcow2", SizeBytes: 100, Format: "qcow2", Description: "Rocky 9 base", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-alpine", Name: "alpine", Path: "/t/a.qcow2", SizeBytes: 100, Format: "qcow2", Description: "alpine 3.19 minimal", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "description")
+	if err != nil {
+		t.Fatalf("image list --sort description: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	// alpine < Rocky (case-insensitive) < (empty tail)
+	want := []string{"img-alpine", "img-rocky", "img-no-desc"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_ImageList_SortByDescription_DescEmptyHeads(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	now := time.Date(2026, time.March, 28, 8, 30, 0, 0, time.UTC)
+	s.PutImage(&types.Image{ID: "img-rocky", Name: "rocky", Path: "/t/r.qcow2", SizeBytes: 100, Format: "qcow2", Description: "Rocky 9 base", CreatedAt: now})
+	s.PutImage(&types.Image{ID: "img-no-desc", Name: "no-desc", Path: "/t/n.qcow2", SizeBytes: 100, Format: "qcow2", CreatedAt: now})
+
+	out, err := runCLI("image", "list", "--sort", "description", "--order", "desc")
+	if err != nil {
+		t.Fatalf("image list --sort description --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 3 {
+		t.Fatalf("expected header + 2 rows, got %d: %v", len(rows), rows)
+	}
+	if rows[1][0] != "img-no-desc" {
+		t.Errorf("first row id = %q, want img-no-desc (empty description heads desc)", rows[1][0])
+	}
 }
 
 // 5.4.117 — case-insensitive sort axis on `source_vm` mirroring the existing

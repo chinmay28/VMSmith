@@ -5236,9 +5236,19 @@ export interface components {
          *     (uploaded images, never exported from a VM) sink to the tail of
          *     `asc` and the head of `desc`, mirroring the nil-trailing semantics
          *     on every other nullable sort axis (ip, guest_ip, image,
-         *     last_fired_at, last_delivery_at, actor).
+         *     last_fired_at, last_delivery_at, actor). `description` (5.4.118)
+         *     is a case-insensitive sort axis over the image's `description`
+         *     field — operators paste descriptions verbatim into list-search
+         *     filters, so the sort axis matches the same case-insensitive
+         *     semantics; images with an empty `description` (the common case —
+         *     most images get no description) sink to the tail of `asc` and the
+         *     head of `desc`, mirroring the `source_vm` axis nil-trailing
+         *     rationale and every other nullable string sort axis. Closes the
+         *     operator query *"which images have a description"* — they cluster
+         *     at the head of `asc` instead of being buried among the unset
+         *     majority.
          */
-        ImageSort: "id" | "name" | "size" | "created_at" | "source_vm";
+        ImageSort: "id" | "name" | "size" | "created_at" | "source_vm" | "description";
         /**
          * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
          *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
