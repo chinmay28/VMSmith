@@ -3054,6 +3054,80 @@ func TestCLI_VMList_SortByNatGateway_RejectsUnknownAxis(t *testing.T) {
 	}
 }
 
+// ----- 5.4.120: `description` sort axis on the VM list -----
+
+func TestCLI_VMList_SortByDescription_Asc(t *testing.T) {
+	// asc: case-insensitive alphabetical on `spec.description`, with
+	// VMs that have an empty description sinking to the tail. Mirrors
+	// the image (5.4.118) / template (5.4.119) description axes.
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{Description: "Web prod", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "bravo", State: types.VMStateRunning, Spec: types.VMSpec{Description: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "charlie", State: types.VMStateRunning, Spec: types.VMSpec{Description: "alpha-svc", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "description")
+	if err != nil {
+		t.Fatalf("vm list --sort description: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// asc: `alpha-svc` < `Web prod` (case-folded; capital `W` should
+	// collate with lowercase `w` and stay in the same bucket as the
+	// case-insensitive `?search=` filter), then (empty) at the tail.
+	want := []string{"charlie", "alpha", "bravo"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDescription_DescEmptyHeads(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", State: types.VMStateRunning, Spec: types.VMSpec{Description: "aaa", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-2", Name: "bravo", State: types.VMStateRunning, Spec: types.VMSpec{Description: "", CPUs: 1, RAMMB: 1024}})
+	mock.SeedVM(&types.VM{ID: "vm-3", Name: "charlie", State: types.VMStateRunning, Spec: types.VMSpec{Description: "zzz", CPUs: 1, RAMMB: 1024}})
+
+	out, err := runCLI("vm", "list", "--sort", "description", "--order", "desc")
+	if err != nil {
+		t.Fatalf("vm list --sort description --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][1], rows[2][1], rows[3][1]}
+	// desc: empty heads (the undocumented majority), then reverse-alphabetic.
+	want := []string{"bravo", "charlie", "alpha"}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_VMList_SortByDescription_RejectsUnknownAxis(t *testing.T) {
+	// Garbage --sort value must surface a clear error that advertises
+	// `description` in the whitelist so operators know it's a valid axis.
+	_, cleanup := withMockVM(t)
+	defer cleanup()
+
+	_, err := runCLI("vm", "list", "--sort", "descriptionz")
+	if err == nil {
+		t.Fatalf("expected error for invalid --sort, got nil")
+	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Errorf("expected --sort error message to advertise 'description' as a valid axis, got: %v", err)
+	}
+}
+
 func TestCLI_VMList_SortByGPU_RejectsUnknownAxis(t *testing.T) {
 	// Garbage --sort value must surface a clear error that advertises `gpu`
 	// in the whitelist so operators know it's a valid axis.

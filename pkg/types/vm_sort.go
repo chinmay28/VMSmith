@@ -32,6 +32,7 @@ const (
 	VMSortLocked      = "locked"
 	VMSortNatStaticIP = "nat_static_ip"
 	VMSortNatGateway  = "nat_gateway"
+	VMSortDescription = "description"
 
 	SortOrderAsc  = "asc"
 	SortOrderDesc = "desc"
@@ -46,7 +47,8 @@ func IsValidVMSort(s string) bool {
 		VMSortImage, VMSortDefaultUser, VMSortGPU, VMSortOSType,
 		VMSortFirmware, VMSortOSVariant, VMSortDiskBus, VMSortNICModel,
 		VMSortMachine, VMSortClockOffset, VMSortAutoStart,
-		VMSortLocked, VMSortNatStaticIP, VMSortNatGateway:
+		VMSortLocked, VMSortNatStaticIP, VMSortNatGateway,
+		VMSortDescription:
 		return true
 	}
 	return false
@@ -540,6 +542,39 @@ func SortVMs(vms []*VM, sortField, order string) {
 				break
 			}
 			less = ai.ID < aj.ID
+		case VMSortDescription:
+			// Case-insensitive compare on `spec.description` so operators
+			// can paste a description verbatim — descriptions are free-form
+			// text the operator chose, and matching `Web Prod` against
+			// `web prod` should land in the same bucket. Mirrors the
+			// case-insensitive haystack in the existing `?search=` filter
+			// on the VM list, so the same description-based query surface
+			// is filtered (substring) and sorted (alphabetical) on the
+			// same case-insensitive semantics. VMs with an empty
+			// `spec.description` (the common case — most VMs get no
+			// description) sink to the tail of asc / head of desc,
+			// mirroring the nil-trailing semantics on every other nullable
+			// string sort axis (ip, image, gpu, actor, last_fired_at,
+			// last_delivery_at) rather than collapsing to a default like
+			// the documented-default axes (os_type → linux, firmware →
+			// bios, default_user → root) — there is no documented default
+			// for description because the field is genuinely "operator did
+			// not bother to write one". Same axis rationale as the image
+			// list `description` axis (5.4.118) and the template list
+			// `description` axis (5.4.119) one resource over.
+			aiD, ajD := strings.ToLower(ai.Spec.Description), strings.ToLower(aj.Spec.Description)
+			switch {
+			case aiD == "" && ajD == "":
+				less = ai.ID < aj.ID
+			case aiD == "":
+				less = false
+			case ajD == "":
+				less = true
+			case aiD != ajD:
+				less = aiD < ajD
+			default:
+				less = ai.ID < aj.ID
+			}
 		default: // VMSortID
 			less = ai.ID < aj.ID
 		}

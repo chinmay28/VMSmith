@@ -1422,6 +1422,33 @@ test.describe("VM List", () => {
 
   // 5.4.106 — case-insensitive `clock_offset` sort axis with OS-family-aware default.
   // 5.4.111 — numeric IP `nat_gateway` sort axis (bare IP, nil-trailing).
+  // 5.4.120 — `description` sort axis on the VM list. The mock seeds
+  // web-server (vm-1) with description "Prod fleet entry", win-app
+  // (vm-3) with "Lab dev", and leaves db-server (vm-2) with no
+  // description. Case-insensitive asc: "lab dev" < "prod fleet entry"
+  // < (empty), so win-app heads and db-server sinks. Desc inverts the
+  // entire compare: db-server (empty) heads.
+  test("description sort axis reorders the VM list and round-trips through the URL", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+
+    const cards = () => page.getByTestId(/^vm-card-/);
+    await expect(cards()).toHaveCount(3);
+
+    await page.getByTestId("vm-list-sort-field").selectOption("description");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=description");
+    // asc: "Lab dev" (win-app) heads; (empty) db-server sinks.
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-win-app");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-db-server");
+
+    // desc: empty heads (the unset majority — db-server), then concrete
+    // descriptions reverse-alphabetic ("Prod fleet entry" before "Lab dev").
+    await page.getByTestId("vm-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(cards().first()).toHaveAttribute("data-testid", "vm-card-db-server");
+    await expect(cards().last()).toHaveAttribute("data-testid", "vm-card-win-app");
+  });
+
   test("nat_gateway sort axis reorders the VM list numerically and sinks VMs with no gateway to the tail", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
