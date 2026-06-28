@@ -3744,6 +3744,31 @@ test.describe("Templates", () => {
     await expect(rows.last()).toHaveAttribute("data-testid", "template-row-windows-11-desktop");
   });
 
+  test("description sort axis reorders the template list and round-trips through the URL", async ({ page }) => {
+    // 5.4.119 — case-insensitive `description` sort axis on the template list.
+    // Seed descriptions: "Big Rocky template" (tmpl-2/big-rocky),
+    // "Small Ubuntu template" (tmpl-1/small-ubuntu),
+    // "Windows 11 desktop template" (tmpl-4/windows-11-desktop),
+    // "Windows Server 2022 template" (tmpl-3/windows-2022). Case-folded
+    // asc alphabetical: big-rocky < small-ubuntu < windows-11-desktop <
+    // windows-2022. Desc flips it.
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+
+    const rows = page.locator('[data-testid^="template-row-"]');
+    await expect(rows).toHaveCount(4);
+
+    await page.getByTestId("template-list-sort-field").selectOption("description");
+    await expect.poll(() => new URL(page.url()).search).toContain("sort=description");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-big-rocky");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-windows-2022");
+
+    await page.getByTestId("template-list-sort-order").selectOption("desc");
+    await expect.poll(() => new URL(page.url()).search).toContain("order=desc");
+    await expect(rows.first()).toHaveAttribute("data-testid", "template-row-windows-2022");
+    await expect(rows.last()).toHaveAttribute("data-testid", "template-row-big-rocky");
+  });
+
   test("capacity sort axes (cpus / ram_mb / disk_gb) reorder templates and round-trip through the URL", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

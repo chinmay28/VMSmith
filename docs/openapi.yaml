@@ -3840,12 +3840,24 @@ components:
         / `default_user` and the VM list `os_variant` axis (5.4.103).
         Alphabetical Windows edition ordering: `windows-10 <
         windows-11 < windows-server-2019 < windows-server-2022 <
-        windows-server-2025`. All comparators tiebreak on `id` so
-        paginated requests return the same set across two independent
-        fetches.
+        windows-server-2025`. `description` (5.4.119) is a
+        case-insensitive sort axis over the template's `description`
+        field, mirroring the case-insensitive haystack used by the
+        existing `?search=` filter so the same description-based query
+        surface is filtered (substring) and sorted (alphabetical) on the
+        same semantics — mirrors the image list `description` axis
+        (5.4.118) one resource over. Templates with an empty
+        `description` (the common case — most templates get no
+        description) sink to the tail of `asc` / head of `desc`,
+        mirroring the nil-trailing semantics on every other nullable
+        sort axis (`image` / `default_user` / `os_variant`) rather than
+        collapsing to a default like the documented-default axes
+        (`os_type` → `linux`) — there is no documented default for
+        description. All comparators tiebreak on `id` so paginated
+        requests return the same set across two independent fetches.
       schema:
         type: string
-        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant]
+        enum: [id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant, description]
         default: id
     SortOrder:
       name: order

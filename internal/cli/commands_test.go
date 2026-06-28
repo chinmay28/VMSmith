@@ -7876,6 +7876,9 @@ func TestCLI_TemplateList_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(err.Error(), "os_variant") {
 		t.Errorf("error = %v, want it to mention `os_variant`", err)
 	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Errorf("error = %v, want it to mention `description` (5.4.119)", err)
+	}
 }
 
 // 5.4.102 — case-insensitive `os_type` sort axis on the template list.
@@ -7995,6 +7998,66 @@ func TestCLI_TemplateList_SortByOSVariant_DescNilLeading(t *testing.T) {
 	rows := tableRows(t, out)
 	// Desc: empty heads, then windows-server-2025 > windows-10.
 	want := []string{"rocky", "srv-2025", "win10"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+// 5.4.119 — case-insensitive `description` sort axis on the template list.
+// Mirrors the image list `description` axis (5.4.118) one resource over;
+// empty stored values sink to the tail of asc / head of desc.
+
+func TestCLI_TemplateList_SortByDescription_Asc(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "no-desc", Image: "rocky9.qcow2", Description: ""}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "zeta", Image: "rocky9.qcow2", Description: "Zeta hardened"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "alpha", Image: "rocky9.qcow2", Description: "alpha bootstrap"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "description")
+	if err != nil {
+		t.Fatalf("template list --sort description: %v", err)
+	}
+	rows := tableRows(t, out)
+	// Case-insensitive: alpha < zeta; empty trails in asc.
+	want := []string{"alpha", "zeta", "no-desc"}
+	for i, name := range want {
+		if rows[i+1][1] != name {
+			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)
+		}
+	}
+}
+
+func TestCLI_TemplateList_SortByDescription_DescEmptyHeads(t *testing.T) {
+	s, _, cleanup := withTestStorage(t)
+	defer cleanup()
+
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-1", Name: "zeta", Image: "rocky9.qcow2", Description: "Zeta hardened"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-3", Name: "no-desc", Image: "rocky9.qcow2", Description: ""}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.PutTemplate(&types.VMTemplate{ID: "tmpl-2", Name: "alpha", Image: "rocky9.qcow2", Description: "alpha bootstrap"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, err := runCLI("template", "list", "--sort", "description", "--order", "desc")
+	if err != nil {
+		t.Fatalf("template list --sort description --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	// Desc inverts asc: empty heads, then zeta, then alpha.
+	want := []string{"no-desc", "zeta", "alpha"}
 	for i, name := range want {
 		if rows[i+1][1] != name {
 			t.Errorf("row %d name = %q, want %q", i, rows[i+1][1], name)

@@ -14932,6 +14932,9 @@ func TestListTemplates_RejectsInvalidSort(t *testing.T) {
 	if !strings.Contains(errResp.Message, "default_user") {
 		t.Errorf("invalid_sort message = %q, want to mention `default_user`", errResp.Message)
 	}
+	if !strings.Contains(errResp.Message, "description") {
+		t.Errorf("invalid_sort message = %q, want to mention `description` (5.4.119)", errResp.Message)
+	}
 }
 
 func TestListTemplates_SortByCPUs(t *testing.T) {
@@ -15358,6 +15361,63 @@ func TestListTemplates_SortByOSVariant_400AdvertisesOSVariant(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "os_variant") {
 		t.Errorf("400 message %q must advertise os_variant in the supported set", string(body))
+	}
+}
+
+// 5.4.119 — case-insensitive `description` sort axis on the template list.
+// Mirrors the image list `description` axis (5.4.118) one resource over;
+// empty stored values sink to the tail of asc / head of desc.
+
+func TestListTemplates_SortByDescription(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", Description: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", Description: "Zeta hardened"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", Description: "alpha bootstrap"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=description")
+	got := decodeTemplateList(t, resp)
+	// Case-insensitive: alpha < zeta; empty trails in asc.
+	want := []string{"b", "a", "c"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByDescription_DescEmptyLeading(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", Description: "Zeta hardened"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", Description: ""})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", Description: "alpha bootstrap"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=description&order=desc")
+	got := decodeTemplateList(t, resp)
+	// Desc inverts asc: empty leads, then zeta, then alpha.
+	want := []string{"c", "a", "b"}
+	for i, tpl := range got {
+		if tpl.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full: %+v)", i, tpl.Name, want[i], got)
+		}
+	}
+}
+
+func TestListTemplates_SortByDescription_TiebreaksOnID(t *testing.T) {
+	ts, _, s, cleanup := testServerFull(t)
+	defer cleanup()
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-3", Name: "c", Image: "rocky9.qcow2", Description: "shared"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-1", Name: "a", Image: "rocky9.qcow2", Description: "shared"})
+	seedStoredTemplate(t, s, &types.VMTemplate{ID: "tmpl-2", Name: "b", Image: "rocky9.qcow2", Description: "shared"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/templates?sort=description")
+	got := decodeTemplateList(t, resp)
+	want := []string{"tmpl-1", "tmpl-2", "tmpl-3"}
+	for i, tpl := range got {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, tpl.ID, want[i])
+		}
 	}
 }
 

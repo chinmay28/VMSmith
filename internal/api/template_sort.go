@@ -22,7 +22,7 @@ func parseTemplateSort(r *http.Request) (sortField, order string, err error) {
 	if !types.IsValidTemplateSort(sortField) {
 		return "", "", types.NewAPIError(
 			"invalid_sort",
-			"sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant",
+			"sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant, description",
 		)
 	}
 

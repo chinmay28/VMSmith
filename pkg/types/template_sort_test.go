@@ -243,6 +243,7 @@ func TestIsValidTemplateSort_AcceptsImage(t *testing.T) {
 		{TemplateSortDefaultUser, true},
 		{TemplateSortOSType, true},
 		{TemplateSortOSVariant, true},
+		{TemplateSortDescription, true},
 		{"bogus", false},
 		{"", false},
 	}
@@ -541,6 +542,71 @@ func TestSortTemplates_ByOSVariant_AllEmpty_TiebreaksOnID(t *testing.T) {
 	SortTemplates(templates, TemplateSortOSVariant, SortOrderAsc)
 	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
 		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3 — all-empty must tiebreak on id",
+			templates[0].ID, templates[1].ID, templates[2].ID)
+	}
+}
+
+// 5.4.119 — case-insensitive `description` sort axis on the template list.
+// Mirrors the image list `description` axis (5.4.118) one resource over —
+// empty stored values sink to the tail of asc / head of desc (no documented
+// default for description because the field is genuinely "operator did not
+// bother to write one").
+
+func TestSortTemplates_ByDescription_AscCaseInsensitive(t *testing.T) {
+	// Operators paste descriptions verbatim and case shouldn't split the cohort.
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Description: "Charlie cluster template"},
+		{ID: "tpl-1", Description: "alpha bootstrap template"},
+		{ID: "tpl-2", Description: "Bravo prod template"},
+	}
+	SortTemplates(templates, TemplateSortDescription, SortOrderAsc)
+	want := []string{"tpl-1", "tpl-2", "tpl-3"} // alpha < bravo < charlie
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, tpl.ID, want[i])
+		}
+	}
+}
+
+func TestSortTemplates_ByDescription_EmptyTrailsInAsc(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Description: ""},
+		{ID: "tpl-1", Description: "rocky base"},
+		{ID: "tpl-2", Description: ""},
+	}
+	SortTemplates(templates, TemplateSortDescription, SortOrderAsc)
+	want := []string{"tpl-1", "tpl-2", "tpl-3"} // rocky base first; the two empties trail in id-asc.
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDescription_EmptyHeadsInDesc(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-1", Description: "rocky base"},
+		{ID: "tpl-3", Description: ""},
+		{ID: "tpl-2", Description: ""},
+	}
+	SortTemplates(templates, TemplateSortDescription, SortOrderDesc)
+	want := []string{"tpl-3", "tpl-2", "tpl-1"} // empties head in desc (id-desc among empties), then rocky.
+	for i, tpl := range templates {
+		if tpl.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q (full: %v)", i, tpl.ID, want[i], templates)
+		}
+	}
+}
+
+func TestSortTemplates_ByDescription_TiebreaksOnID(t *testing.T) {
+	templates := []*VMTemplate{
+		{ID: "tpl-3", Description: "shared description"},
+		{ID: "tpl-1", Description: "shared description"},
+		{ID: "tpl-2", Description: "shared description"},
+	}
+	SortTemplates(templates, TemplateSortDescription, SortOrderAsc)
+	if templates[0].ID != "tpl-1" || templates[1].ID != "tpl-2" || templates[2].ID != "tpl-3" {
+		t.Errorf("got %q,%q,%q want tpl-1,tpl-2,tpl-3 — equal descriptions must tiebreak on id",
 			templates[0].ID, templates[1].ID, templates[2].ID)
 	}
 }

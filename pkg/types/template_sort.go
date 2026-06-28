@@ -18,6 +18,7 @@ const (
 	TemplateSortDefaultUser = "default_user"
 	TemplateSortOSType      = "os_type"
 	TemplateSortOSVariant   = "os_variant"
+	TemplateSortDescription = "description"
 )
 
 // IsValidTemplateSort reports whether s is an accepted template list sort
@@ -27,7 +28,7 @@ func IsValidTemplateSort(s string) bool {
 	case TemplateSortID, TemplateSortName, TemplateSortCreatedAt,
 		TemplateSortCPUs, TemplateSortRAMMB, TemplateSortDiskGB,
 		TemplateSortImage, TemplateSortDefaultUser, TemplateSortOSType,
-		TemplateSortOSVariant:
+		TemplateSortOSVariant, TemplateSortDescription:
 		return true
 	}
 	return false
@@ -153,6 +154,36 @@ func SortTemplates(templates []*VMTemplate, sortField, order string) {
 				less = true
 			case aiV != ajV:
 				less = aiV < ajV
+			default:
+				less = ai.ID < aj.ID
+			}
+		case TemplateSortDescription:
+			// 5.4.119 — case-insensitive compare on the template's
+			// `Description` field. Symmetric sort counterpart to the
+			// case-insensitive haystack used by the existing `?search=`
+			// filter so the description-based query surface is filtered
+			// (substring) and sorted (alphabetical) on the same semantics
+			// — mirrors the image list `description` axis (5.4.118) one
+			// resource over. Templates with an empty `Description` (the
+			// common case — most templates get no description) sink to the
+			// tail of asc / head of desc, mirroring the nil-trailing
+			// semantics on every other nullable string axis (`image` /
+			// `default_user` / `os_variant` and the image axes
+			// `source_vm` / `description`) rather than collapsing to a
+			// default like the documented-default axes (`os_type` →
+			// `linux`, VM `firmware` → `bios`) — there is no documented
+			// default for description because the field is genuinely
+			// "operator did not bother to write one".
+			aiD, ajD := strings.ToLower(ai.Description), strings.ToLower(aj.Description)
+			switch {
+			case aiD == "" && ajD == "":
+				less = ai.ID < aj.ID
+			case aiD == "":
+				less = false
+			case ajD == "":
+				less = true
+			case aiD != ajD:
+				less = aiD < ajD
 			default:
 				less = ai.ID < aj.ID
 			}
