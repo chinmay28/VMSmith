@@ -2074,9 +2074,9 @@ const server = http.createServer(async (req, res) => {
     }
     const sort = (url.searchParams.get("sort") || "id").trim().toLowerCase();
     const order = (url.searchParams.get("order") || "asc").trim().toLowerCase();
-    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image", "default_user", "os_type", "os_variant"];
+    const allowedSort = ["id", "name", "created_at", "cpus", "ram_mb", "disk_gb", "image", "default_user", "os_type", "os_variant", "description"];
     if (!allowedSort.includes(sort)) {
-      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant", code: "invalid_sort" });
+      return json(res, 400, { error: "sort must be one of: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant, description", code: "invalid_sort" });
     }
     if (order !== "asc" && order !== "desc") {
       return json(res, 400, { error: "order must be 'asc' or 'desc'", code: "invalid_order" });
@@ -2161,6 +2161,26 @@ const server = http.createServer(async (req, res) => {
         // windows-server-2025.
         const ai = String(a.os_variant || "").trim().toLowerCase();
         const bi = String(b.os_variant || "").trim().toLowerCase();
+        if (ai === "" && bi === "") {
+          cmp = String(a.id).localeCompare(String(b.id));
+        } else if (ai === "") {
+          cmp = 1;
+        } else if (bi === "") {
+          cmp = -1;
+        } else if (ai !== bi) {
+          cmp = ai < bi ? -1 : 1;
+        } else {
+          cmp = String(a.id).localeCompare(String(b.id));
+        }
+      } else if (sort === "description") {
+        // 5.4.119: case-insensitive `description` sort axis on the
+        // template list. Mirrors the image list `description` axis
+        // (5.4.118) one resource over — empty stored values sink to the
+        // tail of asc / head of desc (no documented default for
+        // description because the field is genuinely "operator did not
+        // bother to write one").
+        const ai = String(a.description || "").toLowerCase();
+        const bi = String(b.description || "").toLowerCase();
         if (ai === "" && bi === "") {
           cmp = String(a.id).localeCompare(String(b.id));
         } else if (ai === "") {

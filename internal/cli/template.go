@@ -180,7 +180,7 @@ var templateListCmd = &cobra.Command{
 			sortField = types.TemplateSortID
 		}
 		if !types.IsValidTemplateSort(sortField) {
-			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant", sortField)
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant, description", sortField)
 		}
 		orderField = strings.TrimSpace(strings.ToLower(orderField))
 		if orderField == "" {
@@ -533,7 +533,7 @@ func init() {
 	templateListCmd.Flags().String("max-ram-mb", "", "keep templates with at most this much RAM in MB (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("min-disk-gb", "", "keep templates with at least this many GB of disk (inclusive; non-negative integer)")
 	templateListCmd.Flags().String("max-disk-gb", "", "keep templates with at most this many GB of disk (inclusive; non-negative integer)")
-	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant")
+	templateListCmd.Flags().String("sort", types.TemplateSortID, "sort field: id, name, created_at, cpus, ram_mb, disk_gb, image, default_user, os_type, os_variant, description")
 	templateListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 
 	templateEditCmd.Flags().String("description", "", "new template description (omit to keep current)")
