@@ -2631,13 +2631,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { code: "invalid_active", message: "active must be 'true' or 'false'" });
     }
     // Whitelisted sort + order, mirroring internal/api/webhook_sort.go.
-    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at", "delivery_status", "active"]);
+    const allowedSort = new Set(["id", "url", "created_at", "last_delivery_at", "delivery_status", "active", "description"]);
     const allowedOrder = new Set(["asc", "desc"]);
     let sortField = (url.searchParams.get("sort") || "").trim().toLowerCase();
     let order = (url.searchParams.get("order") || "").trim().toLowerCase();
     if (sortField === "") sortField = "id";
     else if (!allowedSort.has(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at, delivery_status, active" });
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, url, created_at, last_delivery_at, delivery_status, active, description" });
     }
     if (order === "") order = "asc";
     else if (!allowedOrder.has(order)) {
@@ -2838,6 +2838,21 @@ const server = http.createServer(async (req, res) => {
           if (av === bv) cmp = 0;
           else if (!av && bv) cmp = -1;
           else cmp = 1;
+          if (cmp === 0) cmp = cmpID;
+          break;
+        }
+        case "description": {
+          // 5.4.122 — case-insensitive compare on the webhook's
+          // `description` field; empty descriptions sink to the tail
+          // of asc / head of desc, mirroring the VM (5.4.120) /
+          // template (5.4.119) / image (5.4.118) / snapshot (5.4.121)
+          // description axes one resource over.
+          const ai = (a.description || "").toLowerCase();
+          const bi = (b.description || "").toLowerCase();
+          if (ai === "" && bi === "") cmp = 0;
+          else if (ai === "") cmp = 1;
+          else if (bi === "") cmp = -1;
+          else cmp = ai.localeCompare(bi);
           if (cmp === 0) cmp = cmpID;
           break;
         }

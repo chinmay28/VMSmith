@@ -5887,6 +5887,60 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
   });
 
+  // 5.4.122 — description sort axis on the webhook list. Seeds three
+  // webhooks via the UI: two with distinct descriptions (mixed case) and
+  // one without. Asserts the new "description" sort option clusters the
+  // described webhooks at the head of asc (case-insensitive: "alpha" <
+  // "Slack #ops"), pushes the empty-description webhook to the tail, and
+  // round-trips through ?sort=description in the URL. Desc flips the
+  // entire compare result so the empty-description webhook heads.
+  // Mirrors the VM (5.4.120) / template (5.4.119) / image (5.4.118) /
+  // snapshot (5.4.121) description sort tests one resource over.
+  test("description sort axis reorders the webhook list (described head asc, empty head desc)", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-settings").click();
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+
+    const seed = async (url, description) => {
+      await page.getByTestId("add-webhook-btn").click();
+      await page.getByTestId("webhook-url-input").fill(url);
+      await page.getByTestId("webhook-secret-input").fill("k");
+      if (description) {
+        await page.getByTestId("webhook-description-input").fill(description);
+      }
+      await page.getByTestId("webhook-create-submit").click();
+      await expect(page.getByTestId("add-webhook-form")).not.toBeVisible();
+    };
+    // Two webhooks with distinct descriptions (mixed case so we exercise
+    // the case-insensitive comparator) and one with no description.
+    await seed("https://desc-a.example.com/hook", "Slack #ops");
+    await seed("https://desc-b.example.com/hook", "alpha");
+    await seed("https://desc-c.example.com/hook", "");
+
+    await expect(page.locator('[data-testid^="webhook-row-"]')).toHaveCount(3);
+
+    // Sort by description asc — "alpha" < "Slack #ops" (case-folded),
+    // then the empty-description webhook (desc-c) trails. The first row
+    // must surface the alpha-described webhook (desc-b).
+    await page.getByTestId("webhook-list-sort-field").selectOption("description");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("desc-b.example.com");
+    // URL round-trip honours the new axis.
+    await expect.poll(async () => new URL(page.url()).searchParams.get("sort")).toBe("description");
+
+    // Flip order — desc surfaces the empty-description webhook first
+    // (mirrors the nullable-string nil-trailing convention: empty heads
+    // desc), then "Slack #ops" > "alpha".
+    await page.getByTestId("webhook-list-sort-order").selectOption("desc");
+    await expect.poll(async () => {
+      const text = await page.locator('[data-testid^="webhook-row-"]').first().innerText();
+      return text.toLowerCase();
+    }).toContain("desc-c.example.com");
+    await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
+  });
+
   // 2.3.10 — webhook bulk-delete.
   test("bulk delete selected webhooks via checkbox + Delete-selected", async ({ page }) => {
     page.on("dialog", (d) => d.accept());
