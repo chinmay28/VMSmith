@@ -1741,3 +1741,94 @@ func TestIsValidVMSort_AcceptsNatGateway(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// `description` sort axis (5.4.120)
+// ============================================================
+
+func TestSortVMs_ByDescription_AscCaseInsensitive(t *testing.T) {
+	// Mixed-case descriptions sort case-insensitively so `Web prod` and
+	// `web prod` collate as identical. Mirrors the case-insensitive
+	// haystack in the `?search=` filter — the same description-based
+	// query surface is filtered (substring) and sorted (alphabetical)
+	// on the same semantics.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Description: "Web prod"}},
+		{ID: "vm-2", Spec: VMSpec{Description: "alpha"}},
+		{ID: "vm-3", Spec: VMSpec{Description: "web prod"}},
+	}
+	SortVMs(vms, VMSortDescription, SortOrderAsc)
+	// asc: `alpha` < `web prod` (case-folded). The two `web prod` entries
+	// tiebreak on id ascending (vm-1 before vm-3).
+	want := []string{"vm-2", "vm-1", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q description=%q, want %q", i, v.ID, v.Spec.Description, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDescription_EmptyTrailsInAsc(t *testing.T) {
+	// VMs with no description sink to the tail in ascending order —
+	// operators looking for "which VMs have a description" want them at
+	// the head of asc, not buried among the unset majority. Mirrors the
+	// image (5.4.118) / template (5.4.119) `description` axes one
+	// resource over.
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Description: ""}},
+		{ID: "vm-2", Spec: VMSpec{Description: "z"}},
+		{ID: "vm-3", Spec: VMSpec{Description: "a"}},
+	}
+	SortVMs(vms, VMSortDescription, SortOrderAsc)
+	want := []string{"vm-3", "vm-2", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q description=%q, want %q", i, v.ID, v.Spec.Description, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDescription_EmptyHeadsInDesc(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-1", Spec: VMSpec{Description: "a"}},
+		{ID: "vm-2", Spec: VMSpec{Description: ""}},
+		{ID: "vm-3", Spec: VMSpec{Description: ""}},
+	}
+	SortVMs(vms, VMSortDescription, SortOrderDesc)
+	// Empty heads in desc. The two empty-description entries tiebreak on
+	// id — and because the outer desc-wrapper inverts the tiebreak, vm-3
+	// (id=c) heads vm-2 (id=b), then vm-1 (the only concrete description)
+	// trails. Matches the existing image `_DescEmptyHeads` contract.
+	want := []string{"vm-3", "vm-2", "vm-1"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q description=%q, want %q", i, v.ID, v.Spec.Description, want[i])
+		}
+	}
+}
+
+func TestSortVMs_ByDescription_TiebreaksOnID(t *testing.T) {
+	vms := []*VM{
+		{ID: "vm-3", Spec: VMSpec{Description: "same"}},
+		{ID: "vm-1", Spec: VMSpec{Description: "same"}},
+		{ID: "vm-2", Spec: VMSpec{Description: "same"}},
+	}
+	SortVMs(vms, VMSortDescription, SortOrderAsc)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, v := range vms {
+		if v.ID != want[i] {
+			t.Errorf("idx %d: id=%q, want %q", i, v.ID, want[i])
+		}
+	}
+}
+
+func TestIsValidVMSort_AcceptsDescription(t *testing.T) {
+	if !IsValidVMSort(VMSortDescription) {
+		t.Fatalf("IsValidVMSort(%q) = false, want true", VMSortDescription)
+	}
+	for _, axis := range []string{"DESCRIPTION", "Description", " description "} {
+		if IsValidVMSort(axis) {
+			t.Errorf("IsValidVMSort(%q) = true, want false (parser must normalise before lookup)", axis)
+		}
+	}
+}

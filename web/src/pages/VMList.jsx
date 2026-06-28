@@ -874,6 +874,7 @@ export default function VMList() {
           <option value="locked">Locked</option>
           <option value="nat_static_ip">NAT static IP</option>
           <option value="nat_gateway">NAT gateway</option>
+          <option value="description">Description</option>
         </select>
         <select
           value={order}

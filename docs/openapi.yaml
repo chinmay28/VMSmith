@@ -3743,11 +3743,25 @@ components:
         mirroring the nil-trailing semantics on the `ip` /
         `nat_static_ip` sort axes and the empty-stored-excludes
         contract on the `?nat_gateway=` filter.
+        `description` (5.4.120) is a case-insensitive sort axis
+        over `spec.description` — operators paste descriptions
+        verbatim into list-search filters, so the sort axis
+        matches the same case-insensitive semantics. VMs with an
+        empty `spec.description` (the common case — most VMs get
+        no description) sink to the tail of `asc` and the head of
+        `desc`, mirroring the nil-trailing semantics on every
+        other nullable string sort axis (ip, image, gpu, actor,
+        last_fired_at, last_delivery_at) rather than collapsing to
+        a default like the documented-default axes (os_type →
+        linux, firmware → bios, default_user → root). Same axis
+        rationale as the image list `description` axis (5.4.118)
+        and the template list `description` axis (5.4.119) one
+        resource over.
         All comparators tiebreak on `id` so pagination is deterministic
         across backends.
       schema:
         type: string
-        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip, nat_gateway]
+        enum: [id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip, nat_gateway, description]
         default: id
     ImageSort:
       name: sort

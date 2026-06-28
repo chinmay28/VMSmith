@@ -145,6 +145,15 @@ function seed() {
   vmWin.ip = "192.168.100.12";
   vmWin.created_at = "2026-05-20T00:00:00Z";
   vmWin.updated_at = "2026-05-20T00:00:00Z";
+  // 5.4.120 — Pin per-VM descriptions so the new `description` sort axis
+  // has a meaningful cohort to slice. asc orders `Lab dev` (win-app) before
+  // `Prod fleet entry` (web-server), with db-server's empty description
+  // sinking to the tail per the nil-trailing contract. Search-cohorts are
+  // unaffected — "web" still only matches web-server (description doesn't
+  // contain "web"), and the long "zzz-needle-not-present" haystack misses
+  // both descriptions.
+  vm1.spec.description = "Prod fleet entry";
+  vmWin.spec.description = "Lab dev";
   snapshots.set(vm1.id, [
     {
       id: `${vm1.id}/before-deploy`,
@@ -584,8 +593,8 @@ const server = http.createServer(async (req, res) => {
     if (minDiskP.invalid) return json(res, 400, { code: minDiskP.code, message: minDiskP.msg });
     const maxDiskP = parseCount(url.searchParams.get("max_disk_gb"), "max_disk_gb");
     if (maxDiskP.invalid) return json(res, 400, { code: maxDiskP.code, message: maxDiskP.msg });
-    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked", "nat_static_ip", "nat_gateway"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip, nat_gateway" });
+    if (!["id", "name", "created_at", "state", "cpus", "ram_mb", "disk_gb", "ip", "image", "default_user", "gpu", "os_type", "firmware", "os_variant", "disk_bus", "nic_model", "machine", "clock_offset", "auto_start", "locked", "nat_static_ip", "nat_gateway", "description"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, state, cpus, ram_mb, disk_gb, ip, image, default_user, gpu, os_type, firmware, os_variant, disk_bus, nic_model, machine, clock_offset, auto_start, locked, nat_static_ip, nat_gateway, description" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -1028,6 +1037,19 @@ const server = http.createServer(async (req, res) => {
           else if (ga === "") l = 1;
           else if (gb === "") l = -1;
           else l = ga < gb ? -1 : ga > gb ? 1 : 0;
+          break;
+        }
+        case "description": {
+          // 5.4.120 — case-insensitive sort on spec.description. Empty
+          // descriptions sink to the tail in asc / head in desc, mirroring
+          // the Go SortVMs nil-trailing contract and the image (5.4.118) /
+          // template (5.4.119) `description` axes one resource over.
+          const ad = String((a?.spec?.description) || "").toLowerCase();
+          const bd = String((b?.spec?.description) || "").toLowerCase();
+          if (ad === "" && bd === "") l = 0;
+          else if (ad === "") l = 1;
+          else if (bd === "") l = -1;
+          else l = ad < bd ? -1 : ad > bd ? 1 : 0;
           break;
         }
         default:           l = 0;

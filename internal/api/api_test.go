@@ -6035,6 +6035,90 @@ func TestListVMs_SortByNatGateway_400AdvertisesNatGateway(t *testing.T) {
 	}
 }
 
+// ----- 5.4.120: `description` sort axis on the VM list -----
+
+func TestListVMs_SortByDescription(t *testing.T) {
+	// asc: case-insensitive alphabetical on `spec.description`, with
+	// empty descriptions sinking to the tail — mirrors image (5.4.118)
+	// and template (5.4.119) `description` axes one resource over.
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "alpha", Spec: types.VMSpec{Description: "Web prod"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "bravo", Spec: types.VMSpec{Description: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "charlie", Spec: types.VMSpec{Description: "alpha-svc"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-4", Name: "delta", Spec: types.VMSpec{Description: "web prod"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=description")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// asc: `alpha-svc` < `web prod` (case-folded) < (empty).
+	// The two `web prod` entries tiebreak on id ascending (vm-1 < vm-4).
+	want := []string{"charlie", "alpha", "delta", "bravo"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q (full got: %v)", i, vm.Name, want[i], got)
+		}
+	}
+}
+
+func TestListVMs_SortByDescription_DescEmptyLeading(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Description: "aaa"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Description: ""}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{Description: "zzz"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=description&order=desc")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	// desc: empty heads (the unset majority), then reverse-alphabetic.
+	want := []string{"b", "c", "a"}
+	for i, vm := range got {
+		if vm.Name != want[i] {
+			t.Errorf("idx %d: name = %q, want %q", i, vm.Name, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDescription_TiebreaksOnID(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-3", Name: "c", Spec: types.VMSpec{Description: "same"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", Spec: types.VMSpec{Description: "same"}})
+	mockMgr.SeedVM(&types.VM{ID: "vm-2", Name: "b", Spec: types.VMSpec{Description: "same"}})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=description")
+	var got []*types.VM
+	decodeJSON(t, resp, &got)
+	want := []string{"vm-1", "vm-2", "vm-3"}
+	for i, vm := range got {
+		if vm.ID != want[i] {
+			t.Errorf("idx %d: id = %q, want %q", i, vm.ID, want[i])
+		}
+	}
+}
+
+func TestListVMs_SortByDescription_400AdvertisesDescription(t *testing.T) {
+	ts, _, cleanup := testServer(t)
+	defer cleanup()
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms?sort=desc")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "description") {
+		t.Errorf("error message %q should advertise the description axis", apiErr.Message)
+	}
+}
+
 func TestListVMs_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
