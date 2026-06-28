@@ -549,6 +549,7 @@ export default function VMDetail() {
                 <option value="id">ID</option>
                 <option value="name">Name</option>
                 <option value="created_at">Created</option>
+                <option value="description">Description</option>
               </select>
               <select
                 value={snapOrder}

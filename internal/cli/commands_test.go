@@ -4240,9 +4240,68 @@ func TestCLI_SnapshotList_RejectsInvalidSort(t *testing.T) {
 	defer cleanup()
 	mock.SeedVM(&types.VM{ID: "vm-bad-sort"})
 
-	_, err := runCLI("snapshot", "list", "vm-bad-sort", "--sort", "description")
+	_, err := runCLI("snapshot", "list", "vm-bad-sort", "--sort", "no_such_field")
 	if err == nil || !strings.Contains(err.Error(), "invalid --sort") {
 		t.Fatalf("expected invalid --sort error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Errorf("invalid --sort error does not advertise the description axis (5.4.121): %v", err)
+	}
+}
+
+// ============================================================
+// `description` sort axis (5.4.121)
+// ============================================================
+
+func TestCLI_SnapshotList_SortByDescription_AscCaseInsensitive(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-desc-asc", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-asc", Name: "snap-1", Description: "Pre upgrade"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-asc", Name: "snap-2", Description: "audit"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-asc", Name: "snap-3", Description: "pre upgrade"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-desc-asc", "--sort", "description")
+	if err != nil {
+		t.Fatalf("snapshot list --sort description: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	want := []string{"snap-2", "snap-1", "snap-3"} // audit < pre upgrade (case-folded); name tiebreak on the two `pre upgrade` rows
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestCLI_SnapshotList_SortByDescription_EmptyTrailsInAsc(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-desc-empty", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-empty", Name: "snap-1", Description: ""})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-empty", Name: "snap-2", Description: "z"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-empty", Name: "snap-3", Description: "a"})
+
+	out, err := runCLI("snapshot", "list", "vm-s-desc-empty", "--sort", "description", "--order", "asc")
+	if err != nil {
+		t.Fatalf("snapshot list --sort description --order asc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	want := []string{"snap-3", "snap-2", "snap-1"} // empty description sinks to tail
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
 	}
 }
 
