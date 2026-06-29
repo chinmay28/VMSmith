@@ -389,7 +389,7 @@ func TestSortWebhooks_ByDescription_EmptyHeadsInDesc(t *testing.T) {
 	SortWebhooks(hooks, WebhookSortDescription, SortOrderDesc)
 	// Empty heads in desc. The two empty-description entries tiebreak on
 	// id — and because the outer desc-wrapper inverts the tiebreak,
-	// wh-3 (id=c) heads wh-2 (id=b), then wh-1 (the only concrete
+	// wh-3 heads wh-2 (higher id first), then wh-1 (the only concrete
 	// description) trails. Matches the VM `_DescEmptyHeads` contract.
 	want := []string{"wh-3", "wh-2", "wh-1"}
 	if got := whIDs(hooks); !equalStrings(got, want) {
