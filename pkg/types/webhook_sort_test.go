@@ -232,6 +232,7 @@ func TestIsValidWebhookSort_AcceptsAllAxes(t *testing.T) {
 		WebhookSortLastDelivery,
 		WebhookSortDeliveryStatus,
 		WebhookSortActive,
+		WebhookSortDescription,
 	} {
 		if !IsValidWebhookSort(s) {
 			t.Errorf("IsValidWebhookSort(%q) = false, want true", s)
