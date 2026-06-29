@@ -9655,6 +9655,38 @@ func TestCLI_WebhookList_InvalidSortAdvertisesActive(t *testing.T) {
 	}
 }
 
+// 5.4.122 — description sort axis forwarded to the daemon. The CLI
+// normalises mixed-case + whitespace into the canonical lowercase axis
+// before forwarding so callers can pass shell-friendly forms.
+func TestCLI_WebhookList_ForwardsDescriptionSort(t *testing.T) {
+	srv, state := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+
+	if _, err := runCLI("webhook", "list", "--api-url", srv.URL,
+		"--sort", "  Description  ", "--order", "desc"); err != nil {
+		t.Fatalf("webhook list: %v", err)
+	}
+	if !strings.Contains(state.lastQuery, "sort=description") {
+		t.Fatalf("expected sort=description, got %q", state.lastQuery)
+	}
+	if !strings.Contains(state.lastQuery, "order=desc") {
+		t.Fatalf("expected order=desc, got %q", state.lastQuery)
+	}
+}
+
+// TestCLI_WebhookList_InvalidSortAdvertisesDescription asserts the
+// client-side rejection lists description in the error envelope so
+// operators discover the new 5.4.122 axis from the error path.
+func TestCLI_WebhookList_InvalidSortAdvertisesDescription(t *testing.T) {
+	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
+	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--sort", "garbage")
+	if err == nil {
+		t.Fatal("expected client-side rejection of --sort garbage")
+	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Fatalf("invalid --sort message should advertise description, got %v", err)
+	}
+}
+
 func TestCLI_WebhookList_RejectsInvalidOrder(t *testing.T) {
 	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
 
