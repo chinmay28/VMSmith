@@ -5887,6 +5887,20 @@ test.describe("Settings — Webhooks", () => {
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
   });
 
+  // 5.4.114 follow-up (locks in the 5.4.122 side-fix). The Settings page
+  // VALID_SORT_FIELDS allowlist previously omitted `active`, so loading
+  // `?sort=active` from a bookmarked URL would silently fall back to the
+  // default sort. This test loads the page with the URL already set and
+  // asserts the dropdown reflects the active axis (rather than resetting
+  // to the empty default).
+  test("?sort=active URL round-trips through the Settings sort dropdown", async ({ page }) => {
+    await page.goto(`${BASE_URL}/settings?sort=active`);
+    await expect(page.getByTestId("settings-page")).toBeVisible();
+    await expect.poll(async () =>
+      page.getByTestId("webhook-list-sort-field").inputValue()
+    ).toBe("active");
+  });
+
   // 5.4.122 — description sort axis on the webhook list. Seeds three
   // webhooks via the UI: two with distinct descriptions (mixed case) and
   // one without. Asserts the new "description" sort option clusters the
