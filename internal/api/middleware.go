@@ -147,7 +147,7 @@ func requestLogger(next http.Handler) http.Handler {
 			fields = append(fields, "query", redactSensitiveRawQuery(r.URL.RawQuery))
 		}
 		if bodySnippet != "" {
-			fields = append(fields, "body", bodySnippet)
+			fields = append(fields, "body", redactSensitiveBody(bodySnippet))
 		}
 
 		msg := r.Method + " " + r.URL.Path

@@ -65,9 +65,12 @@ func TestMockManager_Clone(t *testing.T) {
 			DiskGB:      80,
 			Image:       "ubuntu-24.04",
 			Description: "base vm",
+			VNCPassword: "should-not-copy",
 			GPUs:        []string{"0000:01:00.0"},
 			Tags:        []string{"prod", "web"},
 		},
+		VNCPasswordHash: "mock-bcrypt:keep-source-only",
+		VNCPasswordEnc:  "mock-aesgcm:keep-source-only",
 	})
 
 	clone, err := m.Clone(context.Background(), "vm-source", "clone-a")
@@ -88,6 +91,9 @@ func TestMockManager_Clone(t *testing.T) {
 	}
 	if clone.Spec.CPUs != 4 || clone.Spec.RAMMB != 8192 || clone.Spec.DiskGB != 80 || clone.Spec.Image != "ubuntu-24.04" {
 		t.Fatalf("clone spec mismatch: %+v", clone.Spec)
+	}
+	if clone.Spec.VNCPassword != "" || clone.VNCPasswordHash != "" || clone.VNCPasswordEnc != "" {
+		t.Fatalf("clone VNC credentials = spec:%q hash:%q enc:%q, want empty", clone.Spec.VNCPassword, clone.VNCPasswordHash, clone.VNCPasswordEnc)
 	}
 	if len(clone.Spec.GPUs) != 0 {
 		t.Fatalf("clone GPUs = %#v, want nil/empty", clone.Spec.GPUs)

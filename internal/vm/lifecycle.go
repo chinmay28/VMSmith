@@ -467,6 +467,8 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	// Clones intentionally start without VNC credentials so copied machines do
+	// not inherit console secrets from the source VM.
 
 	if err := m.store.PutVM(cloned); err != nil {
 		cloneDom.Undefine()
@@ -1632,6 +1634,7 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 	cloned.NatStaticIP = ""
 	cloned.NatGateway = ""
 	cloned.GPUs = nil
+	cloned.VNCPassword = ""
 	cloned.Tags = append([]string(nil), source.Tags...)
 	cloned.Networks = append([]types.NetworkAttachment(nil), source.Networks...)
 	for i := range cloned.Networks {
