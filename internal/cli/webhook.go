@@ -774,7 +774,7 @@ func init() {
 	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("last-delivery-since", "", "RFC3339 lower bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
 	webhookListCmd.Flags().String("last-delivery-until", "", "RFC3339 upper bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
-	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at|delivery_status|active (default id)")
+	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at|delivery_status|active|description (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")
 	webhookListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
