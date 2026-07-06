@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-06-26
+> **Last updated:** 2026-07-06
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -953,7 +953,6 @@ With the initial platform hardening work mostly done, the next highest-value roa
 |----------|------|-----------|-----|
 | **P0** | VM Resource Metrics | 4.1.10 | REST stats, SSE streaming, Prometheus export, dashboard rollups, CLI support, and live VMDetail charting are shipped; the main remaining work is the real-VM stress/E2E path in 4.1.10 now that the unit/integration coverage is largely in place |
 | **P1** | Events | 4.2.17 | Core event API, SSE transport, connection observability, Activity views, webhook delivery, and the Settings/test-delivery UX are shipped; the biggest remaining work is the real-VM E2E stream assertion now that the retention/webhook/unit/integration coverage is largely in place |
-| **P1** | VM Cloning | 2.1.2 | Main clone flows plus integration/E2E coverage ship today; the last notable cloning gap is the real libvirt-backed implementation |
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.7 – 5.1.11 | Ticket issuance, websocket proxying, active-session teardown, config defaults, auth/TTL/log-redaction checklist items, and operator/docs guidance are already shipped; the remaining work is the browser console UI plus the VNC-password and serial-console follow-ons |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
