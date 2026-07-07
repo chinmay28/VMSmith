@@ -4029,6 +4029,30 @@ test.describe("Templates", () => {
     await expect(page.getByTestId("template-tags-web-tier")).toBeVisible();
   });
 
+  test("creates a Windows template via the New Template modal", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-templates").click();
+    await expect(page.getByTestId("template-table")).toBeVisible();
+
+    await page.getByTestId("btn-new-template").click();
+    await expect(page.getByTestId("create-template-modal")).toBeVisible();
+
+    await page.getByTestId("create-template-name").fill("windows-lab");
+    await page.getByTestId("create-template-image").selectOption({ index: 1 });
+    await page.getByTestId("create-template-os-type").selectOption("windows");
+    await page.getByTestId("create-template-os-variant").selectOption("windows-server-2022");
+
+    await expect(page.getByTestId("create-template-ram")).toHaveValue("2048");
+    await expect(page.getByTestId("create-template-disk")).toHaveValue("32");
+
+    await page.getByTestId("btn-submit-create-template").click();
+
+    await expect(page.getByTestId("create-template-modal")).toHaveCount(0);
+    await page.getByTestId("template-list-os-type-filter").selectOption("windows");
+    await page.getByTestId("template-list-os-variant-filter").selectOption("windows-server-2022");
+    await expect(page.getByTestId("template-row-windows-lab")).toBeVisible();
+  });
+
   test("New Template submit stays disabled until name and image are set", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-templates").click();

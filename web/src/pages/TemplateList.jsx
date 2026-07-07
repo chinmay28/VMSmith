@@ -865,12 +865,26 @@ function EditTemplateModal({ template, onClose, onSaved }) {
 // Unlike EditTemplateModal (which only PATCHes description + tags), every field
 // here is settable because image / resources / name are immutable post-create.
 function CreateTemplateModal({ open, onClose, onCreated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, default_user: '', description: '', tags: '' };
+  const WINDOWS_MIN_RAM_MB = 2048;
+  const WINDOWS_MIN_DISK_GB = 32;
+  const emptyForm = {
+    name: '',
+    image: '',
+    cpus: 2,
+    ram_mb: 2048,
+    disk_gb: 20,
+    default_user: '',
+    description: '',
+    tags: '',
+    os_type: 'linux',
+    os_variant: '',
+  };
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
   const createMut = useMutation(templatesApi.create);
   const { data: imageResponse } = useFetch(() => imagesApi.list(), [], 0);
   const imageList = safeArray(imageResponse?.data || imageResponse);
+  const isWindows = form.os_type === 'windows';
 
   // Reset the form each time the modal is (re)opened so a prior aborted draft
   // never leaks into the next create.
@@ -881,7 +895,23 @@ function CreateTemplateModal({ open, onClose, onCreated }) {
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const update = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const update = (field) => (e) => {
+    const value = e.target.value;
+    setForm(f => {
+      if (field === 'os_type') {
+        if (value === 'windows') {
+          return {
+            ...f,
+            os_type: value,
+            ram_mb: Math.max(Number(f.ram_mb) || 0, WINDOWS_MIN_RAM_MB),
+            disk_gb: Math.max(Number(f.disk_gb) || 0, WINDOWS_MIN_DISK_GB),
+          };
+        }
+        return { ...f, os_type: value, os_variant: '' };
+      }
+      return { ...f, [field]: value };
+    });
+  };
   const updateNum = (field) => (e) => setForm(f => ({ ...f, [field]: parseInt(e.target.value, 10) || 0 }));
 
   const humanSize = (bytes) => {
@@ -900,6 +930,11 @@ function CreateTemplateModal({ open, onClose, onCreated }) {
       ram_mb: form.ram_mb,
       disk_gb: form.disk_gb,
     };
+    if (form.os_type === 'windows') {
+      spec.os_type = 'windows';
+    }
+    const osVariant = form.os_variant.trim();
+    if (osVariant) spec.os_variant = osVariant;
     const defaultUser = form.default_user.trim();
     if (defaultUser) spec.default_user = defaultUser;
     const description = form.description.trim();
@@ -952,20 +987,56 @@ function CreateTemplateModal({ open, onClose, onCreated }) {
             </select>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="label">Guest OS</label>
+            <select className="input" value={form.os_type} onChange={update('os_type')} data-testid="create-template-os-type">
+              <option value="linux">Linux</option>
+              <option value="windows">Windows</option>
+            </select>
+          </div>
           <div>
             <label className="label">vCPUs</label>
             <input type="number" min="1" className="input" value={form.cpus} onChange={updateNum('cpus')} data-testid="create-template-cpus" />
           </div>
           <div>
             <label className="label">RAM (MB)</label>
-            <input type="number" min="128" className="input" value={form.ram_mb} onChange={updateNum('ram_mb')} data-testid="create-template-ram" />
+            <input
+              type="number"
+              min={isWindows ? WINDOWS_MIN_RAM_MB : 128}
+              className="input"
+              value={form.ram_mb}
+              onChange={updateNum('ram_mb')}
+              data-testid="create-template-ram"
+            />
+            {isWindows && <p className="mt-1 text-[11px] text-steel-500">Windows minimum: {WINDOWS_MIN_RAM_MB} MB</p>}
           </div>
           <div>
             <label className="label">Disk (GB)</label>
-            <input type="number" min="1" className="input" value={form.disk_gb} onChange={updateNum('disk_gb')} data-testid="create-template-disk" />
+            <input
+              type="number"
+              min={isWindows ? WINDOWS_MIN_DISK_GB : 1}
+              className="input"
+              value={form.disk_gb}
+              onChange={updateNum('disk_gb')}
+              data-testid="create-template-disk"
+            />
+            {isWindows && <p className="mt-1 text-[11px] text-steel-500">Windows minimum: {WINDOWS_MIN_DISK_GB} GB</p>}
           </div>
         </div>
+        {isWindows && (
+          <div>
+            <label className="label">Windows variant</label>
+            <select className="input" value={form.os_variant} onChange={update('os_variant')} data-testid="create-template-os-variant">
+              <option value="">Select variant…</option>
+              <option value="windows-10">Windows 10</option>
+              <option value="windows-11">Windows 11</option>
+              <option value="windows-server-2019">Windows Server 2019</option>
+              <option value="windows-server-2022">Windows Server 2022</option>
+              <option value="windows-server-2025">Windows Server 2025</option>
+            </select>
+          </div>
+        )}
         <div>
           <label className="label">Default User <span className="text-steel-500 font-normal">(optional)</span></label>
           <input
