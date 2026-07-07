@@ -846,6 +846,16 @@ func TestCLI_ScheduleRuns_InvalidSortAdvertisesSkipReason(t *testing.T) {
 	}
 }
 
+func TestCLI_ScheduleRuns_SortFlagHelpAdvertisesSkipReason(t *testing.T) {
+	flag := scheduleRunsCmd.Flags().Lookup("sort")
+	if flag == nil {
+		t.Fatal("expected --sort flag to exist")
+	}
+	if !strings.Contains(flag.Usage, "skip_reason") {
+		t.Fatalf("--sort flag usage should advertise skip_reason, got %q", flag.Usage)
+	}
+}
+
 func TestCLI_ScheduleRuns_RejectsInvalidOrder(t *testing.T) {
 	d := newFakeScheduleDaemon(t, http.StatusOK, `[]`)
 	_, err := runCLI("schedule", "runs", "sched-1", "--api-url", d.server.URL, "--order", "sideways")

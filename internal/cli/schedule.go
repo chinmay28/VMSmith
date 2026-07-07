@@ -695,7 +695,7 @@ func init() {
 	scheduleRunsCmd.Flags().Int("min-duration-ms", 0, "lower bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
 	scheduleRunsCmd.Flags().Int("max-duration-ms", 0, "upper bound (inclusive) on finished_at - started_at duration in milliseconds; excludes still-running runs")
 	scheduleRunsCmd.Flags().String("search", "", "case-insensitive substring match across run error and skip_reason")
-	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration|vm_id (default started_at)")
+	scheduleRunsCmd.Flags().String("sort", "", "sort field: id|started_at|finished_at|status|duration|vm_id|skip_reason (default started_at)")
 	scheduleRunsCmd.Flags().String("order", "", "sort order: asc|desc (default desc on bare sort, else asc)")
 	scheduleRunsCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set")
 	scheduleRunsCmd.Flags().Int("page", 1, "1-based page number when --limit is set")
