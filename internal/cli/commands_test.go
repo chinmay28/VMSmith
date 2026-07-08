@@ -4305,6 +4305,32 @@ func TestCLI_SnapshotList_SortByDescription_EmptyTrailsInAsc(t *testing.T) {
 	}
 }
 
+func TestCLI_SnapshotList_SortByDescription_DescEmptyHeads(t *testing.T) {
+	mock, cleanup := withMockVM(t)
+	defer cleanup()
+
+	mock.SeedVM(&types.VM{ID: "vm-s-desc-desc", Name: "host"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-desc", Name: "snap-1", Description: "a"})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-desc", Name: "snap-2", Description: ""})
+	mock.SeedSnapshot(&types.Snapshot{VMID: "vm-s-desc-desc", Name: "snap-3", Description: ""})
+
+	out, err := runCLI("snapshot", "list", "vm-s-desc-desc", "--sort", "description", "--order", "desc")
+	if err != nil {
+		t.Fatalf("snapshot list --sort description --order desc: %v", err)
+	}
+	rows := tableRows(t, out)
+	if len(rows) < 4 {
+		t.Fatalf("expected header + 3 rows, got %d: %v", len(rows), rows)
+	}
+	got := []string{rows[1][0], rows[2][0], rows[3][0]}
+	want := []string{"snap-3", "snap-2", "snap-1"} // empty descriptions head desc; name tiebreak is inverted by the outer desc wrapper
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("idx %d: got %q want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestCLI_SnapshotList_RejectsInvalidOrder(t *testing.T) {
 	mock, cleanup := withMockVM(t)
 	defer cleanup()
