@@ -235,6 +235,24 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, fmt.Errorf("creating VM dir: %w", err)
 	}
 
+	var dom *libvirt.Domain
+	createSucceeded := false
+	defer func() {
+		if createSucceeded {
+			return
+		}
+		if dom != nil {
+			_ = forceUndefineDomain(dom)
+			dom.Free()
+		}
+		if spec.NatStaticIP != "" {
+			if ip, _, parseErr := net.ParseCIDR(spec.NatStaticIP); parseErr == nil {
+				netMgr.RemoveDHCPHost(natMAC, ip.String())
+			}
+		}
+		_ = os.RemoveAll(vmDir)
+	}()
+
 	// Create qcow2 overlay backed by the base image
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
 	baseImage := spec.Image
@@ -312,22 +330,13 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		orphan.Free()
 	}
 
-	dom, err := m.conn.DomainDefineXML(xmlDoc)
+	dom, err = m.conn.DomainDefineXML(xmlDoc)
 	if err != nil {
 		return nil, fmt.Errorf("defining domain: %w", err)
 	}
 
 	// Start the domain
 	if err := dom.Create(); err != nil {
-		dom.Undefine()
-		// Clean up the DHCP reservation we made — otherwise the next create
-		// attempt for the same VM name will fail with a name conflict.
-		if spec.NatStaticIP != "" {
-			if ip, _, parseErr := net.ParseCIDR(spec.NatStaticIP); parseErr == nil {
-				netMgr.RemoveDHCPHost(natMAC, ip.String())
-			}
-		}
-		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("starting domain: %w", err)
 	}
 
@@ -350,6 +359,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if err := m.store.PutVM(vm); err != nil {
 		return nil, fmt.Errorf("storing VM metadata: %w", err)
 	}
+	createSucceeded = true
 
 	// Monitor in background: wait for DHCP IP; if none after 60 s apply a
 	// static IP fallback via libvirt DHCP reservation + VM restart.
