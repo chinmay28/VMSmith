@@ -463,10 +463,10 @@ func gpuHostdevXML(addr string) (string, error) {
 		return "", fmt.Errorf("invalid GPU PCI address %q", addr)
 	}
 	return fmt.Sprintf(`<hostdev mode='subsystem' type='pci' managed='yes'>
-	  <source>
-		<address domain='%s' bus='%s' slot='%s' function='%s'/>
-	  </source>
-	</hostdev>`, domain, bus, slot, function), nil
+      <source>
+        <address domain='%s' bus='%s' slot='%s' function='%s'/>
+      </source>
+    </hostdev>`, domain, bus, slot, function), nil
 }
 
 // generateMAC creates a random MAC address with the local/unicast prefix 52:54:00
