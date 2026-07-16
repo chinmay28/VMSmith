@@ -5885,6 +5885,12 @@ test.describe("Settings — Webhooks", () => {
       return text.toLowerCase();
     }).not.toContain("inactive-c.example.com");
     await expect.poll(async () => new URL(page.url()).searchParams.get("order")).toBe("desc");
+
+    // Reload should preserve the active sort axis from the URL instead of
+    // falling back to the default sort whitelist.
+    await page.reload();
+    await expect(page.getByTestId("webhook-list-sort-field")).toHaveValue("active");
+    await expect(page.getByTestId("webhook-list-sort-order")).toHaveValue("desc");
   });
 
   // 2.3.10 — webhook bulk-delete.
