@@ -124,7 +124,7 @@ func requestLogger(next http.Handler) http.Handler {
 			if r.ContentLength > 0 && r.ContentLength < 4096 {
 				buf := new(bytes.Buffer)
 				buf.ReadFrom(r.Body)
-				bodySnippet = buf.String()
+				bodySnippet = redactSensitiveBody(buf.Bytes())
 				// Put the body back so the handler can read it.
 				r.Body = http.NoBody
 				r.Body = nopCloser{bytes.NewReader(buf.Bytes())}
@@ -195,6 +195,51 @@ func redactSensitiveRawQuery(raw string) string {
 	}
 
 	return strings.Join(parts, "&")
+}
+
+func redactSensitiveBody(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return string(raw)
+	}
+
+	redactSensitiveJSONValue(decoded)
+
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return string(raw)
+	}
+	return string(encoded)
+}
+
+func redactSensitiveJSONValue(v any) {
+	switch typed := v.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if isSensitiveBodyKey(key) {
+				typed[key] = "REDACTED"
+				continue
+			}
+			redactSensitiveJSONValue(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactSensitiveJSONValue(child)
+		}
+	}
+}
+
+func isSensitiveBodyKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "admin_password", "api_key", "password", "secret", "ssh_pub_key", "ticket", "vnc_password":
+		return true
+	default:
+		return false
+	}
 }
 
 // nopCloser pairs an io.Reader with a no-op Close method.
