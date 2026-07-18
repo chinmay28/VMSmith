@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,5 +53,49 @@ func TestRedactSensitiveRawQuery_PreservesNonSensitiveAndMalformedParts(t *testi
 	want := "ticket=REDACTED&empty=&flag&name=vm-1&api_key=REDACTED"
 	if got != want {
 		t.Fatalf("redactSensitiveRawQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestRequestLogger_RedactsSensitiveJSONBodyFields(t *testing.T) {
+	if err := logger.Init("", logger.LevelDebug); err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+	defer logger.Close()
+
+	h := requestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	body := []byte(`{"name":"vm-1","vnc_password":"hunter2","ssh_pub_key":"ssh-rsa AAAA test","nested":{"secret":"token"},"items":[{"admin_password":"rootpw"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/vms", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	entries := logger.Get().Entries("debug", logger.Entry{}.Timestamp, 10)
+	if len(entries) == 0 {
+		t.Fatal("expected at least one log entry")
+	}
+
+	loggedBody := entries[len(entries)-1].Fields["body"]
+	for _, leaked := range []string{"hunter2", "ssh-rsa AAAA test", "token", "rootpw"} {
+		if strings.Contains(loggedBody, leaked) {
+			t.Fatalf("sensitive value leaked in body log: %q", loggedBody)
+		}
+	}
+	for _, marker := range []string{`"vnc_password":"REDACTED"`, `"ssh_pub_key":"REDACTED"`, `"secret":"REDACTED"`, `"admin_password":"REDACTED"`} {
+		if !strings.Contains(loggedBody, marker) {
+			t.Fatalf("expected %s in redacted body log, got %q", marker, loggedBody)
+		}
+	}
+	if !strings.Contains(loggedBody, `"name":"vm-1"`) {
+		t.Fatalf("expected non-sensitive fields to remain visible, got %q", loggedBody)
+	}
+}
+
+func TestRedactSensitiveBody_PreservesNonJSONPayload(t *testing.T) {
+	raw := "name=vm-1&secret=hunter2"
+	if got := redactSensitiveBody([]byte(raw)); got != raw {
+		t.Fatalf("redactSensitiveBody() = %q, want %q", got, raw)
 	}
 }
