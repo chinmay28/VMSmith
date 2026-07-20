@@ -691,6 +691,12 @@ v1 actions:
 
 Enable interoperability with other virtualization platforms.
 
+> **Deferred.** This track is not scheduled for near-term delivery and is
+> intentionally not listed in the "Suggested Next Priority Order" summary
+> below — same treatment as the VM Cloning row removed in #467. The tasks
+> stay documented here so the track can be re-prioritised when
+> interoperability demand materialises.
+
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
 | 5.3.1 | Export VM as OVA (tar of OVF descriptor + qcow2→vmdk converted disk) | L | Use `qemu-img convert -O vmdk` |
@@ -958,7 +964,6 @@ With the initial platform hardening work mostly done, the next highest-value roa
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | 5.1.7 – 5.1.11 | Ticket issuance, websocket proxying, active-session teardown, config defaults, auth/TTL/log-redaction checklist items, and operator/docs guidance are already shipped; the remaining work is the browser console UI plus the VNC-password and serial-console follow-ons |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
-| **P3** | OVA Import/Export | 5.3.1 – 5.3.3 | Helpful interoperability feature, but less urgent than core ops gaps |
 | **P3** | Multi-Host Management | 5.5.1 – 5.5.4 | Still a long-term architecture track rather than near-term delivery |
 
 ---
