@@ -311,8 +311,210 @@ export interface paths {
                      *     `root` so empty VMs collate with explicit-root VMs in
                      *     alphabetical order rather than sinking to the tail — matches the
                      *     runtime semantics in `internal/vm/lifecycle.go` and the
-                     *     empty-means-root filter contract. All comparators tiebreak on
-                     *     `id` so pagination is deterministic across backends.
+                     *     empty-means-root filter contract. `gpu` (5.7.13) is a
+                     *     lexicographic sort on the VM's smallest assigned GPU PCI address,
+                     *     normalised to the canonical long form (`0000:01:00.0`) before
+                     *     compare so a VM persisted with the short form (`01:00.0`)
+                     *     collates identically; symmetric sort counterpart to the
+                     *     `?gpu=` filter (5.7.9) so the same passthrough cohort can be
+                     *     both filtered and sorted on the same column. VMs with no
+                     *     requested GPUs sink to the tail in ascending order and the head
+                     *     in descending order, mirroring the nil-trailing semantics on
+                     *     every other nullable axis (ip, guest_ip, image, actor,
+                     *     last_fired_at, last_delivery_at). `os_type` (5.4.100) is a
+                     *     case-insensitive sort on the VM's *effective* OS family via
+                     *     `VMSpec.ResolvedOSType`, the symmetric sort counterpart to the
+                     *     case-insensitive `?os_type=` exact-match filter (5.6.8) so the
+                     *     same OS-family cohort can be both filtered and sorted on the
+                     *     same column. Alphabetical: `linux` < `windows`. Diverges from
+                     *     the nil-trailing convention because os_type has a documented
+                     *     default — an empty stored `spec.os_type` resolves to `linux`
+                     *     (mirrors the `?os_type=linux` empty-means-linux filter contract
+                     *     and the runtime semantics in `lifecycle.go`) so empty VMs
+                     *     collate with explicit-linux VMs rather than sinking to the tail,
+                     *     mirroring the `default_user` documented-default rationale
+                     *     (5.4.91). `firmware` (5.4.101) is a case-insensitive sort on
+                     *     the VM's *effective* firmware via the `resolveFirmware` helper,
+                     *     the symmetric sort counterpart to the case-insensitive
+                     *     `?firmware=` exact-match filter (5.4.68) so the same firmware
+                     *     cohort can be both filtered and sorted on the same column.
+                     *     Alphabetical: `bios` < `ovmf` < `uefi`. Diverges from the
+                     *     nil-trailing convention because firmware has a documented
+                     *     default — an empty stored `spec.firmware` resolves to `bios`
+                     *     (mirrors the `?firmware=bios` empty-means-bios filter contract
+                     *     and the SeaBIOS default surfaced through
+                     *     `ResolvedFirmwareAttr`) so empty VMs collate with explicit-bios
+                     *     VMs rather than sinking to the tail, mirroring the `os_type`
+                     *     documented-default rationale (5.4.100) and the `default_user`
+                     *     rationale (5.4.91). `os_variant` (5.4.103) is a case-insensitive
+                     *     sort on `spec.os_variant` mirroring the case-insensitive
+                     *     `?os_variant=` exact-match filter (5.4.66) so the same Windows
+                     *     edition cohort can be both filtered and sorted on the same
+                     *     column. Unlike `os_type` (5.4.100) and `firmware` (5.4.101) it
+                     *     has NO documented default — an empty stored value means
+                     *     "operator did not specify an edition" (typically Linux guests
+                     *     where the field is genuinely absent), so empty VMs sink to the
+                     *     tail in ascending order and the head in descending order,
+                     *     mirroring the nil-trailing semantics on `image` / `gpu` / `ip`
+                     *     rather than collapsing to a default. Alphabetical Windows
+                     *     edition ordering: `windows-10` < `windows-11` <
+                     *     `windows-server-2019` < `windows-server-2022` <
+                     *     `windows-server-2025`. `disk_bus` (5.4.104) is a case-insensitive
+                     *     sort on the VM's *effective* system-disk bus via
+                     *     `VMSpec.ResolvedDiskBus`, the symmetric sort counterpart to the
+                     *     case-insensitive `?disk_bus=` exact-match filter so the same
+                     *     disk-bus cohort can be both filtered and sorted on the same
+                     *     column. Alphabetical: `sata` < `virtio`. Diverges from the
+                     *     nil-trailing convention because disk_bus has a documented
+                     *     OS-family-aware default — an empty stored `spec.disk_bus`
+                     *     resolves to `virtio` for Linux guests and `sata` for Windows
+                     *     guests (mirrors the `?disk_bus=virtio` empty-defaults-to-
+                     *     OS-family filter contract and the runtime semantics in
+                     *     `lifecycle.go`) so empty VMs collate with explicit-bus VMs of
+                     *     the same OS family rather than sinking to the tail. Same
+                     *     documented-default rationale as the `firmware` axis (5.4.101)
+                     *     and the `os_type` axis (5.4.100), though the resolved value
+                     *     here depends on the VM's OS family rather than being a
+                     *     constant. An explicit `spec.disk_bus` always wins over the
+                     *     OS-family default, so a Windows guest flipped to virtio after
+                     *     the operator installs the virtio-blk drivers in-guest via
+                     *     5.6.12 collates with the virtio cohort. `nic_model` (5.4.105)
+                     *     is a case-insensitive sort on the VM's *effective* NIC model
+                     *     via `VMSpec.ResolvedNICModel`, the symmetric sort counterpart
+                     *     to the case-insensitive `?nic_model=` exact-match filter so
+                     *     the same NIC-model cohort can be both filtered and sorted on
+                     *     the same column. Alphabetical: `e1000e` < `virtio`. Diverges
+                     *     from the nil-trailing convention because nic_model has a
+                     *     documented OS-family-aware default — an empty stored
+                     *     `spec.nic_model` resolves to `virtio` for Linux guests and
+                     *     `e1000e` for Windows guests (mirrors the `?nic_model=virtio`
+                     *     empty-defaults-to-OS-family filter contract and the runtime
+                     *     semantics in `lifecycle.go`) so empty VMs collate with
+                     *     explicit-model VMs of the same OS family rather than sinking
+                     *     to the tail. Same OS-family-aware default rationale as the
+                     *     `disk_bus` axis (5.4.104), though the resolved value here
+                     *     depends on the VM's OS family rather than being a constant.
+                     *     An explicit `spec.nic_model` always wins over the OS-family
+                     *     default, so a Windows guest flipped to virtio after the
+                     *     operator installs the virtio-net drivers in-guest via 5.6.12
+                     *     collates with the virtio cohort. `machine` (5.4.107) is a
+                     *     case-sensitive sort on the VM's *effective* libvirt machine
+                     *     type via `VMSpec.ResolvedMachine`, the symmetric sort
+                     *     counterpart to the case-sensitive `?machine=` exact-match
+                     *     filter so the same machine-type cohort can be both filtered
+                     *     and sorted on the same column. Diverges from the nil-trailing
+                     *     convention because machine has a documented default — an
+                     *     empty stored `spec.machine` resolves to the daemon default
+                     *     `pc-q35-6.2` via `ResolvedMachine` so empty VMs collate with
+                     *     explicit-default VMs rather than sinking to the tail,
+                     *     mirroring the `?machine=pc-q35-6.2` empty-defaults-to-default
+                     *     filter contract and the documented-default rationale of the
+                     *     `firmware` axis (5.4.101). Unlike the closed-and-total enums
+                     *     on `disk_bus` / `nic_model`, machine is a free-form
+                     *     bounded-alphabet value (`[A-Za-z0-9._-]+`) — `pc-q35-6.2`,
+                     *     `q35`, `virt-7.2` — so the compare is case-sensitive,
+                     *     preserving the operator's chosen casing and mirroring the
+                     *     case-sensitive `?machine=` filter contract on the same
+                     *     column. `clock_offset` (5.4.106)
+                     *     is a case-insensitive sort on the VM's *effective* clock offset
+                     *     via `VMSpec.ResolvedClockOffset`, the symmetric sort counterpart
+                     *     to the case-insensitive `?clock_offset=` exact-match filter
+                     *     (5.4.72) so the same clock-offset cohort can be both filtered
+                     *     and sorted on the same column. Alphabetical: `localtime` <
+                     *     `utc`. Diverges from the nil-trailing convention because
+                     *     clock_offset has a documented OS-family-aware default — an
+                     *     empty stored `spec.clock_offset` resolves to `utc` for Linux
+                     *     guests and `localtime` for Windows guests (mirrors the
+                     *     `?clock_offset=utc` empty-defaults-to-OS-family filter
+                     *     contract and the runtime semantics in `lifecycle.go`) so
+                     *     empty VMs collate with explicit-offset VMs of the same OS
+                     *     family rather than sinking to the tail. Same documented-default
+                     *     rationale as the `disk_bus` axis (5.4.104) and the `nic_model`
+                     *     axis (5.4.105), though the resolved value depends on the VM's
+                     *     OS family rather than being a constant. An explicit
+                     *     `spec.clock_offset` always wins over the OS-family default,
+                     *     so a Windows guest pinned to utc for an NTP-synced fleet
+                     *     appears under the utc cohort rather than the localtime cohort.
+                     *     `auto_start` (5.4.108) is a boolean sort axis on
+                     *     `spec.auto_start`, the symmetric sort counterpart to the
+                     *     tristate `?auto_start=true|false` exact-match filter on the
+                     *     same column so the same auto-start cohort can be both
+                     *     filtered and sorted on the same column. Asc collates the
+                     *     disabled cohort (`false`) at the head and the enabled cohort
+                     *     (`true`) at the tail; desc surfaces the auto-starting cohort
+                     *     operators care about at boot first. The column is a
+                     *     non-nullable boolean — a missing `spec.auto_start` key on
+                     *     the wire is treated as the zero value (`false`) — so the
+                     *     classification is closed-and-total and the axis has no
+                     *     nil-trailing bucket, mirroring the `state` enum sort
+                     *     rationale rather than the nullable string axes `ip` /
+                     *     `image` / `gpu` that sink empty stored values to the tail.
+                     *     `locked` (5.4.109) is a boolean sort axis on
+                     *     `spec.locked` (the delete-protection flag), the symmetric
+                     *     sort counterpart to the tristate `?locked=true|false`
+                     *     exact-match filter on the same column so the same
+                     *     delete-protection cohort can be both filtered and sorted
+                     *     on the same column. Asc collates the unlocked cohort
+                     *     (`false`) at the head and the locked cohort (`true`) at
+                     *     the tail; desc surfaces the locked cohort first, the
+                     *     natural ordering for the safety-review operator query
+                     *     *"which VMs are delete-protected against a fleet
+                     *     rebuild"*. Closed-and-total — `spec.locked` is
+                     *     non-nullable (`json:"locked"` without `omitempty`) so a
+                     *     missing key resolves to the zero value (`false`) and
+                     *     every VM belongs to exactly one of the two buckets, with
+                     *     no nil-trailing bucket — same rationale as the
+                     *     `auto_start` axis (5.4.108) and the `state` axis on the
+                     *     closed running/stopped/paused enum.
+                     *     `nat_static_ip` (5.4.110) is a numeric IP sort axis on
+                     *     the IP portion of `spec.nat_static_ip` (the configured
+                     *     static NAT address — stored as CIDR `192.168.100.10/24`
+                     *     but the sort key strips the suffix so the comparator sees
+                     *     a bare address). The symmetric sort counterpart to the
+                     *     `?nat_static_ip=` exact-match filter (5.4.79) which
+                     *     accepts the filter as either the full CIDR or just the
+                     *     IP portion. Compared byte-wise on the canonical 16-byte
+                     *     `To16()` form via `compareVMIP` so `192.168.100.2` sorts
+                     *     before `192.168.100.10` instead of lexicographically.
+                     *     VMs with an empty or unparseable `nat_static_ip`
+                     *     (DHCP-assigned) sink to the tail of `asc` and the head of
+                     *     `desc`, mirroring the nil-trailing semantics on the
+                     *     `ip` sort axis and the empty-stored-excludes contract on
+                     *     the `?nat_static_ip=` filter — same nil-trailing rationale
+                     *     as the nullable string axes `ip` / `image` / `gpu` /
+                     *     `actor`, unlike the closed-and-total boolean axes
+                     *     `auto_start` / `locked` that have no nil-trailing bucket.
+                     *     `nat_gateway` (5.4.111) is a numeric IP sort axis on
+                     *     `spec.nat_gateway` (the configured NAT gateway IP — a bare
+                     *     IP, no CIDR dual-form like `nat_static_ip`). The symmetric
+                     *     sort counterpart to the `?nat_gateway=` exact-match filter
+                     *     (5.4.80) so the same gateway cohort can be both filtered
+                     *     and sorted on the same column. Compared byte-wise on the
+                     *     canonical 16-byte `To16()` form via `compareVMIP` so
+                     *     `192.168.100.2` sorts before `192.168.100.10` instead of
+                     *     lexicographically — same numeric IP comparator as the
+                     *     `ip` and `nat_static_ip` sort axes. VMs with an empty or
+                     *     unparseable `nat_gateway` (no explicit gateway override)
+                     *     sink to the tail of `asc` and the head of `desc`,
+                     *     mirroring the nil-trailing semantics on the `ip` /
+                     *     `nat_static_ip` sort axes and the empty-stored-excludes
+                     *     contract on the `?nat_gateway=` filter.
+                     *     `description` (5.4.120) is a case-insensitive sort axis
+                     *     over `spec.description` — operators paste descriptions
+                     *     verbatim into list-search filters, so the sort axis
+                     *     matches the same case-insensitive semantics. VMs with an
+                     *     empty `spec.description` (the common case — most VMs get
+                     *     no description) sink to the tail of `asc` and the head of
+                     *     `desc`, mirroring the nil-trailing semantics on every
+                     *     other nullable string sort axis (ip, image, gpu, actor,
+                     *     last_fired_at, last_delivery_at) rather than collapsing to
+                     *     a default like the documented-default axes (os_type →
+                     *     linux, firmware → bios, default_user → root). Same axis
+                     *     rationale as the image list `description` axis (5.4.118)
+                     *     and the template list `description` axis (5.4.119) one
+                     *     resource over.
+                     *     All comparators tiebreak on `id` so pagination is deterministic
+                     *     across backends.
                      */
                     sort?: components["parameters"]["VMSort"];
                     /**
@@ -964,7 +1166,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Clone a VM */
+        /**
+         * Clone a VM
+         * @description Clones a stopped VM under a new name. The clone does not inherit the source's GPU passthrough assignment or its VNC console password — a clone of a VNC-protected VM boots with an unauthenticated console until a password is set explicitly via PATCH. The stripped VNC password is logged for auditability.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1182,8 +1387,18 @@ export interface paths {
                     /**
                      * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
                      *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
-                     *     name-asc. Unknown values return 400 `invalid_sort`. All comparators
-                     *     tiebreak on `name` so pagination is deterministic across backends.
+                     *     name-asc. `description` is the case-insensitive sort axis over each
+                     *     snapshot's `description` field — matches the case-insensitive haystack
+                     *     in the existing `?search=` filter on the same column so the same
+                     *     description-based query surface is filtered (substring) and sorted
+                     *     (alphabetical) on the same semantics. Snapshots with an empty
+                     *     description (the common case — most snapshots get no description) sink
+                     *     to the tail of asc / head of desc, mirroring the nil-trailing
+                     *     semantics on every other nullable string sort axis and the image
+                     *     (5.4.118) / template (5.4.119) / VM (5.4.120) `description` axes one
+                     *     resource over. Unknown values return 400 `invalid_sort`. All
+                     *     comparators tiebreak on `name` so pagination is deterministic across
+                     *     backends.
                      */
                     sort?: components["parameters"]["SnapshotSort"];
                     /**
@@ -1884,6 +2099,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/export/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a stopped VM as an OVA appliance
+         * @description Packages the VM as a single-file OVA — an OVF 1.0 descriptor, a
+         *     streamOptimized VMDK converted (and flattened) from the VM's qcow2
+         *     disk via qemu-img, and a SHA256 manifest — and streams it as a tar
+         *     download. The VM must be stopped so the disk is quiescent; a running
+         *     VM returns 409 `vm_running`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OVA stream */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/x-tar": string;
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/import/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a VM from an OVA appliance
+         * @description Multipart upload of a `.ova` archive. The appliance disk is
+         *     converted to qcow2 and registered as a VMSmith image (named
+         *     `<image_name>`, `<name>-ova`, or `<filename>-ova` in that
+         *     precedence), and a VM is created with the descriptor's CPU / RAM /
+         *     disk sizing (zero values fall back to the daemon's configured
+         *     defaults, exactly like `POST /vms`). Failures after the image is
+         *     registered roll the image back. Returns the created VM. Errors:
+         *     400 `invalid_ova` (bad extension, unreadable archive, missing
+         *     descriptor, traversal-unsafe disk reference), 400 `invalid_name` /
+         *     `duplicate_name` from VM validation, 429 `create_limit_reached`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The .ova archive.
+                         */
+                        file: string;
+                        /** @description VM name (default = the descriptor's VirtualSystem name). */
+                        name?: string;
+                        /** @description Name for the registered base image (default `<name>-ova`). */
+                        image_name?: string;
+                        /** @description SSH public key content injected into the created VM. */
+                        ssh_pub_key?: string;
+                        /** @description Create this sudo user instead of enabling root SSH. */
+                        default_user?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description VM created from the appliance */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                429: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images": {
         parameters: {
             query?: never;
@@ -1900,7 +2233,24 @@ export interface paths {
                     /**
                      * @description Field to sort the image list by. Defaults to `id`. Unknown values
                      *     return 400 `invalid_sort`. All comparators tiebreak on `id` so
-                     *     pagination is deterministic across backends.
+                     *     pagination is deterministic across backends. `source_vm` (5.4.117)
+                     *     is the symmetric sort counterpart to the case-insensitive
+                     *     `?source_vm=` exact-match filter — case-insensitive comparison
+                     *     mirrors the filter contract; images with an empty `source_vm`
+                     *     (uploaded images, never exported from a VM) sink to the tail of
+                     *     `asc` and the head of `desc`, mirroring the nil-trailing semantics
+                     *     on every other nullable sort axis (ip, guest_ip, image,
+                     *     last_fired_at, last_delivery_at, actor). `description` (5.4.118)
+                     *     is a case-insensitive sort axis over the image's `description`
+                     *     field — operators paste descriptions verbatim into list-search
+                     *     filters, so the sort axis matches the same case-insensitive
+                     *     semantics; images with an empty `description` (the common case —
+                     *     most images get no description) sink to the tail of `asc` and the
+                     *     head of `desc`, mirroring the `source_vm` axis nil-trailing
+                     *     rationale and every other nullable string sort axis. Closes the
+                     *     operator query *"which images have a description"* — they cluster
+                     *     at the head of `asc` instead of being buried among the unset
+                     *     majority.
                      */
                     sort?: components["parameters"]["ImageSort"];
                     /**
@@ -2291,7 +2641,33 @@ export interface paths {
                      *     empty-means-linux filter contract) so empty templates collate
                      *     with explicit-linux templates rather than sinking to the tail.
                      *     Same documented-default rationale as the VM list `os_type`
-                     *     axis (5.4.100). All comparators tiebreak on `id` so paginated
+                     *     axis (5.4.100). `os_variant` (5.4.115) is the symmetric sort
+                     *     counterpart to the case-insensitive `?os_variant=` exact-match
+                     *     filter on the same column so the same Windows-edition cohort can
+                     *     be both filtered and sorted on the same column. Unlike `os_type`
+                     *     which collapses empty → `linux`, `os_variant` has NO documented
+                     *     default — an empty stored value means "operator did not specify
+                     *     an edition" (typically because the template provisions a Linux
+                     *     guest where the field is genuinely absent / not applicable). So
+                     *     templates with an empty `os_variant` sort to the tail of `asc` /
+                     *     head of `desc`, mirroring the nil-trailing semantics on `image`
+                     *     / `default_user` and the VM list `os_variant` axis (5.4.103).
+                     *     Alphabetical Windows edition ordering: `windows-10 <
+                     *     windows-11 < windows-server-2019 < windows-server-2022 <
+                     *     windows-server-2025`. `description` (5.4.119) is a
+                     *     case-insensitive sort axis over the template's `description`
+                     *     field, mirroring the case-insensitive haystack used by the
+                     *     existing `?search=` filter so the same description-based query
+                     *     surface is filtered (substring) and sorted (alphabetical) on the
+                     *     same semantics — mirrors the image list `description` axis
+                     *     (5.4.118) one resource over. Templates with an empty
+                     *     `description` (the common case — most templates get no
+                     *     description) sink to the tail of `asc` / head of `desc`,
+                     *     mirroring the nil-trailing semantics on every other nullable
+                     *     sort axis (`image` / `default_user` / `os_variant`) rather than
+                     *     collapsing to a default like the documented-default axes
+                     *     (`os_type` → `linux`) — there is no documented default for
+                     *     description. All comparators tiebreak on `id` so paginated
                      *     requests return the same set across two independent fetches.
                      */
                     sort?: components["parameters"]["TemplateSort"];
@@ -3304,7 +3680,7 @@ export interface paths {
                      * @description Exact-match filter on the schedule's `action`.
                      *     Whitespace-trimmed; empty disables the filter.
                      */
-                    action?: "snapshot" | "start" | "stop" | "restart";
+                    action?: "snapshot" | "start" | "stop" | "restart" | "force-stop" | "reboot" | "suspend" | "resume";
                     /**
                      * @description Case-insensitive exact-match filter on the schedule's
                      *     `catch_up_policy`. Whitespace-trimmed; empty disables the filter;
@@ -4176,7 +4552,10 @@ export interface components {
             os_variant?: "windows-10" | "windows-11" | "windows-server-2019" | "windows-server-2022" | "windows-server-2025";
             /** @description Windows local Administrator password injected into the cloudbase-init datasource at first boot. Write-only: it is redacted from the stored/returned VM record once the provisioning ISO is written. Ignored for Linux guests. */
             admin_password?: string;
-            /** @description Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key` so the plaintext can be re-injected into the libvirt domain XML on the next define/start. Redacted from every read path. */
+            /**
+             * Format: password
+             * @description Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key` so the plaintext can be re-injected into the libvirt domain XML on the next define/start. Redacted from every read path. Note QEMU's RFB implementation honours only the first 8 characters at auth time (longer values are accepted but silently truncated by QEMU). Clone does not carry the password over — a clone boots with an unauthenticated console until a password is set explicitly, mirroring the clone-clears-GPUs semantics.
+             */
             vnc_password?: string;
             /**
              * @description Override the libvirt domain `<clock offset='...'>`. Empty/omitted resolves to the OS-family default (utc for Linux, localtime for Windows). Lets operators pin "utc" on Windows guests synced with an NTP-driven Linux fleet, or "localtime" on a dual-boot Linux guest sharing an RTC with Windows. Any other value returns 400 `invalid_clock_offset`.
@@ -4224,7 +4603,10 @@ export interface components {
             auto_start?: boolean | null;
             /** @description Toggle delete-protection. Omit to leave unchanged. */
             locked?: boolean | null;
-            /** @description Optional per-VM VNC password update. Omit/null to leave unchanged; send an empty string to clear the stored VNC password. Returns 409 `vm_running` if the VM is running, because password changes require a stop + redefine so libvirt can pick up the new `passwd=` value. */
+            /**
+             * Format: password
+             * @description Optional per-VM VNC password update. Omit/null to leave unchanged; send an empty string to clear the stored VNC password. Returns 409 `vm_running` if the VM is running, because password changes require a stop + redefine so libvirt can pick up the new `passwd=` value. QEMU's RFB implementation honours only the first 8 characters at auth time (longer values are accepted but silently truncated).
+             */
             vnc_password?: string | null;
             /**
              * @description Override the libvirt domain `<clock offset='...'>` on an existing VM. Allowed values are `utc` / `localtime` (case-insensitive). An explicit empty string clears the override so the OS-family default (utc for Linux, localtime for Windows) applies again at next render. Omit (null) to leave unchanged. Applying a change triggers a domain redefine + VM restart, mirroring the cpus / ram_mb change path. Any other value returns 400 `invalid_clock_offset`.
@@ -5214,8 +5596,8 @@ export interface components {
          *     collate with explicit-linux VMs rather than sinking to the tail,
          *     mirroring the `default_user` documented-default rationale
          *     (5.4.91). `firmware` (5.4.101) is a case-insensitive sort on
-         *     the VM's *effective* firmware via the `resolveFirmware`
-         *     helper, the symmetric sort counterpart to the case-insensitive
+         *     the VM's *effective* firmware via the `resolveFirmware` helper,
+         *     the symmetric sort counterpart to the case-insensitive
          *     `?firmware=` exact-match filter (5.4.68) so the same firmware
          *     cohort can be both filtered and sorted on the same column.
          *     Alphabetical: `bios` < `ovmf` < `uefi`. Diverges from the
@@ -5226,24 +5608,175 @@ export interface components {
          *     `ResolvedFirmwareAttr`) so empty VMs collate with explicit-bios
          *     VMs rather than sinking to the tail, mirroring the `os_type`
          *     documented-default rationale (5.4.100) and the `default_user`
-         *     rationale (5.4.91). `clock_offset` (5.4.106) is a
-         *     case-insensitive sort on the VM's *effective* clock offset
-         *     via `VMSpec.ResolvedClockOffset`, the symmetric sort
-         *     counterpart to the case-insensitive `?clock_offset=`
-         *     exact-match filter (5.4.72) so the same clock-offset cohort
-         *     can be both filtered and sorted on the same column.
-         *     Alphabetical: `localtime` < `utc`. Diverges from the
-         *     nil-trailing convention because clock_offset has a
+         *     rationale (5.4.91). `os_variant` (5.4.103) is a case-insensitive
+         *     sort on `spec.os_variant` mirroring the case-insensitive
+         *     `?os_variant=` exact-match filter (5.4.66) so the same Windows
+         *     edition cohort can be both filtered and sorted on the same
+         *     column. Unlike `os_type` (5.4.100) and `firmware` (5.4.101) it
+         *     has NO documented default — an empty stored value means
+         *     "operator did not specify an edition" (typically Linux guests
+         *     where the field is genuinely absent), so empty VMs sink to the
+         *     tail in ascending order and the head in descending order,
+         *     mirroring the nil-trailing semantics on `image` / `gpu` / `ip`
+         *     rather than collapsing to a default. Alphabetical Windows
+         *     edition ordering: `windows-10` < `windows-11` <
+         *     `windows-server-2019` < `windows-server-2022` <
+         *     `windows-server-2025`. `disk_bus` (5.4.104) is a case-insensitive
+         *     sort on the VM's *effective* system-disk bus via
+         *     `VMSpec.ResolvedDiskBus`, the symmetric sort counterpart to the
+         *     case-insensitive `?disk_bus=` exact-match filter so the same
+         *     disk-bus cohort can be both filtered and sorted on the same
+         *     column. Alphabetical: `sata` < `virtio`. Diverges from the
+         *     nil-trailing convention because disk_bus has a documented
+         *     OS-family-aware default — an empty stored `spec.disk_bus`
+         *     resolves to `virtio` for Linux guests and `sata` for Windows
+         *     guests (mirrors the `?disk_bus=virtio` empty-defaults-to-
+         *     OS-family filter contract and the runtime semantics in
+         *     `lifecycle.go`) so empty VMs collate with explicit-bus VMs of
+         *     the same OS family rather than sinking to the tail. Same
+         *     documented-default rationale as the `firmware` axis (5.4.101)
+         *     and the `os_type` axis (5.4.100), though the resolved value
+         *     here depends on the VM's OS family rather than being a
+         *     constant. An explicit `spec.disk_bus` always wins over the
+         *     OS-family default, so a Windows guest flipped to virtio after
+         *     the operator installs the virtio-blk drivers in-guest via
+         *     5.6.12 collates with the virtio cohort. `nic_model` (5.4.105)
+         *     is a case-insensitive sort on the VM's *effective* NIC model
+         *     via `VMSpec.ResolvedNICModel`, the symmetric sort counterpart
+         *     to the case-insensitive `?nic_model=` exact-match filter so
+         *     the same NIC-model cohort can be both filtered and sorted on
+         *     the same column. Alphabetical: `e1000e` < `virtio`. Diverges
+         *     from the nil-trailing convention because nic_model has a
          *     documented OS-family-aware default — an empty stored
-         *     `spec.clock_offset` resolves to `utc` for Linux guests and
-         *     `localtime` for Windows guests (mirrors the
+         *     `spec.nic_model` resolves to `virtio` for Linux guests and
+         *     `e1000e` for Windows guests (mirrors the `?nic_model=virtio`
+         *     empty-defaults-to-OS-family filter contract and the runtime
+         *     semantics in `lifecycle.go`) so empty VMs collate with
+         *     explicit-model VMs of the same OS family rather than sinking
+         *     to the tail. Same OS-family-aware default rationale as the
+         *     `disk_bus` axis (5.4.104), though the resolved value here
+         *     depends on the VM's OS family rather than being a constant.
+         *     An explicit `spec.nic_model` always wins over the OS-family
+         *     default, so a Windows guest flipped to virtio after the
+         *     operator installs the virtio-net drivers in-guest via 5.6.12
+         *     collates with the virtio cohort. `machine` (5.4.107) is a
+         *     case-sensitive sort on the VM's *effective* libvirt machine
+         *     type via `VMSpec.ResolvedMachine`, the symmetric sort
+         *     counterpart to the case-sensitive `?machine=` exact-match
+         *     filter so the same machine-type cohort can be both filtered
+         *     and sorted on the same column. Diverges from the nil-trailing
+         *     convention because machine has a documented default — an
+         *     empty stored `spec.machine` resolves to the daemon default
+         *     `pc-q35-6.2` via `ResolvedMachine` so empty VMs collate with
+         *     explicit-default VMs rather than sinking to the tail,
+         *     mirroring the `?machine=pc-q35-6.2` empty-defaults-to-default
+         *     filter contract and the documented-default rationale of the
+         *     `firmware` axis (5.4.101). Unlike the closed-and-total enums
+         *     on `disk_bus` / `nic_model`, machine is a free-form
+         *     bounded-alphabet value (`[A-Za-z0-9._-]+`) — `pc-q35-6.2`,
+         *     `q35`, `virt-7.2` — so the compare is case-sensitive,
+         *     preserving the operator's chosen casing and mirroring the
+         *     case-sensitive `?machine=` filter contract on the same
+         *     column. `clock_offset` (5.4.106)
+         *     is a case-insensitive sort on the VM's *effective* clock offset
+         *     via `VMSpec.ResolvedClockOffset`, the symmetric sort counterpart
+         *     to the case-insensitive `?clock_offset=` exact-match filter
+         *     (5.4.72) so the same clock-offset cohort can be both filtered
+         *     and sorted on the same column. Alphabetical: `localtime` <
+         *     `utc`. Diverges from the nil-trailing convention because
+         *     clock_offset has a documented OS-family-aware default — an
+         *     empty stored `spec.clock_offset` resolves to `utc` for Linux
+         *     guests and `localtime` for Windows guests (mirrors the
          *     `?clock_offset=utc` empty-defaults-to-OS-family filter
-         *     contract). Same documented-default rationale as the
-         *     `disk_bus` axis (5.4.104) and the `nic_model` axis
-         *     (5.4.105), though the resolved value depends on the VM's
-         *     OS family rather than being a constant. All comparators
-         *     tiebreak on `id` so pagination is deterministic across
-         *     backends.
+         *     contract and the runtime semantics in `lifecycle.go`) so
+         *     empty VMs collate with explicit-offset VMs of the same OS
+         *     family rather than sinking to the tail. Same documented-default
+         *     rationale as the `disk_bus` axis (5.4.104) and the `nic_model`
+         *     axis (5.4.105), though the resolved value depends on the VM's
+         *     OS family rather than being a constant. An explicit
+         *     `spec.clock_offset` always wins over the OS-family default,
+         *     so a Windows guest pinned to utc for an NTP-synced fleet
+         *     appears under the utc cohort rather than the localtime cohort.
+         *     `auto_start` (5.4.108) is a boolean sort axis on
+         *     `spec.auto_start`, the symmetric sort counterpart to the
+         *     tristate `?auto_start=true|false` exact-match filter on the
+         *     same column so the same auto-start cohort can be both
+         *     filtered and sorted on the same column. Asc collates the
+         *     disabled cohort (`false`) at the head and the enabled cohort
+         *     (`true`) at the tail; desc surfaces the auto-starting cohort
+         *     operators care about at boot first. The column is a
+         *     non-nullable boolean — a missing `spec.auto_start` key on
+         *     the wire is treated as the zero value (`false`) — so the
+         *     classification is closed-and-total and the axis has no
+         *     nil-trailing bucket, mirroring the `state` enum sort
+         *     rationale rather than the nullable string axes `ip` /
+         *     `image` / `gpu` that sink empty stored values to the tail.
+         *     `locked` (5.4.109) is a boolean sort axis on
+         *     `spec.locked` (the delete-protection flag), the symmetric
+         *     sort counterpart to the tristate `?locked=true|false`
+         *     exact-match filter on the same column so the same
+         *     delete-protection cohort can be both filtered and sorted
+         *     on the same column. Asc collates the unlocked cohort
+         *     (`false`) at the head and the locked cohort (`true`) at
+         *     the tail; desc surfaces the locked cohort first, the
+         *     natural ordering for the safety-review operator query
+         *     *"which VMs are delete-protected against a fleet
+         *     rebuild"*. Closed-and-total — `spec.locked` is
+         *     non-nullable (`json:"locked"` without `omitempty`) so a
+         *     missing key resolves to the zero value (`false`) and
+         *     every VM belongs to exactly one of the two buckets, with
+         *     no nil-trailing bucket — same rationale as the
+         *     `auto_start` axis (5.4.108) and the `state` axis on the
+         *     closed running/stopped/paused enum.
+         *     `nat_static_ip` (5.4.110) is a numeric IP sort axis on
+         *     the IP portion of `spec.nat_static_ip` (the configured
+         *     static NAT address — stored as CIDR `192.168.100.10/24`
+         *     but the sort key strips the suffix so the comparator sees
+         *     a bare address). The symmetric sort counterpart to the
+         *     `?nat_static_ip=` exact-match filter (5.4.79) which
+         *     accepts the filter as either the full CIDR or just the
+         *     IP portion. Compared byte-wise on the canonical 16-byte
+         *     `To16()` form via `compareVMIP` so `192.168.100.2` sorts
+         *     before `192.168.100.10` instead of lexicographically.
+         *     VMs with an empty or unparseable `nat_static_ip`
+         *     (DHCP-assigned) sink to the tail of `asc` and the head of
+         *     `desc`, mirroring the nil-trailing semantics on the
+         *     `ip` sort axis and the empty-stored-excludes contract on
+         *     the `?nat_static_ip=` filter — same nil-trailing rationale
+         *     as the nullable string axes `ip` / `image` / `gpu` /
+         *     `actor`, unlike the closed-and-total boolean axes
+         *     `auto_start` / `locked` that have no nil-trailing bucket.
+         *     `nat_gateway` (5.4.111) is a numeric IP sort axis on
+         *     `spec.nat_gateway` (the configured NAT gateway IP — a bare
+         *     IP, no CIDR dual-form like `nat_static_ip`). The symmetric
+         *     sort counterpart to the `?nat_gateway=` exact-match filter
+         *     (5.4.80) so the same gateway cohort can be both filtered
+         *     and sorted on the same column. Compared byte-wise on the
+         *     canonical 16-byte `To16()` form via `compareVMIP` so
+         *     `192.168.100.2` sorts before `192.168.100.10` instead of
+         *     lexicographically — same numeric IP comparator as the
+         *     `ip` and `nat_static_ip` sort axes. VMs with an empty or
+         *     unparseable `nat_gateway` (no explicit gateway override)
+         *     sink to the tail of `asc` and the head of `desc`,
+         *     mirroring the nil-trailing semantics on the `ip` /
+         *     `nat_static_ip` sort axes and the empty-stored-excludes
+         *     contract on the `?nat_gateway=` filter.
+         *     `description` (5.4.120) is a case-insensitive sort axis
+         *     over `spec.description` — operators paste descriptions
+         *     verbatim into list-search filters, so the sort axis
+         *     matches the same case-insensitive semantics. VMs with an
+         *     empty `spec.description` (the common case — most VMs get
+         *     no description) sink to the tail of `asc` and the head of
+         *     `desc`, mirroring the nil-trailing semantics on every
+         *     other nullable string sort axis (ip, image, gpu, actor,
+         *     last_fired_at, last_delivery_at) rather than collapsing to
+         *     a default like the documented-default axes (os_type →
+         *     linux, firmware → bios, default_user → root). Same axis
+         *     rationale as the image list `description` axis (5.4.118)
+         *     and the template list `description` axis (5.4.119) one
+         *     resource over.
+         *     All comparators tiebreak on `id` so pagination is deterministic
+         *     across backends.
          */
         VMSort: "id" | "name" | "created_at" | "state" | "cpus" | "ram_mb" | "disk_gb" | "ip" | "image" | "default_user" | "gpu" | "os_type" | "firmware" | "os_variant" | "disk_bus" | "nic_model" | "machine" | "clock_offset" | "auto_start" | "locked" | "nat_static_ip" | "nat_gateway" | "description";
         /**

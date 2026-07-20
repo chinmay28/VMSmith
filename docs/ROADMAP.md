@@ -691,17 +691,11 @@ v1 actions:
 
 Enable interoperability with other virtualization platforms.
 
-> **Deferred.** This track is not scheduled for near-term delivery and is
-> intentionally not listed in the "Suggested Next Priority Order" summary
-> below — same treatment as the VM Cloning row removed in #467. The tasks
-> stay documented here so the track can be re-prioritised when
-> interoperability demand materialises.
-
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 5.3.1 | Export VM as OVA (tar of OVF descriptor + qcow2→vmdk converted disk) | L | Use `qemu-img convert -O vmdk` |
-| 5.3.2 | Import VM from OVA/OVF: extract, convert disk to qcow2, create VM with matching specs | L | Parse OVF XML for CPU/RAM/disk specs |
-| 5.3.3 | Add export/import endpoints and CLI commands | M | |
+| 5.3.1 | Export VM as OVA (tar of OVF descriptor + qcow2→vmdk converted disk) | L | ✅ Done — `internal/storage/ova.go` `Manager.ExportOVA` packages a stopped VM as a single-file OVA: `qemu-img convert -O vmdk -o subformat=streamOptimized` flattens the qcow2 (backing chain included) into a VMDK, an OVF 1.0 descriptor is generated from the VM spec (CPU/RAM/disk capacity in `byte * 2^30` units, NAT network, SCSI controller + disk + NIC hardware items), and a SHA256 `.mf` manifest rides alongside — descriptor first in the tar per the OVF spec. Optional progress callback reuses the shared `runConvertWithProgress` plumbing. Unit coverage: descriptor round-trip through the import parser, tar entry ordering, manifest SHA256 lines, missing-disk failure (fake `qemu-img` on PATH so no QEMU needed in CI) |
+| 5.3.2 | Import VM from OVA/OVF: extract, convert disk to qcow2, create VM with matching specs | L | ✅ Done — `Manager.ImportOVA` accepts a tar OVA **or** a bare `.ovf` with its disk alongside: extracts with flattened entry names + a 512 GiB expansion cap (bomb guard), rejects traversal-unsafe disk hrefs, parses the descriptor for CPU (`ResourceType 3`) / RAM (`ResourceType 4` with `byte*2^20|2^30|2^10|byte` AllocationUnits conversion) / disk capacity (`capacityAllocationUnits` aware, rounded up to whole GB), converts the referenced disk to qcow2 via `qemu-img convert -O qcow2` (auto-detects vmdk/vdi/raw), and registers it as a VMSmith image. The API/CLI layers then create a stopped VM with the parsed sizing (zeros fall back to daemon defaults exactly like `POST /vms`). Unit coverage: register+parse round-trip, duplicate-image rejection, missing-descriptor rejection, traversal rejection, bare-OVF import, unit-conversion tables |
+| 5.3.3 | Add export/import endpoints and CLI commands | M | ✅ Done — API: `GET /api/v1/vms/{id}/export/ova` streams the OVA as a tar download (409 `vm_running` unless stopped; emits `vm.exported`) and `POST /api/v1/vms/import/ova` takes a multipart `.ova` upload + optional `name` / `image_name` / `ssh_pub_key` / `default_user`, spools to disk, imports, then runs the full `POST /vms` validation pipeline (unique name, quotas, create-slot limiter) with image rollback on any failure, emitting `vm.imported`. CLI: `vmsmith vm export <id> --output <path.ova>` (with conversion progress) and `vmsmith vm import <path.ova|path.ovf> [--name --image-name --ssh-key --default-user]`. Coverage: API integration (import creates VM+image, descriptor-name fallback, non-.ova rejection, garbage-archive rejection, duplicate-VM-name rollback, export tar streaming + 409 + 404) and CLI (export happy path + running-refusal, import round-trip via a real exported OVA, descriptor-name fallback, garbage failure). OpenAPI documents both paths |
 
 ### 5.4 Pagination & Filtering for Large Deployments
 
