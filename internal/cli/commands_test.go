@@ -9726,10 +9726,10 @@ func TestCLI_WebhookList_ForwardsActiveSort(t *testing.T) {
 	}
 }
 
-// TestCLI_WebhookList_InvalidSortAdvertisesActive asserts the client-side
-// rejection lists active in the error envelope so operators discover the
-// new 5.4.114 axis from the error path.
-func TestCLI_WebhookList_InvalidSortAdvertisesActive(t *testing.T) {
+// TestCLI_WebhookList_InvalidSortAdvertisesAxes asserts the client-side
+// rejection lists both the pre-existing `active` axis and the newer
+// `description` axis so operators discover them from the error path.
+func TestCLI_WebhookList_InvalidSortAdvertisesAxes(t *testing.T) {
 	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
 	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--sort", "garbage")
 	if err == nil {
@@ -9737,6 +9737,22 @@ func TestCLI_WebhookList_InvalidSortAdvertisesActive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "active") {
 		t.Fatalf("invalid --sort message should advertise active, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Fatalf("invalid --sort message should advertise description, got %v", err)
+	}
+}
+
+func TestCLI_WebhookList_HelpAdvertisesDescriptionSort(t *testing.T) {
+	out, err := runCLI("webhook", "list", "--help")
+	if err != nil {
+		t.Fatalf("webhook list --help: %v", err)
+	}
+	if !strings.Contains(out, "delivery_status, active, description") {
+		t.Fatalf("help output should advertise description in the sort list, got:\n%s", out)
+	}
+	if !strings.Contains(out, "sort field: id|url|created_at|last_delivery_at|delivery_status|active|description") {
+		t.Fatalf("short --sort help should advertise description, got:\n%s", out)
 	}
 }
 
@@ -9755,20 +9771,6 @@ func TestCLI_WebhookList_ForwardsDescriptionSort(t *testing.T) {
 	}
 	if !strings.Contains(state.lastQuery, "order=desc") {
 		t.Fatalf("expected order=desc, got %q", state.lastQuery)
-	}
-}
-
-// TestCLI_WebhookList_InvalidSortAdvertisesDescription asserts the
-// client-side rejection lists description in the error envelope so
-// operators discover the new 5.4.122 axis from the error path.
-func TestCLI_WebhookList_InvalidSortAdvertisesDescription(t *testing.T) {
-	srv, _ := newFakeWebhookListDaemon(t, http.StatusOK, `[]`)
-	_, err := runCLI("webhook", "list", "--api-url", srv.URL, "--sort", "garbage")
-	if err == nil {
-		t.Fatal("expected client-side rejection of --sort garbage")
-	}
-	if !strings.Contains(err.Error(), "description") {
-		t.Fatalf("invalid --sort message should advertise description, got %v", err)
 	}
 }
 
