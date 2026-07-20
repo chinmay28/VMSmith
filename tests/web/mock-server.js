@@ -1373,8 +1373,8 @@ const server = http.createServer(async (req, res) => {
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/snapshots$/)) && method === "GET") {
     const sortField = url.searchParams.get("sort") || "id";
     const order = url.searchParams.get("order") || "asc";
-    if (!["id", "name", "created_at"].includes(sortField)) {
-      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at" });
+    if (!["id", "name", "created_at", "description"].includes(sortField)) {
+      return json(res, 400, { code: "invalid_sort", message: "sort must be one of: id, name, created_at, description" });
     }
     if (!["asc", "desc"].includes(order)) {
       return json(res, 400, { code: "invalid_order", message: "order must be 'asc' or 'desc'" });
@@ -1432,6 +1432,18 @@ const server = http.createServer(async (req, res) => {
       switch (sortField) {
         case "name":       l = (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()); break;
         case "created_at": l = (a.created_at || "").localeCompare(b.created_at || ""); break;
+        case "description": {
+          // Case-insensitive description sort with nil-trailing semantics:
+          // empty descriptions sink to the tail of asc / head of desc.
+          // Mirrors the API contract (5.4.121).
+          const aD = (a.description || "").toLowerCase();
+          const bD = (b.description || "").toLowerCase();
+          if (aD === "" && bD === "") { l = 0; break; }
+          if (aD === "") { l = 1; break; }
+          if (bD === "") { l = -1; break; }
+          l = aD.localeCompare(bD);
+          break;
+        }
         default:           l = 0; // id == vmID/name, so handled by tiebreak
       }
       if (l === 0) l = (a.name || "").localeCompare(b.name || "");

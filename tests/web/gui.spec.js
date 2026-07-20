@@ -2114,10 +2114,45 @@ test.describe("VM Detail", () => {
     // The mock-server returns 400 invalid_sort if anything but the whitelisted
     // values is supplied. The UI never sends an invalid value directly, but
     // this test asserts the mock-server contract used by other suites.
-    const resp = await page.request.get(`${BASE_URL}/api/v1/vms/vm-1/snapshots?sort=description`);
+    const resp = await page.request.get(`${BASE_URL}/api/v1/vms/vm-1/snapshots?sort=no_such_field`);
     expect(resp.status()).toBe(400);
     const body = await resp.json();
     expect(body.code).toBe("invalid_sort");
+    // 5.4.121: the API advertises the description axis in the error message.
+    expect(body.message).toContain("description");
+  });
+
+  test("snapshot description sort axis orders by description and pushes empty descriptions to the tail", async ({ page }) => {
+    // 5.4.121: case-insensitive description sort axis with nil-trailing
+    // semantics in asc (empty descriptions sink to the bottom).
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await page.getByTestId("tab-snapshots").click();
+
+    // The mock-server seeds three snapshots; only `before-deploy` carries
+    // a description (`"checkpoint before May deploy"`). The two
+    // `auto-*` rows have no description, so they sink to the tail in
+    // ascending order.
+    await page.getByTestId("snap-sort-field").selectOption("description");
+    await page.getByTestId("snap-sort-order").selectOption("asc");
+
+    const rowOrder = () =>
+      page.evaluate(() => {
+        const seeded = ["before-deploy", "auto-2026-05-06", "auto-2026-05-07"];
+        return seeded
+          .map((n) => {
+            const el = document.querySelector(`[data-testid="snap-${n}"]`);
+            return { name: n, top: el ? el.getBoundingClientRect().top : Infinity };
+          })
+          .sort((a, b) => a.top - b.top)
+          .map((r) => r.name);
+      });
+
+    await expect.poll(rowOrder).toEqual([
+      "before-deploy",
+      "auto-2026-05-06",
+      "auto-2026-05-07",
+    ]);
   });
 
   test("snapshot search input filters the snapshot list and round-trips through the URL", async ({ page }) => {
