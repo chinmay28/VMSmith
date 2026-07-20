@@ -49,6 +49,9 @@ export default function Dashboard() {
   const { data: imageResponse, loading: imgLoading, refresh: refreshImages } = useFetch(() => imagesApi.list(), [], 30000);
   const { data: quotaUsage, loading: quotaLoading, refresh: refreshQuotas } = useFetch(() => quotasApi.usage(), [], 30000);
   const { data: hostStats, loading: hostLoading, error: hostError } = useFetch(() => hostApi.stats(), [], 10000);
+  // Multi-host overview (5.5.4). The table renders only when more than one
+  // host is configured, so single-host deployments see no change.
+  const { data: hostRows } = useFetch(() => hostApi.list().catch(() => null), [], 30000);
   const { data: topVMsResponse, loading: topLoading, error: topError } = useFetch(
     () => vms.top({ metric: topMetric, limit: 5 }),
     [topMetric],
@@ -113,6 +116,55 @@ export default function Dashboard() {
         <HostUsageCard label="Host RAM" kind="bytes" resource={hostStats?.ram} icon={MemoryStick} loading={hostLoading} />
         <HostUsageCard label="Host Disk" kind="bytes" resource={hostStats?.disk} icon={Database} loading={hostLoading} />
       </div>
+
+      {Array.isArray(hostRows) && hostRows.length > 1 && (
+        <div className="card p-4 mb-6" data-testid="hosts-overview">
+          <h3 className="text-sm font-semibold text-steel-200 mb-3">Hosts</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-steel-500 uppercase">
+                  <th className="pb-2 pr-4">Name</th>
+                  <th className="pb-2 pr-4">URI</th>
+                  <th className="pb-2 pr-4">Status</th>
+                  <th className="pb-2 pr-4">VMs</th>
+                  <th className="pb-2 pr-4">vCPUs</th>
+                  <th className="pb-2 pr-4">RAM (MB)</th>
+                  <th className="pb-2 pr-4">Disk (GB)</th>
+                  <th className="pb-2">GPUs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hostRows.map((h) => (
+                  <tr key={h.name} className="border-t border-steel-800/60" data-testid={`host-row-${h.name}`}>
+                    <td className="py-2 pr-4 font-medium text-steel-200">
+                      {h.name}
+                      {h.default && (
+                        <span className="ml-2 badge bg-steel-800/60 text-steel-400 border-steel-700/40">default</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4 font-mono text-xs text-steel-500">{h.uri}</td>
+                    <td className="py-2 pr-4">
+                      {h.reachable === undefined || h.reachable === null ? (
+                        <span className="text-steel-500">—</span>
+                      ) : h.reachable ? (
+                        <span className="badge bg-emerald-500/10 text-emerald-300 border-emerald-500/20">reachable</span>
+                      ) : (
+                        <span className="badge bg-red-500/10 text-red-300 border-red-500/20">unreachable</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4">{h.vm_count}</td>
+                    <td className="py-2 pr-4">{h.cpus}</td>
+                    <td className="py-2 pr-4">{h.ram_mb}</td>
+                    <td className="py-2 pr-4">{h.disk_gb}</td>
+                    <td className="py-2">{h.gpus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
         <QuotaCard label="Machines allocated" resource={quotaUsage?.vms} unit="VMs" icon={Server} loading={quotaLoading} testId="quota-card-vms" />

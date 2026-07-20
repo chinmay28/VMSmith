@@ -292,6 +292,8 @@ export const host = {
   interfaces: () => unwrap(apiClient.GET('/host/interfaces')),
   gpus: () => unwrap(apiClient.GET('/host/gpus')),
   stats: () => unwrap(apiClient.GET('/host/stats')),
+  // Multi-host overview (5.5.4): one row per managed libvirt host.
+  list: () => unwrap(apiClient.GET('/hosts' as any)),
 };
 
 // --- Quotas ---

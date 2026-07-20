@@ -6859,3 +6859,22 @@ test.describe("Layout footer", () => {
     await expect(footer).toHaveText("VM Smith");
   });
 });
+
+// ============================================================
+// Multi-host overview (5.5.4)
+// ============================================================
+test.describe("Hosts overview", () => {
+  test("dashboard renders the hosts table with per-host allocation", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await expect(page.getByTestId("hosts-overview")).toBeVisible();
+
+    const localRow = page.getByTestId("host-row-local");
+    await expect(localRow).toContainText("local");
+    await expect(localRow).toContainText("default");
+    await expect(localRow).toContainText("reachable");
+
+    const hv2Row = page.getByTestId("host-row-hv2");
+    await expect(hv2Row).toContainText("hv2");
+    await expect(hv2Row).toContainText("unreachable");
+  });
+});

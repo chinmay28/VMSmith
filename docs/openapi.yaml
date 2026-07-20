@@ -1890,6 +1890,28 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /hosts:
+    get:
+      tags: [Hosts]
+      summary: List managed libvirt hosts with per-host resource allocation
+      description: |
+        Multi-host overview (roadmap 5.5.4): one row per libvirt host this
+        daemon manages — the implicit `local` host first, then every
+        `hosts:` config entry — with the aggregate resources (VM count,
+        vCPUs, RAM, disk, GPUs) allocated to VMs placed on each host.
+        `reachable` is present only when the daemon runs a multi-host
+        manager with live per-host connections. See docs/MULTI_HOST.md.
+      responses:
+        '200':
+          description: Host rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostStatus'
+        default:
+          $ref: '#/components/responses/APIError'
   /host/interfaces:
     get:
       tags: [Host]
@@ -4156,6 +4178,13 @@ components:
             have installed the virtio-net drivers in a Windows guest can
             pin "virtio" here for throughput. Any other value returns 400
             `invalid_nic_model`.
+        host:
+          type: string
+          description: >-
+            Placement (roadmap 5.5.3) — the configured libvirt host the VM
+            is created on. Empty/omitted means the implicit "local" host.
+            Unknown names return 400 `invalid_host`. Fixed post-create (no
+            live migration in v1 — see docs/MULTI_HOST.md).
         machine:
           type: string
           description: >-
@@ -4917,6 +4946,37 @@ components:
           nullable: true
           items:
             type: string
+    HostStatus:
+      type: object
+      required: [name, uri, default, vm_count, cpus, ram_mb, disk_gb, gpus]
+      properties:
+        name:
+          type: string
+          description: Host identifier ("local" for the implicit local host).
+        uri:
+          type: string
+          description: The host's libvirt connection URI.
+        description:
+          type: string
+        default:
+          type: boolean
+          description: True for the host new VMs land on when spec.host is empty.
+        reachable:
+          type: boolean
+          description: >-
+            Whether the daemon currently holds a live libvirt connection to
+            the host. Omitted when connectivity is not tracked (single-host
+            mode).
+        vm_count:
+          type: integer
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        gpus:
+          type: integer
     HostInterface:
       type: object
       required: [name, ips, mac, is_up, is_physical]
