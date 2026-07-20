@@ -2130,7 +2130,7 @@ test.describe("VM Detail", () => {
     await page.getByTestId("tab-snapshots").click();
 
     // The mock-server seeds three snapshots; only `before-deploy` carries
-    // a description (`"Manual snapshot before deploying"`). The two
+    // a description (`"checkpoint before May deploy"`). The two
     // `auto-*` rows have no description, so they sink to the tail in
     // ascending order.
     await page.getByTestId("snap-sort-field").selectOption("description");

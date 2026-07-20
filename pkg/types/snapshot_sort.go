@@ -38,8 +38,10 @@ func IsValidSnapshotSort(s string) bool {
 // single VM, snapshot names are the unique key; the constructed `ID` field is
 // just `<vmID>/<name>`).
 //
-// Unknown sort/order values silently fall back to name-asc; surface validation
-// errors at the parsing layer (see `internal/api.parseSnapshotSort`).
+// Unknown sort/order values are rejected at the parsing layer before this
+// function is called (see `internal/api.parseSnapshotSort` and the CLI-side
+// validator); the comparator's default branch still falls back to name-asc
+// as a defensive measure for direct callers.
 func SortSnapshots(snaps []*Snapshot, sortField, order string) {
 	desc := order == SortOrderDesc
 	sort.SliceStable(snaps, func(i, j int) bool {
