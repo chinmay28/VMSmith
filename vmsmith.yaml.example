@@ -12,7 +12,21 @@ daemon:
     auto_cert_cache_dir: "~/.vmsmith/autocert"
   auth:
     enabled: false                      # when true, API requests must send Authorization: Bearer <key>
-    api_keys: []                        # one or more shared secrets for API clients
+    api_keys: []                        # legacy shared secrets — full (admin) access; prefer role-scoped keys below
+    # Role-scoped API keys (roadmap 3.1.5). Roles:
+    #   admin    — full access (default when role is omitted)
+    #   operator — read access + VM lifecycle verbs (start/stop/restart/
+    #              force-stop/reboot/suspend/resume, bulk lifecycle),
+    #              console tickets, and schedule run-now
+    #   viewer   — read-only (GET endpoints)
+    #keys:
+    #  - key: "change-me-admin"
+    #    role: admin
+    #    name: "ops-alice"
+    #  - key: "change-me-operator"
+    #    role: operator
+    #  - key: "change-me-viewer"
+    #    role: viewer
   console:
     max_concurrent_sessions: 8          # global cap on active browser console sessions
     max_session_seconds: 3600           # hard cap before a console session is closed

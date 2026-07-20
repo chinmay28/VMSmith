@@ -391,6 +391,7 @@ The config struct is in `internal/config/config.go`. `DefaultConfig()` returns u
 
 Key config fields:
 - `daemon.listen` — HTTP listen address (default `0.0.0.0:8080`)
+- `daemon.auth.enabled` / `daemon.auth.api_keys` / `daemon.auth.keys` — bearer-token auth. `api_keys` are legacy full-access (admin) secrets; `keys` are role-scoped entries `{key, role, name}` (roadmap 3.1.5) with roles `admin` (full, default), `operator` (read + VM lifecycle verbs incl. bulk lifecycle, console tickets, schedule run-now), `viewer` (read-only). Insufficient keys get 403 `forbidden`; bulk `delete` is admin-only even though `/vms/bulk` is operator-classified
 - `daemon.log_file` — structured log output path (default `~/.vmsmith/vmsmith.log`); leave empty to disable file logging
 - `daemon.tls.cert_file` / `daemon.tls.key_file` — when both are set, the daemon serves HTTPS via `ListenAndServeTLS`
 - `daemon.tls.auto_cert` — enable automatic Let's Encrypt certificates via Go `autocert`

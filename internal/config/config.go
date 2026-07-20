@@ -58,8 +58,24 @@ type DaemonConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled bool     `yaml:"enabled"`
+	Enabled bool `yaml:"enabled"`
+	// APIKeys are legacy shared secrets that keep their historical full
+	// (admin) access. Prefer Keys for new deployments.
 	APIKeys []string `yaml:"api_keys"`
+	// Keys are role-scoped API keys (roadmap 3.1.5): each key carries a
+	// role — admin (full access, the default), operator (lifecycle verbs +
+	// console tickets + run-now on top of read access), or viewer
+	// (read-only).
+	Keys []APIKeyConfig `yaml:"keys"`
+}
+
+// APIKeyConfig is one role-scoped API key (roadmap 3.1.5).
+type APIKeyConfig struct {
+	Key string `yaml:"key"`
+	// Role is admin (default when empty), operator, or viewer.
+	Role string `yaml:"role"`
+	// Name is an optional operator-facing alias for the key.
+	Name string `yaml:"name"`
 }
 
 type TLSConfig struct {
