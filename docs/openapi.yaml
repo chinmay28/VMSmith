@@ -1156,6 +1156,83 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/gpus:
+    post:
+      tags: [VMs]
+      summary: Attach a host GPU to an existing VM (post-create)
+      description: |
+        Adds a host GPU (PCI address, long `0000:01:00.0` or short
+        `01:00.0` form) to the VM's passthrough set — roadmap 5.7.10. The
+        stored spec and persistent domain XML are updated, so the change
+        applies at the next power cycle. Attaching to a RUNNING VM
+        requires `force: true`, which live-attaches the device (risky —
+        vfio rebinding can wedge the host driver, and the guest typically
+        needs a reboot to initialise the GPU). Errors: 400 `invalid_gpu`,
+        409 `gpu_already_attached` / `vm_running`, 403 `quota_exceeded`
+        (aggregate `quotas.max_total_gpus`), 404 unknown VM.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+                  description: Host GPU PCI address (long or short form).
+                force:
+                  type: boolean
+                  description: Live-attach when the VM is running (risky).
+      responses:
+        '200':
+          description: Updated VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '403':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/gpus/{gpuAddr}:
+    delete:
+      tags: [VMs]
+      summary: Detach a host GPU from an existing VM
+      description: |
+        Removes a host GPU from the VM's passthrough set — roadmap 5.7.10.
+        Persistent-config only: a running VM keeps the device until its
+        next power cycle (no live detach is attempted). Errors: 400
+        `invalid_gpu`, 404 `gpu_not_attached` / unknown VM.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - in: path
+          name: gpuAddr
+          required: true
+          schema:
+            type: string
+          description: PCI address of the GPU to detach (long or short form).
+      responses:
+        '200':
+          description: Updated VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/console/ticket:
     post:
       tags: [Console]

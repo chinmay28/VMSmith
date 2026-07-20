@@ -106,6 +106,24 @@ func (m *quotaManager) DeleteSnapshot(ctx context.Context, vmID string, snapshot
 func (m *quotaManager) GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
 	return m.base.GetConsoleEndpoint(ctx, id, intent)
 }
+func (m *quotaManager) AttachGPU(ctx context.Context, id string, pciAddr string, force bool) (*types.VM, error) {
+	// Attaching one more GPU must stay within the aggregate cap (5.7.11).
+	if m.quotas.MaxTotalGPUs > 0 {
+		vms, err := m.base.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		usage := CalculateQuotaUsage(vms, m.quotas)
+		if usage.GPUs.Used+1 > m.quotas.MaxTotalGPUs {
+			return nil, types.NewAPIError("quota_exceeded",
+				fmt.Sprintf("attaching this gpu would exceed the aggregate GPU quota (%d in use, limit %d)", usage.GPUs.Used, m.quotas.MaxTotalGPUs))
+		}
+	}
+	return m.base.AttachGPU(ctx, id, pciAddr, force)
+}
+func (m *quotaManager) DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error) {
+	return m.base.DetachGPU(ctx, id, pciAddr)
+}
 func (m *quotaManager) Close() error { return m.base.Close() }
 
 func CalculateQuotaUsage(vms []*types.VM, quotas config.QuotasConfig) types.QuotaUsage {

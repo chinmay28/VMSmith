@@ -40,6 +40,8 @@ type MockManager struct {
 	RestoreSnapshotErr    error
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
+	AttachGPUErr          error
+	DetachGPUErr          error
 	CreateDelay           time.Duration
 
 	// VNCPasswordKeyMissing simulates a daemon with no
@@ -630,6 +632,70 @@ func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent 
 	}
 	m.mu.RUnlock()
 	return nil, fmt.Errorf("vms/%s: not found", id)
+}
+
+// AttachGPU mirrors the LibvirtManager contract in memory (roadmap 5.7.10):
+// running VMs refuse without force, duplicates 409, invalid addresses 400.
+func (m *MockManager) AttachGPU(ctx context.Context, id string, pciAddr string, force bool) (*types.VM, error) {
+	if m.AttachGPUErr != nil {
+		return nil, m.AttachGPUErr
+	}
+	norm := types.NormalizePCIAddress(pciAddr)
+	if norm == "" {
+		return nil, types.NewAPIError("invalid_gpu", fmt.Sprintf("%q is not a valid PCI address (want 0000:01:00.0 or 01:00.0)", pciAddr))
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	vm, ok := m.vms[id]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+	for _, existing := range vm.Spec.ResolvedGPUs() {
+		if existing == norm {
+			return nil, types.NewAPIError("gpu_already_attached", fmt.Sprintf("gpu %s is already attached to this vm", norm))
+		}
+	}
+	if vm.State == types.VMStateRunning && !force {
+		return nil, types.NewAPIError("vm_running",
+			"vm is running; stop it first, or pass force to live-attach (risky — vfio rebinding can wedge the host driver, and the guest needs a reboot to initialise the device)")
+	}
+	vm.Spec.GPUs = append(append([]string(nil), vm.Spec.ResolvedGPUs()...), norm)
+	vm.UpdatedAt = time.Now()
+	return vm, nil
+}
+
+// DetachGPU mirrors the LibvirtManager contract in memory.
+func (m *MockManager) DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error) {
+	if m.DetachGPUErr != nil {
+		return nil, m.DetachGPUErr
+	}
+	norm := types.NormalizePCIAddress(pciAddr)
+	if norm == "" {
+		return nil, types.NewAPIError("invalid_gpu", fmt.Sprintf("%q is not a valid PCI address (want 0000:01:00.0 or 01:00.0)", pciAddr))
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	vm, ok := m.vms[id]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+	var remaining []string
+	found := false
+	for _, existing := range vm.Spec.ResolvedGPUs() {
+		if existing == norm {
+			found = true
+			continue
+		}
+		remaining = append(remaining, existing)
+	}
+	if !found {
+		return nil, types.NewAPIError("gpu_not_attached", fmt.Sprintf("gpu %s is not attached to this vm", norm))
+	}
+	vm.Spec.GPUs = remaining
+	vm.UpdatedAt = time.Now()
+	return vm, nil
 }
 
 func (m *MockManager) Close() error {
