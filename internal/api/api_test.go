@@ -8596,6 +8596,78 @@ func TestListSnapshots_SortByCreatedAtDesc(t *testing.T) {
 	}
 }
 
+// ============================================================
+// `description` sort axis (5.4.121)
+// ============================================================
+
+func TestListSnapshots_SortByDescription_AscCaseInsensitive(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-desc-asc"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-asc", Name: "snap-1", Description: "Pre upgrade"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-asc", Name: "snap-2", Description: "audit"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-asc", Name: "snap-3", Description: "pre upgrade"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-desc-asc/snapshots?sort=description")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"snap-2", "snap-1", "snap-3"} // audit < pre upgrade (case-folded); name tiebreak on the two `pre upgrade` entries
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d (got: %#v)", len(got), len(want), got)
+	}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q description = %q, want %q", i, snap.Name, snap.Description, want[i])
+		}
+	}
+}
+
+func TestListSnapshots_SortByDescription_EmptyDescriptionsTrailInAsc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-desc-empty"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-empty", Name: "snap-1", Description: ""})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-empty", Name: "snap-2", Description: "z"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-empty", Name: "snap-3", Description: "a"})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-desc-empty/snapshots?sort=description&order=asc")
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	want := []string{"snap-3", "snap-2", "snap-1"} // empty description sinks to tail
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q description = %q, want %q", i, snap.Name, snap.Description, want[i])
+		}
+	}
+}
+
+func TestListSnapshots_SortByDescription_EmptyDescriptionsHeadInDesc(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-snap-desc-desc"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-desc", Name: "snap-1", Description: "a"})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-desc", Name: "snap-2", Description: ""})
+	mockMgr.SeedSnapshot(&types.Snapshot{VMID: "vm-snap-desc-desc", Name: "snap-3", Description: ""})
+
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-snap-desc-desc/snapshots?sort=description&order=desc")
+	var got []*types.Snapshot
+	decodeJSON(t, resp, &got)
+	// Empty heads in desc; equal-empty pair tiebreaks on name but the desc
+	// wrapper inverts that, so snap-3 heads snap-2 then snap-1 trails.
+	want := []string{"snap-3", "snap-2", "snap-1"}
+	for i, snap := range got {
+		if snap.Name != want[i] {
+			t.Errorf("idx %d: name = %q description = %q, want %q", i, snap.Name, snap.Description, want[i])
+		}
+	}
+}
+
 func TestListSnapshots_SortPaginationDeterministic(t *testing.T) {
 	ts, mockMgr, cleanup := testServer(t)
 	defer cleanup()
@@ -8631,11 +8703,22 @@ func TestListSnapshots_RejectsInvalidSort(t *testing.T) {
 	defer cleanup()
 	mockMgr.SeedVM(&types.VM{ID: "vm-bad-sort"})
 
-	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-bad-sort/snapshots?sort=description")
+	resp, _ := http.Get(ts.URL + "/api/v1/vms/vm-bad-sort/snapshots?sort=no_such_field")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	assertAPIErrorCode(t, resp, "invalid_sort")
+	var apiErr types.APIError
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_sort" {
+		t.Errorf("code = %q, want invalid_sort", apiErr.Code)
+	}
+	// The 400 message advertises the full whitelist so callers can correct
+	// the typo without reading the source. Lock in the description axis
+	// (5.4.121) so a refactor that drops it from the listing regresses
+	// loudly.
+	if !strings.Contains(apiErr.Message, "description") {
+		t.Errorf("invalid_sort message does not advertise %q: %s", "description", apiErr.Message)
+	}
 }
 
 func TestListSnapshots_RejectsInvalidOrder(t *testing.T) {

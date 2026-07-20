@@ -118,10 +118,8 @@ var snapListCmd = &cobra.Command{
 		if sortField == "" {
 			sortField = types.SnapshotSortID
 		}
-		switch sortField {
-		case types.SnapshotSortID, types.SnapshotSortName, types.SnapshotSortCreatedAt:
-		default:
-			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at", sortField)
+		if !types.IsValidSnapshotSort(sortField) {
+			return fmt.Errorf("invalid --sort %q: must be one of id, name, created_at, description", sortField)
 		}
 		if order == "" {
 			order = types.SortOrderAsc
@@ -381,7 +379,7 @@ func init() {
 	snapRestoreCmd.Flags().String("name", "", "snapshot name to restore (required)")
 	snapRestoreCmd.MarkFlagRequired("name")
 
-	snapListCmd.Flags().String("sort", types.SnapshotSortID, "sort field: id, name, or created_at")
+	snapListCmd.Flags().String("sort", types.SnapshotSortID, "sort field: id, name, created_at, or description")
 	snapListCmd.Flags().String("order", types.SortOrderAsc, "sort order: asc or desc")
 	snapListCmd.Flags().String("search", "", "case-insensitive substring filter on snapshot name, description, and tags")
 	snapListCmd.Flags().String("tag", "", "case-insensitive exact-match tag filter (applied before --search)")

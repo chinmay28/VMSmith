@@ -5268,10 +5268,20 @@ export interface components {
         /**
          * @description Field to sort the snapshot list by. Defaults to `id`. Within a single
          *     VM the snapshot ID is `<vmID>/<name>` so id-asc is identical to
-         *     name-asc. Unknown values return 400 `invalid_sort`. All comparators
-         *     tiebreak on `name` so pagination is deterministic across backends.
+         *     name-asc. `description` is the case-insensitive sort axis over each
+         *     snapshot's `description` field — matches the case-insensitive haystack
+         *     in the existing `?search=` filter on the same column so the same
+         *     description-based query surface is filtered (substring) and sorted
+         *     (alphabetical) on the same semantics. Snapshots with an empty
+         *     description (the common case — most snapshots get no description) sink
+         *     to the tail of asc / head of desc, mirroring the nil-trailing
+         *     semantics on every other nullable string sort axis and the image
+         *     (5.4.118) / template (5.4.119) / VM (5.4.120) `description` axes one
+         *     resource over. Unknown values return 400 `invalid_sort`. All
+         *     comparators tiebreak on `name` so pagination is deterministic across
+         *     backends.
          */
-        SnapshotSort: "id" | "name" | "created_at";
+        SnapshotSort: "id" | "name" | "created_at" | "description";
         /**
          * @description Field to sort the template list by. Defaults to `id`. Unknown
          *     values return 400 `invalid_sort`. `cpus`, `ram_mb`, and `disk_gb`
