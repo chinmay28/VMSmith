@@ -41,6 +41,13 @@ type MockManager struct {
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
 	CreateDelay           time.Duration
+
+	// VNCPasswordKeyMissing simulates a daemon with no
+	// daemon.console.password_key configured: Create/Update calls that
+	// carry a VNC password fail with the same typed
+	// vnc_password_key_missing error the LibvirtManager returns, so API
+	// tests can exercise the 422 path deterministically.
+	VNCPasswordKeyMissing bool
 }
 
 // NewMockManager creates a new mock VM manager.
@@ -102,17 +109,32 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	storedSpec := spec
 	storedSpec.AdminPassword = ""
 
+	// Mirror the libvirt manager's VNC password derivation (5.1.8): only
+	// synthetic hash/blob markers are stored, never the plaintext.
+	var vncHash, vncEnc string
+	if spec.VNCPassword != "" {
+		if m.VNCPasswordKeyMissing {
+			return nil, types.NewAPIError("vnc_password_key_missing",
+				"daemon.console.password_key must be configured before setting VNC passwords")
+		}
+		vncHash = "mock-bcrypt:" + spec.VNCPassword
+		vncEnc = "mock-aesgcm:" + spec.VNCPassword
+		storedSpec.VNCPassword = ""
+	}
+
 	vm := &types.VM{
-		ID:          id,
-		Name:        spec.Name,
-		Description: spec.Description,
-		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        storedSpec,
-		State:       types.VMStateRunning,
-		IP:          "192.168.100.10",
-		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            spec.Name,
+		Description:     spec.Description,
+		Tags:            append([]string(nil), spec.Tags...),
+		Spec:            storedSpec,
+		State:           types.VMStateRunning,
+		IP:              "192.168.100.10",
+		DiskPath:        fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		VNCPasswordHash: vncHash,
+		VNCPasswordEnc:  vncEnc,
 	}
 
 	m.vms[id] = vm
@@ -143,6 +165,7 @@ func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string
 	spec := source.Spec
 	spec.Name = newName
 	spec.GPUs = nil
+	spec.VNCPassword = ""
 	spec.Tags = append([]string(nil), source.Spec.Tags...)
 	spec.Networks = append([]types.NetworkAttachment(nil), source.Spec.Networks...)
 
@@ -221,6 +244,26 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	}
 	if patch.NICModel != nil {
 		vm.Spec.NICModel = strings.ToLower(strings.TrimSpace(*patch.NICModel))
+	}
+
+	// VNC password change mirrors the libvirt manager's contract (5.1.8):
+	// rejected while running, pointer-to-"" clears, otherwise re-derive.
+	if patch.VNCPassword != nil {
+		if *patch.VNCPassword == "" && vm.VNCPasswordHash == "" {
+			// Clearing an unset password is a no-op.
+		} else if vm.State == types.VMStateRunning {
+			return nil, types.NewAPIError("vm_running", "stop the VM before changing the vnc password; the new password takes effect on the next start")
+		} else if *patch.VNCPassword == "" {
+			vm.VNCPasswordHash = ""
+			vm.VNCPasswordEnc = ""
+		} else if m.VNCPasswordKeyMissing {
+			return nil, types.NewAPIError("vnc_password_key_missing",
+				"daemon.console.password_key must be configured before setting VNC passwords")
+		} else {
+			vm.VNCPasswordHash = "mock-bcrypt:" + *patch.VNCPassword
+			vm.VNCPasswordEnc = "mock-aesgcm:" + *patch.VNCPassword
+		}
+		vm.Spec.VNCPassword = ""
 	}
 
 	vm.UpdatedAt = time.Now()

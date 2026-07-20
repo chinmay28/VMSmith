@@ -338,6 +338,7 @@ func TestCloneVMSpec(t *testing.T) {
 		DiskGB:      80,
 		Description: "source description",
 		Tags:        []string{"prod", "web"},
+		VNCPassword: "hunter2",
 		NatStaticIP: "192.168.100.50/24",
 		NatGateway:  "192.168.100.1",
 		Networks: []types.NetworkAttachment{
@@ -360,6 +361,9 @@ func TestCloneVMSpec(t *testing.T) {
 	}
 	if cloned.NatStaticIP != "" || cloned.NatGateway != "" {
 		t.Fatalf("clone NAT config = %q / %q, want empty", cloned.NatStaticIP, cloned.NatGateway)
+	}
+	if cloned.VNCPassword != "" {
+		t.Fatalf("clone VNC password = %q, want cleared", cloned.VNCPassword)
 	}
 	if len(cloned.Tags) != 2 || cloned.Tags[0] != "prod" || cloned.Tags[1] != "web" {
 		t.Fatalf("clone tags = %#v", cloned.Tags)

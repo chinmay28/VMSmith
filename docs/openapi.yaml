@@ -539,6 +539,12 @@ paths:
     post:
       tags: [VMs]
       summary: Clone a VM
+      description: >-
+        Clones a stopped VM under a new name. The clone does not inherit the
+        source's GPU passthrough assignment or its VNC console password — a
+        clone of a VNC-protected VM boots with an unauthenticated console
+        until a password is set explicitly via PATCH. The stripped VNC
+        password is logged for auditability.
       parameters:
         - $ref: '#/components/parameters/VMID'
       requestBody:
@@ -4015,6 +4021,20 @@ components:
             cloudbase-init datasource at first boot. Write-only: it is redacted
             from the stored/returned VM record once the provisioning ISO is
             written. Ignored for Linux guests.
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: >-
+            Optional per-VM VNC password. When set, VMSmith stores a bcrypt hash
+            plus an AES-GCM-encrypted copy keyed by `daemon.console.password_key`
+            so the plaintext can be re-injected into the libvirt domain XML on
+            the next define/start. Redacted from every read path. Note QEMU's
+            RFB implementation honours only the first 8 characters at auth
+            time (longer values are accepted but silently truncated by QEMU).
+            Clone does not carry the password over — a clone boots with an
+            unauthenticated console until a password is set explicitly,
+            mirroring the clone-clears-GPUs semantics.
         clock_offset:
           type: string
           enum: [utc, localtime]
@@ -4128,6 +4148,18 @@ components:
           type: boolean
           description: Toggle delete-protection. Omit to leave unchanged.
           nullable: true
+        vnc_password:
+          type: string
+          format: password
+          writeOnly: true
+          nullable: true
+          description: >-
+            Optional per-VM VNC password update. Omit/null to leave unchanged;
+            send an empty string to clear the stored VNC password. Returns 409
+            `vm_running` if the VM is running, because password changes require
+            a stop + redefine so libvirt can pick up the new `passwd=` value.
+            QEMU's RFB implementation honours only the first 8 characters at
+            auth time (longer values are accepted but silently truncated).
         clock_offset:
           type: string
           enum: [utc, localtime, ""]

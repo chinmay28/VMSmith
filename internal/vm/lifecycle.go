@@ -171,6 +171,16 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		generatedAdminPassword = pw
 	}
 
+	// Fail fast when the spec requests a VNC password but the daemon has no
+	// password key configured (5.1.8) — before any resource (DHCP
+	// reservation, VM dir, overlay disk, provisioning ISO) is allocated.
+	// The deferred cleanup below also unwinds these on failure; this check
+	// avoids allocating them at all for a misconfigured daemon.
+	if spec.VNCPassword != "" && strings.TrimSpace(m.cfg.Daemon.Console.PasswordKey) == "" {
+		return nil, types.NewAPIError("vnc_password_key_missing",
+			"daemon.console.password_key must be configured before setting VNC passwords")
+	}
+
 	// Validate network attachments
 	if len(spec.Networks) > 0 {
 		if err := ValidateNetworkAttachments(spec.Networks); err != nil {
@@ -235,6 +245,24 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		return nil, fmt.Errorf("creating VM dir: %w", err)
 	}
 
+	var dom *libvirt.Domain
+	createSucceeded := false
+	defer func() {
+		if createSucceeded {
+			return
+		}
+		if dom != nil {
+			_ = forceUndefineDomain(dom)
+			dom.Free()
+		}
+		if spec.NatStaticIP != "" {
+			if ip, _, parseErr := net.ParseCIDR(spec.NatStaticIP); parseErr == nil {
+				netMgr.RemoveDHCPHost(natMAC, ip.String())
+			}
+		}
+		_ = os.RemoveAll(vmDir)
+	}()
+
 	// Create qcow2 overlay backed by the base image
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
 	baseImage := spec.Image
@@ -271,11 +299,28 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// response (the VMSpec is persisted and returned verbatim).
 	spec.AdminPassword = ""
 
+	// Derive the persisted forms of the VNC console password (5.1.8)
+	// before the spec is stored: only the bcrypt hash + AES-GCM blob
+	// survive, never the plaintext.
+	var vncPlain, vncHash, vncEnc string
+	if spec.VNCPassword != "" {
+		vncPlain = spec.VNCPassword
+		spec.VNCPassword = ""
+		var derr error
+		vncHash, vncEnc, derr = m.deriveVNCPassword(vncPlain)
+		if derr != nil {
+			return nil, derr
+		}
+	}
+
 	// Generate and define domain XML
 	params := DomainParamsFromSpec(spec, diskPath, cloudInitISO, m.cfg.Network.Name, natMAC)
 	params.Machine = resolveMachine(spec.Machine, func() string { return detectMachineType(m.conn) })
 	m.applyVirtioWin(&params, spec)
 	m.applyGPUs(&params, spec)
+	if vncPlain != "" {
+		params.SetVNCPassword(vncPlain)
+	}
 	xmlDoc, err := GenerateDomainXML(params)
 	if err != nil {
 		return nil, err
@@ -295,42 +340,36 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		orphan.Free()
 	}
 
-	dom, err := m.conn.DomainDefineXML(xmlDoc)
+	dom, err = m.conn.DomainDefineXML(xmlDoc)
 	if err != nil {
 		return nil, fmt.Errorf("defining domain: %w", err)
 	}
 
 	// Start the domain
 	if err := dom.Create(); err != nil {
-		dom.Undefine()
-		// Clean up the DHCP reservation we made — otherwise the next create
-		// attempt for the same VM name will fail with a name conflict.
-		if spec.NatStaticIP != "" {
-			if ip, _, parseErr := net.ParseCIDR(spec.NatStaticIP); parseErr == nil {
-				netMgr.RemoveDHCPHost(natMAC, ip.String())
-			}
-		}
-		os.RemoveAll(vmDir)
 		return nil, fmt.Errorf("starting domain: %w", err)
 	}
 
 	vm := &types.VM{
-		ID:          id,
-		Name:        spec.Name,
-		Description: spec.Description,
-		Tags:        append([]string(nil), spec.Tags...),
-		Spec:        spec,
-		State:       types.VMStateRunning,
-		NatMAC:      natMAC,
-		DiskPath:    diskPath,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:              id,
+		Name:            spec.Name,
+		Description:     spec.Description,
+		Tags:            append([]string(nil), spec.Tags...),
+		Spec:            spec,
+		State:           types.VMStateRunning,
+		NatMAC:          natMAC,
+		DiskPath:        diskPath,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		VNCPasswordHash: vncHash,
+		VNCPasswordEnc:  vncEnc,
 	}
 
 	// Persist to store
 	if err := m.store.PutVM(vm); err != nil {
 		return nil, fmt.Errorf("storing VM metadata: %w", err)
 	}
+	createSucceeded = true
 
 	// Monitor in background: wait for DHCP IP; if none after 60 s apply a
 	// static IP fallback via libvirt DHCP reservation + VM restart.
@@ -367,6 +406,14 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	netMgr := network.NewManager(m.conn, m.cfg)
 	if err := netMgr.EnsureNetwork(); err != nil {
 		return nil, fmt.Errorf("ensuring NAT network: %w", err)
+	}
+
+	// The clone intentionally does not inherit the source's VNC password
+	// (mirroring the clone-clears-GPUs semantics); surface the security
+	// downgrade in the log so the operator can set a fresh password.
+	if sourceVM.VNCPasswordHash != "" {
+		logger.Warn("daemon", "clone does not inherit the source VM's VNC password; the clone's console is unauthenticated until a password is set",
+			"source_vm", sourceID, "clone_name", newName)
 	}
 
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
@@ -448,6 +495,8 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	// Clones intentionally start without VNC credentials so copied machines do
+	// not inherit console secrets from the source VM.
 
 	if err := m.store.PutVM(cloned); err != nil {
 		cloneDom.Undefine()
@@ -909,14 +958,30 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// VNC password changes require the VM stopped because the password lives
+	// in the defined domain XML and only takes effect on the next start.
+	vncChanged := false
+	newVNCPlain := ""
+	if patch.VNCPassword != nil {
+		if *patch.VNCPassword == "" && storedVM.VNCPasswordHash == "" {
+			// Clearing an unset password is a no-op.
+		} else {
+			if wasRunning {
+				return nil, types.NewAPIError("vm_running", "stop the VM before changing the vnc password; the new password takes effect on the next start")
+			}
+			newVNCPlain = *patch.VNCPassword
+			vncChanged = true
+		}
+	}
+
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged {
 		return storedVM, nil
 	}
 
 	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
 	// dance and any libvirt redefinitions — they're pure bbolt writes.
-	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged
 	if metadataOnly {
 		if autoStartChanged {
 			storedVM.Spec.AutoStart = newAutoStart
@@ -976,8 +1041,23 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// Derive the persisted VNC password forms before touching libvirt so a
+	// missing daemon.console.password_key fails the update cleanly.
+	newVNCHash, newVNCEnc := storedVM.VNCPasswordHash, storedVM.VNCPasswordEnc
+	if vncChanged {
+		if newVNCPlain == "" {
+			newVNCHash, newVNCEnc = "", ""
+		} else {
+			var derr error
+			newVNCHash, newVNCEnc, derr = m.deriveVNCPassword(newVNCPlain)
+			if derr != nil {
+				return nil, derr
+			}
+		}
+	}
+
 	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model.
-	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged {
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged || vncChanged {
 		// Preserve the existing domain UUID so libvirt accepts the redefinition.
 		existingUUID, _ := dom.GetUUIDString()
 
@@ -993,6 +1073,17 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		params.Machine = resolveMachine(updatedSpec.Machine, func() string { return detectMachineType(m.conn) })
 		m.applyVirtioWin(&params, updatedSpec)
 		m.applyGPUs(&params, updatedSpec)
+		if vncChanged {
+			if newVNCPlain != "" {
+				params.SetVNCPassword(newVNCPlain)
+			}
+		} else if storedVM.VNCPasswordEnc != "" {
+			plain, derr := decryptVNCPassword(m.cfg.Daemon.Console.PasswordKey, storedVM.VNCPasswordEnc)
+			if derr != nil {
+				return nil, types.NewAPIError("vnc_password_undecryptable", "stored vnc password cannot be decrypted; check daemon.console.password_key or rotate the password while the vm is stopped")
+			}
+			params.SetVNCPassword(plain)
+		}
 		xmlDoc, err := GenerateDomainXML(params)
 		if err != nil {
 			return nil, fmt.Errorf("generating domain XML: %w", err)
@@ -1039,6 +1130,11 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if nicModelChanged {
 		storedVM.Spec.NICModel = newNICModel
+	}
+	if vncChanged {
+		storedVM.VNCPasswordHash = newVNCHash
+		storedVM.VNCPasswordEnc = newVNCEnc
+		storedVM.Spec.VNCPassword = ""
 	}
 	storedVM.UpdatedAt = time.Now()
 	if err := m.store.PutVM(storedVM); err != nil {
@@ -1566,6 +1662,7 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 	cloned.NatStaticIP = ""
 	cloned.NatGateway = ""
 	cloned.GPUs = nil
+	cloned.VNCPassword = ""
 	cloned.Tags = append([]string(nil), source.Tags...)
 	cloned.Networks = append([]types.NetworkAttachment(nil), source.Networks...)
 	for i := range cloned.Networks {
@@ -1574,6 +1671,28 @@ func cloneVMSpec(source types.VMSpec, newName string) types.VMSpec {
 		cloned.Networks[i].Gateway = ""
 	}
 	return cloned
+}
+
+// deriveVNCPassword turns an operator-supplied plaintext VNC password into
+// its two persisted forms (roadmap 5.1.8): a bcrypt hash for verification
+// and an AES-GCM blob (keyed by daemon.console.password_key) the manager
+// can decrypt when re-rendering domain XML. Fails with a typed error when
+// the daemon has no password key configured.
+func (m *LibvirtManager) deriveVNCPassword(plain string) (hash, enc string, err error) {
+	key := m.cfg.Daemon.Console.PasswordKey
+	if strings.TrimSpace(key) == "" {
+		return "", "", types.NewAPIError("vnc_password_key_missing",
+			"daemon.console.password_key must be configured before setting VNC passwords")
+	}
+	hash, err = hashVNCPassword(plain)
+	if err != nil {
+		return "", "", err
+	}
+	enc, err = encryptVNCPassword(key, plain)
+	if err != nil {
+		return "", "", err
+	}
+	return hash, enc, nil
 }
 
 func createClonedDisk(sourceDiskPath, diskPath string) error {

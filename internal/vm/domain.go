@@ -87,7 +87,7 @@ const domainXMLTemplate = `<domain type='kvm'>
       <model type='{{.VideoModel}}'/>
     </video>
     {{- end}}
-    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'{{if .VNCPasswordAttr}} passwd='{{.VNCPasswordAttr}}'{{end}}/>
     <channel type='unix'>
       <target type='virtio' name='org.qemu.guest_agent.0'/>
     </channel>
@@ -143,6 +143,11 @@ type DomainParams struct {
 	// embedded only in the rendered interface XML strings) so tests can
 	// assert it without grepping XML.
 	NICModel string
+	// VNCPasswordAttr is the XML-escaped plaintext emitted into the
+	// <graphics passwd='...'> attribute (roadmap 5.1.8). Callers must set
+	// it via SetVNCPassword so escaping cannot be skipped; empty omits
+	// the attribute (no VNC auth — the historical behaviour).
+	VNCPasswordAttr string
 
 	// GPUAddresses lists normalized host PCI addresses to attach as VFIO
 	// passthrough <hostdev> entries — the GPU plus its IOMMU-group
@@ -316,6 +321,26 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	params.FirmwareAttr = spec.ResolvedFirmwareAttr()
 
 	return params
+}
+
+// SetVNCPassword installs a plaintext VNC password on the params,
+// XML-escaping it so quotes / angle brackets in an operator-chosen
+// password cannot break out of the passwd attribute in the template.
+func (p *DomainParams) SetVNCPassword(password string) {
+	p.VNCPasswordAttr = xmlEscapeAttr(password)
+}
+
+// xmlEscapeAttr escapes the five XML special characters for safe embedding
+// in a single-quoted XML attribute value.
+func xmlEscapeAttr(s string) string {
+	repl := strings.NewReplacer(
+		"&", "&amp;",
+		"'", "&apos;",
+		"\"", "&quot;",
+		"<", "&lt;",
+		">", "&gt;",
+	)
+	return repl.Replace(s)
 }
 
 // GenerateDomainXML renders the libvirt domain XML from the given parameters.
