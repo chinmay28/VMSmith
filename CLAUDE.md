@@ -109,6 +109,10 @@ vmsmith/
 │   ├── test_cli_networking.py   # CLI E2E: multi-NIC, port forwarding
 │   ├── test_api_vm_lifecycle.py # API E2E: same lifecycle via REST
 │   ├── test_api_networking.py   # API E2E: same networking via REST
+│   ├── test_api_metrics_load.py # API E2E: real-VM metrics under induced CPU/net load (4.1.10; `-m metrics`)
+│   ├── test_api_schedules.py    # API E2E: real schedule fires a snapshot on a live VM (5.2.11; `-m schedules`)
+│   ├── test_windows_guest.py    # Windows guest tier: DHCP IP + RDP 3389 + optional SSH (5.6.16; `-m windows`, gated on --windows-image)
+│   ├── test_gpu_passthrough.py  # GPU passthrough tier: lspci in-guest + optional SMI (5.7.12; `-m gpu`, gated on --gpu)
 │   ├── gui-e2e.spec.js          # Playwright E2E against live daemon
 │   └── playwright.config.js     # Playwright config for live daemon
 ├── scripts/
@@ -149,6 +153,10 @@ All common operations are in the `Makefile`. Always use `make` targets rather th
 | `make test-e2e-gui` | GUI E2E tests (Playwright against live daemon) |
 | `make test-e2e-networking` | Multi-NIC networking E2E tests only |
 | `make test-e2e-portforward` | Port forwarding E2E tests only |
+| `make test-e2e-metrics` | Real-VM metrics-under-load E2E tests only |
+| `make test-e2e-schedules` | Real-VM scheduled-operations E2E tests only |
+| `make test-e2e-windows` | Windows guest E2E tier (requires `VMSMITH_WINDOWS_IMAGE`) |
+| `make test-e2e-gpu` | GPU passthrough E2E tier (requires `VMSMITH_GPU`) |
 | `make test-e2e-deps` | Install Python + Playwright deps for E2E tests |
 | `make lint` | golangci-lint |
 | `make fmt` | gofmt (use the pinned Go 1.22.5 toolchain from `go.mod`) |
@@ -316,6 +324,10 @@ make test-e2e-deps         # install pytest, requests, paramiko, Playwright + Ch
 | `--host-iface2` | `VMSMITH_HOST_IFACE2` | — | Second host interface for dual-NIC |
 | `--ip-timeout` | `VMSMITH_IP_TIMEOUT` | `120` | Seconds to wait for VM IP |
 | `--ssh-timeout` | `VMSMITH_SSH_TIMEOUT` | `180` | Seconds to wait for SSH |
+| `--windows-image` | `VMSMITH_WINDOWS_IMAGE` | — | Prepared Windows qcow2 image (enables the `windows` tier; a Windows-only run without `--rocky-image` is supported) |
+| `--windows-ssh-user` | `VMSMITH_WINDOWS_SSH_USER` | — | Optional SSH user for Windows images with OpenSSH Server |
+| `--gpu` | `VMSMITH_GPU` | — | Passthrough-eligible host GPU PCI address (enables the `gpu` tier) |
+| `--gpu-smi-cmd` | `VMSMITH_GPU_SMI_CMD` | — | Optional in-guest SMI command (`nvidia-smi` / `rocm-smi`) |
 
 **Running:**
 
@@ -353,6 +365,11 @@ VMSMITH_GUI_URL=http://localhost:8080 \
 2. **Snapshots & Images** — Snapshot → modify → restore → export image → create from image → verify SSH
 3. **Multi-NIC Networking** — Extra macvtap interfaces → DHCP IPs → inter-VM ping → dual-NIC
 4. **Port Forwarding** — Add DNAT rule → SSH via forwarded port → CRUD operations
+5. **Metrics Under Load** — Boot VM → in-guest CPU burn + NAT traffic → `/vms/{id}/stats` shows non-zero CPU/net within 30s
+6. **Live Events Stream** — Stop VM → subscribe `/events/stream` → start VM → `vm.started` frame arrives
+7. **Scheduled Operations** — Register `*/15s` snapshot schedule on a live VM → success run recorded → `auto-*` snapshot appears
+8. **Windows Guest** *(opt-in `--windows-image`)* — Create Windows VM → one-time generated admin password → DHCP IP → RDP :3389 reachable → optional SSH
+9. **GPU Passthrough** *(opt-in `--gpu`)* — Create VM with `gpus` → boot → GPU visible in guest `lspci` → optional `nvidia-smi`/`rocm-smi`
 
 See `tests/e2e/README.md` for full documentation.
 

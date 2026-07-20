@@ -42,6 +42,10 @@ Resolution order: CLI option → env var → built-in default.
 | `--host-iface2 NAME` | `VMSMITH_HOST_IFACE2` | — | Second host interface for dual-NIC tests |
 | `--ip-timeout SECS` | `VMSMITH_IP_TIMEOUT` | `120` | Seconds to wait for VM IP assignment |
 | `--ssh-timeout SECS` | `VMSMITH_SSH_TIMEOUT` | `180` | Seconds to wait for SSH readiness |
+| `--windows-image PATH` | `VMSMITH_WINDOWS_IMAGE` | — | Prepared Windows qcow2 image — enables the `windows` tier |
+| `--windows-ssh-user USER` | `VMSMITH_WINDOWS_SSH_USER` | — | Optional SSH user for Windows images with OpenSSH Server |
+| `--gpu PCI-ADDR` | `VMSMITH_GPU` | — | Passthrough-eligible host GPU (e.g. `0000:01:00.0`) — enables the `gpu` tier |
+| `--gpu-smi-cmd CMD` | `VMSMITH_GPU_SMI_CMD` | — | Optional in-guest SMI command (`nvidia-smi`, `rocm-smi`) to verify the driver stack |
 
 **GUI-only** (Playwright env vars, no pytest equivalent):
 
@@ -51,7 +55,9 @@ Resolution order: CLI option → env var → built-in default.
 | `VMSMITH_SSH_PUBKEY` | — | SSH public key content (injected into VM create form) |
 
 Multi-NIC tests (`--host-iface` / `--host-iface2`) are **skipped** when the interfaces
-are not specified.
+are not specified. Likewise the `windows` tier is skipped without `--windows-image`
+and the `gpu` tier without `--gpu`. A Windows-only run (`--windows-image` with no
+`--rocky-image`) is supported — every Linux-image test skips instead of failing.
 
 Run `cd tests/e2e && python -m pytest --help` to see the full option list under the
 "VMSmith E2E test options" group.
@@ -67,6 +73,10 @@ make test-e2e-api            # API tests only
 make test-e2e-gui            # GUI tests only (Playwright)
 make test-e2e-networking     # Only multi-NIC networking tests
 make test-e2e-portforward    # Only port forwarding tests
+make test-e2e-metrics        # Real-VM metrics-under-load tests (4.1.10)
+make test-e2e-schedules     # Real-VM scheduled-operations tests (5.2.11)
+make test-e2e-windows        # Windows guest tier (5.6.16, needs VMSMITH_WINDOWS_IMAGE)
+make test-e2e-gpu            # GPU passthrough tier (5.7.12, needs VMSMITH_GPU)
 ```
 
 ### Via pytest directly (with CLI options)
@@ -98,6 +108,10 @@ python -m pytest -m networking -v
 python -m pytest -m portforward -v
 python -m pytest -m cli -v
 python -m pytest -m api -v
+python -m pytest -m metrics -v
+python -m pytest -m schedules -v
+python -m pytest -m windows -v --windows-image /images/win2022-cloudbase.qcow2
+python -m pytest -m gpu -v --gpu 0000:01:00.0 --gpu-smi-cmd nvidia-smi
 
 # Single test class
 python -m pytest test_api_networking.py::TestAPIPortForward -v
