@@ -196,7 +196,7 @@ Optional filters and ordering:
 
   --sort <field>        Whitelisted to one of:
                           id, url, created_at, last_delivery_at,
-                          delivery_status, active
+                          delivery_status, active, description
                         Default: id.  delivery_status orders by the derived
                         classification — alphabetical failing < healthy <
                         never — and is the symmetric sort counterpart to
@@ -206,6 +206,11 @@ Optional filters and ordering:
                         heads asc and the live cohort heads desc; closed-
                         and-total (no nil-trailing bucket).  Symmetric sort
                         counterpart to the --active exact-match filter.
+                        description (5.4.122) is a case-insensitive sort
+                        over the webhook's description field; webhooks
+                        with no description sink to the tail of asc / head
+                        of desc (mirrors the VM / image / template /
+                        snapshot description sort axes one resource over).
 
   --order <asc|desc>    Default: asc.  Sort ascending or descending. Unknown
                         values are rejected client-side before contacting the
@@ -258,7 +263,7 @@ Optional filters and ordering:
 
 		sortField = strings.TrimSpace(strings.ToLower(sortField))
 		if sortField != "" && !types.IsValidWebhookSort(sortField) {
-			return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at, delivery_status, active")
+			return fmt.Errorf("invalid --sort: must be one of id, url, created_at, last_delivery_at, delivery_status, active, description")
 		}
 		order = strings.TrimSpace(strings.ToLower(order))
 		if order != "" {
@@ -769,7 +774,7 @@ func init() {
 	webhookListCmd.Flags().String("until", "", "RFC3339 upper bound (inclusive) on created_at")
 	webhookListCmd.Flags().String("last-delivery-since", "", "RFC3339 lower bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
 	webhookListCmd.Flags().String("last-delivery-until", "", "RFC3339 upper bound (inclusive) on last_delivery_at; never-delivered webhooks are excluded when set")
-	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at|delivery_status|active (default id)")
+	webhookListCmd.Flags().String("sort", "", "sort field: id|url|created_at|last_delivery_at|delivery_status|active|description (default id)")
 	webhookListCmd.Flags().String("order", "", "sort order: asc|desc (default asc)")
 	webhookListCmd.Flags().Int("limit", 0, "page size; 0 returns the full filtered set (forwarded as per_page)")
 	webhookListCmd.Flags().Int("page", 1, "1-based page number when --limit is set")

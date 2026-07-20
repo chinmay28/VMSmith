@@ -2429,6 +2429,94 @@ func TestListWebhooks_InvalidSortAdvertisesActive(t *testing.T) {
 	}
 }
 
+// 5.4.122 — description sort axis. Case-insensitive compare on
+// Webhook.Description with empty-trailing nil-handling. Mirrors the VM
+// (5.4.120) / template (5.4.119) / image (5.4.118) / snapshot (5.4.121)
+// description axes one resource over.
+//
+// seedDescriptionSortWebhooks lays out four webhooks in non-sorted ID
+// order: two with descriptions (mixed case) and two without. Tests assert
+// the comparator's effect, not the input order.
+func seedDescriptionSortWebhooks(t *testing.T, fake *fakeWebhookStore) {
+	t.Helper()
+	base := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	hooks := []*types.Webhook{
+		{ID: "wh-desc-1", URL: "https://a.example.com/h", Secret: "k", Description: "Slack #ops", CreatedAt: base},
+		{ID: "wh-desc-2", URL: "https://b.example.com/h", Secret: "k", Description: "", CreatedAt: base},
+		{ID: "wh-desc-3", URL: "https://c.example.com/h", Secret: "k", Description: "alpha", CreatedAt: base},
+		{ID: "wh-desc-4", URL: "https://d.example.com/h", Secret: "k", Description: "", CreatedAt: base},
+	}
+	for _, h := range hooks {
+		if err := fake.PutWebhook(h); err != nil {
+			t.Fatalf("seed PutWebhook: %v", err)
+		}
+	}
+}
+
+func TestListWebhooks_SortByDescription_AscCaseInsensitive(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDescriptionSortWebhooks(t, fake)
+
+	// asc: "alpha" < "slack #ops" (case-folded), then the two empty
+	// descriptions sink to the tail (id-tiebreak: wh-desc-2 < wh-desc-4).
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=description&order=asc")
+	want := []string{"wh-desc-3", "wh-desc-1", "wh-desc-2", "wh-desc-4"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=description asc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDescription_DescEmptyHeads(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDescriptionSortWebhooks(t, fake)
+
+	// desc: empty descriptions head (id-tiebreak inverted by outer desc
+	// wrapper: wh-desc-4 > wh-desc-2), then "slack #ops" > "alpha".
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=description&order=desc")
+	want := []string{"wh-desc-4", "wh-desc-2", "wh-desc-1", "wh-desc-3"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=description desc: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_SortByDescription_NormalisesCaseAndWhitespace(t *testing.T) {
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedDescriptionSortWebhooks(t, fake)
+
+	// Mixed-case + whitespace must normalise to the canonical lowercase
+	// axis (the parser trims + lowercases before validating).
+	hooks := listWebhooksWithQuery(t, ts.URL, "sort=%20DESCRIPTION%20&order=asc")
+	want := []string{"wh-desc-3", "wh-desc-1", "wh-desc-2", "wh-desc-4"}
+	if got := webhookIDsInOrder(hooks); !equalStringSlice(got, want) {
+		t.Fatalf("sort=DESCRIPTION: got %v, want %v", got, want)
+	}
+}
+
+func TestListWebhooks_InvalidSortAdvertisesDescription(t *testing.T) {
+	// 5.4.122 — the 400 envelope must advertise description so operators
+	// discover the new axis from the daemon's error text.
+	ts, _, fake, cleanup := webhookTestServer(t)
+	defer cleanup()
+	seedSortableWebhooks(t, fake)
+
+	resp, err := http.Get(ts.URL + "/api/v1/webhooks?sort=bogus-description-axis")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := readAllBody(resp)
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode, b)
+	}
+	body, _ := readAllBody(resp)
+	if !strings.Contains(string(body), "description") {
+		t.Fatalf("400 envelope %q should advertise the new description axis so operators discover it", body)
+	}
+}
+
 func TestListWebhooks_SortComposesWithSearch(t *testing.T) {
 	ts, _, fake, cleanup := webhookTestServer(t)
 	defer cleanup()

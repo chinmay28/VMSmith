@@ -2036,7 +2036,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [id, url, created_at, last_delivery_at, delivery_status, active]
+            enum: [id, url, created_at, last_delivery_at, delivery_status, active, description]
             default: id
           description: |
             Field to sort by. `url` matches case-insensitively.
@@ -2058,9 +2058,25 @@ paths:
             resolves to the zero value (false) and every webhook belongs
             to exactly one of the two buckets — no nil-trailing bucket,
             mirroring the VM `auto_start` axis (5.4.108) / `locked` axis
-            (5.4.109) and the schedule `enabled` axis (5.4.113). All
-            comparators tiebreak on `id` so repeated requests return a
-            deterministic order.
+            (5.4.109) and the schedule `enabled` axis (5.4.113).
+            `description` (5.4.122) is a case-insensitive sort axis over
+            the webhook's `description` field — operators paste
+            descriptions verbatim into list-search filters, so the sort
+            axis matches the same case-insensitive semantics as the
+            existing `?search=` filter haystack on the same column;
+            webhooks with an empty `description` (the common case — most
+            webhooks get no description) sink to the tail of `asc` and
+            the head of `desc`, mirroring the nullable-string nil-trailing
+            convention on every other nullable axis (`url`,
+            `last_delivery_at`) and the VM list `description` axis
+            (5.4.120) / template list `description` axis (5.4.119) /
+            image list `description` axis (5.4.118) / snapshot list
+            `description` axis (5.4.121) one resource over. Closes the
+            operator query *"which webhooks have a description so I can
+            audit the documented receivers"* — they cluster at the head
+            of `asc` instead of being buried among the unset majority.
+            All comparators tiebreak on `id` so repeated requests return
+            a deterministic order.
         - in: query
           name: order
           required: false
