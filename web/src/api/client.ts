@@ -78,7 +78,7 @@ export const vms = {
   reboot: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/reboot', { params: { path: { vmID: id } } })),
   suspend: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/suspend', { params: { path: { vmID: id } } })),
   resume: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/resume', { params: { path: { vmID: id } } })),
-  issueConsoleTicket: (id: string, intent?: 'vnc' | 'serial') =>
+  issueConsoleTicket: (id: string, intent?: 'vnc' | 'serial' | 'rdp') =>
     unwrap(apiClient.POST('/vms/{vmID}/console/ticket', { params: { path: { vmID: id }, query: intent ? { intent } : undefined } as any })),
   delete: (id: string) => unwrap(apiClient.DELETE('/vms/{vmID}', { params: { path: { vmID: id } } })),
   stats: (id: string, { since = '', fields = '' }: { since?: string; fields?: string } = {}) =>

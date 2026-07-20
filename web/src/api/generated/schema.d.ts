@@ -2020,7 +2020,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Console flavour the ticket should be valid for. */
-                    intent?: "vnc" | "serial";
+                    intent?: "vnc" | "serial" | "rdp";
                 };
                 header?: never;
                 path: {
@@ -2069,10 +2069,17 @@ export interface paths {
          *     websocket subprotocol and bridges websocket binary frames to the VM's
          *     loopback-only VNC listener. With `intent=serial` the server negotiates
          *     the `text` subprotocol and bridges UTF-8 terminal bytes to the domain's
-         *     serial console (libvirt `virDomainOpenConsole`). The intent must match
-         *     the one the ticket was issued for — a mismatch returns 401. When
-         *     daemon TLS is enabled, callers must use `wss://`; reverse-proxy
-         *     deployments may forward that fact with `X-Forwarded-Proto: https`.
+         *     serial console (libvirt `virDomainOpenConsole`). With `intent=rdp`
+         *     (roadmap 5.6.13) the server negotiates the `guacamole` subprotocol,
+         *     performs the Guacamole client handshake against the configured
+         *     `daemon.console.guacd_address` (targeting the VM's IP on 3389), and
+         *     relays Guacamole-protocol instructions — 503 `rdp_console_unavailable`
+         *     when no guacd bridge is configured, 503 `console_unavailable` when the
+         *     VM has no IP yet, 502 `console_unreachable` when guacd cannot be
+         *     reached. The intent must match the one the ticket was issued for — a
+         *     mismatch returns 401. When daemon TLS is enabled, callers must use
+         *     `wss://`; reverse-proxy deployments may forward that fact with
+         *     `X-Forwarded-Proto: https`.
          */
         get: {
             parameters: {
@@ -2080,7 +2087,7 @@ export interface paths {
                     /** @description Single-use console ticket issued by `POST /vms/{vmID}/console/ticket`. */
                     ticket: string;
                     /** @description Console flavour to attach; must match the ticket's intent. */
-                    intent?: "vnc" | "serial";
+                    intent?: "vnc" | "serial" | "rdp";
                 };
                 header?: never;
                 path: {
@@ -4480,10 +4487,20 @@ export interface components {
             /** @description Libvirt machine type override (e.g. `pc-q35-rhel9.6.0`). Empty/omitted resolves to vmsmith's default (`pc-q35-6.2`). Only letters, digits, dots, hyphens, and underscores are allowed; anything else returns 400 `invalid_machine`. */
             machine?: string;
             /**
-             * @description Firmware override. "bios" (default) emits no firmware attribute and falls back to SeaBIOS; "uefi" and "ovmf" both resolve to libvirt's `firmware='efi'` shorthand, which auto-picks the host's OVMF code/vars pair. Required for Windows 11. Does NOT enable Secure Boot or attach a virtual TPM (tracked separately under roadmap 5.6.9). Any other value returns 400 `invalid_firmware`.
+             * @description Firmware override. "bios" (default) emits no firmware attribute and falls back to SeaBIOS; "uefi" and "ovmf" both resolve to libvirt's `firmware='efi'` shorthand, which auto-picks the host's OVMF code/vars pair. Required for Windows 11. Secure Boot / vTPM are controlled by the separate `secure_boot` / `tpm` flags (roadmap 5.6.9). Any other value returns 400 `invalid_firmware`.
              * @enum {string}
              */
             firmware?: "bios" | "uefi" | "ovmf";
+            /** @description Enable UEFI Secure Boot (roadmap 5.6.9): the domain renders with firmware='efi' plus the secure-boot + enrolled-keys firmware features so libvirt selects the host's secboot OVMF build. Omitted = auto (on for os_variant windows-11, off otherwise). Requires uefi/ovmf firmware — combining it with an explicit "bios" returns 400 `invalid_firmware`. Create fails with 4xx `ovmf_missing` when the host has no (secboot) OVMF build. Immutable post-create. */
+            secure_boot?: boolean;
+            /** @description Attach an emulated TPM 2.0 device (tpm-crb backed by swtpm) — roadmap 5.6.9. Omitted = auto (on for os_variant windows-11, off otherwise). Create fails with 4xx `swtpm_missing` when swtpm is not installed on the host. Immutable post-create. */
+            tpm?: boolean;
+            /** @description Unattended install from a raw Windows ISO (roadmap 5.6.11). Path to the installation ISO on the daemon host. Mutually exclusive with `image`: the VM starts from a blank qcow2 disk of disk_gb, boots the ISO, and a generated Autounattend.xml (partition layout matched to the firmware, edition via install_image_index, locale, Administrator password, RDP + WinRM enablement) baked into the provisioning cdrom drives the install hands-free. Windows-only; violations return 400 `invalid_install_iso`. */
+            install_iso?: string;
+            /** @description WIM image index for edition selection during an unattended install (e.g. 2 = Standard with Desktop Experience on Server media). 0 omits the selection. Only meaningful with install_iso. */
+            install_image_index?: number;
+            /** @description Windows UI/input locale for the unattended install (default en-US). Only meaningful with install_iso. */
+            locale?: string;
             /** @description Per-VM virtio-win driver ISO path. Overrides the daemon-wide `storage.virtio_win_iso` config for this Windows VM only; ignored for Linux guests. If the override path is missing on the daemon host the resolver logs a warning and falls back to the daemon config / probe. The guest still boots without an ISO (SATA + e1000e work natively); the ISO is only required in-guest to install virtio drivers. */
             virtio_win_iso?: string;
             /** @description Host PCI GPU addresses to pass through to this VM via VFIO, in the long ("0000:01:00.0") or short ("01:00.0") form. Discover assignable GPUs via GET /host/gpus. vmsmith attaches each requested GPU together with the rest of its IOMMU group (the GPU plus, typically, its HDMI audio function) as managed='yes' <hostdev> entries. The host must have IOMMU enabled (intel_iommu=on / amd_iommu=on) and the GPU must not be driving the host console. Invalid addresses return 400 `invalid_gpu`. See docs/GPU_PASSTHROUGH.md. */
@@ -4806,7 +4823,7 @@ export interface components {
              * @description Console flavour the ticket was issued for.
              * @enum {string}
              */
-            intent: "vnc" | "serial";
+            intent: "vnc" | "serial" | "rdp";
             /** Format: date-time */
             expires_at: string;
             /** @description Path the client should dial after upgrading to a websocket. */

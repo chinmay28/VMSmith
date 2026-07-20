@@ -6913,3 +6913,18 @@ test.describe("VM Console", () => {
     await expect(page.getByTestId("btn-console")).toHaveCount(0);
   });
 });
+
+// ============================================================
+// RDP Console (5.6.13 — guacd-bridged Guacamole client)
+// ============================================================
+test.describe("RDP Console", () => {
+  test("rdp tab connects through the mock guacd bridge", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+    await page.getByTestId("tab-rdp").click();
+    await expect(page.getByTestId("rdp-console")).toBeVisible();
+    // The mock sends ready + size + sync; answering the sync flips the
+    // guacamole client into the CONNECTED state.
+    await expect(page.getByTestId("console-status")).toHaveAttribute("data-status", "connected", { timeout: 15000 });
+    await expect(page.getByTestId("rdp-display")).toBeVisible();
+  });
+});

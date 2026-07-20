@@ -272,3 +272,93 @@ vmsmith vm create <name> --image <img> --os windows \
 Validation errors: `invalid_os_type` (not `linux`/`windows`),
 `invalid_os_variant` (unknown variant), and `invalid_spec` for the Windows
 RAM/disk floors — all HTTP 400.
+
+## UEFI, Secure Boot, and virtual TPM (roadmap 5.6.9)
+
+Windows 11 Setup refuses to install without UEFI Secure Boot and a TPM 2.0
+device, so both **default on automatically for `os_variant: windows-11`**.
+Every other variant keeps the SeaBIOS default unless you opt in:
+
+```jsonc
+{
+  "name": "win11",
+  "os_type": "windows",
+  "os_variant": "windows-11",   // secure_boot + tpm default ON
+  "secure_boot": true,           // optional explicit override (either way)
+  "tpm": true                    // optional explicit override (either way)
+}
+```
+
+- `secure_boot: true` renders the domain with `firmware='efi'` plus the
+  `secure-boot` + `enrolled-keys` firmware features, so libvirt selects the
+  host's *secboot* OVMF build with the Microsoft keys enrolled. It forces
+  EFI even when `firmware` was left empty; combining it with an explicit
+  `"firmware": "bios"` is rejected with 400 `invalid_firmware`.
+- `tpm: true` attaches `<tpm model='tpm-crb'>` backed by **swtpm**.
+- Host prerequisites are probed at create time and fail fast with typed
+  errors: `swtpm_missing` (install `swtpm`) and `ovmf_missing` (install
+  `ovmf` / `edk2-ovmf`).
+- To install Windows 11 legacy-style anyway, disable explicitly:
+  `"secure_boot": false, "tpm": false`.
+
+CLI: `vmsmith vm create ... --secure-boot --tpm` (pass `--secure-boot=false`
+/ `--tpm=false` to override the windows-11 default off).
+
+## Unattended install from a raw Windows ISO (roadmap 5.6.11)
+
+No prepared cloudbase-init image? Point VMSmith at a stock installation ISO
+and it will drive Windows Setup hands-free:
+
+```jsonc
+{
+  "name": "win2022-fresh",
+  "os_type": "windows",
+  "install_iso": "/var/lib/vmsmith/isos/win2022.iso",  // instead of "image"
+  "install_image_index": 2,   // optional WIM edition (2 = Desktop Experience)
+  "locale": "en-US",          // optional, default en-US
+  "ram_mb": 4096,
+  "disk_gb": 64
+}
+```
+
+What happens: the VM gets a **blank** qcow2 disk (no backing image), the ISO
+is attached as a boot cdrom, and a generated `Autounattend.xml` rides in the
+provisioning cdrom's root (Windows Setup scans attached removable media for
+it). The unattend file covers firmware-matched partitioning (GPT/EFI layout
+under UEFI, single active MBR partition under BIOS), edition selection,
+locale, EULA, computer name, the Administrator password (the one-time
+generated password from the create response applies when you omit
+`admin_password`), RDP enablement, and a first-logon `winrm quickconfig`.
+
+Notes:
+- `image` and `install_iso` are mutually exclusive (400 `invalid_install_iso`).
+- Expect the first boot to take a while — it is a full Windows installation.
+- Combine with `os_variant: windows-11` to get the UEFI/Secure Boot/TPM
+  stack the Windows 11 installer requires.
+
+CLI: `vmsmith vm create <name> --os windows --install-iso /path/win.iso
+[--install-image-index 2] [--locale en-US]`.
+
+## Browser RDP console (roadmap 5.6.13)
+
+The VMConsole page (`/vms/:id/console`) has an **RDP** tab that bridges the
+browser to the guest's native RDP session through
+[guacd](https://guacamole.apache.org/) — no client install needed. Configure
+the bridge in the daemon config:
+
+```yaml
+daemon:
+  console:
+    guacd_address: "127.0.0.1:4822"   # empty disables the RDP intent
+```
+
+The daemon performs the Guacamole handshake against guacd (targeting the
+VM's IP on 3389) and relays the session over the same single-use,
+intent-scoped ticket machinery as the VNC/serial consoles. Without a
+configured `guacd_address` the RDP intent returns 503
+`rdp_console_unavailable`; a VM without an IP yet returns 503
+`console_unavailable`. Run guacd next to the daemon, e.g.:
+
+```bash
+docker run -d --network host guacamole/guacd
+```

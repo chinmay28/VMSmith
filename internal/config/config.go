@@ -74,6 +74,12 @@ type ConsoleConfig struct {
 	MaxSessionSeconds     int    `yaml:"max_session_seconds"`
 	IdleTimeoutSeconds    int    `yaml:"idle_timeout_seconds"`
 	PasswordKey           string `yaml:"password_key"`
+	// GuacdAddress is the host:port of a guacd (Apache Guacamole proxy
+	// daemon) instance used by the browser RDP console (roadmap 5.6.13).
+	// Empty disables the RDP console intent — the endpoints return 503
+	// rdp_console_unavailable. guacd typically runs on the VM host or a
+	// trusted network segment, e.g. "127.0.0.1:4822".
+	GuacdAddress string `yaml:"guacd_address"`
 }
 
 func (d DaemonConfig) TLSConfigured() bool {

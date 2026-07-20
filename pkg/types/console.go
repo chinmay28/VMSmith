@@ -24,12 +24,17 @@ const (
 	// ConsoleIntentSerial selects the text serial console exposed via
 	// the libvirt domain's `<console type='pty'>` element.
 	ConsoleIntentSerial ConsoleIntent = "serial"
+	// ConsoleIntentRDP selects the in-browser RDP console bridged through
+	// a guacd (Apache Guacamole proxy daemon) instance configured via
+	// daemon.console.guacd_address (roadmap 5.6.13). The daemon speaks
+	// the Guacamole protocol to guacd, which speaks RDP to the guest.
+	ConsoleIntentRDP ConsoleIntent = "rdp"
 )
 
 // Valid reports whether the intent is a value the manager understands.
 func (i ConsoleIntent) Valid() bool {
 	switch i {
-	case ConsoleIntentVNC, ConsoleIntentSerial:
+	case ConsoleIntentVNC, ConsoleIntentSerial, ConsoleIntentRDP:
 		return true
 	}
 	return false

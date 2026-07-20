@@ -26,8 +26,27 @@ func validateVMSpec(spec types.VMSpec) error {
 	if !vmNameRe.MatchString(name) {
 		return types.NewAPIError("invalid_name", "vm name must be 1-64 characters and contain only letters, numbers, and hyphens")
 	}
-	if strings.TrimSpace(spec.Image) == "" {
+	// The unattended-install path (roadmap 5.6.11) starts from a blank disk
+	// + install ISO instead of a base image, so image and install_iso are
+	// mutually exclusive and exactly one must be present.
+	if strings.TrimSpace(spec.InstallISO) != "" {
+		if strings.TrimSpace(spec.Image) != "" {
+			return types.NewAPIError("invalid_install_iso", "image and install_iso are mutually exclusive — an unattended install starts from a blank disk")
+		}
+		if !spec.IsWindows() {
+			return types.NewAPIError("invalid_install_iso", "install_iso requires os_type \"windows\" — the unattended-install path generates a Windows Autounattend.xml")
+		}
+		if spec.InstallImageIndex < 0 {
+			return types.NewAPIError("invalid_install_iso", "install_image_index must be >= 0")
+		}
+	} else if strings.TrimSpace(spec.Image) == "" {
 		return types.NewAPIError("invalid_image", "image is required")
+	}
+
+	// Secure Boot needs EFI firmware (roadmap 5.6.9): an explicit
+	// firmware "bios" combined with Secure Boot is contradictory.
+	if spec.ResolvedSecureBoot() && strings.EqualFold(strings.TrimSpace(spec.Firmware), types.FirmwareBIOS) {
+		return types.NewAPIError("invalid_firmware", "secure_boot requires uefi/ovmf firmware; remove the \"bios\" firmware override or disable secure boot")
 	}
 	if err := validateOptionalVMResourceValue(spec.CPUs, 1, 128, "cpus"); err != nil {
 		return err

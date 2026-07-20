@@ -465,8 +465,8 @@ const server = http.createServer(async (req, res) => {
   if (consoleTicketMatch && method === "POST") {
     const vmId = consoleTicketMatch[1];
     const intent = (url.searchParams.get("intent") || "vnc").trim().toLowerCase();
-    if (intent !== "vnc" && intent !== "serial") {
-      return json(res, 400, { code: "invalid_console_intent", message: "console intent must be one of: vnc, serial" });
+    if (intent !== "vnc" && intent !== "serial" && intent !== "rdp") {
+      return json(res, 400, { code: "invalid_console_intent", message: "console intent must be one of: vnc, serial, rdp" });
     }
     const vm = vms.get(vmId);
     if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
@@ -3972,6 +3972,11 @@ server.on("upgrade", (req, socket) => {
     return socket.destroy();
   }
 
+  // guacEncode renders a Guacamole-protocol instruction (rune-length
+  // prefixed elements) for the mock RDP path.
+  const guacEncode = (...elems) =>
+    elems.map((e) => `${String(e).length}.${e}`).join(",") + ";";
+
   const accept = crypto.createHash("sha1").update(key + WS_GUID).digest("base64");
   const protoHeader = (req.headers["sec-websocket-protocol"] || "").split(",")[0].trim();
   const responseHeaders = [
@@ -3987,6 +3992,14 @@ server.on("upgrade", (req, socket) => {
   const onRFBBytes = intent === "vnc" ? startMockRFBServer(socket, vmId) : null;
   if (intent === "serial") {
     socket.write(wsEncodeFrame(0x1, Buffer.from("mock-serial login: ", "utf8")));
+  }
+  if (intent === "rdp") {
+    // Mock guacd-bridged session: ready + a size + one sync. The
+    // guacamole-common-js client transitions to CONNECTED when it answers
+    // the first sync while in the WAITING state.
+    socket.write(wsEncodeFrame(0x1, Buffer.from(guacEncode("ready", "$mock-connection"), "utf8")));
+    socket.write(wsEncodeFrame(0x1, Buffer.from(guacEncode("size", "0", "1024", "768"), "utf8")));
+    socket.write(wsEncodeFrame(0x1, Buffer.from(guacEncode("sync", String(Date.now() % 1000000)), "utf8")));
   }
 
   socket.on("data", (chunk) => {
@@ -4005,6 +4018,8 @@ server.on("upgrade", (req, socket) => {
       if (frame.opcode !== 0x1 && frame.opcode !== 0x2) continue;
       if (intent === "vnc") {
         onRFBBytes(frame.payload);
+      } else if (intent === "rdp") {
+        // Swallow client instructions (sync replies, mouse/key events).
       } else {
         socket.write(wsEncodeFrame(0x1, frame.payload)); // serial echo
       }

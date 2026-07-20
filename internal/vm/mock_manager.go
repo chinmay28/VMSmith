@@ -603,6 +603,11 @@ func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent 
 	if !intent.Valid() {
 		return nil, types.NewAPIError("invalid_console_intent", fmt.Sprintf("unknown console intent %q", string(intent)))
 	}
+	if intent == types.ConsoleIntentRDP {
+		// RDP consoles are bridged via guacd straight to the guest's IP
+		// (roadmap 5.6.13) — there is no local libvirt endpoint to return.
+		return nil, types.NewAPIError("invalid_console_intent", "rdp consoles have no local endpoint; they are bridged via guacd")
+	}
 
 	m.mu.RLock()
 	vm, ok := m.vms[id]
