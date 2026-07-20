@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu, MonitorPlay
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -337,6 +337,16 @@ export default function VMDetail() {
           {vm.state === 'paused' && (
             <button className="btn-primary" onClick={() => { resumeMut.execute(id).then(refresh); }} data-testid="btn-resume" title="Unpause and continue running">
               <Play size={14} /> Resume
+            </button>
+          )}
+          {vm.state === 'running' && (
+            <button
+              className="btn-secondary"
+              onClick={() => window.open(`/vms/${id}/console`, '_blank', 'noopener')}
+              data-testid="btn-console"
+              title="Open the VNC / serial console in a new tab"
+            >
+              <MonitorPlay size={14} /> Console
             </button>
           )}
           <button data-testid="btn-edit-vm" className="btn-secondary" onClick={() => setShowEditModal(true)} title="Edit resources">

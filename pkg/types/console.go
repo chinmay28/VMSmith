@@ -6,9 +6,10 @@ import "time"
 // POST /api/v1/vms/{id}/console/ticket. The ticket is a single-use, short-TTL
 // token the caller passes to the (forthcoming) console websocket endpoint.
 type ConsoleTicket struct {
-	Ticket       string    `json:"ticket"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	WebsocketURL string    `json:"websocket_url"`
+	Ticket       string        `json:"ticket"`
+	Intent       ConsoleIntent `json:"intent"`
+	ExpiresAt    time.Time     `json:"expires_at"`
+	WebsocketURL string        `json:"websocket_url"`
 }
 
 // ConsoleIntent identifies which console flavour the caller wants when

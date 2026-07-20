@@ -1162,12 +1162,26 @@ paths:
       summary: Issue a single-use console ticket
       description: |
         Returns a short-TTL one-time token the caller passes to the console
-        websocket endpoint (forthcoming).  The VM must be in the `running`
-        state.  The endpoint returns 503 `service_unavailable` when the
-        daemon was started without a console subsystem (e.g. on a host where
-        the console feature is disabled in config).
+        websocket endpoint.  The VM must be in the `running` state.  The
+        endpoint returns 503 `service_unavailable` when the daemon was
+        started without a console subsystem (e.g. on a host where the
+        console feature is disabled in config).
+
+        The optional `intent` query parameter selects which console flavour
+        the ticket is valid for — `vnc` (default, graphical RFB) or
+        `serial` (text console).  The intent is baked into the ticket: a
+        `vnc` ticket cannot be redeemed against the serial console and vice
+        versa.  Unknown values return 400 `invalid_console_intent`.
       parameters:
         - $ref: '#/components/parameters/VMID'
+        - in: query
+          name: intent
+          required: false
+          schema:
+            type: string
+            enum: [vnc, serial]
+            default: vnc
+          description: Console flavour the ticket should be valid for.
       responses:
         '200':
           description: Ticket issued
@@ -1175,6 +1189,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConsoleTicket'
+        '400':
+          $ref: '#/components/responses/APIError'
         '404':
           $ref: '#/components/responses/APIError'
         '409':
@@ -1186,14 +1202,18 @@ paths:
   /vms/{vmID}/console:
     get:
       tags: [Console]
-      summary: Proxy the live VM VNC console over websocket
+      summary: Proxy the live VM console (VNC or serial) over websocket
       description: |
-        Upgrades the request to a websocket and proxies raw VNC/RFB bytes for a
+        Upgrades the request to a websocket and proxies the VM's console for a
         running VM. Call `POST /vms/{vmID}/console/ticket` first, then connect
         with the returned short-lived single-use `ticket` query parameter.
 
-        The server negotiates the `binary` websocket subprotocol and bridges
-        websocket binary frames to the VM's loopback-only VNC listener. When
+        With `intent=vnc` (the default) the server negotiates the `binary`
+        websocket subprotocol and bridges websocket binary frames to the VM's
+        loopback-only VNC listener. With `intent=serial` the server negotiates
+        the `text` subprotocol and bridges UTF-8 terminal bytes to the domain's
+        serial console (libvirt `virDomainOpenConsole`). The intent must match
+        the one the ticket was issued for — a mismatch returns 401. When
         daemon TLS is enabled, callers must use `wss://`; reverse-proxy
         deployments may forward that fact with `X-Forwarded-Proto: https`.
       parameters:
@@ -1204,6 +1224,14 @@ paths:
           schema:
             type: string
           description: Single-use console ticket issued by `POST /vms/{vmID}/console/ticket`.
+        - in: query
+          name: intent
+          required: false
+          schema:
+            type: string
+            enum: [vnc, serial]
+            default: vnc
+          description: Console flavour to attach; must match the ticket's intent.
       responses:
         '101':
           description: Switching Protocols — websocket proxy established.
@@ -4676,11 +4704,15 @@ components:
             type: string
     ConsoleTicket:
       type: object
-      required: [ticket, expires_at, websocket_url]
+      required: [ticket, intent, expires_at, websocket_url]
       properties:
         ticket:
           type: string
           description: Single-use opaque token; pass to the websocket endpoint.
+        intent:
+          type: string
+          enum: [vnc, serial]
+          description: Console flavour the ticket was issued for.
         expires_at:
           type: string
           format: date-time
