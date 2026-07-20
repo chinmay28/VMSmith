@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -25,16 +26,11 @@ func TestCreateVM_VNCPasswordRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /vms: %v", err)
 	}
-	if resp.StatusCode != http.StatusUnprocessableEntity && resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 or 422", resp.StatusCode)
-	}
-	if resp.StatusCode == http.StatusUnprocessableEntity {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if !strings.Contains(string(body), "vnc_password_key_missing") {
-			t.Fatalf("422 body = %s, want vnc_password_key_missing", body)
-		}
-		return
+	// MockManager never enforces the password key unless explicitly toggled,
+	// so the create must succeed here; the key-missing 422 path has its own
+	// dedicated test below.
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -148,5 +144,123 @@ func TestCreateVM_VNCPasswordTooLong(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "invalid_vnc_password") {
 		t.Errorf("body = %s, want invalid_vnc_password", body)
+	}
+}
+
+// TestCreateVM_VNCPasswordKeyMissing422 exercises the misconfigured-daemon
+// path deterministically: a create that requests a VNC password while
+// daemon.console.password_key is unset fails fast with 422
+// vnc_password_key_missing before any resource is allocated.
+func TestCreateVM_VNCPasswordKeyMissing422(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+	mockMgr.VNCPasswordKeyMissing = true
+
+	spec := types.VMSpec{
+		Name:        "vnc-no-key",
+		Image:       "ubuntu-22.04",
+		VNCPassword: "hunter2",
+	}
+	resp, err := http.Post(ts.URL+"/api/v1/vms", "application/json", jsonBody(t, spec))
+	if err != nil {
+		t.Fatalf("POST /vms: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "vnc_password_key_missing") {
+		t.Fatalf("422 body = %s, want vnc_password_key_missing", body)
+	}
+}
+
+// TestUpdateVM_VNCPasswordPreservedAcrossCPUChange locks in the contract on
+// the most subtle update path: a PATCH that does not touch vnc_password must
+// carry the stored hash/enc artifacts through unchanged (the LibvirtManager
+// decrypts and re-injects the password when redefining the domain XML).
+func TestUpdateVM_VNCPasswordPreservedAcrossCPUChange(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:              "vm-vnc-keep",
+		Name:            "keep",
+		State:           types.VMStateStopped,
+		Spec:            types.VMSpec{Name: "keep", CPUs: 2, RAMMB: 2048},
+		VNCPasswordHash: "mock-bcrypt:hunter2",
+		VNCPasswordEnc:  "mock-aesgcm:hunter2",
+	})
+
+	resp := patchJSON(t, ts.URL+"/api/v1/vms/vm-vnc-keep", types.VMUpdateSpec{CPUs: 4})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "hunter2") {
+		t.Errorf("PATCH response leaks vnc secrets: %s", body)
+	}
+
+	stored, err := mockMgr.Get(context.Background(), "vm-vnc-keep")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.Spec.CPUs != 4 {
+		t.Errorf("cpus = %d, want 4", stored.Spec.CPUs)
+	}
+	if stored.VNCPasswordHash != "mock-bcrypt:hunter2" || stored.VNCPasswordEnc != "mock-aesgcm:hunter2" {
+		t.Errorf("vnc artifacts not preserved across cpu change: hash=%q enc=%q",
+			stored.VNCPasswordHash, stored.VNCPasswordEnc)
+	}
+}
+
+// TestCloneVM_StripsVNCPasswordArtifacts locks in the documented clone
+// contract: a clone of a VNC-protected VM does NOT inherit the password —
+// its console comes up unauthenticated (mirroring the GPU-clear semantics)
+// and the operator must set a fresh password explicitly.
+func TestCloneVM_StripsVNCPasswordArtifacts(t *testing.T) {
+	ts, mockMgr, cleanup := testServer(t)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{
+		ID:              "vm-vnc-src",
+		Name:            "src",
+		State:           types.VMStateStopped,
+		Spec:            types.VMSpec{Name: "src", CPUs: 2, RAMMB: 2048},
+		VNCPasswordHash: "mock-bcrypt:hunter2",
+		VNCPasswordEnc:  "mock-aesgcm:hunter2",
+	})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-vnc-src/clone", "application/json",
+		strings.NewReader(`{"name":"src-clone"}`))
+	if err != nil {
+		t.Fatalf("POST clone: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("clone status = %d, want 200/201; body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "hunter2") {
+		t.Errorf("clone response leaks vnc secrets: %s", body)
+	}
+
+	cloneID := extractVMID(t, body)
+	cloned, err := mockMgr.Get(context.Background(), cloneID)
+	if err != nil {
+		t.Fatalf("Get clone: %v", err)
+	}
+	if cloned.VNCPasswordHash != "" || cloned.VNCPasswordEnc != "" {
+		t.Errorf("clone inherited vnc artifacts: hash=%q enc=%q",
+			cloned.VNCPasswordHash, cloned.VNCPasswordEnc)
+	}
+
+	source, err := mockMgr.Get(context.Background(), "vm-vnc-src")
+	if err != nil {
+		t.Fatalf("Get source: %v", err)
+	}
+	if source.VNCPasswordHash == "" || source.VNCPasswordEnc == "" {
+		t.Errorf("source lost its vnc artifacts after clone")
 	}
 }

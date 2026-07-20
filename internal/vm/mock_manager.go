@@ -41,6 +41,13 @@ type MockManager struct {
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
 	CreateDelay           time.Duration
+
+	// VNCPasswordKeyMissing simulates a daemon with no
+	// daemon.console.password_key configured: Create/Update calls that
+	// carry a VNC password fail with the same typed
+	// vnc_password_key_missing error the LibvirtManager returns, so API
+	// tests can exercise the 422 path deterministically.
+	VNCPasswordKeyMissing bool
 }
 
 // NewMockManager creates a new mock VM manager.
@@ -106,6 +113,10 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	// synthetic hash/blob markers are stored, never the plaintext.
 	var vncHash, vncEnc string
 	if spec.VNCPassword != "" {
+		if m.VNCPasswordKeyMissing {
+			return nil, types.NewAPIError("vnc_password_key_missing",
+				"daemon.console.password_key must be configured before setting VNC passwords")
+		}
 		vncHash = "mock-bcrypt:" + spec.VNCPassword
 		vncEnc = "mock-aesgcm:" + spec.VNCPassword
 		storedSpec.VNCPassword = ""
@@ -245,6 +256,9 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 		} else if *patch.VNCPassword == "" {
 			vm.VNCPasswordHash = ""
 			vm.VNCPasswordEnc = ""
+		} else if m.VNCPasswordKeyMissing {
+			return nil, types.NewAPIError("vnc_password_key_missing",
+				"daemon.console.password_key must be configured before setting VNC passwords")
 		} else {
 			vm.VNCPasswordHash = "mock-bcrypt:" + *patch.VNCPassword
 			vm.VNCPasswordEnc = "mock-aesgcm:" + *patch.VNCPassword

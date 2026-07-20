@@ -23,10 +23,6 @@ func hashVNCPassword(password string) (string, error) {
 	return string(h), nil
 }
 
-func verifyVNCPassword(hash, password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
-}
-
 func vncPasswordAEAD(passwordKey string) (cipher.AEAD, error) {
 	if strings.TrimSpace(passwordKey) == "" {
 		return nil, errVNCPasswordKeyMissing

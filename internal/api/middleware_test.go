@@ -56,7 +56,7 @@ func TestRedactSensitiveRawQuery_PreservesNonSensitiveAndMalformedParts(t *testi
 	}
 }
 
-func TestRequestLogger_RedactsSensitiveBodyFields(t *testing.T) {
+func TestRequestLogger_RedactsSensitiveJSONBodyFields(t *testing.T) {
 	if err := logger.Init("", logger.LevelDebug); err != nil {
 		t.Fatalf("init logger: %v", err)
 	}

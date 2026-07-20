@@ -171,6 +171,16 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		generatedAdminPassword = pw
 	}
 
+	// Fail fast when the spec requests a VNC password but the daemon has no
+	// password key configured (5.1.8) — before any resource (DHCP
+	// reservation, VM dir, overlay disk, provisioning ISO) is allocated.
+	// The deferred cleanup below also unwinds these on failure; this check
+	// avoids allocating them at all for a misconfigured daemon.
+	if spec.VNCPassword != "" && strings.TrimSpace(m.cfg.Daemon.Console.PasswordKey) == "" {
+		return nil, types.NewAPIError("vnc_password_key_missing",
+			"daemon.console.password_key must be configured before setting VNC passwords")
+	}
+
 	// Validate network attachments
 	if len(spec.Networks) > 0 {
 		if err := ValidateNetworkAttachments(spec.Networks); err != nil {
@@ -396,6 +406,14 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 	netMgr := network.NewManager(m.conn, m.cfg)
 	if err := netMgr.EnsureNetwork(); err != nil {
 		return nil, fmt.Errorf("ensuring NAT network: %w", err)
+	}
+
+	// The clone intentionally does not inherit the source's VNC password
+	// (mirroring the clone-clears-GPUs semantics); surface the security
+	// downgrade in the log so the operator can set a fresh password.
+	if sourceVM.VNCPasswordHash != "" {
+		logger.Warn("daemon", "clone does not inherit the source VM's VNC password; the clone's console is unauthenticated until a password is set",
+			"source_vm", sourceID, "clone_name", newName)
 	}
 
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())

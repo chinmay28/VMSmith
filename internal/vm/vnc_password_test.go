@@ -3,6 +3,8 @@ package vm
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestVNCPasswordEncryptDecryptRoundTrip(t *testing.T) {
@@ -70,11 +72,11 @@ func TestVNCPasswordHashVerify(t *testing.T) {
 	if hash == "hunter2" || !strings.HasPrefix(hash, "$2") {
 		t.Errorf("hash does not look like bcrypt: %q", hash)
 	}
-	if !verifyVNCPassword(hash, "hunter2") {
-		t.Error("verify rejected the correct password")
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("hunter2")) != nil {
+		t.Error("hash does not verify against the correct password")
 	}
-	if verifyVNCPassword(hash, "hunter3") {
-		t.Error("verify accepted the wrong password")
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte("hunter3")) == nil {
+		t.Error("hash verifies against the wrong password")
 	}
 }
 

@@ -181,6 +181,14 @@ type VMSpec struct {
 	// redacts this field before the spec is stored or returned. Requires
 	// daemon.console.password_key to be configured. Empty means no VNC
 	// password (the historical behaviour).
+	//
+	// Two caveats operators should know: QEMU's RFB implementation only
+	// honours the first 8 characters of the password (longer values are
+	// accepted and stored but silently truncated by QEMU at auth time),
+	// and Clone does NOT carry the password over — a clone of a
+	// VNC-protected VM boots with an unauthenticated console until a
+	// password is set explicitly, mirroring the clone-clears-GPUs
+	// semantics.
 	VNCPassword string `json:"vnc_password,omitempty" yaml:"vnc_password,omitempty"`
 }
 
