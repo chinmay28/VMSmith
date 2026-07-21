@@ -361,11 +361,11 @@ func (m *Manager) ImportOVA(ovaPath, imageName string) (*OVAImportResult, error)
 		return nil, fmt.Errorf("OVF descriptor references no disk file")
 	}
 
-	// The href is relative to the descriptor. Reject traversal.
-	if filepath.IsAbs(diskHref) || strings.Contains(diskHref, "..") {
+	cleanDiskHref, ok := safeRelativeOVFDiskPath(diskHref)
+	if !ok {
 		return nil, fmt.Errorf("OVF disk reference %q is not a safe relative path", diskHref)
 	}
-	diskPath := filepath.Join(filepath.Dir(ovfPath), diskHref)
+	diskPath := filepath.Join(filepath.Dir(ovfPath), cleanDiskHref)
 	if _, err := os.Stat(diskPath); err != nil {
 		return nil, fmt.Errorf("OVF-referenced disk %q not found: %w", diskHref, err)
 	}
@@ -489,13 +489,32 @@ func parseOVFDescriptor(descriptor []byte) (*OVAImportResult, string, error) {
 	}
 
 	var diskHref string
-	for _, f := range env.References.Files {
-		if f.ID == diskFileRef || diskFileRef == "" {
-			diskHref = f.Href
-			break
+	if diskFileRef != "" {
+		for _, f := range env.References.Files {
+			if f.ID == diskFileRef {
+				diskHref = f.Href
+				break
+			}
 		}
+	} else if len(env.References.Files) == 1 {
+		diskHref = env.References.Files[0].Href
 	}
 	return result, diskHref, nil
+}
+
+func safeRelativeOVFDiskPath(href string) (string, bool) {
+	href = strings.TrimSpace(href)
+	if href == "" || filepath.IsAbs(href) {
+		return "", false
+	}
+	clean := filepath.Clean(href)
+	if clean == "." || clean == ".." {
+		return "", false
+	}
+	if strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return clean, true
 }
 
 // memoryToMB converts an OVF memory quantity to MB given its allocation

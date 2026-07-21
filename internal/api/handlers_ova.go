@@ -86,8 +86,14 @@ func (s *Server) ImportVMOVA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Spool the upload to disk — OVAs are typically far too large to buffer.
-	spool, err := os.CreateTemp("", "vmsmith-ova-import-*.ova")
+	// Spool beside the durable images store rather than /tmp, which is often
+	// tmpfs and can fill up on multi-GB appliance uploads.
+	spoolDir := filepath.Dir(s.storageMgr.ImagePath(".ova-upload-spool"))
+	if err := os.MkdirAll(spoolDir, 0o755); err != nil {
+		writeErrorCode(w, http.StatusInternalServerError, "import_failed", "creating upload spool dir: "+err.Error())
+		return
+	}
+	spool, err := os.CreateTemp(spoolDir, "vmsmith-ova-import-*.ova")
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "import_failed", "creating upload spool: "+err.Error())
 		return

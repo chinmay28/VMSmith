@@ -273,6 +273,51 @@ func TestImportOVA_TraversalDiskHrefRejected(t *testing.T) {
 	}
 }
 
+func TestImportOVA_DiskHrefWithDoubleDotInFilenameAllowed(t *testing.T) {
+	installFakeQemuImg(t)
+	m := ovaTestManager(t)
+
+	dir := t.TempDir()
+	descriptor := `<?xml version="1.0"?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1">
+  <References><File ovf:href="disk..bak.vmdk" ovf:id="file1"/></References>
+  <DiskSection><Info/><Disk ovf:capacity="1" ovf:diskId="vmdisk1" ovf:fileRef="file1"/></DiskSection>
+  <VirtualSystem ovf:id="ok"><Info/><VirtualHardwareSection><Info/></VirtualHardwareSection></VirtualSystem>
+</Envelope>`
+	if err := os.WriteFile(filepath.Join(dir, "machine.ovf"), []byte(descriptor), 0o644); err != nil {
+		t.Fatalf("write ovf: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "disk..bak.vmdk"), []byte("disk"), 0o644); err != nil {
+		t.Fatalf("write disk: %v", err)
+	}
+
+	if _, err := m.ImportOVA(filepath.Join(dir, "machine.ovf"), "dotdot-ok"); err != nil {
+		t.Fatalf("ImportOVA: %v", err)
+	}
+}
+
+func TestParseOVFDescriptor_DiskSectionMissingDoesNotGrabFirstReference(t *testing.T) {
+	descriptor := []byte(`<?xml version="1.0"?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1">
+  <References>
+    <File ovf:href="manifest.mf" ovf:id="manifest"/>
+    <File ovf:href="disk1.vmdk" ovf:id="disk1"/>
+  </References>
+  <VirtualSystem ovf:id="appliance"><Info/><VirtualHardwareSection><Info/></VirtualHardwareSection></VirtualSystem>
+</Envelope>`)
+
+	parsed, diskHref, err := parseOVFDescriptor(descriptor)
+	if err != nil {
+		t.Fatalf("parseOVFDescriptor: %v", err)
+	}
+	if parsed.Name != "appliance" {
+		t.Fatalf("Name = %q, want appliance", parsed.Name)
+	}
+	if diskHref != "" {
+		t.Fatalf("diskHref = %q, want empty when DiskSection is absent and references are ambiguous", diskHref)
+	}
+}
+
 func TestImportOVA_BareOVFWithSiblingDisk(t *testing.T) {
 	installFakeQemuImg(t)
 	m := ovaTestManager(t)
