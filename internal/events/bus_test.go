@@ -253,15 +253,10 @@ func TestBusSlowSubscriberIsDropped(t *testing.T) {
 	const total = subscriberBufSize + 32
 	for i := range total {
 		bus.Publish(&types.Event{Type: "tick", Message: fmt.Sprintf("%d", i)})
-	}
-
-	deadline := time.After(2 * time.Second)
-	for received := 0; received < total; {
 		select {
 		case <-fastCh:
-			received++
-		case <-deadline:
-			t.Fatalf("fast subscriber received %d/%d before timeout", received, total)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("fast subscriber missed event %d/%d before timeout", i+1, total)
 		}
 	}
 
