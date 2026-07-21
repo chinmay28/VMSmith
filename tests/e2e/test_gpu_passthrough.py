@@ -33,8 +33,14 @@ class TestGPUPassthrough:
         resp = api_get("/host/gpus")
         assert resp.status_code == 200, f"host gpus failed: {resp.text}"
         gpus = resp.json()
-        match = [g for g in gpus if g["address"].endswith(gpu_address.lstrip("0")) or g["address"] == gpu_address]
+        match = [
+            g
+            for g in gpus
+            if g["address"].endswith(gpu_address.lstrip("0"))
+            or g["address"] == gpu_address
+        ]
         assert gpus, "host reported no assignable GPUs"
+        assert match, f"requested GPU {gpu_address} was not reported as assignable: {gpus}"
 
         spec = {
             "name": "e2e-gpu-guest",

@@ -61,6 +61,7 @@ class TestScheduleFiresSnapshotOnRealVM:
                     time.sleep(3)
             assert success_run is not None, "schedule never recorded a successful run"
             assert success_run["vm_id"] == vm_id
+            assert success_run["actor"] == "scheduler"
 
             # The auto-snapshot naming contract: auto-<schedule-name>-*.
             resp = api_get(f"/vms/{vm_id}/snapshots")

@@ -70,5 +70,5 @@ class TestWindowsGuestBoots:
         ssh_user = request.config.getoption("--windows-ssh-user")
         if ssh_user:
             wait_for_ssh(ip, user=ssh_user, timeout=max(helpers.VM_SSH_TIMEOUT, 600))
-            out = ssh_run(ip, "ver", user=ssh_user)
+            out = ssh_run(ip, "cmd /c ver", user=ssh_user)
             assert "Windows" in out, f"unexpected `ver` output: {out}"
