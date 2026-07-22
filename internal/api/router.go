@@ -261,6 +261,10 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				// websocket proxy itself is handled on GET /console.
 				r.Post("/console/ticket", s.IssueConsoleTicket)
 				r.Get("/console", s.ProxyConsole)
+
+				// Post-create GPU passthrough lifecycle (5.7.10).
+				r.Post("/gpus", s.withRequestBodyLimit(s.AttachGPU))
+				r.Delete("/gpus/{gpuAddr}", s.DetachGPU)
 			})
 		})
 

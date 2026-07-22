@@ -1993,6 +1993,118 @@ export interface paths {
         };
         trace?: never;
     };
+    "/vms/{vmID}/gpus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a host GPU to an existing VM (post-create)
+         * @description Adds a host GPU (PCI address, long `0000:01:00.0` or short
+         *     `01:00.0` form) to the VM's passthrough set — roadmap 5.7.10. The
+         *     stored spec and persistent domain XML are updated, so the change
+         *     applies at the next power cycle. Attaching to a RUNNING VM
+         *     requires `force: true`, which live-attaches the device (risky —
+         *     vfio rebinding can wedge the host driver, and the guest typically
+         *     needs a reboot to initialise the GPU). Errors: 400 `invalid_gpu`,
+         *     409 `gpu_already_attached` / `vm_running`, 403 `quota_exceeded`
+         *     (aggregate `quotas.max_total_gpus`), 404 unknown VM.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Host GPU PCI address (long or short form). */
+                        address: string;
+                        /** @description Live-attach when the VM is running (risky). */
+                        force?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated VM */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                403: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/gpus/{gpuAddr}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Detach a host GPU from an existing VM
+         * @description Removes a host GPU from the VM's passthrough set — roadmap 5.7.10.
+         *     Persistent-config only: a running VM keeps the device until its
+         *     next power cycle (no live detach is attempted). Errors: 400
+         *     `invalid_gpu`, 404 `gpu_not_attached` / unknown VM.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                    /** @description PCI address of the GPU to detach (long or short form). */
+                    gpuAddr: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated VM */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/console/ticket": {
         parameters: {
             query?: never;
