@@ -34,7 +34,12 @@ vmsmith/
 │   │   ├── handlers_image.go    # Image upload/download/list/delete
 │   │   ├── handlers_network.go  # Port forward + host interface endpoints
 │   │   ├── handlers_logs.go     # Log viewer endpoint (GET /api/v1/logs)
-│   │   ├── handlers_console.go  # Console ticket issuance endpoint (POST /api/v1/vms/{id}/console/ticket)
+│   │   ├── handlers_console.go  # Console ticket issuance endpoint (POST /api/v1/vms/{id}/console/ticket, ?intent=vnc|serial|rdp)
+│   │   ├── handlers_console_ws.go # Console websocket proxy (GET /api/v1/vms/{id}/console — VNC binary / serial text / RDP guacamole subprotocols)
+│   │   ├── guacd.go             # Guacamole protocol codec + guacd client handshake for the RDP console intent (5.6.13)
+│   │   ├── handlers_gpu.go      # GPU attach/detach endpoints (POST /vms/{id}/gpus, DELETE /vms/{id}/gpus/{addr} — 5.7.10)
+│   │   ├── handlers_hosts.go    # Multi-host overview endpoint (GET /api/v1/hosts — 5.5.4)
+│   │   ├── handlers_ova.go      # OVA export/import endpoints (GET /vms/{id}/export/ova, POST /vms/import/ova — 5.3)
 │   │   └── middleware.go        # Request logging, CORS, error response helpers
 │   ├── cli/
 │   │   ├── root.go              # Root Cobra command, global --config flag
@@ -65,7 +70,7 @@ vmsmith/
 │   │   └── discover.go          # Host interface enumeration via /sys/class/net
 │   ├── storage/
 │   │   ├── image.go             # qcow2 import/export/list (shells out to qemu-img)
-│   │   ├── ova.go               # OVA/OVF export + import (OVF descriptor gen/parse, qcow2↔vmdk via qemu-img, tar assembly/extraction with traversal + bomb guards)
+│   │   ├── ova.go               # OVA/OVF export + import (OVF descriptor gen/parse, qcow2↔vmdk via qemu-img, tar assembly/extraction with traversal + bomb guards; transient import/upload state lives in a mode-0700 `.ova-work` dir under storage.base_dir, swept for stale entries at daemon startup)
 │   │   └── transfer.go          # SCP push/pull helpers for image transfer
 │   ├── store/
 │   │   ├── bolt.go              # bbolt CRUD: VMs, images, port forwards
@@ -74,7 +79,11 @@ vmsmith/
 │   │   ├── manager.go           # VMManager interface definition
 │   │   ├── lifecycle.go         # LibvirtManager: Create/Start/Stop/Delete/Get/List + snapshots
 │   │   ├── quota_manager.go     # Optional quota enforcement wrapper + usage aggregation
-│   │   ├── domain.go            # libvirt XML generation, multi-network, cloud-init ISO, OS-family device tuning (Linux: virtio/utc; Windows: SATA/e1000e/localtime/Hyper-V/tablet/QXL/virtio-win), VFIO GPU passthrough <hostdev> entries
+│   │   ├── domain.go            # libvirt XML generation, multi-network, cloud-init ISO, OS-family device tuning (Linux: virtio/utc; Windows: SATA/e1000e/localtime/Hyper-V/tablet/QXL/virtio-win), VFIO GPU passthrough <hostdev> entries, UEFI/Secure Boot firmware features + swtpm-backed vTPM (5.6.9)
+│   │   ├── autounattend.go      # Generated Autounattend.xml for unattended Windows ISO installs (5.6.11 — firmware-matched partitioning, edition select, locale, RDP/WinRM enablement)
+│   │   ├── gpu_lifecycle.go     # Post-create GPU attach/detach (5.7.10): spec update + persistent domain redefine; live-attach gated behind force
+│   │   ├── serial_console.go    # OpenSerialConsole via libvirt virDomainOpenConsole (serial console websocket backend)
+│   │   ├── multihost.go         # MultiHostManager (5.5): routes vm.Manager calls across per-host LibvirtManagers; placement via spec.host; concurrent List fan-out with stored-state fallback for unreachable hosts; TTL-cached reachability probes
 │   │   └── mock_manager.go      # In-memory mock VMManager for tests
 │   └── web/
 │       ├── embed.go             # go:embed dist/*
@@ -458,6 +467,7 @@ Key config fields:
   wget -O /var/lib/vmsmith/images/rocky9.qcow2 \
     https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
   ```
+- **Stale OVA import state:** Transient OVA import/upload files (extracted archives, upload spools) live in a mode-0700 `.ova-work` directory under `storage.base_dir` — never in the world-readable images dir or tmpfs-backed `/tmp`. If the daemon crashes mid-import, leftovers are swept automatically at the next startup (`storage.Manager.SweepStaleOVAWork`, mirroring the stale-dnsmasq cleanup). A failed `qemu-img convert` during import also removes its partial qcow2 so a retry doesn't hit "image already exists".
 - **Stale DHCP reservations:** If VM creation fails after a DHCP reservation is registered, the reservation is automatically cleaned up. If a previous failed create left a reservation with the same VM name, `RemoveDHCPHostByName` removes it before adding the new one (both MAC and name are unique keys in libvirt DHCP host entries).
 - **SSH key injection in CLI:** Use `"$(cat ~/.ssh/id_ed25519.pub)"` — not `"$(~/.ssh/id_ed25519.pub)"` (which executes the file as a shell command).
 - **CGO_ENABLED=0 builds fail:** The `libvirt.org/go/libvirt` package requires cgo.
@@ -514,7 +524,7 @@ POST   /templates                      Create template (CreateTemplateRequest bo
 PATCH  /templates/{id}                 Update template description / tags (TemplateUpdateSpec: empty `description` = no change; nil `tags` = no change; explicit `[]` clears the tag set; image, resources, name, networks immutable post-create)
 DELETE /templates/{id}                 Delete template
 POST   /templates/bulk_delete          Delete multiple templates in a single request. Body: `{"ids": [...]}` or `{"tag": "..."}` (exactly one). Tag matching is case-insensitive. Returns `{"results": [{id, success, code?, message?}]}`. Emits one `template.deleted` event per successful target with `bulk=true`. CLI: `vmsmith template delete --tag <tag>`.
-GET    /hosts                          Multi-host overview (5.5.4): one row per managed libvirt host (implicit `local` first) with URI / description / default marker / live `reachable` probe (multi-host mode only) and per-host allocation aggregates (VM count, vCPUs, RAM, disk, GPUs). CLI: `vmsmith host list [--json]`. Placement is chosen at create via `spec.host` / `--host` (unknown → 400 `invalid_host`); see docs/MULTI_HOST.md (v1: shared storage, no live migration).
+GET    /hosts                          Multi-host overview (5.5.4): one row per managed libvirt host (implicit `local` first) with URI / description / default marker / live `reachable` probe (multi-host mode only; cheap single-RPC ping with a 5s verdict cache so Dashboard polls don't restorm connections) and per-host allocation aggregates (VM count, vCPUs, RAM, disk, GPUs). CLI: `vmsmith host list [--json]`. Placement is chosen at create via `spec.host` / `--host` (unknown → 400 `invalid_host`); the aggregate VM `List` fans out concurrently and falls back to shared-store stored state for VMs on an unreachable host (whole-fleet error only when every host is down); VMs whose stored host was removed from config route to the default host. See docs/MULTI_HOST.md (v1: shared storage, no live migration).
 GET    /host/interfaces                List host network interfaces
 GET    /host/gpus                      List host GPUs (PCI display controllers) available for VFIO passthrough. Each entry: `{address, vendor_id, device_id, vendor, class, driver, iommu_group, group_devices[]}`. `group_devices` lists every assignable PCI function sharing the GPU's IOMMU group (GPU + HDMI audio; bridges excluded) — the set vmsmith attaches when the GPU is requested. Read via sysfs (`/sys/bus/pci/devices` + `/sys/kernel/iommu_group`); returns `[]` on a host with no GPU / no IOMMU. CLI: `vmsmith host gpus` (`--json` for scripting). See `docs/GPU_PASSTHROUGH.md`.
 GET    /host/stats                     Host capacity + utilisation snapshot used by the GUI Dashboard cards. Returns `vm_count`, `cpu` / `ram` / `disk` `HostResourceUsageSummary` (RAM + disk in bytes, CPU as `0-100` percentage), and `event_stream_connections` (active SSE clients). CLI mirrors via `vmsmith host stats` (thin HTTP client; `--json` for raw pass-through).

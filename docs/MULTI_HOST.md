@@ -106,8 +106,22 @@ vmsmith host list --json
 `GET /api/v1/hosts` returns one row per host — the implicit `local` host
 first — with per-host **allocation** (VM count, vCPUs, RAM, disk, GPUs of
 the VMs placed there) plus a live `reachable` probe when the daemon runs
-in multi-host mode. The GUI Dashboard renders the same data as a Hosts
+in multi-host mode. The probe is a single cheap libvirt RPC
+(`GetLibVersion`) rather than a fleet enumeration, and verdicts are cached
+for 5 seconds so repeated Dashboard polls do not restorm every host
+connection. The GUI Dashboard renders the same data as a Hosts
 table whenever more than one host is configured.
+
+### Partial outages
+
+The aggregate VM `List` fans out to all hosts concurrently. When one
+host's libvirt is unreachable, its VMs are still returned using the
+shared metadata store's stored state (name, spec, last known state) —
+the fleet view stays complete, and lifecycle operations routed to the
+down host fail cleanly. A whole-fleet error is returned only when every
+host is unreachable. VMs whose stored `spec.host` no longer matches any
+configured host are routed to the default host for both `Get` and
+`List`, so removing a host from `hosts:` never makes its VMs invisible.
 
 Live utilisation (CPU %, IO rates) remains per-VM via `/vms/{id}/stats`;
 the hosts view is about placement capacity.
