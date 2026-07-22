@@ -101,6 +101,45 @@ func New(cfg *config.Config) (*Daemon, error) {
 	var vmMgr vm.Manager = libvirtMgr
 	logger.Info("daemon", "connected to libvirt", "uri", cfg.Libvirt.URI)
 
+	// Multi-host topology (roadmap 5.5): when hosts are configured the
+	// local manager becomes the "local" member of a routing manager that
+	// also connects to every remote libvirt URI. Placement is decided at
+	// create time via spec.host; see docs/MULTI_HOST.md.
+	var remoteLibvirtMgrs []*vm.LibvirtManager
+	if len(cfg.Hosts) > 0 {
+		if err := cfg.ValidateHosts(); err != nil {
+			libvirtMgr.Close()
+			s.Close()
+			return nil, err
+		}
+		hostMgrs := map[string]vm.Manager{config.LocalHostName: libvirtMgr}
+		for _, h := range cfg.Hosts {
+			remoteCfg := *cfg
+			remoteCfg.Libvirt.URI = h.URI
+			remote, rerr := vm.NewLibvirtManager(&remoteCfg, s)
+			if rerr != nil {
+				for _, mgr := range hostMgrs {
+					_ = mgr.Close()
+				}
+				s.Close()
+				logger.Error("daemon", "connecting to remote host failed", "host", h.Name, "uri", h.URI, "error", rerr.Error())
+				return nil, fmt.Errorf("connecting to host %q (%s): %w", h.Name, h.URI, rerr)
+			}
+			hostMgrs[h.Name] = remote
+			remoteLibvirtMgrs = append(remoteLibvirtMgrs, remote)
+			logger.Info("daemon", "connected to remote libvirt host", "host", h.Name, "uri", h.URI)
+		}
+		multi, merr := vm.NewMultiHostManager(config.LocalHostName, hostMgrs)
+		if merr != nil {
+			for _, mgr := range hostMgrs {
+				_ = mgr.Close()
+			}
+			s.Close()
+			return nil, merr
+		}
+		vmMgr = multi
+	}
+
 	// Set up the NAT network.
 	conn, err := libvirt.NewConnect(cfg.Libvirt.URI)
 	if err != nil {
@@ -115,6 +154,15 @@ func New(cfg *config.Config) (*Daemon, error) {
 	logger.Info("daemon", "NAT network ready", "network", cfg.Network.Name)
 
 	storageMgr := storage.NewManager(cfg, s)
+
+	// Sweep transient OVA import/upload state left behind by an unclean
+	// shutdown (mirrors the stale-dnsmasq cleanup pattern). Best-effort.
+	if removed, err := storageMgr.SweepStaleOVAWork(); err != nil {
+		logger.Warn("daemon", "stale OVA work sweep incomplete", "removed", fmt.Sprintf("%d", removed), "error", err.Error())
+	} else if removed > 0 {
+		logger.Info("daemon", "removed stale OVA work entries", "count", fmt.Sprintf("%d", removed))
+	}
+
 	portFwd := network.NewPortForwarder(s)
 
 	// Create event bus backed by the store.  Create early so we can emit
@@ -123,6 +171,9 @@ func New(cfg *config.Config) (*Daemon, error) {
 	eventBus := events.New(s)
 	logger.Info("daemon", "event bus initialised")
 	libvirtMgr.SetEventBus(eventBus)
+	for _, remote := range remoteLibvirtMgrs {
+		remote.SetEventBus(eventBus)
+	}
 
 	// Restore port forwarding rules.
 	if err := portFwd.RestoreAll(); err != nil {
@@ -172,6 +223,9 @@ func New(cfg *config.Config) (*Daemon, error) {
 
 	apiServer := api.NewServerWithMetrics(vmMgr, storageMgr, portFwd, s, cfg, web.Handler(), metricsMgr)
 	apiServer.SetEventBus(eventBus)
+	if multi, ok := vmMgr.(*vm.MultiHostManager); ok {
+		apiServer.SetHostConnectivityReporter(multi)
+	}
 
 	// Webhook subsystem.  Always wire so the API surface is available; if no
 	// webhooks are registered the manager simply has no workers.

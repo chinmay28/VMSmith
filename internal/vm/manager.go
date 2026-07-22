@@ -33,6 +33,15 @@ type Manager interface {
 	ListSnapshots(ctx context.Context, vmID string) ([]*types.Snapshot, error)
 	DeleteSnapshot(ctx context.Context, vmID string, snapshotName string) error
 
+	// GPU passthrough lifecycle (roadmap 5.7.10). Both calls update the
+	// stored spec and the persistent domain XML; changes apply at the next
+	// power cycle. AttachGPU on a running VM requires force=true, which
+	// live-attaches the device (risky — see the CLI --force-attach gate).
+	// DetachGPU never live-detaches. Typed errors: invalid_gpu,
+	// gpu_already_attached, gpu_not_attached, vm_running.
+	AttachGPU(ctx context.Context, id string, pciAddr string, force bool) (*types.VM, error)
+	DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error)
+
 	// Console access — returns the host/port (vnc) or pty path (serial)
 	// the daemon's console proxy should dial.  Returns a typed
 	// `vm_not_running` API error when the VM is stopped (graphics + pty

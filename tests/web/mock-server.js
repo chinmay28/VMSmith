@@ -459,6 +459,25 @@ const server = http.createServer(async (req, res) => {
     }, { "Cache-Control": "no-store" });
   }
 
+  // Multi-host overview (5.5.4). Two hosts so the Dashboard Hosts table
+  // renders; the seeded VMs all live on the implicit local host.
+  if (p === "/api/v1/hosts" && method === "GET") {
+    const all = Array.from(vms.values());
+    const agg = (list) => ({
+      vm_count: list.length,
+      cpus: list.reduce((n, v) => n + (v.spec.cpus || 0), 0),
+      ram_mb: list.reduce((n, v) => n + (v.spec.ram_mb || 0), 0),
+      disk_gb: list.reduce((n, v) => n + (v.spec.disk_gb || 0), 0),
+      gpus: list.reduce((n, v) => n + ((v.spec.gpus || []).length), 0),
+    });
+    const localVMs = all.filter((v) => !v.spec.host || v.spec.host === "local");
+    const hv2VMs = all.filter((v) => v.spec.host === "hv2");
+    return json(res, 200, [
+      { name: "local", uri: "qemu:///system", default: true, reachable: true, ...agg(localVMs) },
+      { name: "hv2", uri: "qemu+ssh://root@hv2.example.com/system", description: "rack 2", default: false, reachable: false, ...agg(hv2VMs) },
+    ]);
+  }
+
   // Console ticket issuance (5.1.7 / 5.1.9). Mirrors the daemon contract:
   // intent defaults to vnc, unknown intents 400, stopped VMs 409.
   const consoleTicketMatch = p.match(/^\/api\/v1\/vms\/([^/]+)\/console\/ticket$/);

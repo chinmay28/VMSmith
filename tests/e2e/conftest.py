@@ -78,6 +78,26 @@ def pytest_addoption(parser):
         help="Second host interface for dual-NIC tests (env: VMSMITH_HOST_IFACE2)",
     )
     g.addoption(
+        "--windows-image",
+        default=os.environ.get("VMSMITH_WINDOWS_IMAGE", ""),
+        help="Path to a prepared Windows qcow2 image — enables the windows marker tier (env: VMSMITH_WINDOWS_IMAGE)",
+    )
+    g.addoption(
+        "--windows-ssh-user",
+        default=os.environ.get("VMSMITH_WINDOWS_SSH_USER", ""),
+        help="Optional SSH username for Windows images with OpenSSH Server baked in (env: VMSMITH_WINDOWS_SSH_USER)",
+    )
+    g.addoption(
+        "--gpu",
+        default=os.environ.get("VMSMITH_GPU", ""),
+        help="PCI address of a passthrough-eligible host GPU (e.g. 0000:01:00.0) — enables the gpu marker tier (env: VMSMITH_GPU)",
+    )
+    g.addoption(
+        "--gpu-smi-cmd",
+        default=os.environ.get("VMSMITH_GPU_SMI_CMD", ""),
+        help="Optional in-guest SMI command to verify the driver stack (e.g. nvidia-smi, rocm-smi) (env: VMSMITH_GPU_SMI_CMD)",
+    )
+    g.addoption(
         "--ip-timeout",
         default=int(os.environ.get("VMSMITH_IP_TIMEOUT", "120")),
         type=int,
@@ -102,6 +122,10 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "gui: GUI/Playwright E2E tests")
     config.addinivalue_line("markers", "networking: multi-NIC networking tests")
     config.addinivalue_line("markers", "portforward: port forwarding tests")
+    config.addinivalue_line("markers", "metrics: real-VM metrics-under-load tests")
+    config.addinivalue_line("markers", "schedules: real-VM scheduled-operations tests")
+    config.addinivalue_line("markers", "windows: Windows guest tests (require --windows-image)")
+    config.addinivalue_line("markers", "gpu: GPU passthrough tests (require --gpu)")
 
     # Propagate CLI options into helpers module-level config.
     # getoption() returns None when pytest_addoption hasn't run yet (e.g. during
@@ -128,7 +152,7 @@ def pytest_collection_modifyitems(config, items):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session", autouse=True)
-def check_prerequisites():
+def check_prerequisites(request):
     """Verify the vmsmith binary and Rocky image exist."""
     # Check binary
     result = subprocess.run(
@@ -138,13 +162,18 @@ def check_prerequisites():
         f"vmsmith binary not found or broken at {helpers.VMSMITH_BIN}"
     )
 
-    # Check image
-    assert helpers.ROCKY_IMAGE, (
-        "Rocky image path required. Set --rocky-image or VMSMITH_ROCKY_IMAGE env var."
-    )
-    assert os.path.isfile(helpers.ROCKY_IMAGE), (
-        f"Rocky image not found: {helpers.ROCKY_IMAGE}"
-    )
+    # Check image. A Windows-only run (--windows-image without --rocky-image)
+    # is legal — every Linux-image test consumes the rocky_image fixture,
+    # which skips when the path is unset.
+    if helpers.ROCKY_IMAGE:
+        assert os.path.isfile(helpers.ROCKY_IMAGE), (
+            f"Rocky image not found: {helpers.ROCKY_IMAGE}"
+        )
+    else:
+        assert request.config.getoption("--windows-image"), (
+            "Rocky image path required. Set --rocky-image or VMSMITH_ROCKY_IMAGE "
+            "env var (or run the Windows tier with --windows-image)."
+        )
 
     # Check SSH key
     assert os.path.isfile(helpers.SSH_PRIVATE_KEY), (
@@ -155,7 +184,9 @@ def check_prerequisites():
 
 @pytest.fixture(scope="session")
 def rocky_image():
-    """Return the path to the Rocky Linux qcow2 image."""
+    """Return the path to the Rocky Linux qcow2 image (skip when unset)."""
+    if not helpers.ROCKY_IMAGE:
+        pytest.skip("--rocky-image not set — skipping Linux-image tests")
     return helpers.ROCKY_IMAGE
 
 
@@ -197,6 +228,25 @@ def host_interface2(request):
 def api_base_url():
     """Return the daemon API base URL."""
     return helpers.VMSMITH_API
+
+
+@pytest.fixture(scope="session")
+def windows_image(request):
+    """Return the Windows image path, skipping the tier when unset."""
+    image = request.config.getoption("--windows-image")
+    if not image:
+        pytest.skip("--windows-image not set — skipping Windows guest tests")
+    assert os.path.isfile(image), f"Windows image not found: {image}"
+    return image
+
+
+@pytest.fixture(scope="session")
+def gpu_address(request):
+    """Return the host GPU PCI address, skipping the tier when unset."""
+    addr = request.config.getoption("--gpu")
+    if not addr:
+        pytest.skip("--gpu not set — skipping GPU passthrough tests")
+    return addr
 
 
 # ---------------------------------------------------------------------------

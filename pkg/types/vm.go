@@ -141,6 +141,12 @@ type VMSpec struct {
 	// Mutable via VMUpdateSpec.NICModel (roadmap 5.6.12).
 	NICModel string `json:"nic_model,omitempty" yaml:"nic_model,omitempty"`
 
+	// Host selects which configured libvirt host the VM is placed on
+	// (roadmap 5.5.3). Empty means the implicit "local" host. Unknown
+	// names are rejected at create with 400 invalid_host. Placement is
+	// fixed post-create (no live migration in v1 — see docs/MULTI_HOST.md).
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
+
 	// Machine overrides the libvirt <os><type machine='...'/></os> machine
 	// type. Empty falls back to vmsmith's default ("pc-q35-6.2"). Useful for
 	// pinning a specific QEMU machine version when a host's libvirt has

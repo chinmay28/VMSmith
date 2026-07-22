@@ -61,6 +61,7 @@ var vmCreateCmd = &cobra.Command{
 		natGW, _ := cmd.Flags().GetString("nat-gw")
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
 		locked, _ := cmd.Flags().GetBool("locked")
+		hostName, _ := cmd.Flags().GetString("host")
 
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
@@ -108,6 +109,7 @@ var vmCreateCmd = &cobra.Command{
 			NatGateway:    natGW,
 			AutoStart:     autoStart,
 			Locked:        locked,
+			Host:          strings.TrimSpace(hostName),
 		}
 		if spec.InstallISO != "" {
 			spec.InstallImageIndex = installImageIndex
@@ -1266,6 +1268,7 @@ func init() {
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
 	vmCreateCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmCreateCmd.Flags().Bool("locked", false, "lock the VM (delete-protected) on create")
+	vmCreateCmd.Flags().String("host", "", "place the VM on this configured libvirt host (5.5.3; default: the local host)")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")
 	vmCreateCmd.Flags().String("nat-gw", "",

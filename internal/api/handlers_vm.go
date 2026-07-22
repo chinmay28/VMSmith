@@ -119,6 +119,11 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	// Placement (5.5.3): the target host must be one this daemon manages.
+	if !s.validSpecHost(spec.Host) {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_host", fmt.Sprintf("host %q is not configured on this daemon", strings.TrimSpace(spec.Host))))
+		return
+	}
 	if tags, err := normalizeTags(spec.Tags); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
@@ -714,6 +719,13 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_action",
 			"action must be one of: "+strings.Join(supportedBulkVMActionsList, ", ")))
+		return
+	}
+	// RBAC (3.1.5): the middleware classifies /vms/bulk as an operator
+	// endpoint so lifecycle fan-out works for operator keys, but bulk
+	// delete is destructive and stays admin-only.
+	if req.Action == "delete" && requestRole(r) < roleAdmin {
+		writeAPIError(w, http.StatusForbidden, types.NewAPIError("forbidden", "bulk delete requires the admin role"))
 		return
 	}
 	if len(req.IDs) == 0 {

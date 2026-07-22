@@ -62,6 +62,20 @@ type Server struct {
 	scheduleStore        ScheduleStore
 	scheduleController   ScheduleController
 	operationProgress    *operationProgressBroker
+
+	// Multi-host (roadmap 5.5): configured extra hosts, the local libvirt
+	// URI (for the implicit "local" row on /hosts), and an optional
+	// per-host connectivity reporter installed by the daemon when running
+	// a MultiHostManager.
+	hostsConfig     []config.HostConfig
+	localLibvirtURI string
+	hostReporter    HostConnectivityReporter
+}
+
+// SetHostConnectivityReporter installs a per-host reachability probe
+// (implemented by vm.MultiHostManager) used by GET /api/v1/hosts.
+func (s *Server) SetHostConnectivityReporter(r HostConnectivityReporter) {
+	s.hostReporter = r
 }
 
 // EventStreamConnections returns the number of in-flight SSE clients on
@@ -131,6 +145,8 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		shutdownNotify:       make(chan struct{}),
 		consoleSessions:      make(map[string]map[*activeConsoleSession]struct{}),
 		operationProgress:    newOperationProgressBroker(),
+		hostsConfig:          cfg.Hosts,
+		localLibvirtURI:      cfg.Libvirt.URI,
 	}
 	if setter, ok := vmMgr.(vm.ConsoleSessionTerminatorSetter); ok {
 		setter.SetConsoleSessionTerminator(s.closeConsoleSessionsForVM)
@@ -203,9 +219,11 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 			r.Post("/", s.withRequestBodyLimit(s.CreateVM))
 			r.Get("/", s.ListVMs)
 			r.Post("/bulk", s.withRequestBodyLimit(s.BulkVMAction))
+			r.Post("/import/ova", s.withUploadBodyLimit(s.ImportVMOVA))
 			r.Get("/stats/top", s.GetTopVMs)
 			r.Route("/{vmID}", func(r chi.Router) {
 				r.Get("/", s.GetVM)
+				r.Get("/export/ova", s.ExportVMOVA)
 				r.Post("/clone", s.withRequestBodyLimit(s.CloneVM))
 				r.Patch("/", s.withRequestBodyLimit(s.UpdateVM))
 				r.Delete("/", s.DeleteVM)
@@ -259,6 +277,10 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				// websocket proxy itself is handled on GET /console.
 				r.Post("/console/ticket", s.IssueConsoleTicket)
 				r.Get("/console", s.ProxyConsole)
+
+				// Post-create GPU passthrough lifecycle (5.7.10).
+				r.Post("/gpus", s.withRequestBodyLimit(s.AttachGPU))
+				r.Delete("/gpus/{gpuAddr}", s.DetachGPU)
 			})
 		})
 
@@ -283,6 +305,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 		})
 
 		// Host discovery and stats
+		// Multi-host overview (5.5.4)
+		r.Get("/hosts", s.ListHosts)
+
 		r.Get("/host/interfaces", s.ListHostInterfaces)
 		r.Get("/host/gpus", s.ListHostGPUs)
 		r.Get("/host/stats", s.GetHostStats)

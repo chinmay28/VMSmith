@@ -1156,6 +1156,83 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/gpus:
+    post:
+      tags: [VMs]
+      summary: Attach a host GPU to an existing VM (post-create)
+      description: |
+        Adds a host GPU (PCI address, long `0000:01:00.0` or short
+        `01:00.0` form) to the VM's passthrough set — roadmap 5.7.10. The
+        stored spec and persistent domain XML are updated, so the change
+        applies at the next power cycle. Attaching to a RUNNING VM
+        requires `force: true`, which live-attaches the device (risky —
+        vfio rebinding can wedge the host driver, and the guest typically
+        needs a reboot to initialise the GPU). Errors: 400 `invalid_gpu`,
+        409 `gpu_already_attached` / `vm_running`, 403 `quota_exceeded`
+        (aggregate `quotas.max_total_gpus`), 404 unknown VM.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+                  description: Host GPU PCI address (long or short form).
+                force:
+                  type: boolean
+                  description: Live-attach when the VM is running (risky).
+      responses:
+        '200':
+          description: Updated VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '403':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/gpus/{gpuAddr}:
+    delete:
+      tags: [VMs]
+      summary: Detach a host GPU from an existing VM
+      description: |
+        Removes a host GPU from the VM's passthrough set — roadmap 5.7.10.
+        Persistent-config only: a running VM keeps the device until its
+        next power cycle (no live detach is attempted). Errors: 400
+        `invalid_gpu`, 404 `gpu_not_attached` / unknown VM.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+        - in: path
+          name: gpuAddr
+          required: true
+          schema:
+            type: string
+          description: PCI address of the GPU to detach (long or short form).
+      responses:
+        '200':
+          description: Updated VM
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/console/ticket:
     post:
       tags: [Console]
@@ -1255,6 +1332,86 @@ paths:
         '502':
           $ref: '#/components/responses/APIError'
         '503':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/{vmID}/export/ova:
+    get:
+      tags: [VMs]
+      summary: Export a stopped VM as an OVA appliance
+      description: |
+        Packages the VM as a single-file OVA — an OVF 1.0 descriptor, a
+        streamOptimized VMDK converted (and flattened) from the VM's qcow2
+        disk via qemu-img, and a SHA256 manifest — and streams it as a tar
+        download. The VM must be stopped so the disk is quiescent; a running
+        VM returns 409 `vm_running`.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: OVA stream
+          content:
+            application/x-tar:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/import/ova:
+    post:
+      tags: [VMs]
+      summary: Import a VM from an OVA appliance
+      description: |
+        Multipart upload of a `.ova` archive. The appliance disk is
+        converted to qcow2 and registered as a VMSmith image (named
+        `<image_name>`, `<name>-ova`, or `<filename>-ova` in that
+        precedence), and a VM is created with the descriptor's CPU / RAM /
+        disk sizing (zero values fall back to the daemon's configured
+        defaults, exactly like `POST /vms`). Failures after the image is
+        registered roll the image back. Returns the created VM. Errors:
+        400 `invalid_ova` (bad extension, unreadable archive, missing
+        descriptor, traversal-unsafe disk reference), 400 `invalid_name` /
+        `duplicate_name` from VM validation, 429 `create_limit_reached`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The .ova archive.
+                name:
+                  type: string
+                  description: VM name (default = the descriptor's VirtualSystem name).
+                image_name:
+                  type: string
+                  description: Name for the registered base image (default `<name>-ova`).
+                ssh_pub_key:
+                  type: string
+                  description: SSH public key content injected into the created VM.
+                default_user:
+                  type: string
+                  description: Create this sudo user instead of enabling root SSH.
+      responses:
+        '201':
+          description: VM created from the appliance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '429':
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
@@ -1846,6 +2003,28 @@ paths:
           description: Template deleted
         '404':
           $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /hosts:
+    get:
+      tags: [Hosts]
+      summary: List managed libvirt hosts with per-host resource allocation
+      description: |
+        Multi-host overview (roadmap 5.5.4): one row per libvirt host this
+        daemon manages — the implicit `local` host first, then every
+        `hosts:` config entry — with the aggregate resources (VM count,
+        vCPUs, RAM, disk, GPUs) allocated to VMs placed on each host.
+        `reachable` is present only when the daemon runs a multi-host
+        manager with live per-host connections. See docs/MULTI_HOST.md.
+      responses:
+        '200':
+          description: Host rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostStatus'
         default:
           $ref: '#/components/responses/APIError'
   /host/interfaces:
@@ -4114,6 +4293,13 @@ components:
             have installed the virtio-net drivers in a Windows guest can
             pin "virtio" here for throughput. Any other value returns 400
             `invalid_nic_model`.
+        host:
+          type: string
+          description: >-
+            Placement (roadmap 5.5.3) — the configured libvirt host the VM
+            is created on. Empty/omitted means the implicit "local" host.
+            Unknown names return 400 `invalid_host`. Fixed post-create (no
+            live migration in v1 — see docs/MULTI_HOST.md).
         machine:
           type: string
           description: >-
@@ -4921,6 +5107,37 @@ components:
           nullable: true
           items:
             type: string
+    HostStatus:
+      type: object
+      required: [name, uri, default, vm_count, cpus, ram_mb, disk_gb, gpus]
+      properties:
+        name:
+          type: string
+          description: Host identifier ("local" for the implicit local host).
+        uri:
+          type: string
+          description: The host's libvirt connection URI.
+        description:
+          type: string
+        default:
+          type: boolean
+          description: True for the host new VMs land on when spec.host is empty.
+        reachable:
+          type: boolean
+          description: >-
+            Whether the daemon currently holds a live libvirt connection to
+            the host. Omitted when connectivity is not tracked (single-host
+            mode).
+        vm_count:
+          type: integer
+        cpus:
+          type: integer
+        ram_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        gpus:
+          type: integer
     HostInterface:
       type: object
       required: [name, ips, mac, is_up, is_physical]

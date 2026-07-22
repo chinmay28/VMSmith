@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 type Config struct {
 	Daemon    DaemonConfig    `yaml:"daemon"`
 	Libvirt   LibvirtConfig   `yaml:"libvirt"`
+	Hosts     []HostConfig    `yaml:"hosts"`
 	Storage   StorageConfig   `yaml:"storage"`
 	Network   NetworkConfig   `yaml:"network"`
 	Defaults  DefaultsConfig  `yaml:"defaults"`
@@ -58,8 +60,24 @@ type DaemonConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled bool     `yaml:"enabled"`
+	Enabled bool `yaml:"enabled"`
+	// APIKeys are legacy shared secrets that keep their historical full
+	// (admin) access. Prefer Keys for new deployments.
 	APIKeys []string `yaml:"api_keys"`
+	// Keys are role-scoped API keys (roadmap 3.1.5): each key carries a
+	// role — admin (full access, the default), operator (lifecycle verbs +
+	// console tickets + run-now on top of read access), or viewer
+	// (read-only).
+	Keys []APIKeyConfig `yaml:"keys"`
+}
+
+// APIKeyConfig is one role-scoped API key (roadmap 3.1.5).
+type APIKeyConfig struct {
+	Key string `yaml:"key"`
+	// Role is admin (default when empty), operator, or viewer.
+	Role string `yaml:"role"`
+	// Name is an optional operator-facing alias for the key.
+	Name string `yaml:"name"`
 }
 
 type TLSConfig struct {
@@ -96,6 +114,60 @@ func (d DaemonConfig) TLSEnabled() bool {
 
 type LibvirtConfig struct {
 	URI string `yaml:"uri"`
+}
+
+// HostConfig describes one additional libvirt host managed by this daemon
+// (roadmap 5.5). The daemon always manages the implicit "local" host via
+// libvirt.uri; entries here add remote hosts reached through remote
+// libvirt URIs (qemu+ssh://..., qemu+tls://...). v1 assumes shared
+// storage: storage.images_dir and storage.base_dir must be mounted at the
+// same paths on every host (e.g. via NFS) — see docs/MULTI_HOST.md.
+type HostConfig struct {
+	// Name is the operator-facing host identifier used by `--host`,
+	// `spec.host`, and the hosts dashboard. Must be unique; "local" is
+	// reserved for the implicit local host.
+	Name string `yaml:"name"`
+	// URI is the libvirt connection URI for the host,
+	// e.g. "qemu+ssh://root@hv2.example.com/system".
+	URI string `yaml:"uri"`
+	// Description is free-form operator context.
+	Description string `yaml:"description"`
+}
+
+// LocalHostName is the reserved name of the implicit local host.
+const LocalHostName = "local"
+
+// HostNames returns every configured host name including the implicit
+// local host (always first).
+func (c *Config) HostNames() []string {
+	names := []string{LocalHostName}
+	for _, h := range c.Hosts {
+		names = append(names, h.Name)
+	}
+	return names
+}
+
+// ValidateHosts checks the hosts section for empty/duplicate/reserved
+// names and missing URIs.
+func (c *Config) ValidateHosts() error {
+	seen := map[string]bool{LocalHostName: true}
+	for _, h := range c.Hosts {
+		name := strings.TrimSpace(h.Name)
+		if name == "" {
+			return fmt.Errorf("hosts: every host needs a name")
+		}
+		if name == LocalHostName {
+			return fmt.Errorf("hosts: %q is reserved for the implicit local host", LocalHostName)
+		}
+		if seen[name] {
+			return fmt.Errorf("hosts: duplicate host name %q", name)
+		}
+		seen[name] = true
+		if strings.TrimSpace(h.URI) == "" {
+			return fmt.Errorf("hosts: host %q needs a libvirt uri", name)
+		}
+	}
+	return nil
 }
 
 type StorageConfig struct {
