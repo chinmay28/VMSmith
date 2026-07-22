@@ -6859,3 +6859,57 @@ test.describe("Layout footer", () => {
     await expect(footer).toHaveText("VM Smith");
   });
 });
+
+// ============================================================
+// VM Console (5.1.7 noVNC page + 5.1.9 serial tab + 5.1.11)
+// ============================================================
+test.describe("VM Console", () => {
+  test("console page connects VNC and mounts the canvas", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+    await expect(page.getByTestId("vm-console-page")).toBeVisible();
+    // The mock RFB server completes the 3.8 handshake, so noVNC should
+    // reach the connected state and mount its canvas.
+    await expect(page.getByTestId("console-status")).toHaveAttribute("data-status", "connected", { timeout: 15000 });
+    await expect(page.locator('[data-testid="vnc-canvas-container"] canvas')).toBeVisible();
+    // Page header shows the VM name fetched from the API.
+    await expect(page.getByTestId("console-vm-name")).toHaveText("web-server");
+  });
+
+  test("Ctrl-Alt-Del sends key events to the VNC server", async ({ page, request }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+    await expect(page.getByTestId("console-status")).toHaveAttribute("data-status", "connected", { timeout: 15000 });
+
+    const before = await (await request.get(`${BASE_URL}/__console/keys?vm=vm-1`)).json();
+    await page.getByTestId("ctrl-alt-del").click();
+
+    // noVNC sends 3 key-down + 3 key-up RFB KeyEvent messages.
+    await expect
+      .poll(async () => {
+        const after = await (await request.get(`${BASE_URL}/__console/keys?vm=vm-1`)).json();
+        return after.key_events - before.key_events;
+      }, { timeout: 10000 })
+      .toBeGreaterThanOrEqual(6);
+  });
+
+  test("serial tab opens an echoing xterm terminal", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+    await page.getByTestId("tab-serial").click();
+    await expect(page.getByTestId("serial-console")).toBeVisible();
+    await expect(page.getByTestId("console-status")).toHaveAttribute("data-status", "connected", { timeout: 15000 });
+
+    // The mock serial endpoint sends a banner and echoes keystrokes; both
+    // should be rendered by xterm's DOM renderer.
+    await expect(page.locator('[data-testid="serial-terminal-container"]')).toContainText("mock-serial login:", { timeout: 10000 });
+    await page.keyboard.type("uname");
+    await expect(page.locator('[data-testid="serial-terminal-container"]')).toContainText("uname", { timeout: 10000 });
+  });
+
+  test("VMDetail shows a Console button only for running VMs", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1`);
+    await expect(page.getByTestId("btn-console")).toBeVisible();
+
+    await page.goto(`${BASE_URL}/vms/vm-2`);
+    await expect(page.getByTestId("vm-detail-name")).toHaveText("db-server");
+    await expect(page.getByTestId("btn-console")).toHaveCount(0);
+  });
+});

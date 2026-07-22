@@ -2117,14 +2117,23 @@ export interface paths {
         /**
          * Issue a single-use console ticket
          * @description Returns a short-TTL one-time token the caller passes to the console
-         *     websocket endpoint (forthcoming).  The VM must be in the `running`
-         *     state.  The endpoint returns 503 `service_unavailable` when the
-         *     daemon was started without a console subsystem (e.g. on a host where
-         *     the console feature is disabled in config).
+         *     websocket endpoint.  The VM must be in the `running` state.  The
+         *     endpoint returns 503 `service_unavailable` when the daemon was
+         *     started without a console subsystem (e.g. on a host where the
+         *     console feature is disabled in config).
+         *
+         *     The optional `intent` query parameter selects which console flavour
+         *     the ticket is valid for — `vnc` (default, graphical RFB) or
+         *     `serial` (text console).  The intent is baked into the ticket: a
+         *     `vnc` ticket cannot be redeemed against the serial console and vice
+         *     versa.  Unknown values return 400 `invalid_console_intent`.
          */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Console flavour the ticket should be valid for. */
+                    intent?: "vnc" | "serial";
+                };
                 header?: never;
                 path: {
                     vmID: components["parameters"]["VMID"];
@@ -2142,6 +2151,7 @@ export interface paths {
                         "application/json": components["schemas"]["ConsoleTicket"];
                     };
                 };
+                400: components["responses"]["APIError"];
                 404: components["responses"]["APIError"];
                 409: components["responses"]["APIError"];
                 503: components["responses"]["APIError"];
@@ -2162,13 +2172,17 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Proxy the live VM VNC console over websocket
-         * @description Upgrades the request to a websocket and proxies raw VNC/RFB bytes for a
+         * Proxy the live VM console (VNC or serial) over websocket
+         * @description Upgrades the request to a websocket and proxies the VM's console for a
          *     running VM. Call `POST /vms/{vmID}/console/ticket` first, then connect
          *     with the returned short-lived single-use `ticket` query parameter.
          *
-         *     The server negotiates the `binary` websocket subprotocol and bridges
-         *     websocket binary frames to the VM's loopback-only VNC listener. When
+         *     With `intent=vnc` (the default) the server negotiates the `binary`
+         *     websocket subprotocol and bridges websocket binary frames to the VM's
+         *     loopback-only VNC listener. With `intent=serial` the server negotiates
+         *     the `text` subprotocol and bridges UTF-8 terminal bytes to the domain's
+         *     serial console (libvirt `virDomainOpenConsole`). The intent must match
+         *     the one the ticket was issued for — a mismatch returns 401. When
          *     daemon TLS is enabled, callers must use `wss://`; reverse-proxy
          *     deployments may forward that fact with `X-Forwarded-Proto: https`.
          */
@@ -2177,6 +2191,8 @@ export interface paths {
                 query: {
                     /** @description Single-use console ticket issued by `POST /vms/{vmID}/console/ticket`. */
                     ticket: string;
+                    /** @description Console flavour to attach; must match the ticket's intent. */
+                    intent?: "vnc" | "serial";
                 };
                 header?: never;
                 path: {
@@ -2205,6 +2221,124 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/{vmID}/export/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a stopped VM as an OVA appliance
+         * @description Packages the VM as a single-file OVA — an OVF 1.0 descriptor, a
+         *     streamOptimized VMDK converted (and flattened) from the VM's qcow2
+         *     disk via qemu-img, and a SHA256 manifest — and streams it as a tar
+         *     download. The VM must be stopped so the disk is quiescent; a running
+         *     VM returns 409 `vm_running`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OVA stream */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/x-tar": string;
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/import/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a VM from an OVA appliance
+         * @description Multipart upload of a `.ova` archive. The appliance disk is
+         *     converted to qcow2 and registered as a VMSmith image (named
+         *     `<image_name>`, `<name>-ova`, or `<filename>-ova` in that
+         *     precedence), and a VM is created with the descriptor's CPU / RAM /
+         *     disk sizing (zero values fall back to the daemon's configured
+         *     defaults, exactly like `POST /vms`). Failures after the image is
+         *     registered roll the image back. Returns the created VM. Errors:
+         *     400 `invalid_ova` (bad extension, unreadable archive, missing
+         *     descriptor, traversal-unsafe disk reference), 400 `invalid_name` /
+         *     `duplicate_name` from VM validation, 429 `create_limit_reached`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The .ova archive.
+                         */
+                        file: string;
+                        /** @description VM name (default = the descriptor's VirtualSystem name). */
+                        name?: string;
+                        /** @description Name for the registered base image (default `<name>-ova`). */
+                        image_name?: string;
+                        /** @description SSH public key content injected into the created VM. */
+                        ssh_pub_key?: string;
+                        /** @description Create this sudo user instead of enabling root SSH. */
+                        default_user?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description VM created from the appliance */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                429: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -4898,6 +5032,11 @@ export interface components {
         ConsoleTicket: {
             /** @description Single-use opaque token; pass to the websocket endpoint. */
             ticket: string;
+            /**
+             * @description Console flavour the ticket was issued for.
+             * @enum {string}
+             */
+            intent: "vnc" | "serial";
             /** Format: date-time */
             expires_at: string;
             /** @description Path the client should dial after upgrading to a websocket. */
