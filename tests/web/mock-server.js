@@ -77,6 +77,13 @@ let webhookCounter = 0;
 let scheduleCounter = 0;
 let scheduleRunCounter = 0;
 const vms = new Map();
+// Console mock state (5.1.7 / 5.1.9 / 5.1.11): single-use intent-scoped
+// tickets plus a per-VM count of RFB KeyEvent messages received, so the
+// Playwright Ctrl-Alt-Del test can assert the key events actually reached
+// the "server".
+let consoleTicketCounter = 0;
+const consoleTickets = new Map(); // token -> { vmId, intent }
+const consoleKeyEvents = new Map(); // vmId -> count
 const snapshots = new Map();
 const images = new Map();
 const templates = new Map();
@@ -374,6 +381,9 @@ function resetState() {
   scheduleCounter = 0;
   scheduleRunCounter = 0;
   vms.clear();
+  consoleTicketCounter = 0;
+  consoleTickets.clear();
+  consoleKeyEvents.clear();
   snapshots.clear();
   images.clear();
   templates.clear();
@@ -466,6 +476,38 @@ const server = http.createServer(async (req, res) => {
       { name: "local", uri: "qemu:///system", default: true, reachable: true, ...agg(localVMs) },
       { name: "hv2", uri: "qemu+ssh://root@hv2.example.com/system", description: "rack 2", default: false, reachable: false, ...agg(hv2VMs) },
     ]);
+  }
+
+  // Console ticket issuance (5.1.7 / 5.1.9). Mirrors the daemon contract:
+  // intent defaults to vnc, unknown intents 400, stopped VMs 409.
+  const consoleTicketMatch = p.match(/^\/api\/v1\/vms\/([^/]+)\/console\/ticket$/);
+  if (consoleTicketMatch && method === "POST") {
+    const vmId = consoleTicketMatch[1];
+    const intent = (url.searchParams.get("intent") || "vnc").trim().toLowerCase();
+    if (intent !== "vnc" && intent !== "serial") {
+      return json(res, 400, { code: "invalid_console_intent", message: "console intent must be one of: vnc, serial" });
+    }
+    const vm = vms.get(vmId);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    if (vm.state !== "running") {
+      return json(res, 409, { code: "vm_not_running", message: "vm must be running to open a console session" });
+    }
+    consoleTicketCounter++;
+    const token = `mock-console-ticket-${consoleTicketCounter}`;
+    consoleTickets.set(token, { vmId, intent });
+    return json(res, 200, {
+      ticket: token,
+      intent,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      websocket_url: `/api/v1/vms/${vmId}/console?intent=${intent}&ticket=${token}`,
+    });
+  }
+
+  // Test-only introspection: how many RFB KeyEvent messages has the mock
+  // VNC server received for this VM? Lets Playwright assert Ctrl-Alt-Del.
+  if (p === "/__console/keys" && method === "GET") {
+    const vmId = url.searchParams.get("vm") || "";
+    return json(res, 200, { key_events: consoleKeyEvents.get(vmId) || 0 });
   }
 
   // API routes
@@ -3782,6 +3824,212 @@ const server = http.createServer(async (req, res) => {
   }
 
   json(res, 404, { error: `not found: ${method} ${p}` });
+});
+
+// ============================================================
+// Console websocket mock (5.1.7 / 5.1.9 / 5.1.11)
+//
+// A dependency-free RFC6455 websocket endpoint at
+// GET /api/v1/vms/:id/console that speaks:
+//   - intent=vnc:    a minimal RFB 3.8 server (version handshake, security
+//                    None, ServerInit) so the vendored noVNC client reaches
+//                    the "connected" state; incoming KeyEvent messages are
+//                    counted per VM for the Ctrl-Alt-Del assertion.
+//   - intent=serial: a plain echo (with a login banner) over the `text`
+//                    subprotocol so the xterm.js tab renders round-trips.
+// ============================================================
+
+const crypto = require("crypto");
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+function wsEncodeFrame(opcode, payload) {
+  const len = payload.length;
+  let header;
+  if (len < 126) {
+    header = Buffer.from([0x80 | opcode, len]);
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(len), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+// Incremental client-frame parser. Returns [frames, remainder].
+function wsDecodeFrames(buf) {
+  const frames = [];
+  let off = 0;
+  while (buf.length - off >= 2) {
+    const opcode = buf[off] & 0x0f;
+    const masked = (buf[off + 1] & 0x80) !== 0;
+    let len = buf[off + 1] & 0x7f;
+    let headerLen = 2;
+    if (len === 126) {
+      if (buf.length - off < 4) break;
+      len = buf.readUInt16BE(off + 2);
+      headerLen = 4;
+    } else if (len === 127) {
+      if (buf.length - off < 10) break;
+      len = Number(buf.readBigUInt64BE(off + 2));
+      headerLen = 10;
+    }
+    const maskLen = masked ? 4 : 0;
+    if (buf.length - off < headerLen + maskLen + len) break;
+    let payload = buf.subarray(off + headerLen + maskLen, off + headerLen + maskLen + len);
+    if (masked) {
+      const mask = buf.subarray(off + headerLen, off + headerLen + 4);
+      const unmasked = Buffer.alloc(len);
+      for (let i = 0; i < len; i++) unmasked[i] = payload[i] ^ mask[i % 4];
+      payload = unmasked;
+    }
+    frames.push({ opcode, payload });
+    off += headerLen + maskLen + len;
+  }
+  return [frames, buf.subarray(off)];
+}
+
+// Minimal RFB 3.8 server driving noVNC to the connected state.
+function startMockRFBServer(socket, vmId) {
+  let phase = "version"; // version -> security -> clientinit -> connected
+  let rfbBuf = Buffer.alloc(0);
+  const sendB = (payload) => socket.write(wsEncodeFrame(0x2, payload));
+
+  sendB(Buffer.from("RFB 003.008\n", "ascii"));
+
+  return function onRFBBytes(chunk) {
+    rfbBuf = Buffer.concat([rfbBuf, chunk]);
+    for (;;) {
+      if (phase === "version") {
+        if (rfbBuf.length < 12) return;
+        rfbBuf = rfbBuf.subarray(12);
+        phase = "security";
+        sendB(Buffer.from([1, 1])); // one security type: None
+      } else if (phase === "security") {
+        if (rfbBuf.length < 1) return;
+        rfbBuf = rfbBuf.subarray(1);
+        sendB(Buffer.from([0, 0, 0, 0])); // SecurityResult OK
+        phase = "clientinit";
+      } else if (phase === "clientinit") {
+        if (rfbBuf.length < 1) return;
+        rfbBuf = rfbBuf.subarray(1);
+        // ServerInit: 800x600, 32bpp truecolor, name "mock-vm".
+        const name = Buffer.from("mock-vm", "ascii");
+        const init = Buffer.alloc(24 + name.length);
+        init.writeUInt16BE(800, 0);
+        init.writeUInt16BE(600, 2);
+        init[4] = 32; // bits-per-pixel
+        init[5] = 24; // depth
+        init[6] = 0; // big-endian
+        init[7] = 1; // true-colour
+        init.writeUInt16BE(255, 8); // red max
+        init.writeUInt16BE(255, 10); // green max
+        init.writeUInt16BE(255, 12); // blue max
+        init[14] = 16; // red shift
+        init[15] = 8; // green shift
+        init[16] = 0; // blue shift
+        init.writeUInt32BE(name.length, 20);
+        name.copy(init, 24);
+        sendB(init);
+        phase = "connected";
+      } else {
+        // Connected: parse client→server messages just enough to count
+        // KeyEvents and stay in sync with the byte stream.
+        if (rfbBuf.length < 1) return;
+        const msgType = rfbBuf[0];
+        let msgLen;
+        switch (msgType) {
+          case 0: msgLen = 20; break; // SetPixelFormat
+          case 2: {
+            if (rfbBuf.length < 4) return;
+            msgLen = 4 + 4 * rfbBuf.readUInt16BE(2); // SetEncodings
+            break;
+          }
+          case 3: msgLen = 10; break; // FramebufferUpdateRequest
+          case 4: msgLen = 8; break; // KeyEvent
+          case 5: msgLen = 6; break; // PointerEvent
+          case 6: {
+            if (rfbBuf.length < 8) return;
+            msgLen = 8 + rfbBuf.readUInt32BE(4); // ClientCutText
+            break;
+          }
+          default:
+            rfbBuf = Buffer.alloc(0); // unknown message — drop and resync
+            return;
+        }
+        if (rfbBuf.length < msgLen) return;
+        if (msgType === 4) {
+          consoleKeyEvents.set(vmId, (consoleKeyEvents.get(vmId) || 0) + 1);
+        }
+        rfbBuf = rfbBuf.subarray(msgLen);
+      }
+    }
+  };
+}
+
+server.on("upgrade", (req, socket) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const m = url.pathname.match(/^\/api\/v1\/vms\/([^/]+)\/console$/);
+  const key = req.headers["sec-websocket-key"];
+  if (!m || !key) {
+    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    return socket.destroy();
+  }
+
+  const vmId = m[1];
+  const intent = (url.searchParams.get("intent") || "vnc").trim().toLowerCase();
+  const token = url.searchParams.get("ticket") || "";
+  const ticket = consoleTickets.get(token);
+  consoleTickets.delete(token); // single-use, even on mismatch
+  if (!ticket || ticket.vmId !== vmId || ticket.intent !== intent) {
+    socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    return socket.destroy();
+  }
+
+  const accept = crypto.createHash("sha1").update(key + WS_GUID).digest("base64");
+  const protoHeader = (req.headers["sec-websocket-protocol"] || "").split(",")[0].trim();
+  const responseHeaders = [
+    "HTTP/1.1 101 Switching Protocols",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Accept: ${accept}`,
+  ];
+  if (protoHeader) responseHeaders.push(`Sec-WebSocket-Protocol: ${protoHeader}`);
+  socket.write(responseHeaders.join("\r\n") + "\r\n\r\n");
+
+  let wsBuf = Buffer.alloc(0);
+  const onRFBBytes = intent === "vnc" ? startMockRFBServer(socket, vmId) : null;
+  if (intent === "serial") {
+    socket.write(wsEncodeFrame(0x1, Buffer.from("mock-serial login: ", "utf8")));
+  }
+
+  socket.on("data", (chunk) => {
+    wsBuf = Buffer.concat([wsBuf, chunk]);
+    const [frames, rest] = wsDecodeFrames(wsBuf);
+    wsBuf = rest;
+    for (const frame of frames) {
+      if (frame.opcode === 0x8) {
+        socket.end(wsEncodeFrame(0x8, Buffer.alloc(0)));
+        return;
+      }
+      if (frame.opcode === 0x9) {
+        socket.write(wsEncodeFrame(0xa, frame.payload)); // pong
+        continue;
+      }
+      if (frame.opcode !== 0x1 && frame.opcode !== 0x2) continue;
+      if (intent === "vnc") {
+        onRFBBytes(frame.payload);
+      } else {
+        socket.write(wsEncodeFrame(0x1, frame.payload)); // serial echo
+      }
+    }
+  });
+  socket.on("error", () => socket.destroy());
 });
 
 resetState();

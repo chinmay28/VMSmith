@@ -25,7 +25,7 @@ func TestIssueAndConsumeTicket(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
 
-	token, expiresAt, err := s.IssueTicket("vm-1", "api-key-1")
+	token, expiresAt, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestIssueAndConsumeTicket(t *testing.T) {
 		t.Fatal("expected non-zero expiry")
 	}
 
-	apiKey, err := s.ConsumeTicket(token, "vm-1")
+	apiKey, err := s.ConsumeTicket(token, "vm-1", "vnc")
 	if err != nil {
 		t.Fatalf("ConsumeTicket returned error: %v", err)
 	}
@@ -49,15 +49,15 @@ func TestConsumeTicketSingleUse(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
-	if _, err := s.ConsumeTicket(token, "vm-1"); err != nil {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); err != nil {
 		t.Fatalf("first ConsumeTicket returned error: %v", err)
 	}
-	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketNotFound) {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("second ConsumeTicket error = %v, want %v", err, ErrTicketNotFound)
 	}
 }
@@ -69,14 +69,14 @@ func TestConsumeTicketExpired(t *testing.T) {
 	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
 	s.now = func() time.Time { return now.Add(time.Minute + time.Second) }
 
-	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketExpired) {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketExpired) {
 		t.Fatalf("ConsumeTicket error = %v, want %v", err, ErrTicketExpired)
 	}
 }
@@ -88,14 +88,14 @@ func TestConsumeTicket_ExpiryBoundaryIsExpired(t *testing.T) {
 	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 
-	token, expiresAt, err := s.IssueTicket("vm-1", "api-key-1")
+	token, expiresAt, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
 	s.now = func() time.Time { return expiresAt }
 
-	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketExpired) {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketExpired) {
 		t.Fatalf("ConsumeTicket at exact expiry error = %v, want %v", err, ErrTicketExpired)
 	}
 }
@@ -104,15 +104,15 @@ func TestConsumeTicketVMMismatch(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
-	if _, err := s.ConsumeTicket(token, "vm-2"); !errors.Is(err, ErrTicketVMMismatch) {
+	if _, err := s.ConsumeTicket(token, "vm-2", "vnc"); !errors.Is(err, ErrTicketVMMismatch) {
 		t.Fatalf("ConsumeTicket error = %v, want %v", err, ErrTicketVMMismatch)
 	}
-	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketNotFound) {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("ticket should be removed after mismatch, got %v", err)
 	}
 }
@@ -124,14 +124,14 @@ func TestJanitorRemovesExpiredTickets(t *testing.T) {
 	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
 	s.deleteExpired(now.Add(time.Minute + time.Second))
 
-	if _, err := s.ConsumeTicket(token, "vm-1"); !errors.Is(err, ErrTicketNotFound) {
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("ConsumeTicket error = %v, want %v", err, ErrTicketNotFound)
 	}
 }
@@ -142,7 +142,7 @@ func TestJanitorRemovesExpiredTicketsAutomatically(t *testing.T) {
 	defer s.Close()
 	s.now = func() time.Time { return now }
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestCloseStopsJanitor(t *testing.T) {
 	s := NewStoreWithOptions(20*time.Millisecond, 10*time.Millisecond)
 	s.now = func() time.Time { return now }
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestIssueTicketGeneratesUniqueTokens(t *testing.T) {
 	const count = 32
 	seen := make(map[string]struct{}, count)
 	for i := 0; i < count; i++ {
-		token, _, err := s.IssueTicket("vm-1", "api-key-1")
+		token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 		if err != nil {
 			t.Fatalf("IssueTicket returned error: %v", err)
 		}
@@ -200,7 +200,7 @@ func TestConsumeTicketConcurrentSingleWinner(t *testing.T) {
 	s := NewStoreWithOptions(time.Minute, time.Hour)
 	defer s.Close()
 
-	token, _, err := s.IssueTicket("vm-1", "api-key-1")
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestConsumeTicketConcurrentSingleWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := s.ConsumeTicket(token, "vm-1")
+			_, err := s.ConsumeTicket(token, "vm-1", "vnc")
 			results <- err
 		}()
 	}
@@ -238,5 +238,23 @@ func TestConsumeTicketConcurrentSingleWinner(t *testing.T) {
 	}
 	if notFound != attempts-1 {
 		t.Fatalf("notFound = %d, want %d", notFound, attempts-1)
+	}
+}
+
+func TestConsumeTicketIntentMismatch(t *testing.T) {
+	s := NewStoreWithOptions(time.Minute, time.Hour)
+	defer s.Close()
+
+	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
+	if err != nil {
+		t.Fatalf("IssueTicket returned error: %v", err)
+	}
+
+	if _, err := s.ConsumeTicket(token, "vm-1", "serial"); !errors.Is(err, ErrTicketIntentMismatch) {
+		t.Fatalf("ConsumeTicket error = %v, want %v", err, ErrTicketIntentMismatch)
+	}
+	// Intent mismatch still burns the ticket — single-use above all.
+	if _, err := s.ConsumeTicket(token, "vm-1", "vnc"); !errors.Is(err, ErrTicketNotFound) {
+		t.Fatalf("ConsumeTicket after mismatch error = %v, want %v", err, ErrTicketNotFound)
 	}
 }

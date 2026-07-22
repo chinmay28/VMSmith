@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
@@ -138,8 +139,19 @@ func TestMultiHost_HostReachable(t *testing.T) {
 		t.Error("both mock hosts should be reachable")
 	}
 	remote.ListErr = types.NewAPIError("down", "conn lost")
+
+	// Within the TTL the cached verdict is served — that's the point of the
+	// cache (Dashboard polls must not restorm connections).
+	if !multi.HostReachable(ctx, "hv2") {
+		t.Error("cached verdict should still report hv2 reachable inside the TTL")
+	}
+
+	// Expire the cache entry; the next probe must see the failure.
+	multi.probeMu.Lock()
+	multi.probeCache["hv2"] = hostProbe{reachable: true, checkedAt: time.Now().Add(-2 * hostProbeTTL)}
+	multi.probeMu.Unlock()
 	if multi.HostReachable(ctx, "hv2") {
-		t.Error("hv2 should be unreachable with ListErr injected")
+		t.Error("hv2 should be unreachable with ListErr injected once the cache expires")
 	}
 	if multi.HostReachable(ctx, "unknown") {
 		t.Error("unknown host should be unreachable")
@@ -160,5 +172,59 @@ func TestMultiHost_HostNamesDeterministic(t *testing.T) {
 	}
 	if multi.DefaultHostName() != "local" {
 		t.Fatalf("default = %q", multi.DefaultHostName())
+	}
+}
+
+func TestMultiHost_ListSurvivesOneUnreachableHost(t *testing.T) {
+	multi, local, remote := newTestMulti(t)
+	ctx := context.Background()
+
+	vmLocal, err := multi.Create(ctx, types.VMSpec{Name: "on-local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// hv2's libvirt goes down: the healthy host's rows must still be
+	// returned instead of a whole-fleet error.
+	remote.ListErr = types.NewAPIError("down", "conn lost")
+	out, err := multi.List(ctx)
+	if err != nil {
+		t.Fatalf("List should not fail when one host is down: %v", err)
+	}
+	if len(out) != 1 || out[0].ID != vmLocal.ID {
+		t.Fatalf("List = %v, want just the local VM", out)
+	}
+
+	// Every host down → the error surfaces.
+	local.ListErr = types.NewAPIError("down", "conn lost")
+	if _, err := multi.List(ctx); err == nil {
+		t.Fatal("List should fail when every host is unreachable")
+	}
+}
+
+func TestMultiHost_ListRoutesOrphanedHostRowsToDefault(t *testing.T) {
+	// A VM stored with spec.host="hv3" while hv3 is no longer configured
+	// must still appear in List (owned by the default host), matching
+	// locate()'s orphan fallback.
+	local := NewMockManager()
+	multi, err := NewMultiHostManager("local", map[string]Manager{"local": local})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orphan, err := local.Create(ctx, types.VMSpec{Name: "orphan", Host: "hv3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := multi.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(out) != 1 || out[0].ID != orphan.ID {
+		t.Fatalf("List = %v, want the orphaned VM routed to the default host", out)
+	}
+	if got, err := multi.Get(ctx, orphan.ID); err != nil || got.ID != orphan.ID {
+		t.Fatalf("Get should agree with List on orphan membership: %v, %v", got, err)
 	}
 }

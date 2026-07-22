@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -123,6 +124,9 @@ func (m *quotaManager) AttachGPU(ctx context.Context, id string, pciAddr string,
 }
 func (m *quotaManager) DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error) {
 	return m.base.DetachGPU(ctx, id, pciAddr)
+}
+func (m *quotaManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	return m.base.OpenSerialConsole(ctx, id)
 }
 func (m *quotaManager) Close() error { return m.base.Close() }
 

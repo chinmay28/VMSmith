@@ -42,6 +42,16 @@ var consoleUpgrader = websocket.Upgrader{
 	},
 }
 
+// serialConsoleUpgrader negotiates the `text` subprotocol used by the
+// xterm.js serial console client (raw UTF-8 terminal bytes rather than
+// binary RFB frames).
+var serialConsoleUpgrader = websocket.Upgrader{
+	Subprotocols: []string{"text"},
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
 // ProxyConsole handles GET /api/v1/vms/{vmID}/console.
 //
 // It validates a single-use ticket, resolves the live VNC endpoint for the VM,
@@ -69,9 +79,20 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey, err := s.consoleStore.ConsumeTicket(ticket, vmID)
+	intent, err := consoleIntentFromRequest(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	apiKey, err := s.consoleStore.ConsumeTicket(ticket, vmID, string(intent))
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, sanitizeConsoleTicketError(err))
+		return
+	}
+
+	if intent == types.ConsoleIntentSerial {
+		s.proxySerialConsole(w, r, vmID, apiKey)
 		return
 	}
 
@@ -118,6 +139,100 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 	}()
 	go func() {
 		errCh <- proxyConsoleTCPToWebSocket(targetConn, wsConn, time.Duration(s.consoleConfig.IdleTimeoutSeconds)*time.Second)
+	}()
+
+	var maxSession <-chan time.Time
+	if s.consoleConfig.MaxSessionSeconds > 0 {
+		timer := time.NewTimer(time.Duration(s.consoleConfig.MaxSessionSeconds) * time.Second)
+		defer timer.Stop()
+		maxSession = timer.C
+	}
+
+	select {
+	case <-r.Context().Done():
+	case <-s.shutdownNotify:
+	case <-maxSession:
+	case <-errCh:
+	}
+}
+
+// proxySerialConsole bridges a websocket (text subprotocol) to the VM's
+// serial console stream obtained via vm.Manager.OpenSerialConsole. The
+// ticket has already been consumed and validated by the caller.
+func (s *Server) proxySerialConsole(w http.ResponseWriter, r *http.Request, vmID, apiKey string) {
+	serialConn, err := s.vmManager.OpenSerialConsole(r.Context(), vmID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if apiErr, ok := sanitizeManagerError(err).(*types.APIError); ok {
+			switch apiErr.Code {
+			case "resource_not_found":
+				status = http.StatusNotFound
+			case "vm_not_running":
+				status = http.StatusConflict
+			case "console_unavailable":
+				status = http.StatusServiceUnavailable
+			}
+		}
+		writeAPIError(w, status, sanitizeManagerError(err))
+		return
+	}
+
+	wsConn, err := serialConsoleUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = serialConn.Close()
+		return
+	}
+
+	session := &activeConsoleSession{vmID: vmID, apiKey: apiKey, ws: wsConn}
+	s.registerConsoleSession(session)
+	defer s.unregisterConsoleSession(session)
+	defer session.close()
+	defer serialConn.Close()
+
+	wsConn.SetReadLimit(1 << 20)
+
+	idleTimeout := time.Duration(s.consoleConfig.IdleTimeoutSeconds) * time.Second
+
+	errCh := make(chan error, 2)
+	go func() {
+		// Browser keystrokes → serial console. Accept both text and
+		// binary frames; xterm.js sends text but other clients may not.
+		for {
+			if idleTimeout > 0 {
+				_ = wsConn.SetReadDeadline(time.Now().Add(idleTimeout))
+			}
+			msgType, payload, err := wsConn.ReadMessage()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if msgType != websocket.TextMessage && msgType != websocket.BinaryMessage {
+				continue
+			}
+			if _, err := serialConn.Write(payload); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		// Serial console output → browser, as text frames per the
+		// negotiated subprotocol.
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := serialConn.Read(buf)
+			if n > 0 {
+				_ = wsConn.SetWriteDeadline(time.Now().Add(consoleWriteWait))
+				if writeErr := wsConn.WriteMessage(websocket.TextMessage, buf[:n]); writeErr != nil {
+					errCh <- writeErr
+					return
+				}
+			}
+			if err != nil {
+				errCh <- err
+				return
+			}
+		}
 	}()
 
 	var maxSession <-chan time.Time

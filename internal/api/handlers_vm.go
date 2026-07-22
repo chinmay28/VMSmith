@@ -721,6 +721,13 @@ func (s *Server) BulkVMAction(w http.ResponseWriter, r *http.Request) {
 			"action must be one of: "+strings.Join(supportedBulkVMActionsList, ", ")))
 		return
 	}
+	// RBAC (3.1.5): the middleware classifies /vms/bulk as an operator
+	// endpoint so lifecycle fan-out works for operator keys, but bulk
+	// delete is destructive and stays admin-only.
+	if req.Action == "delete" && requestRole(r) < roleAdmin {
+		writeAPIError(w, http.StatusForbidden, types.NewAPIError("forbidden", "bulk delete requires the admin role"))
+		return
+	}
 	if len(req.IDs) == 0 {
 		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_bulk_request", "ids must contain at least one VM ID"))
 		return

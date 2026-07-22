@@ -6,9 +6,10 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
-	"github.com/vmsmith/vmsmith/internal/config"
-	"github.com/vmsmith/vmsmith/internal/store"
+	"github.com/vmsmith/vmsmith/internal/logger"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -22,6 +23,26 @@ type MultiHostManager struct {
 	hosts       map[string]Manager
 	order       []string // deterministic iteration order, default first
 	defaultName string
+
+	probeMu    sync.Mutex
+	probeCache map[string]hostProbe
+}
+
+// hostProbe caches a HostReachable result so repeated Dashboard polls do
+// not re-probe every host connection on every request.
+type hostProbe struct {
+	reachable bool
+	checkedAt time.Time
+}
+
+// hostProbeTTL bounds how stale a cached reachability verdict may be.
+const hostProbeTTL = 5 * time.Second
+
+// Pinger is an optional Manager capability: a cheap liveness probe that
+// avoids a full fleet enumeration. LibvirtManager implements it with a
+// single GetLibVersion RPC.
+type Pinger interface {
+	Ping(ctx context.Context) error
 }
 
 // NewMultiHostManager builds a router over the given per-host managers.
@@ -39,7 +60,12 @@ func NewMultiHostManager(defaultName string, hosts map[string]Manager) (*MultiHo
 	}
 	sort.Strings(order)
 	order = append([]string{defaultName}, order...)
-	return &MultiHostManager{hosts: hosts, order: order, defaultName: defaultName}, nil
+	return &MultiHostManager{
+		hosts:       hosts,
+		order:       order,
+		defaultName: defaultName,
+		probeCache:  make(map[string]hostProbe),
+	}, nil
 }
 
 // HostNames returns the managed host names, default first.
@@ -50,16 +76,35 @@ func (m *MultiHostManager) HostNames() []string {
 // DefaultHostName returns the placement default.
 func (m *MultiHostManager) DefaultHostName() string { return m.defaultName }
 
-// HostReachable reports whether the named host's manager currently
-// responds to a List call — the cheapest liveness probe every Manager
-// implementation supports.
+// HostReachable reports whether the named host's manager is currently
+// alive. Managers implementing Pinger get a single cheap RPC probe;
+// others fall back to a List call. Verdicts are cached for hostProbeTTL
+// so repeated Dashboard polls of /hosts don't restorm every connection.
 func (m *MultiHostManager) HostReachable(ctx context.Context, name string) bool {
 	mgr, ok := m.hosts[name]
 	if !ok {
 		return false
 	}
-	_, err := mgr.List(ctx)
-	return err == nil
+
+	m.probeMu.Lock()
+	if p, ok := m.probeCache[name]; ok && time.Since(p.checkedAt) < hostProbeTTL {
+		m.probeMu.Unlock()
+		return p.reachable
+	}
+	m.probeMu.Unlock()
+
+	var err error
+	if pinger, ok := mgr.(Pinger); ok {
+		err = pinger.Ping(ctx)
+	} else {
+		_, err = mgr.List(ctx)
+	}
+	reachable := err == nil
+
+	m.probeMu.Lock()
+	m.probeCache[name] = hostProbe{reachable: reachable, checkedAt: time.Now()}
+	m.probeMu.Unlock()
+	return reachable
 }
 
 // hostFor normalises a spec/stored host name to a routing key.
@@ -128,29 +173,86 @@ func (m *MultiHostManager) Clone(ctx context.Context, sourceID string, newName s
 }
 
 func (m *MultiHostManager) List(ctx context.Context) ([]*types.VM, error) {
+	// Fan out concurrently so one slow remote doesn't serialise the whole
+	// coordinator dashboard behind it.
+	type hostResult struct {
+		vms []*types.VM
+		err error
+	}
+	results := make([]hostResult, len(m.order))
+	var wg sync.WaitGroup
+	for i := range m.order {
+		wg.Add(1)
+		go func(i int, mgr Manager) {
+			defer wg.Done()
+			vms, err := mgr.List(ctx)
+			results[i] = hostResult{vms: vms, err: err}
+		}(i, m.hosts[m.order[i]])
+	}
+	wg.Wait()
+
+	// owner maps a stored host name to the host whose listing carries the
+	// row. VMs whose stored host is no longer configured route to the
+	// default host, matching locate()'s orphan fallback so Get and List
+	// agree on membership.
+	owner := func(storedHost string) string {
+		name := m.hostFor(storedHost)
+		if _, known := m.hosts[name]; !known {
+			return m.defaultName
+		}
+		return name
+	}
+
 	var out []*types.VM
+	seen := make(map[string]bool)
+	failed := make(map[string]bool)
 	var firstErr error
-	for _, name := range m.order {
-		vms, err := m.hosts[name].List(ctx)
-		if err != nil {
+	for i, name := range m.order {
+		r := results[i]
+		if r.err != nil {
+			failed[name] = true
 			if firstErr == nil {
-				firstErr = err
+				firstErr = r.err
 			}
+			logger.Warn("vm", "multi-host list: host unreachable; falling back to stored state for its VMs",
+				"host", name, "error", r.err.Error())
 			continue
 		}
-		for _, vmRec := range vms {
+		for _, vmRec := range r.vms {
 			// Every host shares the store in production, so each List
 			// returns the whole fleet; keep only the rows this host owns
 			// (its libvirt connection enriched their live state), which
 			// also yields each VM exactly once across the fan-out.
-			if m.hostFor(vmRec.Spec.Host) != name {
+			if owner(vmRec.Spec.Host) != name {
 				continue
 			}
 			out = append(out, vmRec)
+			seen[vmRec.ID] = true
 		}
 	}
-	if len(out) == 0 && firstErr != nil {
+	if len(failed) == len(m.order) {
 		return nil, firstErr
+	}
+
+	// Backfill rows owned by unreachable hosts from the first healthy
+	// host's listing: hosts share the metadata store, so a healthy host's
+	// List still returns the stored records (name / spec / last known
+	// state) for the down host's VMs. Ops on them will fail cleanly when
+	// routed, but the fleet view stays complete.
+	if len(failed) > 0 {
+		for i := range m.order {
+			r := results[i]
+			if r.err != nil {
+				continue
+			}
+			for _, vmRec := range r.vms {
+				if failed[owner(vmRec.Spec.Host)] && !seen[vmRec.ID] {
+					out = append(out, vmRec)
+					seen[vmRec.ID] = true
+				}
+			}
+			break // one healthy listing carries the whole shared store
+		}
 	}
 	return out, nil
 }
@@ -246,6 +348,14 @@ func (m *MultiHostManager) GetConsoleEndpoint(ctx context.Context, id string, in
 	return mgr.GetConsoleEndpoint(ctx, id, intent)
 }
 
+func (m *MultiHostManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	mgr, _, err := m.locate(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.OpenSerialConsole(ctx, id)
+}
+
 func (m *MultiHostManager) AttachGPU(ctx context.Context, id string, pciAddr string, force bool) (*types.VM, error) {
 	mgr, _, err := m.locate(ctx, id)
 	if err != nil {
@@ -286,32 +396,3 @@ func (m *MultiHostManager) Close() error {
 // interface conformance
 var _ Manager = (*MultiHostManager)(nil)
 var _ io.Closer = (*MultiHostManager)(nil)
-
-// NewMultiHostManagerFromConfig wires the production topology: the local
-// libvirt host plus one LibvirtManager per `hosts:` entry, all sharing the
-// same metadata store (shared storage assumed — see docs/MULTI_HOST.md).
-func NewMultiHostManagerFromConfig(cfg *config.Config, s *store.Store) (*MultiHostManager, error) {
-	if err := cfg.ValidateHosts(); err != nil {
-		return nil, err
-	}
-	local, err := NewLibvirtManager(cfg, s)
-	if err != nil {
-		return nil, err
-	}
-	hosts := map[string]Manager{config.LocalHostName: local}
-	for _, h := range cfg.Hosts {
-		remoteCfg := *cfg
-		remoteCfg.Libvirt.URI = h.URI
-		remote, err := NewLibvirtManager(&remoteCfg, s)
-		if err != nil {
-			// Fail fast: a misconfigured host should surface at daemon
-			// startup, not at first placement.
-			for _, mgr := range hosts {
-				_ = mgr.Close()
-			}
-			return nil, fmt.Errorf("connecting to host %q (%s): %w", h.Name, h.URI, err)
-		}
-		hosts[h.Name] = remote
-	}
-	return NewMultiHostManager(config.LocalHostName, hosts)
-}

@@ -86,16 +86,19 @@ func TestIssueConsoleTicket_RunningVM_ReturnsTicket(t *testing.T) {
 	if ticket.ExpiresAt.IsZero() {
 		t.Error("ExpiresAt should be set")
 	}
-	if !strings.HasPrefix(ticket.WebsocketURL, "/api/v1/vms/vm-running/console?ticket=") {
+	if !strings.HasPrefix(ticket.WebsocketURL, "/api/v1/vms/vm-running/console?intent=vnc&ticket=") {
 		t.Errorf("WebsocketURL = %q", ticket.WebsocketURL)
+	}
+	if ticket.Intent != types.ConsoleIntentVNC {
+		t.Errorf("Intent = %q, want vnc (default)", ticket.Intent)
 	}
 
 	// The ticket should consume successfully — single-use, so a second
 	// consume should fail with not-found.
-	if _, err := store.ConsumeTicket(ticket.Ticket, "vm-running"); err != nil {
+	if _, err := store.ConsumeTicket(ticket.Ticket, "vm-running", "vnc"); err != nil {
 		t.Errorf("first consume: %v", err)
 	}
-	if _, err := store.ConsumeTicket(ticket.Ticket, "vm-running"); err == nil {
+	if _, err := store.ConsumeTicket(ticket.Ticket, "vm-running", "vnc"); err == nil {
 		t.Error("second consume should fail (single-use)")
 	}
 }
@@ -174,11 +177,61 @@ func TestIssueConsoleTicket_TicketCarriesCallerAPIKey(t *testing.T) {
 	var ticket types.ConsoleTicket
 	decodeJSON(t, resp, &ticket)
 
-	gotKey, err := store.ConsumeTicket(ticket.Ticket, "vm-keyed")
+	gotKey, err := store.ConsumeTicket(ticket.Ticket, "vm-keyed", "vnc")
 	if err != nil {
 		t.Fatalf("ConsumeTicket: %v", err)
 	}
 	if gotKey != "caller-key-abc" {
 		t.Errorf("apiKey = %q, want caller-key-abc", gotKey)
+	}
+}
+
+func TestIssueConsoleTicket_InvalidIntentRejected(t *testing.T) {
+	ts, mockMgr, _, cleanup := consoleTestServer(t, true)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-running/console/ticket?intent=hdmi", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var apiErr struct {
+		Code string `json:"code"`
+	}
+	decodeJSON(t, resp, &apiErr)
+	if apiErr.Code != "invalid_console_intent" {
+		t.Fatalf("code = %q, want invalid_console_intent", apiErr.Code)
+	}
+}
+
+func TestIssueConsoleTicket_SerialIntentRoundTrips(t *testing.T) {
+	ts, mockMgr, store, cleanup := consoleTestServer(t, true)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-running/console/ticket?intent=serial", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var ticket types.ConsoleTicket
+	decodeJSON(t, resp, &ticket)
+	if ticket.Intent != types.ConsoleIntentSerial {
+		t.Fatalf("Intent = %q, want serial", ticket.Intent)
+	}
+	if !strings.HasPrefix(ticket.WebsocketURL, "/api/v1/vms/vm-running/console?intent=serial&ticket=") {
+		t.Fatalf("WebsocketURL = %q", ticket.WebsocketURL)
+	}
+	// A serial ticket must not redeem for the vnc intent.
+	if _, err := store.ConsumeTicket(ticket.Ticket, "vm-running", "vnc"); err == nil {
+		t.Fatal("vnc consume of serial ticket should fail")
 	}
 }

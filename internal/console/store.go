@@ -16,14 +16,16 @@ const (
 )
 
 var (
-	ErrTicketNotFound   = errors.New("console ticket not found")
-	ErrTicketExpired    = errors.New("console ticket expired")
-	ErrTicketVMMismatch = errors.New("console ticket vm mismatch")
+	ErrTicketNotFound       = errors.New("console ticket not found")
+	ErrTicketExpired        = errors.New("console ticket expired")
+	ErrTicketVMMismatch     = errors.New("console ticket vm mismatch")
+	ErrTicketIntentMismatch = errors.New("console ticket intent mismatch")
 )
 
 type ticket struct {
 	vmID    string
 	apiKey  string
+	intent  string
 	expires time.Time
 }
 
@@ -70,8 +72,11 @@ func (s *Store) Close() {
 	s.stopJanitor = nil
 }
 
-// IssueTicket creates a new single-use ticket for the given VM and API key.
-func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
+// IssueTicket creates a new single-use ticket for the given VM, API key,
+// and console intent ("vnc" or "serial"). The intent is baked into the
+// ticket so a VNC ticket cannot be redeemed against the serial console and
+// vice versa.
+func (s *Store) IssueTicket(vmID, apiKey, intent string) (string, time.Time, error) {
 	token, err := newToken()
 	if err != nil {
 		return "", time.Time{}, err
@@ -83,6 +88,7 @@ func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
 	s.tickets[token] = ticket{
 		vmID:    vmID,
 		apiKey:  apiKey,
+		intent:  intent,
 		expires: expires,
 	}
 	s.mu.Unlock()
@@ -90,8 +96,9 @@ func (s *Store) IssueTicket(vmID, apiKey string) (string, time.Time, error) {
 	return token, expires, nil
 }
 
-// ConsumeTicket validates and removes a ticket.
-func (s *Store) ConsumeTicket(token, vmID string) (string, error) {
+// ConsumeTicket validates and removes a ticket. The caller's VM and intent
+// must both match the values the ticket was issued for.
+func (s *Store) ConsumeTicket(token, vmID, intent string) (string, error) {
 	now := s.now()
 
 	s.mu.Lock()
@@ -108,6 +115,9 @@ func (s *Store) ConsumeTicket(token, vmID string) (string, error) {
 	}
 	if t.vmID != vmID {
 		return "", ErrTicketVMMismatch
+	}
+	if t.intent != intent {
+		return "", ErrTicketIntentMismatch
 	}
 
 	return t.apiKey, nil

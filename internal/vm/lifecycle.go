@@ -124,6 +124,14 @@ func NewLibvirtManager(cfg *config.Config, store *store.Store) (*LibvirtManager,
 	return mgr, nil
 }
 
+// Ping is a cheap liveness probe — a single GetLibVersion RPC — used by
+// the multi-host router's HostReachable instead of a full fleet
+// enumeration.
+func (m *LibvirtManager) Ping(ctx context.Context) error {
+	_, err := m.conn.GetLibVersion()
+	return err
+}
+
 // Close releases the libvirt connection.
 func (m *LibvirtManager) Close() error {
 	m.stopLifecycleMonitor()

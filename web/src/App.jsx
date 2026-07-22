@@ -10,23 +10,34 @@ import Schedules from './pages/Schedules';
 import LogViewer from './pages/LogViewer';
 import Activity from './pages/Activity';
 import Settings from './pages/Settings';
+import VMConsole from './pages/VMConsole';
 
 export default function App() {
   return (
     <AuthGate>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/vms" element={<VMList />} />
-          <Route path="/vms/:id" element={<VMDetail />} />
-          <Route path="/images" element={<ImageList />} />
-          <Route path="/templates" element={<TemplateList />} />
-          <Route path="/schedules" element={<Schedules />} />
-          <Route path="/activity" element={<Activity />} />
-          <Route path="/logs" element={<LogViewer />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        {/* The console renders without the Layout chrome: it opens in its
+            own tab and wants the whole viewport for keyboard capture. */}
+        <Route path="/vms/:id/console" element={<VMConsole />} />
+        <Route
+          path="*"
+          element={
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/vms" element={<VMList />} />
+                <Route path="/vms/:id" element={<VMDetail />} />
+                <Route path="/images" element={<ImageList />} />
+                <Route path="/templates" element={<TemplateList />} />
+                <Route path="/schedules" element={<Schedules />} />
+                <Route path="/activity" element={<Activity />} />
+                <Route path="/logs" element={<LogViewer />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </Layout>
+          }
+        />
+      </Routes>
     </AuthGate>
   );
 }
