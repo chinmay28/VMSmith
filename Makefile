@@ -12,7 +12,8 @@ LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_P
 WEB_DIR   := ./web
 
 .PHONY: build install install-service clean purge test lint fmt fmt-check deps web web-install \
-       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb
+       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb \
+       test-e2e-metrics test-e2e-schedules test-e2e-windows test-e2e-gpu
 
 # --- Full build (frontend + backend) ---
 build: go.sum web
@@ -108,6 +109,22 @@ test-e2e-networking:
 # Run only port forwarding E2E tests
 test-e2e-portforward:
 	cd tests/e2e && python -m pytest -m portforward -v
+
+# Real-VM metrics-under-load tests (roadmap 4.1.10)
+test-e2e-metrics:
+	cd tests/e2e && python -m pytest -m metrics -v
+
+# Real-VM scheduled-operations tests (roadmap 5.2.11)
+test-e2e-schedules:
+	cd tests/e2e && python -m pytest -m schedules -v
+
+# Windows guest tier (roadmap 5.6.16) — requires --windows-image / VMSMITH_WINDOWS_IMAGE
+test-e2e-windows:
+	cd tests/e2e && python -m pytest -m windows -v
+
+# GPU passthrough tier (roadmap 5.7.12) — requires --gpu / VMSMITH_GPU
+test-e2e-gpu:
+	cd tests/e2e && python -m pytest -m gpu -v
 
 lint:
 	golangci-lint run ./...
