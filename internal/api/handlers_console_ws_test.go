@@ -328,7 +328,7 @@ func TestProxyConsole_BulkStopClosesActiveSession(t *testing.T) {
 		}
 	}()
 
-	ticket, _, err := store.IssueTicket("vm-running", "")
+	ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 		}
 	}()
 
-	ticket, _, err := store.IssueTicket("vm-running", "")
+	ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestProxyConsole_ClosesOnVMLifecycleHandlers(t *testing.T) {
 				}
 			}()
 
-			ticket, _, err := store.IssueTicket("vm-running", "")
+			ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
 			if err != nil {
 				t.Fatalf("IssueTicket: %v", err)
 			}
@@ -559,7 +559,7 @@ func TestProxyConsole_ClosesOnDirectManagerLifecycleActions(t *testing.T) {
 				}
 			}()
 
-			ticket, _, err := store.IssueTicket("vm-running", "")
+			ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
 			if err != nil {
 				t.Fatalf("IssueTicket: %v", err)
 			}
@@ -849,7 +849,7 @@ func TestProxyConsole_LifecycleHandlersEmitExactlyOneTerminationEvent(t *testing
 				}
 			}()
 
-			ticket, _, err := store.IssueTicket("vm-running", "")
+			ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
 			if err != nil {
 				t.Fatalf("IssueTicket: %v", err)
 			}
@@ -911,5 +911,207 @@ func TestProxyConsole_LifecycleHandlersEmitExactlyOneTerminationEvent(t *testing
 				t.Fatalf("expected exactly 1 console.session_terminated event, got %d (events: %+v)", terminated, events)
 			}
 		})
+	}
+}
+
+// issueConsoleTicketWithIntent issues a ticket via the HTTP endpoint with an
+// explicit ?intent= value.
+func issueConsoleTicketWithIntent(t *testing.T, ts *httptest.Server, vmID, intent string) types.ConsoleTicket {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/api/v1/vms/"+vmID+"/console/ticket?intent="+intent, "application/json", nil)
+	if err != nil {
+		t.Fatalf("issue ticket: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("issue ticket status = %d, body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var ticket types.ConsoleTicket
+	if err := json.NewDecoder(resp.Body).Decode(&ticket); err != nil {
+		t.Fatalf("decode ticket: %v", err)
+	}
+	return ticket
+}
+
+func TestProxyConsole_SerialEchoRoundTrip(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	// MockManager's default serial console is a loopback echo pipe, so
+	// whatever the websocket client types must come back verbatim.
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+
+	ticket := issueConsoleTicketWithIntent(t, ts, "vm-running", "serial")
+	if ticket.Intent != types.ConsoleIntentSerial {
+		t.Fatalf("ticket intent = %q, want serial", ticket.Intent)
+	}
+	if !strings.Contains(ticket.WebsocketURL, "intent=serial") {
+		t.Fatalf("websocket URL %q missing intent=serial", ticket.WebsocketURL)
+	}
+
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"text"}
+	conn, resp, err := dialer.Dial(wsURLFromHTTP(ts.URL, ticket.WebsocketURL), nil)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("Dial: %v (status %d)", err, status)
+	}
+	defer conn.Close()
+	if got := conn.Subprotocol(); got != "text" {
+		t.Fatalf("negotiated subprotocol = %q, want text", got)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("uname -a\n")); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	msgType, payload, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	if msgType != websocket.TextMessage {
+		t.Fatalf("message type = %d, want text", msgType)
+	}
+	if string(payload) != "uname -a\n" {
+		t.Fatalf("payload = %q, want echo of input", string(payload))
+	}
+}
+
+func TestProxyConsole_VNCTicketCannotOpenSerial(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+
+	ticket := issueConsoleTicket(t, ts, "vm-running") // defaults to vnc intent
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"text"}
+	wsURL := wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console?intent=serial&ticket="+ticket.Ticket)
+	_, resp, err := dialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("dial succeeded, want unauthorized")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("status = %d, want 401", status)
+	}
+}
+
+func TestProxyConsole_SerialTicketCannotOpenVNC(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+	ln, err := mockMgr.SeedConsoleListener("vm-running")
+	if err != nil {
+		t.Fatalf("SeedConsoleListener: %v", err)
+	}
+	defer ln.Close()
+
+	ticket := issueConsoleTicketWithIntent(t, ts, "vm-running", "serial")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"binary"}
+	wsURL := wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-running/console?ticket="+ticket.Ticket)
+	_, resp, err := dialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("dial succeeded, want unauthorized")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("status = %d, want 401", status)
+	}
+}
+
+func TestProxyConsole_SerialStoppedVMConflict(t *testing.T) {
+	ts, _, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	// The VM is running at ticket time but stopped by redeem time, so the
+	// serial open must surface the manager's 409 vm_not_running.
+	seeded := &types.VM{ID: "vm-flip", Name: "flip", State: types.VMStateRunning}
+	mockMgr.SeedVM(seeded)
+	ticket, _, err := store.IssueTicket("vm-flip", "", "serial")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	seeded.State = types.VMStateStopped
+
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"text"}
+	wsURL := wsURLFromHTTP(ts.URL, "/api/v1/vms/vm-flip/console?intent=serial&ticket="+ticket)
+	_, resp, err := dialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("dial succeeded, want conflict")
+	}
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("status = %d, want 409", status)
+	}
+}
+
+func TestProxyConsole_InvalidIntentRejected(t *testing.T) {
+	ts, _, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+	ticket, _, err := store.IssueTicket("vm-running", "", "vnc")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/v1/vms/vm-running/console?intent=parallel-port&ticket=" + ticket)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestProxyConsole_SerialStopClosesActiveSession(t *testing.T) {
+	ts, _, mockMgr, _, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
+	defer cleanup()
+
+	mockMgr.SeedVM(&types.VM{ID: "vm-running", Name: "running", State: types.VMStateRunning})
+
+	ticket := issueConsoleTicketWithIntent(t, ts, "vm-running", "serial")
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"text"}
+	conn, _, err := dialer.Dial(wsURLFromHTTP(ts.URL, ticket.WebsocketURL), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/vms/vm-running/stop", "application/json", nil)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("stop status = %d", resp.StatusCode)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("serial websocket stayed open after stop")
 	}
 }

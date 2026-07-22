@@ -26,3 +26,6 @@ __pycache__/
 
 # Claude Code harness state (sub-agent worktrees, transcripts, etc.)
 /.claude/
+
+# Playwright test artifacts
+/test-results/

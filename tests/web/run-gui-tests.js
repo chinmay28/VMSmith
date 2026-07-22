@@ -1641,6 +1641,43 @@ async function main() {
 
     await page.close();
 
+    // ================== VM Console (5.1.7 / 5.1.9) ==================
+    console.log("\nVM Console:");
+
+    page = await context.newPage();
+
+    await runTest("console page connects VNC and mounts canvas", async (p) => {
+      await p.goto(`${BASE}/vms/vm-1/console`);
+      await assertVisible(p, "vm-console-page");
+      await p.waitForSelector('[data-testid="console-status"][data-status="connected"]', { timeout: 15000 });
+      await p.waitForSelector('[data-testid="vnc-canvas-container"] canvas', { timeout: 10000 });
+    }, page);
+
+    await runTest("serial tab opens an echoing terminal", async (p) => {
+      await p.goto(`${BASE}/vms/vm-1/console`);
+      await p.locator('[data-testid="tab-serial"]').click();
+      await p.waitForSelector('[data-testid="console-status"][data-status="connected"]', { timeout: 15000 });
+      await p.waitForFunction(
+        () => document.querySelector('[data-testid="serial-terminal-container"]')?.textContent?.includes("mock-serial login:"),
+        { timeout: 10000 }
+      );
+      await p.keyboard.type("uname");
+      await p.waitForFunction(
+        () => document.querySelector('[data-testid="serial-terminal-container"]')?.textContent?.includes("uname"),
+        { timeout: 10000 }
+      );
+    }, page);
+
+    await runTest("VMDetail console button opens for running VM only", async (p) => {
+      await p.goto(`${BASE}/vms/vm-1`);
+      await p.waitForSelector('[data-testid="btn-console"]', { timeout: 5000 });
+      await p.goto(`${BASE}/vms/vm-2`);
+      await p.waitForSelector('[data-testid="vm-detail-name"]', { timeout: 5000 });
+      await assertNotVisible(p, "btn-console");
+    }, page);
+
+    await page.close();
+
   } finally {
     if (browser) await browser.close();
     server.kill();

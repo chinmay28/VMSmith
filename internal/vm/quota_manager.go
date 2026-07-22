@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/vmsmith/vmsmith/internal/config"
@@ -105,6 +106,9 @@ func (m *quotaManager) DeleteSnapshot(ctx context.Context, vmID string, snapshot
 }
 func (m *quotaManager) GetConsoleEndpoint(ctx context.Context, id string, intent types.ConsoleIntent) (*types.ConsoleEndpoint, error) {
 	return m.base.GetConsoleEndpoint(ctx, id, intent)
+}
+func (m *quotaManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	return m.base.OpenSerialConsole(ctx, id)
 }
 func (m *quotaManager) Close() error { return m.base.Close() }
 

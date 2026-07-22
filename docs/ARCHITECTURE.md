@@ -285,10 +285,10 @@ See `docs/WINDOWS_GUESTS.md` for the operator guide (preparing base images, virt
 
 VMSmith's browser-console path is intentionally split into two halves:
 
-1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket`
-2. **Console proxying** via the forthcoming websocket endpoint that will consume that ticket and bridge the browser to a loopback-only libvirt console endpoint
+1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket` (`?intent=vnc|serial`, default `vnc` — the intent is baked into the ticket so a VNC ticket cannot be redeemed against the serial console and vice versa)
+2. **Console proxying** via `GET /api/v1/vms/{id}/console`, which consumes that ticket and bridges the browser to a loopback-only libvirt console endpoint — raw RFB bytes over the `binary` subprotocol for `vnc`, UTF-8 terminal bytes over the `text` subprotocol (backed by `vm.Manager.OpenSerialConsole` / `virDomainOpenConsole`) for `serial`
 
-The daemon already ships the first half and the discovery primitives for the second half.
+Both halves ship in the daemon, and the browser surface is `web/src/pages/VMConsole.jsx` (route `/vms/:id/console`): a VNC tab driven by the vendored noVNC 1.5.0 ESM bundle (`web/src/vendor/novnc/`) with Ctrl-Alt-Del / fullscreen / reconnect controls, and a Serial tab driven by `@xterm/xterm`.
 
 #### Ticket flow
 

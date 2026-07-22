@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ type MockManager struct {
 	snapshots         map[string][]*types.Snapshot // vmID -> snapshots
 	consoleEndpoints  map[string]*types.ConsoleEndpoint
 	consoleListeners  map[string]net.Listener
+	serialConsoles    map[string]io.ReadWriteCloser
 	nextID            int
 	consoleTerminator ConsoleSessionTerminator
 
@@ -40,6 +42,7 @@ type MockManager struct {
 	RestoreSnapshotErr    error
 	DeleteSnapshotErr     error
 	GetConsoleEndpointErr error
+	OpenSerialConsoleErr  error
 	CreateDelay           time.Duration
 
 	// VNCPasswordKeyMissing simulates a daemon with no
@@ -57,6 +60,7 @@ func NewMockManager() *MockManager {
 		snapshots:        make(map[string][]*types.Snapshot),
 		consoleEndpoints: make(map[string]*types.ConsoleEndpoint),
 		consoleListeners: make(map[string]net.Listener),
+		serialConsoles:   make(map[string]io.ReadWriteCloser),
 	}
 }
 
@@ -632,12 +636,71 @@ func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent 
 	return nil, fmt.Errorf("vms/%s: not found", id)
 }
 
+// OpenSerialConsole returns the seeded stream for the VM when one was
+// registered via SeedSerialConsole; otherwise it returns an in-memory
+// echo stream (everything written is read back), which is enough for the
+// websocket-proxy round-trip tests. Stopped VMs return the same typed
+// `vm_not_running` error the LibvirtManager emits.
+func (m *MockManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	if m.OpenSerialConsoleErr != nil {
+		return nil, m.OpenSerialConsoleErr
+	}
+
+	m.mu.RLock()
+	vm, ok := m.vms[id]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+	state := vm.State
+	seeded := m.serialConsoles[id]
+	m.mu.RUnlock()
+
+	if state != types.VMStateRunning {
+		return nil, types.NewAPIError("vm_not_running", "vm is not running; start it before opening a serial console")
+	}
+	if seeded != nil {
+		return seeded, nil
+	}
+	return newEchoConsole(), nil
+}
+
+// SeedSerialConsole pins the stream OpenSerialConsole returns for the VM
+// so tests can drive both ends of the console.
+func (m *MockManager) SeedSerialConsole(vmID string, rwc io.ReadWriteCloser) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.serialConsoles[vmID] = rwc
+}
+
+// echoConsole is a loopback serial console: bytes written become readable.
+type echoConsole struct {
+	r *io.PipeReader
+	w *io.PipeWriter
+}
+
+func newEchoConsole() *echoConsole {
+	r, w := io.Pipe()
+	return &echoConsole{r: r, w: w}
+}
+
+func (e *echoConsole) Read(p []byte) (int, error)  { return e.r.Read(p) }
+func (e *echoConsole) Write(p []byte) (int, error) { return e.w.Write(p) }
+func (e *echoConsole) Close() error {
+	_ = e.w.Close()
+	return e.r.Close()
+}
+
 func (m *MockManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for k, ln := range m.consoleListeners {
 		_ = ln.Close()
 		delete(m.consoleListeners, k)
+	}
+	for k, rwc := range m.serialConsoles {
+		_ = rwc.Close()
+		delete(m.serialConsoles, k)
 	}
 	return nil
 }
