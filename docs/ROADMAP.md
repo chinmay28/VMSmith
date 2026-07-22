@@ -23,7 +23,7 @@ There are currently no automated checks. This is the single highest-impact impro
 | 1.1.3 | Add frontend build + Playwright mock tests to CI | M | ✅ Done — `.github/workflows/ci.yml` runs a dedicated frontend job that installs Node dependencies, builds the frontend bundle, installs Chromium via Playwright, and runs `make test-web` |
 | 1.1.4 | Add API integration test step (`make test-integration`) | S | ✅ Done — included in `.github/workflows/ci.yml` backend job |
 | 1.1.5 | Create release workflow: build + attach `vmsmith-linux-amd64` binary on tag push | M | ✅ Done — `.github/workflows/release.yml` builds the frontend + `make dist` on `v*` tags and publishes `bin/vmsmith-linux-amd64` via GitHub Releases |
-| 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | GitHub repo settings |
+| 1.1.6 | Add branch protection rules for `main` (require CI pass, no force push) | S | ✅ Done — branch protection is a GitHub repository *setting*, so the deliverable is the executable rule set: `scripts/setup-branch-protection.sh` applies the full policy via `gh api` (require the "Backend build and tests" + "Frontend build and mock GUI tests" CI checks, require branches up to date, enforce for admins, block force pushes and deletions) and prints the resulting protection for verification. A repo admin runs it once: `scripts/setup-branch-protection.sh [owner/repo] [branch]` |
 
 ### 1.2 Input Validation & Error Handling
 
@@ -170,7 +170,7 @@ The API is completely open. This blocks any multi-user or network-exposed deploy
 | 3.1.2 | Add `daemon.auth.enabled` and `daemon.auth.api_keys` config fields | S | ✅ Done — config loader, example config, and tests cover `daemon.auth.enabled` / `daemon.auth.api_keys` |
 | 3.1.3 | Add `--api-key` flag to CLI commands for remote daemon usage | S | ✅ Done — CLI now exposes a persistent `--api-key` flag that adds `Authorization: Bearer <key>` for HTTP-based remote daemon operations such as `image pull http://...` |
 | 3.1.4 | Add login screen to frontend when auth is enabled | M | ✅ Done — the embedded web UI now prompts for an API key after a 401, stores it in `localStorage`, and retries authenticated API calls without a full reload |
-| 3.1.5 | (Future) Role-based access: `admin` (full), `operator` (start/stop/list), `viewer` (read-only) | L | Optional follow-up; start with single-role API keys |
+| 3.1.5 | (Future) Role-based access: `admin` (full), `operator` (start/stop/list), `viewer` (read-only) | L | ✅ Done — `daemon.auth.keys` accepts role-scoped API keys (`{key, role, name}`) alongside the legacy `api_keys` list (which keeps its historical full/admin access). Roles: `viewer` = read-only (GET/HEAD), `operator` = viewer + VM lifecycle verbs (start/stop/restart/force-stop/reboot/suspend/resume + the bulk endpoint for those verbs), console tickets, and schedule run-now; `admin` (default when `role` is omitted) = everything. The middleware classifies each request's minimum role and returns 403 `forbidden` (with the required-vs-held roles in the message) on insufficient keys; bulk `delete` is additionally admin-gated at the handler since the middleware never reads request bodies. Unknown roles fail closed (startup validation + a fail-closed middleware guard). Coverage: viewer read-only, operator lifecycle-allowed/mutations-forbidden, operator bulk-lifecycle-allowed/bulk-delete-forbidden, admin + legacy full access, 401 paths unchanged, console-ticket classification, unknown-role rejection, and a route-classification table |
 
 ### 3.2 TLS / HTTPS Support
 
@@ -949,7 +949,7 @@ start (`managed='yes'`) and reattaches the host driver on stop.
 | 6.3.1 | Write production deployment guide (systemd, TLS, reverse proxy, firewall rules) | M | ✅ Done — `docs/PRODUCTION_DEPLOYMENT.md` covers systemd, TLS via reverse proxy, firewall rules, logging, backups, and upgrade guidance |
 | 6.3.2 | Write networking deep-dive (NAT vs macvtap vs bridge, when to use each, troubleshooting) | M | ✅ Done — added `docs/NETWORKING.md` covering mode selection, tradeoffs, examples, and troubleshooting |
 | 6.3.3 | Add example automation scripts (bash/python) for common workflows | S | ✅ Done — added `examples/` with bash and Python API automation examples for common create/wait/port-forward flows |
-| 6.3.4 | Create short video/GIF demos for README | S | |
+| 6.3.4 | Create short video/GIF demos for README | S | ✅ Done — two looping animated terminal "recordings" ship in `docs/demos/` and are embedded in the README's new Demos section: `vm-lifecycle.svg` (create with pre-assigned IP → list → snapshot → ssh) and `fleet-ops.svg` (tag-scoped list → recurring snapshot schedule → bulk restart → host stats). Implemented as self-contained SVGs animated with pure CSS keyframes so they play inside GitHub's sanitized `<img>` rendering with no video hosting or JS; the scripted sessions live in the checked-in generator `scripts/generate-demos.py`, so updating a demo is an edit + re-run rather than a screen-recording session |
 
 ---
 
