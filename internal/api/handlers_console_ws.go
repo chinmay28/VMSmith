@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,10 @@ func (s *Server) ProxyConsole(w http.ResponseWriter, r *http.Request) {
 
 	if intent == types.ConsoleIntentSerial {
 		s.proxySerialConsole(w, r, vmID, apiKey)
+		return
+	}
+	if intent == types.ConsoleIntentRDP {
+		s.proxyRDPConsole(w, r, vmID, apiKey)
 		return
 	}
 
@@ -229,6 +234,139 @@ func (s *Server) proxySerialConsole(w http.ResponseWriter, r *http.Request, vmID
 				}
 			}
 			if err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	var maxSession <-chan time.Time
+	if s.consoleConfig.MaxSessionSeconds > 0 {
+		timer := time.NewTimer(time.Duration(s.consoleConfig.MaxSessionSeconds) * time.Second)
+		defer timer.Stop()
+		maxSession = timer.C
+	}
+
+	select {
+	case <-r.Context().Done():
+	case <-s.shutdownNotify:
+	case <-maxSession:
+	case <-errCh:
+	}
+}
+
+// guacamoleSubprotocolUpgrader negotiates the `guacamole` subprotocol used
+// by guacamole-common-js's WebSocketTunnel.
+var guacamoleSubprotocolUpgrader = websocket.Upgrader{
+	Subprotocols: []string{"guacamole"},
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// proxyRDPConsole bridges a websocket to guacd, which speaks RDP to the
+// guest (roadmap 5.6.13). The daemon performs the Guacamole client
+// handshake (select rdp → connect to the VM's IP on 3389) and then relays
+// opaque Guacamole instructions in both directions. The ticket has already
+// been consumed and validated by the caller.
+func (s *Server) proxyRDPConsole(w http.ResponseWriter, r *http.Request, vmID, apiKey string) {
+	guacdAddr := strings.TrimSpace(s.consoleConfig.GuacdAddress)
+	if guacdAddr == "" {
+		writeAPIError(w, http.StatusServiceUnavailable, types.NewAPIError("rdp_console_unavailable", "rdp console requires daemon.console.guacd_address to be configured"))
+		return
+	}
+
+	machine, err := s.vmManager.Get(r.Context(), vmID)
+	if err != nil {
+		apiErr := sanitizeManagerError(err)
+		writeAPIError(w, statusForAPIError(apiErr, http.StatusNotFound), apiErr)
+		return
+	}
+	if machine.State != types.VMStateRunning {
+		writeAPIError(w, http.StatusConflict, types.NewAPIError("vm_not_running", "vm must be running to open an rdp console"))
+		return
+	}
+	if machine.IP == "" {
+		writeAPIError(w, http.StatusServiceUnavailable, types.NewAPIError("console_unavailable", "vm has no ip address yet; wait for the guest to acquire its lease"))
+		return
+	}
+
+	guacdConn, err := net.DialTimeout("tcp", guacdAddr, consoleWriteWait)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, types.NewAPIError("console_unreachable", "failed to reach guacd"))
+		return
+	}
+
+	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
+	height, _ := strconv.Atoi(r.URL.Query().Get("height"))
+	guacReader, ready, err := guacdHandshakeRDP(guacdConn, machine.IP, 3389, width, height)
+	if err != nil {
+		_ = guacdConn.Close()
+		writeAPIError(w, http.StatusBadGateway, types.NewAPIError("console_unreachable", "guacd handshake failed"))
+		return
+	}
+
+	wsConn, err := guacamoleSubprotocolUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = guacdConn.Close()
+		return
+	}
+
+	session := &activeConsoleSession{vmID: vmID, apiKey: apiKey, ws: wsConn}
+	s.registerConsoleSession(session)
+	defer s.unregisterConsoleSession(session)
+	defer session.close()
+	defer guacdConn.Close()
+
+	wsConn.SetReadLimit(8 << 20)
+	idleTimeout := time.Duration(s.consoleConfig.IdleTimeoutSeconds) * time.Second
+
+	// Forward the ready instruction so the browser's tunnel learns its
+	// connection id before the instruction stream starts.
+	_ = wsConn.SetWriteDeadline(time.Now().Add(consoleWriteWait))
+	if err := wsConn.WriteMessage(websocket.TextMessage, []byte(encodeGuacInstruction(ready.Opcode, ready.Args...))); err != nil {
+		return
+	}
+
+	errCh := make(chan error, 2)
+	go func() {
+		// guacd → browser: forward complete instructions as text frames so
+		// the client-side parser always receives whole elements.
+		for {
+			if idleTimeout > 0 {
+				_ = guacdConn.SetReadDeadline(time.Now().Add(idleTimeout))
+			}
+			inst, err := guacReader.ReadInstruction()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			_ = wsConn.SetWriteDeadline(time.Now().Add(consoleWriteWait))
+			if err := wsConn.WriteMessage(websocket.TextMessage, []byte(encodeGuacInstruction(inst.Opcode, inst.Args...))); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		// browser → guacd: guacamole-common-js writes whole instructions
+		// per message, so a raw byte relay is safe in this direction.
+		for {
+			if idleTimeout > 0 {
+				_ = wsConn.SetReadDeadline(time.Now().Add(idleTimeout))
+			}
+			msgType, payload, err := wsConn.ReadMessage()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if msgType != websocket.TextMessage && msgType != websocket.BinaryMessage {
+				continue
+			}
+			if idleTimeout > 0 {
+				_ = guacdConn.SetWriteDeadline(time.Now().Add(idleTimeout))
+			}
+			if _, err := guacdConn.Write(payload); err != nil {
 				errCh <- err
 				return
 			}

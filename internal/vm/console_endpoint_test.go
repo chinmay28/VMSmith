@@ -266,7 +266,7 @@ func TestMockManager_GetConsoleEndpoint_RejectsInvalidIntent(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	_, err = m.GetConsoleEndpoint(ctx, vm.ID, types.ConsoleIntent("rdp"))
+	_, err = m.GetConsoleEndpoint(ctx, vm.ID, types.ConsoleIntent("spice"))
 	if err == nil {
 		t.Fatalf("expected invalid_console_intent error")
 	}

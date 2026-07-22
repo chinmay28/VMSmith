@@ -6862,9 +6862,6 @@ test.describe("Layout footer", () => {
 
 // ============================================================
 // Multi-host overview (5.5.4)
-// =====================================================  });
-});
-
 // ============================================================
 test.describe("Hosts overview", () => {
   test("dashboard renders the hosts table with per-host allocation", async ({ page }) => {
@@ -6879,7 +6876,10 @@ test.describe("Hosts overview", () => {
     const hv2Row = page.getByTestId("host-row-hv2");
     await expect(hv2Row).toContainText("hv2");
     await expect(hv2Row).toContainText("unreachable");
-=======
+  });
+});
+
+// ============================================================
 // VM Console (5.1.7 noVNC page + 5.1.9 serial tab + 5.1.11)
 // ============================================================
 test.describe("VM Console", () => {
@@ -6930,5 +6930,20 @@ test.describe("VM Console", () => {
     await page.goto(`${BASE_URL}/vms/vm-2`);
     await expect(page.getByTestId("vm-detail-name")).toHaveText("db-server");
     await expect(page.getByTestId("btn-console")).toHaveCount(0);
+  });
+});
+
+// ============================================================
+// RDP Console (5.6.13 — guacd-bridged Guacamole client)
+// ============================================================
+test.describe("RDP Console", () => {
+  test("rdp tab connects through the mock guacd bridge", async ({ page }) => {
+    await page.goto(`${BASE_URL}/vms/vm-1/console`);
+    await page.getByTestId("tab-rdp").click();
+    await expect(page.getByTestId("rdp-console")).toBeVisible();
+    // The mock sends ready + size + sync; answering the sync flips the
+    // guacamole client into the CONNECTED state.
+    await expect(page.getByTestId("console-status")).toHaveAttribute("data-status", "connected", { timeout: 15000 });
+    await expect(page.getByTestId("rdp-display")).toBeVisible();
   });
 });

@@ -47,6 +47,11 @@ var vmCreateCmd = &cobra.Command{
 		machineType, _ := cmd.Flags().GetString("machine")
 		firmware, _ := cmd.Flags().GetString("firmware")
 		virtioWinISO, _ := cmd.Flags().GetString("virtio-win-iso")
+		installISO, _ := cmd.Flags().GetString("install-iso")
+		installImageIndex, _ := cmd.Flags().GetInt("install-image-index")
+		locale, _ := cmd.Flags().GetString("locale")
+		secureBootFlag, _ := cmd.Flags().GetBool("secure-boot")
+		tpmFlag, _ := cmd.Flags().GetBool("tpm")
 		cloudInit, _ := cmd.Flags().GetString("cloud-init")
 		description, _ := cmd.Flags().GetString("description")
 		tags, _ := cmd.Flags().GetStringSlice("tag")
@@ -95,6 +100,8 @@ var vmCreateCmd = &cobra.Command{
 			Machine:       strings.TrimSpace(machineType),
 			Firmware:      strings.TrimSpace(strings.ToLower(firmware)),
 			VirtioWinISO:  strings.TrimSpace(virtioWinISO),
+			InstallISO:    strings.TrimSpace(installISO),
+			Locale:        strings.TrimSpace(locale),
 			CloudInitFile: cloudInit,
 			Networks:      networks,
 			GPUs:          gpuFlags,
@@ -103,6 +110,17 @@ var vmCreateCmd = &cobra.Command{
 			AutoStart:     autoStart,
 			Locked:        locked,
 			Host:          strings.TrimSpace(hostName),
+		}
+		if spec.InstallISO != "" {
+			spec.InstallImageIndex = installImageIndex
+		}
+		// Pointer semantics: only an explicitly passed --secure-boot / --tpm
+		// overrides the os_variant default (windows-11 ⇒ on).
+		if cmd.Flags().Changed("secure-boot") {
+			spec.SecureBoot = &secureBootFlag
+		}
+		if cmd.Flags().Changed("tpm") {
+			spec.TPM = &tpmFlag
 		}
 
 		result, err := mgr.Create(context.Background(), spec)
@@ -1240,6 +1258,11 @@ func init() {
 	vmCreateCmd.Flags().String("machine", "", "libvirt machine type override (default: pc-q35-6.2)")
 	vmCreateCmd.Flags().String("firmware", "", "firmware override: bios (default), uefi, or ovmf (uefi/ovmf both select libvirt's firmware='efi')")
 	vmCreateCmd.Flags().String("virtio-win-iso", "", "per-VM virtio-win driver ISO path (overrides daemon storage.virtio_win_iso for this Windows VM only)")
+	vmCreateCmd.Flags().String("install-iso", "", "unattended install: path to a raw Windows installation ISO (mutually exclusive with --image; boots the installer against a blank disk with a generated Autounattend.xml)")
+	vmCreateCmd.Flags().Int("install-image-index", 0, "unattended install: WIM image index for edition selection (0 = installer default)")
+	vmCreateCmd.Flags().String("locale", "", "unattended install: Windows UI/input locale (default en-US)")
+	vmCreateCmd.Flags().Bool("secure-boot", false, "enable UEFI Secure Boot (default: on for --os-variant windows-11, off otherwise; pass --secure-boot=false to disable)")
+	vmCreateCmd.Flags().Bool("tpm", false, "attach an emulated TPM 2.0 via swtpm (default: on for --os-variant windows-11, off otherwise; pass --tpm=false to disable)")
 	vmCreateCmd.Flags().String("cloud-init", "", "path to cloud-init / cloudbase-init user-data file")
 	vmCreateCmd.Flags().String("description", "", "free-form VM description")
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")

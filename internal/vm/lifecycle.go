@@ -184,6 +184,14 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// reservation, VM dir, overlay disk, provisioning ISO) is allocated.
 	// The deferred cleanup below also unwinds these on failure; this check
 	// avoids allocating them at all for a misconfigured daemon.
+	// Fail fast when the spec's firmware / TPM / install-ISO selections need
+	// host capabilities that are missing (roadmap 5.6.9 / 5.6.11): swtpm for
+	// the emulated TPM, an OVMF (secboot) build for UEFI / Secure Boot, and
+	// an existing install ISO for the unattended-install path.
+	if err := probeUEFIRequirements(spec); err != nil {
+		return nil, err
+	}
+
 	if spec.VNCPassword != "" && strings.TrimSpace(m.cfg.Daemon.Console.PasswordKey) == "" {
 		return nil, types.NewAPIError("vnc_password_key_missing",
 			"daemon.console.password_key must be configured before setting VNC passwords")
@@ -271,24 +279,32 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 		_ = os.RemoveAll(vmDir)
 	}()
 
-	// Create qcow2 overlay backed by the base image
+	// Create the system disk. The unattended-install path (roadmap 5.6.11)
+	// starts from a blank qcow2 that Windows Setup partitions and installs
+	// onto; every other path overlays the base image.
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
-	baseImage := spec.Image
-	if !filepath.IsAbs(spec.Image) {
-		candidate := filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
-		// Images must have a .qcow2 extension so libvirt's AppArmor driver
-		// correctly follows the backing-file chain and allows QEMU to open them.
-		// Try the name as-is first; if it doesn't exist, append .qcow2.
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			withExt := candidate + ".qcow2"
-			if _, err2 := os.Stat(withExt); err2 == nil {
-				candidate = withExt
-			}
+	if spec.InstallISO != "" {
+		if err := createBlankDisk(diskPath, spec.DiskGB); err != nil {
+			return nil, fmt.Errorf("creating blank install disk: %w", err)
 		}
-		baseImage = candidate
-	}
-	if err := createOverlayDisk(baseImage, diskPath, spec.DiskGB); err != nil {
-		return nil, fmt.Errorf("creating overlay disk: %w", err)
+	} else {
+		baseImage := spec.Image
+		if !filepath.IsAbs(spec.Image) {
+			candidate := filepath.Join(m.cfg.Storage.ImagesDir, spec.Image)
+			// Images must have a .qcow2 extension so libvirt's AppArmor driver
+			// correctly follows the backing-file chain and allows QEMU to open them.
+			// Try the name as-is first; if it doesn't exist, append .qcow2.
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				withExt := candidate + ".qcow2"
+				if _, err2 := os.Stat(withExt); err2 == nil {
+					candidate = withExt
+				}
+			}
+			baseImage = candidate
+		}
+		if err := createOverlayDisk(baseImage, diskPath, spec.DiskGB); err != nil {
+			return nil, fmt.Errorf("creating overlay disk: %w", err)
+		}
 	}
 
 	// Always create a cloud-init ISO. Rocky Linux (and other RHEL-based images)
@@ -1553,6 +1569,11 @@ func (m *LibvirtManager) GetConsoleEndpoint(ctx context.Context, id string, inte
 	if !intent.Valid() {
 		return nil, types.NewAPIError("invalid_console_intent", fmt.Sprintf("unknown console intent %q", string(intent)))
 	}
+	if intent == types.ConsoleIntentRDP {
+		// RDP consoles are bridged via guacd straight to the guest's IP
+		// (roadmap 5.6.13) — there is no local libvirt endpoint to return.
+		return nil, types.NewAPIError("invalid_console_intent", "rdp consoles have no local endpoint; they are bridged via guacd")
+	}
 
 	storedVM, err := m.store.GetVM(id)
 	if err != nil {
@@ -1792,6 +1813,20 @@ func createOverlayDisk(baseImage, diskPath string, sizeGB int) error {
 	return nil
 }
 
+// createBlankDisk creates an empty qcow2 disk (no backing file) for the
+// unattended-install-from-ISO path (roadmap 5.6.11).
+func createBlankDisk(diskPath string, sizeGB int) error {
+	cmd := exec.Command("qemu-img", "create",
+		"-f", "qcow2",
+		diskPath,
+		fmt.Sprintf("%dG", sizeGB),
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("qemu-img create: %s: %w", string(out), err)
+	}
+	return nil
+}
+
 // virtioWinISOPath resolves the virtio-win driver ISO to attach to Windows
 // guests. It prefers the explicitly-configured storage.virtio_win_iso path and
 // falls back to the conventional package install location. Returns "" when no
@@ -1915,10 +1950,34 @@ func createWindowsProvisioningISO(isoPath string, spec types.VMSpec, instanceID 
 		return err
 	}
 
-	return writeNoCloudISO(isoPath, []string{
+	files := []string{
 		filepath.Join(tmpDir, "meta-data"),
 		filepath.Join(tmpDir, "user-data"),
-	})
+	}
+
+	// Unattended install (roadmap 5.6.11): Windows Setup scans the root of
+	// every attached removable drive for Autounattend.xml, so baking it
+	// into the provisioning cdrom drives a hands-free installation from
+	// the raw install ISO attached as the boot cdrom.
+	if spec.InstallISO != "" {
+		unattend, err := GenerateAutounattendXML(
+			spec.Name,
+			spec.AdminPassword,
+			spec.Locale,
+			spec.InstallImageIndex,
+			spec.ResolvedFirmwareAttr() == "efi",
+		)
+		if err != nil {
+			return err
+		}
+		unattendPath := filepath.Join(tmpDir, "Autounattend.xml")
+		if err := os.WriteFile(unattendPath, []byte(unattend), 0644); err != nil {
+			return err
+		}
+		files = append(files, unattendPath)
+	}
+
+	return writeNoCloudISO(isoPath, files)
 }
 
 // buildWindowsUserData returns a cloudbase-init #ps1_sysnative PowerShell

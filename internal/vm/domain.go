@@ -21,6 +21,15 @@ const domainXMLTemplate = `<domain type='kvm'>
   <vcpu placement='static'>{{.CPUs}}</vcpu>
   <os{{if .FirmwareAttr}} firmware='{{.FirmwareAttr}}'{{end}}>
     <type arch='x86_64' machine='{{.Machine}}'>hvm</type>
+    {{- if .SecureBoot}}
+    <firmware>
+      <feature enabled='yes' name='secure-boot'/>
+      <feature enabled='yes' name='enrolled-keys'/>
+    </firmware>
+    {{- end}}
+    {{- if .BootFromCDROM}}
+    <boot dev='cdrom'/>
+    {{- end}}
     <boot dev='hd'/>
   </os>
   <features>
@@ -70,6 +79,14 @@ const domainXMLTemplate = `<domain type='kvm'>
       <readonly/>
     </disk>
     {{- end}}
+    {{- if .InstallISO}}
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{{.InstallISO}}'/>
+      <target dev='{{.InstallISOTarget}}' bus='sata'/>
+      <readonly/>
+    </disk>
+    {{- end}}
     {{- range .Interfaces}}
     {{.XML}}
     {{- end}}
@@ -94,6 +111,11 @@ const domainXMLTemplate = `<domain type='kvm'>
     <rng model='virtio'>
       <backend model='random'>/dev/urandom</backend>
     </rng>
+    {{- if .TPM}}
+    <tpm model='tpm-crb'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+    {{- end}}
     {{- range .GPUHostdevs}}
     {{.}}
     {{- end}}
@@ -136,6 +158,24 @@ type DomainParams struct {
 	// indirectly from VMSpec.Firmware ("uefi"/"ovmf" → "efi"; "bios"/"" →
 	// empty) via VMSpec.ResolvedFirmwareAttr.
 	FirmwareAttr string
+	// SecureBoot emits the <os><firmware> feature block enabling
+	// secure-boot + enrolled-keys so libvirt auto-selects the host's
+	// secboot OVMF build (roadmap 5.6.9). Requires FirmwareAttr "efi".
+	SecureBoot bool
+	// TPM attaches an emulated TPM 2.0 device (tpm-crb, swtpm backend) —
+	// roadmap 5.6.9. The host must have swtpm installed.
+	TPM bool
+	// InstallISO attaches a Windows installation ISO as an extra cdrom
+	// for the unattended-install create path (roadmap 5.6.11); combine
+	// with BootFromCDROM so the first boot enters Windows Setup.
+	InstallISO string
+	// InstallISOTarget is the cdrom target dev for InstallISO (e.g. "sdd").
+	InstallISOTarget string
+	// BootFromCDROM prepends <boot dev='cdrom'/> ahead of the hd entry so
+	// a fresh (blank-disk) VM boots the installer; after installation the
+	// installer's "press any key" prompt times out and boot falls through
+	// to the disk.
+	BootFromCDROM bool
 	// NICModel is the libvirt <interface><model type='...'/></interface>
 	// value used for the primary NAT interface and every additional
 	// attachment. Populated in DomainParamsFromSpec via
@@ -316,9 +356,23 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	// Apply Firmware override (5.6.15). "uefi"/"ovmf" resolve to libvirt's
 	// firmware='efi' shorthand which auto-selects the host's OVMF code/vars
 	// pair from the QEMU firmware descriptors; "bios"/"" emit no attribute.
-	// This is the minimal-viable UEFI path — Secure Boot + virtual TPM are
-	// out of scope for 5.6.15 (tracked separately under roadmap 5.6.9).
 	params.FirmwareAttr = spec.ResolvedFirmwareAttr()
+
+	// Secure Boot + virtual TPM (roadmap 5.6.9). Both default on for
+	// os_variant windows-11 (whose installer refuses to run without them)
+	// and honour explicit spec flags otherwise. ResolvedFirmwareAttr
+	// already forces "efi" whenever Secure Boot resolves on.
+	params.SecureBoot = spec.ResolvedSecureBoot()
+	params.TPM = spec.ResolvedTPM()
+
+	// Unattended install from a raw Windows ISO (roadmap 5.6.11): attach
+	// the installer as a boot cdrom on the next free SATA slot after the
+	// provisioning (sdb) and virtio-win (sdc) cdroms.
+	if spec.InstallISO != "" {
+		params.InstallISO = spec.InstallISO
+		params.InstallISOTarget = "sdd"
+		params.BootFromCDROM = true
+	}
 
 	return params
 }
@@ -360,6 +414,9 @@ func GenerateDomainXML(params DomainParams) (string, error) {
 	}
 	if params.VirtioWinTarget == "" {
 		params.VirtioWinTarget = "sdc"
+	}
+	if params.InstallISO != "" && params.InstallISOTarget == "" {
+		params.InstallISOTarget = "sdd"
 	}
 	if params.ClockOffset == "" {
 		params.ClockOffset = "utc"

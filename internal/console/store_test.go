@@ -137,17 +137,28 @@ func TestJanitorRemovesExpiredTickets(t *testing.T) {
 }
 
 func TestJanitorRemovesExpiredTicketsAutomatically(t *testing.T) {
+	// The janitor goroutine reads the clock concurrently, so both the
+	// s.now swap and later advances must be synchronised.
+	var timeMu sync.Mutex
 	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
 	s := NewStoreWithOptions(20*time.Millisecond, 10*time.Millisecond)
 	defer s.Close()
-	s.now = func() time.Time { return now }
+	s.mu.Lock()
+	s.now = func() time.Time {
+		timeMu.Lock()
+		defer timeMu.Unlock()
+		return now
+	}
+	s.mu.Unlock()
 
 	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
 		t.Fatalf("IssueTicket returned error: %v", err)
 	}
 
+	timeMu.Lock()
 	now = now.Add(time.Minute)
+	timeMu.Unlock()
 	waitForCondition(t, 250*time.Millisecond, func() bool {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
@@ -157,9 +168,16 @@ func TestJanitorRemovesExpiredTicketsAutomatically(t *testing.T) {
 }
 
 func TestCloseStopsJanitor(t *testing.T) {
+	var timeMu sync.Mutex
 	now := time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC)
 	s := NewStoreWithOptions(20*time.Millisecond, 10*time.Millisecond)
-	s.now = func() time.Time { return now }
+	s.mu.Lock()
+	s.now = func() time.Time {
+		timeMu.Lock()
+		defer timeMu.Unlock()
+		return now
+	}
+	s.mu.Unlock()
 
 	token, _, err := s.IssueTicket("vm-1", "api-key-1", "vnc")
 	if err != nil {
@@ -167,7 +185,9 @@ func TestCloseStopsJanitor(t *testing.T) {
 	}
 
 	s.Close()
+	timeMu.Lock()
 	now = now.Add(time.Minute)
+	timeMu.Unlock()
 	time.Sleep(50 * time.Millisecond)
 
 	s.mu.RLock()

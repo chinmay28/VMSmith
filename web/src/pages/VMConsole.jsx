@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Monitor, TerminalSquare, Maximize2, RefreshCw, Keyboard } from 'lucide-react';
+import { Monitor, TerminalSquare, Maximize2, RefreshCw, Keyboard, AppWindow } from 'lucide-react';
 import RFB from '../vendor/novnc';
+import Guacamole from '../vendor/guacamole/guacamole.js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -258,6 +259,121 @@ function SerialConsole({ vmId }) {
   );
 }
 
+// RDP tab: guacamole-common-js client bridged through the daemon to guacd
+// (roadmap 5.6.13). Requires daemon.console.guacd_address; the daemon
+// returns a clear 503 when the bridge is not configured.
+function RDPConsole({ vmId }) {
+  const containerRef = useRef(null);
+  const [generation, setGeneration] = useState(0);
+  const [status, setStatus] = useState('connecting');
+  const [message, setMessage] = useState('Requesting console ticket…');
+
+  useEffect(() => {
+    let cancelled = false;
+    let client = null;
+    let keyboard = null;
+
+    async function connect() {
+      setStatus('connecting');
+      setMessage('Requesting console ticket…');
+      let ticket;
+      try {
+        ticket = await vms.issueConsoleTicket(vmId, 'rdp');
+      } catch (err) {
+        if (!cancelled) {
+          setStatus('error');
+          setMessage(err?.message || 'Failed to issue console ticket');
+        }
+        return;
+      }
+      if (cancelled || !containerRef.current) return;
+
+      setMessage('Connecting via guacd…');
+      // WebSocketTunnel appends "?<data>" itself, so the tunnel URL must be
+      // bare and the ticket/intent ride in the connect data string.
+      const scheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const tunnel = new Guacamole.WebSocketTunnel(
+        `${scheme}${window.location.host}/api/v1/vms/${vmId}/console`
+      );
+      client = new Guacamole.Client(tunnel);
+      const el = client.getDisplay().getElement();
+      el.setAttribute('data-testid', 'rdp-display');
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(el);
+
+      client.onstatechange = (state) => {
+        if (cancelled) return;
+        // 3 = CONNECTED, 5 = DISCONNECTED (Guacamole.Client states)
+        if (state === 3) {
+          setStatus('connected');
+          setMessage('Connected');
+        } else if (state === 5) {
+          setStatus((prev) => (prev === 'error' ? prev : 'disconnected'));
+          setMessage((prev) => (prev === 'Connected' || prev === 'Connecting via guacd…' ? 'Disconnected' : prev));
+        }
+      };
+      tunnel.onerror = () => {
+        if (!cancelled) {
+          setStatus('error');
+          setMessage('RDP tunnel error (is guacd configured and the guest reachable on 3389?)');
+        }
+      };
+
+      const width = containerRef.current.clientWidth || 1024;
+      const height = containerRef.current.clientHeight || 768;
+      client.connect(
+        `intent=rdp&ticket=${encodeURIComponent(ticket.ticket)}&width=${width}&height=${height}`
+      );
+
+      const mouse = new Guacamole.Mouse(el);
+      const sendMouseState = (state) => client.sendMouseState(state);
+      mouse.onmousedown = sendMouseState;
+      mouse.onmouseup = sendMouseState;
+      mouse.onmousemove = sendMouseState;
+      keyboard = new Guacamole.Keyboard(document);
+      keyboard.onkeydown = (keysym) => client.sendKeyEvent(1, keysym);
+      keyboard.onkeyup = (keysym) => client.sendKeyEvent(0, keysym);
+    }
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (keyboard) keyboard.onkeydown = keyboard.onkeyup = null;
+      if (client) {
+        try {
+          client.disconnect();
+        } catch {
+          // Already torn down.
+        }
+      }
+    };
+  }, [vmId, generation]);
+
+  return (
+    <div className="flex flex-col h-full" data-testid="rdp-console">
+      <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700">
+        <StatusPill status={status} message={message} />
+        <div className="flex-1" />
+        <button
+          onClick={() => setGeneration((g) => g + 1)}
+          data-testid="rdp-reconnect"
+          className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+        >
+          <RefreshCw size={14} /> Reconnect
+        </button>
+      </div>
+      <div className="relative flex-1 bg-black overflow-hidden">
+        <div ref={containerRef} className="absolute inset-0 flex items-center justify-center" data-testid="rdp-display-container" />
+        {status !== 'connected' && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="px-4 py-2 rounded bg-gray-900/80 text-sm text-gray-300">{message}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Full-page console surface. Rendered outside the app Layout so a new tab
 // gives a clean keyboard-capture surface (Ctrl-W etc. still belong to the
 // browser, but nothing in the SPA chrome steals focus).
@@ -302,10 +418,15 @@ export default function VMConsole() {
           <button className={tabClass(tab === 'serial')} onClick={() => setTab('serial')} data-testid="tab-serial">
             <TerminalSquare size={15} /> Serial
           </button>
+          <button className={tabClass(tab === 'rdp')} onClick={() => setTab('rdp')} data-testid="tab-rdp">
+            <AppWindow size={15} /> RDP
+          </button>
         </nav>
       </header>
       <main className="flex-1 min-h-0">
-        {tab === 'vnc' ? <VNCConsole vmId={id} /> : <SerialConsole vmId={id} />}
+        {tab === 'vnc' && <VNCConsole vmId={id} />}
+        {tab === 'serial' && <SerialConsole vmId={id} />}
+        {tab === 'rdp' && <RDPConsole vmId={id} />}
       </main>
     </div>
   );

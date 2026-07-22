@@ -168,6 +168,45 @@ type VMSpec struct {
 	// in-guest. Empty falls back to the daemon config / probe.
 	VirtioWinISO string `json:"virtio_win_iso,omitempty" yaml:"virtio_win_iso,omitempty"`
 
+	// SecureBoot enables UEFI Secure Boot (roadmap 5.6.9): the domain is
+	// rendered with firmware='efi' plus the secure-boot + enrolled-keys
+	// firmware features so libvirt auto-selects the host's secboot OVMF
+	// build with Microsoft keys enrolled. Pointer semantics: nil = auto
+	// (on for os_variant windows-11, which refuses to install without it;
+	// off otherwise), explicit true/false overrides the default. Requires
+	// firmware uefi/ovmf (an explicit "bios" is rejected at create).
+	// Immutable post-create, like Firmware.
+	SecureBoot *bool `json:"secure_boot,omitempty" yaml:"secure_boot,omitempty"`
+
+	// TPM attaches an emulated TPM 2.0 device (tpm-crb backed by swtpm) —
+	// roadmap 5.6.9. Pointer semantics: nil = auto (on for os_variant
+	// windows-11, off otherwise), explicit true/false overrides. The host
+	// must have swtpm installed; create fails with a clear typed error
+	// when it is missing. Immutable post-create.
+	TPM *bool `json:"tpm,omitempty" yaml:"tpm,omitempty"`
+
+	// InstallISO enables the unattended-install-from-ISO create path for
+	// Windows guests (roadmap 5.6.11): instead of overlaying a prepared
+	// base image, VMSmith creates a blank qcow2 disk of DiskGB, attaches
+	// the referenced Windows installation ISO as a boot cdrom, and bakes a
+	// generated Autounattend.xml (partitioning matched to the firmware,
+	// edition selection via InstallImageIndex, locale, Administrator
+	// password, RDP + WinRM enablement) into the provisioning ISO so
+	// Windows Setup runs hands-free. Mutually exclusive with Image; the
+	// path must exist on the daemon host at create time. Windows-only.
+	InstallISO string `json:"install_iso,omitempty" yaml:"install_iso,omitempty"`
+
+	// InstallImageIndex selects the WIM image index inside the install
+	// ISO (edition select — e.g. 1 = Standard Core, 2 = Standard with
+	// Desktop Experience on Server media). Zero omits the selection so
+	// Windows Setup uses the first image. Only meaningful with InstallISO.
+	InstallImageIndex int `json:"install_image_index,omitempty" yaml:"install_image_index,omitempty"`
+
+	// Locale sets the Windows UI language / input locale used by the
+	// unattended install (e.g. "en-US", default when empty). Only
+	// meaningful with InstallISO.
+	Locale string `json:"locale,omitempty" yaml:"locale,omitempty"`
+
 	// GPUs lists host PCI GPU addresses to pass through to this VM via VFIO,
 	// in either the long ("0000:01:00.0") or short ("01:00.0") form.
 	// Discover assignable GPUs with GET /api/v1/host/gpus (`vmsmith host
@@ -390,14 +429,44 @@ func (s VMSpec) ResolvedMachine() string {
 // ResolvedFirmwareAttr returns the libvirt <os firmware='...'> attribute
 // value for this spec, or empty for "no firmware attribute" (BIOS /
 // SeaBIOS default). "uefi" and "ovmf" both resolve to libvirt's "efi"
-// shorthand; "bios" and "" both resolve to empty.
+// shorthand; "bios" and "" both resolve to empty — unless Secure Boot is
+// resolved on (roadmap 5.6.9), which requires EFI and therefore forces
+// the attribute even when Firmware was left empty.
 func (s VMSpec) ResolvedFirmwareAttr() string {
 	switch strings.ToLower(strings.TrimSpace(s.Firmware)) {
 	case FirmwareUEFI, FirmwareOVMF:
 		return "efi"
 	default:
+		if s.ResolvedSecureBoot() {
+			return "efi"
+		}
 		return ""
 	}
+}
+
+// windows11Variant is the OS variant whose installer refuses to run
+// without UEFI Secure Boot and a TPM 2.0 device.
+const windows11Variant = "windows-11"
+
+// ResolvedSecureBoot reports whether UEFI Secure Boot is effectively
+// enabled for this spec (roadmap 5.6.9): an explicit SecureBoot value
+// wins; otherwise it defaults on for os_variant windows-11 (whose
+// installer requires it) and off for everything else.
+func (s VMSpec) ResolvedSecureBoot() bool {
+	if s.SecureBoot != nil {
+		return *s.SecureBoot
+	}
+	return strings.EqualFold(strings.TrimSpace(s.OSVariant), windows11Variant)
+}
+
+// ResolvedTPM reports whether an emulated TPM 2.0 device is effectively
+// attached (roadmap 5.6.9): an explicit TPM value wins; otherwise it
+// defaults on for os_variant windows-11 and off for everything else.
+func (s VMSpec) ResolvedTPM() bool {
+	if s.TPM != nil {
+		return *s.TPM
+	}
+	return strings.EqualFold(strings.TrimSpace(s.OSVariant), windows11Variant)
 }
 
 // ResolvedClockOffset returns the effective libvirt clock offset for this

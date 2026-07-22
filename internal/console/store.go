@@ -135,10 +135,19 @@ func (s *Store) startJanitor() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.deleteExpired(s.now())
+				s.deleteExpired(s.currentTime())
 			}
 		}
 	}()
+}
+
+// currentTime reads the clock function under the lock so tests can swap
+// s.now without racing the janitor goroutine.
+func (s *Store) currentTime() time.Time {
+	s.mu.RLock()
+	nowFn := s.now
+	s.mu.RUnlock()
+	return nowFn()
 }
 
 func (s *Store) deleteExpired(now time.Time) {

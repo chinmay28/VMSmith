@@ -35,6 +35,13 @@ func (s *Server) IssueConsoleTicket(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	// Fail RDP tickets early when no guacd bridge is configured (5.6.13)
+	// so the operator sees a clear config error instead of a websocket
+	// failure after the ticket round-trip.
+	if intent == types.ConsoleIntentRDP && strings.TrimSpace(s.consoleConfig.GuacdAddress) == "" {
+		writeAPIError(w, http.StatusServiceUnavailable, types.NewAPIError("rdp_console_unavailable", "rdp console requires daemon.console.guacd_address to be configured"))
+		return
+	}
 
 	id := chi.URLParam(r, "vmID")
 	v, err := s.vmManager.Get(r.Context(), id)
@@ -71,7 +78,7 @@ func consoleIntentFromRequest(r *http.Request) (types.ConsoleIntent, error) {
 	}
 	intent := types.ConsoleIntent(strings.ToLower(raw))
 	if !intent.Valid() {
-		return "", types.NewAPIError("invalid_console_intent", "console intent must be one of: vnc, serial")
+		return "", types.NewAPIError("invalid_console_intent", "console intent must be one of: vnc, serial, rdp")
 	}
 	return intent, nil
 }

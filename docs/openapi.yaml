@@ -1256,7 +1256,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [vnc, serial]
+            enum: [vnc, serial, rdp]
             default: vnc
           description: Console flavour the ticket should be valid for.
       responses:
@@ -1289,10 +1289,17 @@ paths:
         websocket subprotocol and bridges websocket binary frames to the VM's
         loopback-only VNC listener. With `intent=serial` the server negotiates
         the `text` subprotocol and bridges UTF-8 terminal bytes to the domain's
-        serial console (libvirt `virDomainOpenConsole`). The intent must match
-        the one the ticket was issued for — a mismatch returns 401. When
-        daemon TLS is enabled, callers must use `wss://`; reverse-proxy
-        deployments may forward that fact with `X-Forwarded-Proto: https`.
+        serial console (libvirt `virDomainOpenConsole`). With `intent=rdp`
+        (roadmap 5.6.13) the server negotiates the `guacamole` subprotocol,
+        performs the Guacamole client handshake against the configured
+        `daemon.console.guacd_address` (targeting the VM's IP on 3389), and
+        relays Guacamole-protocol instructions — 503 `rdp_console_unavailable`
+        when no guacd bridge is configured, 503 `console_unavailable` when the
+        VM has no IP yet, 502 `console_unreachable` when guacd cannot be
+        reached. The intent must match the one the ticket was issued for — a
+        mismatch returns 401. When daemon TLS is enabled, callers must use
+        `wss://`; reverse-proxy deployments may forward that fact with
+        `X-Forwarded-Proto: https`.
       parameters:
         - $ref: '#/components/parameters/VMID'
         - in: query
@@ -1306,7 +1313,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [vnc, serial]
+            enum: [vnc, serial, rdp]
             default: vnc
           description: Console flavour to attach; must match the ticket's intent.
       responses:
@@ -4308,9 +4315,51 @@ components:
             attribute and falls back to SeaBIOS; "uefi" and "ovmf" both
             resolve to libvirt's `firmware='efi'` shorthand, which
             auto-picks the host's OVMF code/vars pair. Required for
-            Windows 11. Does NOT enable Secure Boot or attach a virtual
-            TPM (tracked separately under roadmap 5.6.9). Any other value
+            Windows 11. Secure Boot / vTPM are controlled by the separate
+            `secure_boot` / `tpm` flags (roadmap 5.6.9). Any other value
             returns 400 `invalid_firmware`.
+        secure_boot:
+          type: boolean
+          description: >-
+            Enable UEFI Secure Boot (roadmap 5.6.9): the domain renders
+            with firmware='efi' plus the secure-boot + enrolled-keys
+            firmware features so libvirt selects the host's secboot OVMF
+            build. Omitted = auto (on for os_variant windows-11, off
+            otherwise). Requires uefi/ovmf firmware — combining it with an
+            explicit "bios" returns 400 `invalid_firmware`. Create fails
+            with 4xx `ovmf_missing` when the host has no (secboot) OVMF
+            build. Immutable post-create.
+        tpm:
+          type: boolean
+          description: >-
+            Attach an emulated TPM 2.0 device (tpm-crb backed by swtpm) —
+            roadmap 5.6.9. Omitted = auto (on for os_variant windows-11,
+            off otherwise). Create fails with 4xx `swtpm_missing` when
+            swtpm is not installed on the host. Immutable post-create.
+        install_iso:
+          type: string
+          description: >-
+            Unattended install from a raw Windows ISO (roadmap 5.6.11).
+            Path to the installation ISO on the daemon host. Mutually
+            exclusive with `image`: the VM starts from a blank qcow2 disk
+            of disk_gb, boots the ISO, and a generated Autounattend.xml
+            (partition layout matched to the firmware, edition via
+            install_image_index, locale, Administrator password, RDP +
+            WinRM enablement) baked into the provisioning cdrom drives the
+            install hands-free. Windows-only; violations return 400
+            `invalid_install_iso`.
+        install_image_index:
+          type: integer
+          description: >-
+            WIM image index for edition selection during an unattended
+            install (e.g. 2 = Standard with Desktop Experience on Server
+            media). 0 omits the selection. Only meaningful with
+            install_iso.
+        locale:
+          type: string
+          description: >-
+            Windows UI/input locale for the unattended install (default
+            en-US). Only meaningful with install_iso.
         virtio_win_iso:
           type: string
           description: >-
@@ -4897,7 +4946,7 @@ components:
           description: Single-use opaque token; pass to the websocket endpoint.
         intent:
           type: string
-          enum: [vnc, serial]
+          enum: [vnc, serial, rdp]
           description: Console flavour the ticket was issued for.
         expires_at:
           type: string

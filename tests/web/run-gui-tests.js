@@ -128,7 +128,7 @@ async function main() {
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.PW_CHROMIUM_PATH || undefined });
     const context = await browser.newContext();
 
     // ================== Dashboard Tests ==================
