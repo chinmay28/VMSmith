@@ -2115,6 +2115,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/export/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a stopped VM as an OVA appliance
+         * @description Packages the VM as a single-file OVA — an OVF 1.0 descriptor, a
+         *     streamOptimized VMDK converted (and flattened) from the VM's qcow2
+         *     disk via qemu-img, and a SHA256 manifest — and streams it as a tar
+         *     download. The VM must be stopped so the disk is quiescent; a running
+         *     VM returns 409 `vm_running`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OVA stream */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/x-tar": string;
+                    };
+                };
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vms/import/ova": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a VM from an OVA appliance
+         * @description Multipart upload of a `.ova` archive. The appliance disk is
+         *     converted to qcow2 and registered as a VMSmith image (named
+         *     `<image_name>`, `<name>-ova`, or `<filename>-ova` in that
+         *     precedence), and a VM is created with the descriptor's CPU / RAM /
+         *     disk sizing (zero values fall back to the daemon's configured
+         *     defaults, exactly like `POST /vms`). Failures after the image is
+         *     registered roll the image back. Returns the created VM. Errors:
+         *     400 `invalid_ova` (bad extension, unreadable archive, missing
+         *     descriptor, traversal-unsafe disk reference), 400 `invalid_name` /
+         *     `duplicate_name` from VM validation, 429 `create_limit_reached`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The .ova archive.
+                         */
+                        file: string;
+                        /** @description VM name (default = the descriptor's VirtualSystem name). */
+                        name?: string;
+                        /** @description Name for the registered base image (default `<name>-ova`). */
+                        image_name?: string;
+                        /** @description SSH public key content injected into the created VM. */
+                        ssh_pub_key?: string;
+                        /** @description Create this sudo user instead of enabling root SSH. */
+                        default_user?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description VM created from the appliance */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                413: components["responses"]["APIError"];
+                429: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/images": {
         parameters: {
             query?: never;

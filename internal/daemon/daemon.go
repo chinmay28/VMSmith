@@ -115,6 +115,15 @@ func New(cfg *config.Config) (*Daemon, error) {
 	logger.Info("daemon", "NAT network ready", "network", cfg.Network.Name)
 
 	storageMgr := storage.NewManager(cfg, s)
+
+	// Sweep transient OVA import/upload state left behind by an unclean
+	// shutdown (mirrors the stale-dnsmasq cleanup pattern). Best-effort.
+	if removed, err := storageMgr.SweepStaleOVAWork(); err != nil {
+		logger.Warn("daemon", "stale OVA work sweep incomplete", "removed", fmt.Sprintf("%d", removed), "error", err.Error())
+	} else if removed > 0 {
+		logger.Info("daemon", "removed stale OVA work entries", "count", fmt.Sprintf("%d", removed))
+	}
+
 	portFwd := network.NewPortForwarder(s)
 
 	// Create event bus backed by the store.  Create early so we can emit

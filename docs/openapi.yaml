@@ -1251,6 +1251,86 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/export/ova:
+    get:
+      tags: [VMs]
+      summary: Export a stopped VM as an OVA appliance
+      description: |
+        Packages the VM as a single-file OVA — an OVF 1.0 descriptor, a
+        streamOptimized VMDK converted (and flattened) from the VM's qcow2
+        disk via qemu-img, and a SHA256 manifest — and streams it as a tar
+        download. The VM must be stopped so the disk is quiescent; a running
+        VM returns 409 `vm_running`.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      responses:
+        '200':
+          description: OVA stream
+          content:
+            application/x-tar:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
+  /vms/import/ova:
+    post:
+      tags: [VMs]
+      summary: Import a VM from an OVA appliance
+      description: |
+        Multipart upload of a `.ova` archive. The appliance disk is
+        converted to qcow2 and registered as a VMSmith image (named
+        `<image_name>`, `<name>-ova`, or `<filename>-ova` in that
+        precedence), and a VM is created with the descriptor's CPU / RAM /
+        disk sizing (zero values fall back to the daemon's configured
+        defaults, exactly like `POST /vms`). Failures after the image is
+        registered roll the image back. Returns the created VM. Errors:
+        400 `invalid_ova` (bad extension, unreadable archive, missing
+        descriptor, traversal-unsafe disk reference), 400 `invalid_name` /
+        `duplicate_name` from VM validation, 429 `create_limit_reached`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The .ova archive.
+                name:
+                  type: string
+                  description: VM name (default = the descriptor's VirtualSystem name).
+                image_name:
+                  type: string
+                  description: Name for the registered base image (default `<name>-ova`).
+                ssh_pub_key:
+                  type: string
+                  description: SSH public key content injected into the created VM.
+                default_user:
+                  type: string
+                  description: Create this sudo user instead of enabling root SSH.
+      responses:
+        '201':
+          description: VM created from the appliance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '413':
+          $ref: '#/components/responses/APIError'
+        '429':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /images:
     get:
       tags: [Images]
