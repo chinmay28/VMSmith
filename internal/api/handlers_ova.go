@@ -86,14 +86,15 @@ func (s *Server) ImportVMOVA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Spool beside the durable images store rather than /tmp, which is often
-	// tmpfs and can fill up on multi-GB appliance uploads.
-	spoolDir := filepath.Dir(s.storageMgr.ImagePath(".ova-upload-spool"))
-	if err := os.MkdirAll(spoolDir, 0o755); err != nil {
+	// Spool into the private OVA work root under storage.base_dir rather than
+	// /tmp (often tmpfs, so multi-GB uploads can OOM the host) or the
+	// world-readable images dir (which must stay 0755 for libvirt-qemu).
+	spoolDir, err := s.storageMgr.OVAWorkRoot()
+	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "import_failed", "creating upload spool dir: "+err.Error())
 		return
 	}
-	spool, err := os.CreateTemp(spoolDir, "vmsmith-ova-import-*.ova")
+	spool, err := os.CreateTemp(spoolDir, "upload-*.ova")
 	if err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "import_failed", "creating upload spool: "+err.Error())
 		return

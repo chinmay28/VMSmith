@@ -329,10 +329,57 @@ type OVAImportResult struct {
 	DiskGB int
 }
 
+// ovaWorkRootName is the directory under storage.base_dir that holds all
+// transient OVA import/upload state. It is created mode 0700 so in-flight
+// appliance payloads are never world-readable (ImagesDir must stay 0755 for
+// libvirt-qemu, so transient files cannot live there).
+const ovaWorkRootName = ".ova-work"
+
+// OVAWorkRoot returns (and creates, mode 0700) the private work root for
+// transient OVA import state: extracted archives, upload spools, etc.
+func (m *Manager) OVAWorkRoot() (string, error) {
+	root := filepath.Join(m.cfg.Storage.BaseDir, ovaWorkRootName)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("creating OVA work root: %w", err)
+	}
+	return root, nil
+}
+
+// SweepStaleOVAWork removes leftover transient state from previous runs
+// (e.g. a daemon crash mid-import). Called at daemon startup, mirroring the
+// stale-dnsmasq cleanup pattern. Best-effort: returns the number of entries
+// removed and the first error encountered, but never blocks startup.
+func (m *Manager) SweepStaleOVAWork() (int, error) {
+	root := filepath.Join(m.cfg.Storage.BaseDir, ovaWorkRootName)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	removed := 0
+	var firstErr error
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
+}
+
 // ImportOVA extracts an OVA (or bare OVF alongside its disk) and registers
 // the converted qcow2 as a VMSmith image named imageName.
 func (m *Manager) ImportOVA(ovaPath, imageName string) (*OVAImportResult, error) {
-	workDir, err := os.MkdirTemp(m.cfg.Storage.ImagesDir, ".ova-import-*")
+	workRoot, err := m.OVAWorkRoot()
+	if err != nil {
+		return nil, err
+	}
+	workDir, err := os.MkdirTemp(workRoot, "import-*")
 	if err != nil {
 		return nil, fmt.Errorf("creating import workdir: %w", err)
 	}
@@ -381,6 +428,10 @@ func (m *Manager) ImportOVA(ovaPath, imageName string) (*OVAImportResult, error)
 	// qemu-img auto-detects the source format (vmdk/vdi/raw/qcow2).
 	cmd := exec.Command("qemu-img", "convert", "-O", "qcow2", diskPath, imagePath)
 	if out, err := cmd.CombinedOutput(); err != nil {
+		// A failed convert (disk full, killed, corrupt source) can leave a
+		// partial file behind; remove it so a retry doesn't trip the
+		// "image already exists" guard above.
+		_ = os.Remove(imagePath)
 		return nil, fmt.Errorf("qemu-img convert to qcow2: %s: %w", string(out), err)
 	}
 

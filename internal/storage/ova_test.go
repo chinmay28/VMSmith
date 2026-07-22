@@ -41,7 +41,9 @@ func ovaTestManager(t *testing.T) *Manager {
 
 	cfg := config.DefaultConfig()
 	cfg.Storage.ImagesDir = filepath.Join(dir, "images")
+	cfg.Storage.BaseDir = filepath.Join(dir, "vms")
 	os.MkdirAll(cfg.Storage.ImagesDir, 0o755)
+	os.MkdirAll(cfg.Storage.BaseDir, 0o755)
 	return NewManager(cfg, s)
 }
 
@@ -376,5 +378,92 @@ func TestCapacityToGB_Units(t *testing.T) {
 		if got := capacityToGB(tc.capacity, tc.units); got != tc.want {
 			t.Errorf("capacityToGB(%d, %q) = %d, want %d", tc.capacity, tc.units, got, tc.want)
 		}
+	}
+}
+
+func TestOVAWorkRoot_PrivateAndUnderBaseDir(t *testing.T) {
+	m := ovaTestManager(t)
+	root, err := m.OVAWorkRoot()
+	if err != nil {
+		t.Fatalf("OVAWorkRoot: %v", err)
+	}
+	if filepath.Dir(root) != m.cfg.Storage.BaseDir {
+		t.Fatalf("work root %q not directly under base dir %q", root, m.cfg.Storage.BaseDir)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatalf("stat work root: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("work root perm = %o, want 0700 (transient appliance payloads must not be world-readable)", perm)
+	}
+}
+
+func TestSweepStaleOVAWork_RemovesLeftovers(t *testing.T) {
+	m := ovaTestManager(t)
+
+	// No work root yet: sweep is a silent no-op.
+	if removed, err := m.SweepStaleOVAWork(); err != nil || removed != 0 {
+		t.Fatalf("sweep on missing root = (%d, %v), want (0, nil)", removed, err)
+	}
+
+	root, err := m.OVAWorkRoot()
+	if err != nil {
+		t.Fatalf("OVAWorkRoot: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "import-stale", "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "upload-stale.ova"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := m.SweepStaleOVAWork()
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want 2", removed)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("readdir after sweep: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("work root not empty after sweep: %v", entries)
+	}
+}
+
+func TestImportOVA_ConvertFailureLeavesNoOrphanImage(t *testing.T) {
+	// Fake qemu-img that writes a partial destination file, then fails —
+	// simulating disk-full / crash mid-convert.
+	dir := t.TempDir()
+	script := `#!/bin/sh
+dst=$(eval echo \${$#})
+echo partial > "$dst"
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(dir, "qemu-img"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake qemu-img: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	m := ovaTestManager(t)
+	// Build the OVA with a working converter first, then swap in the failing one.
+	installFakeQemuImg(t)
+	ova := exportForImport(t, m)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if _, err := m.ImportOVA(ova, "convert-fails"); err == nil {
+		t.Fatal("expected convert failure error")
+	}
+	if _, err := os.Stat(m.ImagePath("convert-fails")); !os.IsNotExist(err) {
+		t.Fatalf("partial image left behind after failed convert (stat err = %v)", err)
+	}
+
+	// A retry must not trip the "image already exists" guard.
+	installFakeQemuImg(t)
+	if _, err := m.ImportOVA(ova, "convert-fails"); err != nil {
+		t.Fatalf("retry after failed convert: %v", err)
 	}
 }
