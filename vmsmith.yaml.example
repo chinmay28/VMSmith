@@ -38,6 +38,16 @@ daemon:
   rate_limit_per_second: 10             # per-client API token refill rate; set <= 0 to disable
   rate_limit_burst: 20                  # short burst allowance before returning HTTP 429
 
+# Additional libvirt hosts for multi-host management (roadmap 5.5).
+# The daemon always manages the implicit "local" host via libvirt.uri;
+# entries here add remote hosts reached through remote libvirt URIs.
+# v1 assumes shared storage: storage.images_dir and storage.base_dir must
+# be mounted at the same paths on every host. See docs/MULTI_HOST.md.
+#hosts:
+#  - name: hv2
+#    uri: "qemu+ssh://root@hv2.example.com/system"
+#    description: "rack 2, GPU box"
+
 libvirt:
   uri: "qemu:///system"       # Use qemu:///session for rootless operation
 

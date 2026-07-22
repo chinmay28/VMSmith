@@ -234,8 +234,48 @@ func formatBytes(b uint64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), suffix)
 }
 
+// hostListCmd lists every libvirt host this daemon manages (roadmap
+// 5.5.4): the implicit local host plus each `hosts:` config entry, with
+// the aggregate resources allocated to VMs placed on it.
+var hostListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List managed libvirt hosts with per-host resource allocation",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		flagAPIKey, _ := cmd.Flags().GetString("api-key")
+		asJSON, _ := cmd.Flags().GetBool("json")
+
+		logger.Info("cli", "host list", "api-url", apiURL)
+
+		body, err := hostGET(cmd, apiURL, flagAPIKey, "/api/v1/hosts")
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			fmt.Println(strings.TrimSpace(string(body)))
+			return nil
+		}
+		var hosts []types.HostStatus
+		if err := json.Unmarshal(body, &hosts); err != nil {
+			return fmt.Errorf("decoding /hosts response: %w", err)
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tURI\tDEFAULT\tREACHABLE\tVMS\tCPUS\tRAM_MB\tDISK_GB\tGPUS")
+		for _, h := range hosts {
+			reachable := "-"
+			if h.Reachable != nil {
+				reachable = fmt.Sprintf("%t", *h.Reachable)
+			}
+			fmt.Fprintf(w, "%s\t%s\t%t\t%s\t%d\t%d\t%d\t%d\t%d\n",
+				h.Name, h.URI, h.Default, reachable, h.VMCount, h.CPUs, h.RAMMB, h.DiskGB, h.GPUs)
+		}
+		return w.Flush()
+	},
+}
+
 func init() {
-	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd, hostGPUsCmd} {
+	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd, hostGPUsCmd, hostListCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 		c.Flags().Bool("json", false, "emit the raw JSON response instead of a table")
@@ -243,4 +283,5 @@ func init() {
 	hostCmd.AddCommand(hostStatsCmd)
 	hostCmd.AddCommand(hostQuotasCmd)
 	hostCmd.AddCommand(hostGPUsCmd)
+	hostCmd.AddCommand(hostListCmd)
 }

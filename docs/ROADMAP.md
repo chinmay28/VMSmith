@@ -832,10 +832,10 @@ Manage VMs across multiple physical hosts from a single VMSmith instance.
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
-| 5.5.1 | Design multi-host architecture: central coordinator + per-host agents, or remote libvirt URIs | XL | Architecture decision needed |
-| 5.5.2 | Add `hosts` config section with libvirt URI per host | M | |
-| 5.5.3 | Add host selection to VM create (`--host <name>`) | L | |
-| 5.5.4 | Add host overview dashboard showing per-host resource usage | L | |
+| 5.5.1 | Design multi-host architecture: central coordinator + per-host agents, or remote libvirt URIs | XL | ✅ Done — decision recorded in `docs/MULTI_HOST.md`: **central coordinator + remote libvirt URIs** (`qemu+ssh://` / `qemu+tls://`), rejecting the per-host-agent architecture for VMSmith's tens-of-hosts scale because libvirt's remote transport removes the need for a new agent binary, auth scheme, and wire protocol, and the coordinator drops cleanly into the existing `vm.Manager` seam. The doc also records the v1 constraints explicitly: shared storage assumed (images/base dirs mounted at identical paths on every host), no live migration (placement fixed post-create), per-host NAT networking, and coordinator-scoped port forwards. Implementation: `internal/vm/multihost.go` `MultiHostManager` — one `LibvirtManager` per host sharing the metadata store, placement stamped into `spec.host` at create, every lifecycle/snapshot/console/GPU call routed to the owning host, `List` fanned out with per-host live-state enrichment, per-host `HostReachable` probe, console-teardown hook fan-out, fail-fast startup when a configured host is unreachable. Routing is unit-tested against per-host MockManagers (placement, unknown-host rejection, routed lifecycle + snapshots proven via error-injection on the wrong host, aggregate List, reachability) |
+| 5.5.2 | Add `hosts` config section with libvirt URI per host | M | ✅ Done — `hosts: [{name, uri, description}]` config section; the implicit `local` host always exists via `libvirt.uri`. `Config.ValidateHosts` rejects empty/duplicate names, the reserved `local` name, and missing URIs at daemon startup. Documented in `vmsmith.yaml.example` and `docs/MULTI_HOST.md` |
+| 5.5.3 | Add host selection to VM create (`--host <name>`) | L | ✅ Done — `VMSpec.Host` (`host` JSON field, `--host` CLI flag) selects the placement target, defaulting to `local`; the create handler rejects unknown names with 400 `invalid_host`, and `MultiHostManager.Create` stamps the resolved host into the stored spec so all subsequent operations route correctly. The host is visible on every VM response via `spec.host` |
+| 5.5.4 | Add host overview dashboard showing per-host resource usage | L | ✅ Done — `GET /api/v1/hosts` returns one `HostStatus` row per managed host (implicit `local` first): URI, description, default marker, live `reachable` probe (multi-host mode only), and per-host allocation aggregates (VM count / vCPUs / RAM / disk / GPUs of the VMs placed there). CLI: `vmsmith host list` (table + `--json`). GUI: the Dashboard renders a Hosts table (name, URI, reachable/unreachable badge, allocations) whenever more than one host is configured — single-host deployments see no change. Coverage: API (single-host aggregate row, multi-host rows with placement split, unknown-host create 400, configured-host create round-trip) and a Playwright scenario against the mock server's two-host topology |
 
 ### 5.6 Windows Guest Support
 
@@ -958,7 +958,7 @@ With the initial platform hardening work mostly done, the next highest-value roa
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | — | Complete: ticket issuance, websocket proxying (VNC + serial intents), active-session teardown, config defaults, auth/TTL/log-redaction, VNC passwords, the noVNC browser console page with serial xterm tab (5.1.7 / 5.1.9), and the Playwright console coverage (5.1.11) have all shipped |
 | **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
-| **P3** | Multi-Host Management | 5.5.1 – 5.5.4 | Still a long-term architecture track rather than near-term delivery |
+| **P3** | Multi-Host Management | — | Complete: architecture decided + documented (docs/MULTI_HOST.md), hosts config, --host placement, and the hosts overview dashboard have all shipped |
 
 ---
 

@@ -119,6 +119,11 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return
 	}
+	// Placement (5.5.3): the target host must be one this daemon manages.
+	if !s.validSpecHost(spec.Host) {
+		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_host", fmt.Sprintf("host %q is not configured on this daemon", strings.TrimSpace(spec.Host))))
+		return
+	}
 	if tags, err := normalizeTags(spec.Tags); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return

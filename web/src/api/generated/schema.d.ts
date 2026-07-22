@@ -3173,6 +3173,51 @@ export interface paths {
         };
         trace?: never;
     };
+    "/hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List managed libvirt hosts with per-host resource allocation
+         * @description Multi-host overview (roadmap 5.5.4): one row per libvirt host this
+         *     daemon manages — the implicit `local` host first, then every
+         *     `hosts:` config entry — with the aggregate resources (VM count,
+         *     vCPUs, RAM, disk, GPUs) allocated to VMs placed on each host.
+         *     `reachable` is present only when the daemon runs a multi-host
+         *     manager with live per-host connections. See docs/MULTI_HOST.md.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Host rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HostStatus"][];
+                    };
+                };
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/host/interfaces": {
         parameters: {
             query?: never;
@@ -4707,6 +4752,8 @@ export interface components {
              * @enum {string}
              */
             nic_model?: "virtio" | "e1000e";
+            /** @description Placement (roadmap 5.5.3) — the configured libvirt host the VM is created on. Empty/omitted means the implicit "local" host. Unknown names return 400 `invalid_host`. Fixed post-create (no live migration in v1 — see docs/MULTI_HOST.md). */
+            host?: string;
             /** @description Libvirt machine type override (e.g. `pc-q35-rhel9.6.0`). Empty/omitted resolves to vmsmith's default (`pc-q35-6.2`). Only letters, digits, dots, hyphens, and underscores are allowed; anything else returns 400 `invalid_machine`. */
             machine?: string;
             /**
@@ -5129,6 +5176,22 @@ export interface components {
         UpdateTemplateRequest: {
             description?: string;
             tags?: string[] | null;
+        };
+        HostStatus: {
+            /** @description Host identifier ("local" for the implicit local host). */
+            name: string;
+            /** @description The host's libvirt connection URI. */
+            uri: string;
+            description?: string;
+            /** @description True for the host new VMs land on when spec.host is empty. */
+            default: boolean;
+            /** @description Whether the daemon currently holds a live libvirt connection to the host. Omitted when connectivity is not tracked (single-host mode). */
+            reachable?: boolean;
+            vm_count: number;
+            cpus: number;
+            ram_mb: number;
+            disk_gb: number;
+            gpus: number;
         };
         HostInterface: {
             name: string;
