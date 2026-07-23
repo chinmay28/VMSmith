@@ -281,6 +281,9 @@ func TestGetVMStats_WithSamples(t *testing.T) {
 	if snap.LastSampledAt == nil {
 		t.Error("expected LastSampledAt to be set")
 	}
+	if snap.State != string(types.VMStateRunning) {
+		t.Errorf("State = %q, want %q from manager overlay", snap.State, types.VMStateRunning)
+	}
 }
 
 func TestGetVMStats_SinceFilter(t *testing.T) {
@@ -318,6 +321,42 @@ func TestGetVMStats_SinceFilter(t *testing.T) {
 	}
 	if len(snap.History) != 2 {
 		t.Errorf("len(History) = %d, want 2 (since filter should exclude first sample)", len(snap.History))
+	}
+}
+
+func TestGetVMStats_SinceFilterClearsCurrentWhenCutoffIsAfterLatest(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-since-current", "since-current", types.VMStateRunning)
+
+	base := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Second)
+	cpu := 10.0
+	m.seed(v.ID, types.MetricSample{Timestamp: base, CPUPercent: &cpu})
+	cpu2 := 20.0
+	m.seed(v.ID, types.MetricSample{Timestamp: base.Add(30 * time.Second), CPUPercent: &cpu2})
+
+	cutoff := base.Add(1 * time.Minute).Format(time.RFC3339)
+	resp, err := http.Get(ts.URL + "/api/v1/vms/" + v.ID + "/stats?since=" + cutoff)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var snap types.VMStatsSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(snap.History) != 0 {
+		t.Errorf("len(History) = %d, want 0 after cutoff past latest sample", len(snap.History))
+	}
+	if snap.Current != nil {
+		t.Errorf("Current = %+v, want nil when latest sample is at/before cutoff", snap.Current)
 	}
 }
 
@@ -701,6 +740,53 @@ func TestStreamVMStats_DeliversInitialAndNewSamples(t *testing.T) {
 	}
 	if second.id == first.id {
 		t.Errorf("expected distinct event IDs, got both = %q", first.id)
+	}
+}
+
+func TestStreamVMStats_DeliversFirstSampleWhenStreamStartsEmpty(t *testing.T) {
+	m := newTestMetricsMock()
+	ts, mockMgr, cleanup := testServerWithMetrics(t, m)
+	defer cleanup()
+
+	v := seedTestVM(t, mockMgr, "vm-stream-empty", "stream-empty", types.VMStateRunning)
+	m.setState(v.ID, "running")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/v1/vms/"+v.ID+"/stats/stream", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	br := bufio.NewReader(resp.Body)
+
+	cpu := 33.3
+	first := types.MetricSample{Timestamp: time.Now().Add(2 * time.Second), CPUPercent: &cpu}
+	m.seed(v.ID, first)
+
+	frame, err := readSSEFrame(br)
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if frame.event != "vm.stats" {
+		t.Errorf("frame event = %q, want vm.stats", frame.event)
+	}
+
+	var sample types.MetricSample
+	if err := json.Unmarshal([]byte(frame.data), &sample); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	if sample.CPUPercent == nil || *sample.CPUPercent != cpu {
+		t.Errorf("streamed CPUPercent = %v, want %v", sample.CPUPercent, cpu)
 	}
 }
 
