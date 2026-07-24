@@ -1,6 +1,6 @@
 # VMSmith Project Roadmap
 
-> **Last updated:** 2026-07-06
+> **Last updated:** 2026-07-23
 
 This document outlines planned improvements, new features, and technical debt items for VMSmith. Tasks are organized into phases by theme, with rough effort estimates and dependency notes.
 
@@ -903,7 +903,7 @@ start (`managed='yes'`) and reattaches the host driver on stop.
 | 5.7.7 | Operator guide: one-time host setup (BIOS VT-d/IOMMU, `intel_iommu=on iommu=pt` or `amd_iommu=on iommu=pt` kernel params, `vfio-pci.ids=` boot pin, blacklist the host's nouveau/amdgpu, verify with `vmsmith host gpus`) and the consumer-board grouping caveat | S | ✅ Done — `docs/GPU_PASSTHROUGH.md` covers IOMMU/vfio setup, the consumer-board grouping caveat, the `boot_vga` warning, troubleshooting table, and clone-clears-GPUs semantics |
 | 5.7.8 | Test coverage — PCI helpers (long/short, slot range, whitespace, garbage), sysfs discovery against an RTX 4080 fixture (sort, vendor, `boot_vga`, bridge exclusion), IOMMU expansion (short form, dedup, invalid drop, no-IOMMU fallback, unreadable-class skip, optional-attr tolerance), domain XML (passthrough emits hostdevs, no-GPU default doesn't, invalid fails the render), API (`/host/gpus` happy + 500-on-error, `gpus_immutable` PATCH, clone clears GPUs), end-to-end fixture test wiring `applyGPUs` + `GenerateDomainXML` | M | ✅ Done — `internal/host/gpu_test.go`, `internal/api/validation_test.go`, `internal/api/api_test.go`, `internal/vm/domain_gpu_test.go`, plus the GUI test in `tests/web/run-gui-tests.js` |
 
-**Open follow-ups (not yet shipped):**
+**Delivered follow-ups:**
 
 | # | Task | Effort | Notes |
 |---|------|--------|-------|
@@ -957,7 +957,7 @@ With the initial platform hardening work mostly done, the next highest-value roa
 | **P1** | Events | — | Complete: core event API, SSE transport, connection observability, Activity views, webhook delivery, the Settings/test-delivery UX, and the real-VM live-stream E2E assertion (4.2.17, `tests/e2e/test_api_events_stream.py`) have all shipped |
 | **P1** | OpenAPI Tooling | 4.3.1 – 4.3.3 | Spec, Swagger UI, and typed frontend client are in place; remaining work is maintenance and follow-on SDK ergonomics rather than first delivery |
 | **P2** | Console Access | — | Complete: ticket issuance, websocket proxying (VNC + serial intents), active-session teardown, config defaults, auth/TTL/log-redaction, VNC passwords, the noVNC browser console page with serial xterm tab (5.1.7 / 5.1.9), and the Playwright console coverage (5.1.11) have all shipped |
-| **P2** | Scheduled Operations | 5.2.1 – 5.2.6 | Useful automation once observability and lifecycle features are in place |
+| **P2** | Scheduled Operations | — | Complete: schedule CRUD, catch-up policies, action retries/timeouts, VM-detail schedule UX, run history, and the real-VM schedule E2E tier (`tests/e2e/test_api_schedules.py`) have all shipped |
 | **P3** | Multi-Host Management | — | Complete: architecture decided + documented (docs/MULTI_HOST.md), hosts config, --host placement, and the hosts overview dashboard have all shipped |
 
 ---
