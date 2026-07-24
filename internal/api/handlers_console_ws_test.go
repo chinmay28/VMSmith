@@ -381,6 +381,13 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 	ts, apiServer, mockMgr, store, cleanup := consoleWebSocketTestServer(t, nil, time.Minute)
 	defer cleanup()
 
+	bus := events.New(&testEventStore{})
+	bus.Start()
+	defer bus.Stop()
+	apiServer.SetEventBus(bus)
+	eventCh, cancelEvents := bus.Subscribe("shutdown-test")
+	defer cancelEvents()
+
 	mockMgr.SeedVM(&types.VM{ID: "vm-running", State: types.VMStateRunning})
 	ln, err := mockMgr.SeedConsoleListener("vm-running")
 	if err != nil {
@@ -420,6 +427,16 @@ func TestProxyConsole_ClosesOnServerShutdownSignal(t *testing.T) {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				_ = conn.Close()
+				events := drainEvents(t, eventCh, 1)
+				if len(events) != 1 || events[0].Type != "console.session_terminated" {
+					t.Fatalf("expected console.session_terminated event, got %+v", events)
+				}
+				if events[0].Attributes["reason"] != "daemon_shutdown" {
+					t.Fatalf("event reason = %q, want daemon_shutdown", events[0].Attributes["reason"])
+				}
+				if events[0].Attributes["sessions"] != "1" {
+					t.Fatalf("event sessions = %q, want 1", events[0].Attributes["sessions"])
+				}
 				return
 			}
 		}

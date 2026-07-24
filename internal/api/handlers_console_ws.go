@@ -490,6 +490,30 @@ func (s *Server) closeConsoleSessionsForVM(vmID, reason string) {
 	})
 }
 
+func (s *Server) closeAllConsoleSessions(reason string) {
+	s.consoleSessionsMu.Lock()
+	if len(s.consoleSessions) == 0 {
+		s.consoleSessionsMu.Unlock()
+		return
+	}
+	copySessions := make([]*activeConsoleSession, 0)
+	for _, sessions := range s.consoleSessions {
+		for session := range sessions {
+			copySessions = append(copySessions, session)
+		}
+	}
+	s.consoleSessionsMu.Unlock()
+
+	for _, session := range copySessions {
+		session.close()
+	}
+
+	s.publishAppEvent("console.session_terminated", "", "console sessions terminated during daemon shutdown", map[string]string{
+		"reason":   reason,
+		"sessions": itoa(len(copySessions)),
+	})
+}
+
 func (s *Server) consoleSessionCount() int {
 	s.consoleSessionsMu.Lock()
 	defer s.consoleSessionsMu.Unlock()
