@@ -285,8 +285,8 @@ See `docs/WINDOWS_GUESTS.md` for the operator guide (preparing base images, virt
 
 VMSmith's browser-console path is intentionally split into two halves:
 
-1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket` (`?intent=vnc|serial`, default `vnc` — the intent is baked into the ticket so a VNC ticket cannot be redeemed against the serial console and vice versa)
-2. **Console proxying** via `GET /api/v1/vms/{id}/console`, which consumes that ticket and bridges the browser to a loopback-only libvirt console endpoint — raw RFB bytes over the `binary` subprotocol for `vnc`, UTF-8 terminal bytes over the `text` subprotocol (backed by `vm.Manager.OpenSerialConsole` / `virDomainOpenConsole`) for `serial`
+1. **Ticket issuance** via `POST /api/v1/vms/{id}/console/ticket` (`?intent=vnc|serial|rdp`, default `vnc` — the intent is baked into the ticket so a VNC ticket cannot be redeemed against the serial console and vice versa)
+2. **Console proxying** via `GET /api/v1/vms/{id}/console`, which consumes that ticket and bridges the browser to a loopback-only libvirt console endpoint — raw RFB bytes over the `binary` subprotocol for `vnc`, UTF-8 terminal bytes over the `text` subprotocol (backed by `vm.Manager.OpenSerialConsole` / `virDomainOpenConsole`) for `serial`, or Guacamole-protocol instructions over the `guacamole` subprotocol for `rdp` (the daemon performs the Guacamole client handshake against the guacd bridge configured via `daemon.console.guacd_address`, targeting the VM's runtime IP on 3389; see `internal/api/guacd.go`)
 
 Both halves ship in the daemon, and the browser surface is `web/src/pages/VMConsole.jsx` (route `/vms/:id/console`): a VNC tab driven by the vendored noVNC 1.5.0 ESM bundle (`web/src/vendor/novnc/`) with Ctrl-Alt-Del / fullscreen / reconnect controls, and a Serial tab driven by `@xterm/xterm`.
 
@@ -958,11 +958,19 @@ make test-all         # everything
 
 ## Future Enhancements
 
-Active feature work — including additional VM-level metrics polish, the event-bus webhook subsystem, browser-based VNC + serial console, and the cron-style scheduler — is tracked in [`ROADMAP.md`](ROADMAP.md) (Phases 4.1, 4.2, 5.1, 5.2). VM templates and the in-process event bus / SSE feed have shipped (see Section 5 above and `/api/v1/events`, `/api/v1/events/stream`).
+Every task in [`ROADMAP.md`](ROADMAP.md) has shipped — metrics, the event
+bus + webhooks, browser VNC/serial/RDP consoles, scheduled operations,
+OVA import/export, multi-host management, Windows guest support, and GPU
+passthrough. Dedicated operator guides for the larger subsystems:
+
+- [`MULTI_HOST.md`](MULTI_HOST.md) — coordinator + remote libvirt URIs, placement, hosts overview
+- [`WINDOWS_GUESTS.md`](WINDOWS_GUESTS.md) — Windows images, UEFI/Secure Boot/vTPM, unattended ISO installs, RDP console
+- [`GPU_PASSTHROUGH.md`](GPU_PASSTHROUGH.md) — VFIO passthrough, IOMMU groups, post-create attach/detach
+- [`SCHEDULES.md`](SCHEDULES.md) — recurring VM actions, catch-up policies, run history
 
 Longer-horizon items not yet promoted to the roadmap:
 
 - **KubeVirt backend** — `KubeVirtVMManager` behind the same `vm.Manager` interface
 - **Second NAT networks** — create per-VM isolated private subnets
 - **OCI image support** — pull cloud images from container registries
-- **Cluster mode** — multiple VM Smith hosts with shared image catalog (early sketch in roadmap Phase 5.5)
+- **Live migration** — moving a running VM between managed hosts (multi-host v1 fixes placement at create time; see `MULTI_HOST.md`)
