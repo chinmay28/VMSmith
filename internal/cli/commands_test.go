@@ -127,8 +127,10 @@ func withTestStorage(t *testing.T) (*store.Store, *storage.Manager, func()) {
 	dir := t.TempDir()
 
 	cfg := config.DefaultConfig()
+	cfg.Storage.BaseDir = filepath.Join(dir, "vms")
 	cfg.Storage.DBPath = filepath.Join(dir, "test.db")
 	cfg.Storage.ImagesDir = filepath.Join(dir, "images")
+	os.MkdirAll(cfg.Storage.BaseDir, 0755)
 	os.MkdirAll(cfg.Storage.ImagesDir, 0755)
 
 	s, err := store.New(cfg.Storage.DBPath)

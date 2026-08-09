@@ -47,8 +47,10 @@ func testServerWithConfig(t *testing.T, mutator func(*config.Config)) (*httptest
 	}
 
 	cfg := config.DefaultConfig()
+	cfg.Storage.BaseDir = filepath.Join(dir, "vms")
 	cfg.Storage.ImagesDir = imagesDir
 	cfg.Storage.DBPath = dbPath
+	os.MkdirAll(cfg.Storage.BaseDir, 0755)
 	if mutator != nil {
 		mutator(cfg)
 	}
