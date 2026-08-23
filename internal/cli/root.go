@@ -12,7 +12,7 @@ var apiKey string
 
 var rootCmd = &cobra.Command{
 	Use:     "vmsmith",
-	Version: version.Version,
+	Version: version.String(),
 	Short:   "vmSmith — lightweight VM provisioning and management",
 	Long: `vmSmith is a CLI tool and daemon for provisioning and managing
 QEMU/KVM virtual machines on Linux hosts.

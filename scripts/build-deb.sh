@@ -7,7 +7,7 @@ PACKAGE_NAME=${PACKAGE_NAME:-vmsmith}
 ARCH=${ARCH:-amd64}
 MAINTAINER=${MAINTAINER:-"VMSmith Maintainers <maintainers@vmsmith.dev>"}
 DESCRIPTION=${DESCRIPTION:-"VMSmith CLI, API daemon, and embedded web UI for QEMU/KVM VM management"}
-VERSION_INPUT=${VERSION:-$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)}
+VERSION_INPUT=${VERSION:-$("$ROOT_DIR/scripts/version.sh" 2>/dev/null || echo v0.0.0)}
 DEB_VERSION=$(printf '%s' "$VERSION_INPUT" | sed 's/[^A-Za-z0-9.+:~-]/-/g; s/-/+/g')
 case "$DEB_VERSION" in
   [0-9]*) ;;

@@ -13,7 +13,7 @@ VERSION="${VERSION:-${1:-}}"
 RELEASE="${RELEASE:-1}"
 
 if [[ -z "${VERSION}" ]]; then
-  VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
+  VERSION="$("${ROOT_DIR}/scripts/version.sh" 2>/dev/null || echo v0.0.0)"
 fi
 
 # RPM versions cannot contain '-' in Version.

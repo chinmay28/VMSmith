@@ -12,9 +12,9 @@ import (
 )
 
 func TestGetVersion_ReturnsBuildInfo(t *testing.T) {
-	prevVersion, prevCommit, prevDate := version.Version, version.Commit, version.BuildDate
-	defer func() { version.Version, version.Commit, version.BuildDate = prevVersion, prevCommit, prevDate }()
-	version.Version = "v9.9.9-test"
+	prevPatch, prevCommit, prevDate := version.Patch, version.Commit, version.BuildDate
+	defer func() { version.Patch, version.Commit, version.BuildDate = prevPatch, prevCommit, prevDate }()
+	version.Patch = "462"
 	version.Commit = "abc1234"
 	version.BuildDate = "2026-05-06T00:00:00Z"
 
@@ -41,7 +41,7 @@ func TestGetVersion_ReturnsBuildInfo(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if info.Version != "v9.9.9-test" || info.Commit != "abc1234" || info.BuildDate != "2026-05-06T00:00:00Z" {
+	if info.Version != version.String() || info.Commit != "abc1234" || info.BuildDate != "2026-05-06T00:00:00Z" {
 		t.Errorf("BuildInfo = %+v, want overrides applied", info)
 	}
 	if info.GoVersion != runtime.Version() || info.OS != runtime.GOOS || info.Arch != runtime.GOARCH {
