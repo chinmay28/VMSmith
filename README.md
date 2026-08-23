@@ -743,6 +743,40 @@ make dev-web
 
 `make dev` starts both processes together and cleans them up on Ctrl-C. `make install-githooks` configures Git to use the repository's `.githooks/pre-commit` hook, which runs `make fmt && make lint` before each commit.
 
+### Versioning
+
+`vYEAR.MONTH.PATCH` — a calendar version, where **the patch number is the
+repository's commit count**, so `v2026.8.462` is the 462nd commit on the 2026.8
+line. It is what `vmsmith version`, `vmsmith --version` and `GET /api/version`
+report, and what the GUI footer shows.
+
+There is no semantic major/minor: the leading numbers say *when* a release line
+opened, not what it promises about compatibility. What changes for an operator
+on an upgrade is what the release notes are for.
+
+- `Year`/`Month` are source constants in
+  [`pkg/version/version.go`](pkg/version/version.go), bumped by hand when a
+  release line opens — deliberately not read from the build clock, so rebuilding
+  an old tree still reports what it originally shipped.
+- The month is not zero-padded (`v2026.8.462`, not `v2026.08.462`): semver
+  forbids a leading zero, so an unpadded month keeps every version something a
+  semver parser will accept.
+- `PATCH` only exists at build time, so the linker stamps it in.
+  [`scripts/version.sh`](scripts/version.sh) is the one place the string is
+  assembled — `make build`, `make deb` and `make rpm` all call it, so the
+  binary and its packages can never disagree.
+
+```bash
+make version                  # v2026.8.462
+scripts/version.sh --patch    # 462
+```
+
+A patch of `0` means an unstamped build — no git, or a **shallow clone**, which
+`version.sh` detects and refuses to guess around rather than shipping a build
+that quietly calls itself `v2026.8.1`. Anything building a release needs the
+full commit graph (`fetch-depth: 0` in Actions, or `--filter=blob:none` rather
+than `--depth 1` for a cheap clone that still carries all of it).
+
 Contributor setup, test expectations, and PR conventions live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 For scriptable API workflows, see the bash and Python examples in [examples/](examples/README.md).

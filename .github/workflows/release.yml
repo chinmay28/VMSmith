@@ -18,6 +18,12 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        with:
+          # The version's patch number is the repository's commit count, and
+          # actions/checkout defaults to a depth-1 clone. scripts/version.sh
+          # detects that and reports patch 0 rather than a plausible lie — so a
+          # release build has to fetch the whole commit graph.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5

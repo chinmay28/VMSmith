@@ -1,5 +1,9 @@
 BINARY    := vmsmith
-VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# vYEAR.MONTH.<commit count> — scripts/version.sh is the one place it is
+# assembled, reading Year/Month out of pkg/version/version.go. PATCH feeds the
+# linker; VERSION is the same string, for the .deb and .rpm package names.
+VERSION   := $(shell scripts/version.sh 2>/dev/null || echo "v0.0.0")
+PATCH     := $(shell scripts/version.sh --patch 2>/dev/null || echo 0)
 COMMIT    := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 # BUILD_DATE is the HEAD commit's author date in RFC 3339 format. Sourcing
 # from `git log` instead of `date` keeps two builds of the same SHA byte-
@@ -8,10 +12,10 @@ COMMIT    := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell git log -1 --format=%cI HEAD 2>/dev/null || echo "unknown")
 BUILD_DIR := ./bin
 VERSION_PKG := github.com/vmsmith/vmsmith/pkg/version
-LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_DATE)"
+LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Patch=$(PATCH) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_DATE)"
 WEB_DIR   := ./web
 
-.PHONY: build install install-service clean purge test lint fmt fmt-check deps web web-install \
+.PHONY: build version install install-service clean purge test lint fmt fmt-check deps web web-install \
        test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb \
        test-e2e-metrics test-e2e-schedules test-e2e-windows test-e2e-gpu
 
@@ -19,6 +23,10 @@ WEB_DIR   := ./web
 build: go.sum web
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/vmsmith
+
+# Print the version this tree would build as
+version:
+	@scripts/version.sh
 
 # Backend only (skip frontend rebuild)
 build-go: go.sum
