@@ -7137,6 +7137,7 @@ test.describe("VM disk location", () => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();
     await expect(page.getByTestId("btn-move-disk")).toBeDisabled();
+    await expect(page.getByTestId("vm-detail-disk-move-hint")).toHaveText("Stop the machine to move its disk.");
   });
 
   test("move disk surfaces API errors inline", async ({ page }) => {

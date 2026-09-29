@@ -475,10 +475,13 @@ export default function VMDetail() {
                 <span data-testid="vm-detail-disk-location">{spec.disk_location || 'default'}</span>
                 <span className="font-mono text-xs text-steel-500 ml-2 break-all" data-testid="vm-detail-disk-path">{vm.disk_path || ''}</span>
               </p>
+              {vm.state !== 'stopped' && (
+                <p className="text-[11px] text-steel-500 mt-0.5" data-testid="vm-detail-disk-move-hint">Stop the machine to move its disk.</p>
+              )}
             </div>
           </div>
           <button
-            className="btn-secondary shrink-0"
+            className="btn-secondary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-steel-800"
             onClick={() => setShowMoveDiskModal(true)}
             disabled={vm.state !== 'stopped'}
             title={vm.state === 'stopped' ? 'Move the disk to another storage location' : 'Stop the machine to move its disk'}
