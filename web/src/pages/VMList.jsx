@@ -6,6 +6,7 @@ import { useFetch, useMutation } from '../hooks/useFetch';
 import { useEventStream } from '../hooks/useEventStream';
 import { PageHeader, StatusBadge, Modal, EmptyState, Spinner, ErrorBanner, StatusBanner, PaginationControls, LiveIndicator, FilterPanel, ProgressBar, OperationProgress } from '../components/Shared';
 import { normalizeVMList, safeArray } from '../utils/normalize';
+import { StorageLocationSelect } from '../components/StorageLocationSelect';
 
 const WINDOWS_MIN_RAM_MB = 4096;
 const WINDOWS_MIN_DISK_GB = 64;
@@ -1391,7 +1392,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', secure_boot: false, boot_source: 'image', install_iso: '', virtio_win_iso: '', gpus: [] };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', secure_boot: false, boot_source: 'image', install_iso: '', virtio_win_iso: '', gpus: [], disk_location: '' };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -1406,6 +1407,8 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
   );
   const { data: hostIfaces } = useFetch(() => hostApi.interfaces(), [], 0);
   const { data: hostGpuData } = useFetch(() => hostApi.gpus(), [], 0);
+  const { data: storageLocationData } = useFetch(() => hostApi.storageLocations(), [], 0);
+  const storageLocations = safeArray(storageLocationData);
   const imageList = safeArray(imageResponse?.data || imageResponse);
   const templates = safeArray(templateResponse?.data || templateResponse);
   const hostGpus = safeArray(hostGpuData);
@@ -1535,6 +1538,8 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     // GPU passthrough — only send the list when the operator selected at least
     // one device, so the daemon defaults to no passthrough otherwise.
     if (!spec.gpus || spec.gpus.length === 0) delete spec.gpus;
+    // Disk placement — omit for the default location (storage.base_dir).
+    if (!spec.disk_location || spec.disk_location === 'default') delete spec.disk_location;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
         const att = { mode: n.mode };
@@ -1783,6 +1788,19 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                   </div>
                 ) : <div />}
               </div>
+
+              {storageLocations.length > 1 && (
+                <div>
+                  <label className="label">Disk location</label>
+                  <StorageLocationSelect
+                    locations={storageLocations}
+                    value={form.disk_location}
+                    onChange={v => setForm(f => ({ ...f, disk_location: v }))}
+                    testId="input-vm-disk-location"
+                  />
+                  <p className="mt-1 text-[11px] text-steel-500">Where the VM's disk file lives. You can move it later from the VM page.</p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu, MonitorPlay, Disc
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu, MonitorPlay, Disc, HardDrive
 } from 'lucide-react';
-import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi } from '../api/client';
+import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi, host as hostApi } from '../api/client';
+import { StorageLocationSelect } from '../components/StorageLocationSelect';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { useVMStats, STATS_STATE_LOADING, STATS_STATE_ERROR } from '../hooks/useVMStats';
 import { buildChartData } from '../hooks/vmStatsHelpers.js';
@@ -222,6 +223,7 @@ export default function VMDetail() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCloneModal, setShowCloneModal] = useState(false);
+  const [showMoveDiskModal, setShowMoveDiskModal] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
   const { data: scheduleResponse } = useFetch(
@@ -461,6 +463,33 @@ export default function VMDetail() {
           testId="vm-detail-locked"
         />
         <InfoCard label="Firmware" value={firmwareText} testId="vm-detail-firmware" />
+      </div>
+
+      <div className="card mb-4" data-testid="vm-detail-disk">
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <HardDrive size={14} className="text-steel-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-steel-500">Disk location</span>
+              <p className="text-sm text-steel-200 mt-0.5">
+                <span data-testid="vm-detail-disk-location">{spec.disk_location || 'default'}</span>
+                <span className="font-mono text-xs text-steel-500 ml-2 break-all" data-testid="vm-detail-disk-path">{vm.disk_path || ''}</span>
+              </p>
+              {vm.state !== 'stopped' && (
+                <p className="text-[11px] text-steel-500 mt-0.5" data-testid="vm-detail-disk-move-hint">Stop the machine to move its disk.</p>
+              )}
+            </div>
+          </div>
+          <button
+            className="btn-secondary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-steel-800"
+            onClick={() => setShowMoveDiskModal(true)}
+            disabled={vm.state !== 'stopped'}
+            title={vm.state === 'stopped' ? 'Move the disk to another storage location' : 'Stop the machine to move its disk'}
+            data-testid="btn-move-disk"
+          >
+            <HardDrive size={14} /> Move disk
+          </button>
+        </div>
       </div>
 
       {installIso && (
@@ -908,6 +937,7 @@ export default function VMDetail() {
       {/* Modals */}
       <EditVMModal vm={vm} open={showEditModal} onClose={() => setShowEditModal(false)} onUpdated={refresh} />
       <CloneVMModal vm={vm} open={showCloneModal} onClose={() => setShowCloneModal(false)} />
+      <MoveDiskModal vm={vm} open={showMoveDiskModal} onClose={() => setShowMoveDiskModal(false)} onMoved={refresh} />
       <CreateSnapshotModal vmId={id} open={showSnapModal} onClose={() => setShowSnapModal(false)} onCreated={refreshSnaps} />
       <AddPortModal vmId={id} open={showPortModal} onClose={() => setShowPortModal(false)} onCreated={refreshPorts} />
       <ExportImageModal vmId={id} open={showImageModal} onClose={() => setShowImageModal(false)} />
@@ -1003,6 +1033,105 @@ function CloneVMModal({ vm, open, onClose }) {
           <button data-testid="btn-cancel-clone" className="btn-secondary" onClick={handleClose} disabled={cloneMut.loading}>Cancel</button>
           <button data-testid="btn-submit-clone" className="btn-primary" onClick={handleSubmit} disabled={!name.trim() || cloneMut.loading}>
             {cloneMut.loading ? <Spinner size={14} /> : <Copy size={14} />} Clone VM
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// --- Move Disk Modal ---
+function MoveDiskModal({ vm, open, onClose, onMoved }) {
+  const [location, setLocation] = useState('');
+  const { data: locationData, loading, error: loadError, refresh: reloadLocations } = useFetch(
+    () => (open ? hostApi.storageLocations() : Promise.resolve([])),
+    [open],
+    0,
+  );
+  const locations = safeArray(locationData);
+  const current = vm?.spec?.disk_location || 'default';
+  const moveMut = useMutation((target) => vms.moveDisk(vm.id, target));
+  const progress = useOperationProgress(vm?.id, 'move_disk', location);
+
+  useEffect(() => {
+    if (open) {
+      moveMut.reset();
+      setLocation('');
+    }
+  }, [open, moveMut.reset]);
+
+  // Preselect the first selectable location other than the current one.
+  useEffect(() => {
+    if (!open || location) return;
+    const first = locations.find(l => l.available && l.name !== current);
+    if (first) setLocation(first.name);
+  }, [open, locations, location, current]);
+
+  const handleClose = () => {
+    progress.reset();
+    moveMut.reset();
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    progress.start();
+    try {
+      await moveMut.execute(location);
+      progress.finish();
+      onMoved?.();
+      reloadLocations();
+      handleClose();
+    } catch {
+      // Error shown inline.
+    } finally {
+      progress.stop();
+    }
+  };
+
+  const selectable = locations.some(l => l.available && l.name !== current);
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Move Disk">
+      <div className="space-y-4">
+        <p className="text-xs text-steel-500">
+          Move this machine&apos;s disk (and its snapshots) to another storage location, e.g. a drive with more free space.
+          Moves across drives copy the data, so they can take a while for large disks.
+        </p>
+        <div>
+          <label className="label">Current location</label>
+          <p className="text-sm text-steel-200 font-mono" data-testid="move-disk-current">{current}</p>
+        </div>
+        {loading && !locations.length ? (
+          <Spinner size={14} />
+        ) : loadError ? (
+          <p className="text-sm text-red-400">{loadError}</p>
+        ) : selectable ? (
+          <div>
+            <label className="label">Target location</label>
+            <StorageLocationSelect
+              locations={locations}
+              value={location}
+              onChange={setLocation}
+              exclude={current}
+              testId="input-move-disk-location"
+            />
+          </div>
+        ) : (
+          <p className="text-sm text-steel-400" data-testid="move-disk-no-targets">
+            No other storage location is available. Add one under <span className="font-mono">storage.disk_locations</span> in the daemon config.
+          </p>
+        )}
+        <ProgressReadout active={moveMut.loading} percent={progress.percent} label="Moving disk…" testId="move-disk-progress" />
+        {moveMut.error && <p className="text-sm text-red-400" data-testid="move-disk-error">{moveMut.error}</p>}
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={handleClose} disabled={moveMut.loading}>Cancel</button>
+          <button
+            data-testid="btn-submit-move-disk"
+            className="btn-primary"
+            onClick={handleSubmit}
+            disabled={!selectable || !location || location === current || moveMut.loading}
+          >
+            {moveMut.loading ? <Spinner size={14} /> : <HardDrive size={14} />} Move disk
           </button>
         </div>
       </div>

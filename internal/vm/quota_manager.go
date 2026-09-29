@@ -125,6 +125,9 @@ func (m *quotaManager) AttachGPU(ctx context.Context, id string, pciAddr string,
 func (m *quotaManager) DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error) {
 	return m.base.DetachGPU(ctx, id, pciAddr)
 }
+func (m *quotaManager) MoveDisk(ctx context.Context, id string, location string) (*types.VM, error) {
+	return m.base.MoveDisk(ctx, id, location)
+}
 func (m *quotaManager) OpenSerialConsole(ctx context.Context, id string) (io.ReadWriteCloser, error) {
 	return m.base.OpenSerialConsole(ctx, id)
 }

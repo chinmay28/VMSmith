@@ -181,6 +181,16 @@ type StorageConfig struct {
 	// in-guest installer can load the paravirtual storage/network/balloon
 	// drivers. Empty disables the attachment.
 	VirtioWinISO string `yaml:"virtio_win_iso"`
+
+	// DiskLocations declares additional named directories VM disks can be
+	// placed in at create time (VMSpec.DiskLocation) or moved to later
+	// (POST /vms/{id}/disk/move) — e.g. a larger or faster physical drive.
+	// storage.base_dir is always available as the implicit "default"
+	// location. Paths must already exist (they are deliberately not
+	// auto-created, so an unmounted drive fails loudly instead of silently
+	// filling the root filesystem) and, like base_dir, must be traversable
+	// by the libvirt-qemu user.
+	DiskLocations []DiskLocation `yaml:"disk_locations"`
 }
 
 // DefaultVirtioWinISOPath is the conventional install location for the
@@ -354,6 +364,10 @@ func Load(path string) (*Config, error) {
 
 	cfg.expandPaths()
 
+	if err := cfg.Storage.ValidateDiskLocations(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -385,6 +399,9 @@ func (c *Config) expandPaths() {
 	expand(&c.Storage.BaseDir)
 	expand(&c.Storage.DBPath)
 	expand(&c.Storage.VirtioWinISO)
+	for i := range c.Storage.DiskLocations {
+		expand(&c.Storage.DiskLocations[i].Path)
+	}
 }
 
 // EnsureDirs creates all required directories.

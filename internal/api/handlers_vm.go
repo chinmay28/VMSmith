@@ -124,6 +124,10 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, types.NewAPIError("invalid_host", fmt.Sprintf("host %q is not configured on this daemon", strings.TrimSpace(spec.Host))))
 		return
 	}
+	if err := s.validateDiskLocationName(spec.DiskLocation); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err)
+		return
+	}
 	if tags, err := normalizeTags(spec.Tags); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err)
 		return

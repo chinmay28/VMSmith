@@ -1215,6 +1215,52 @@ paths:
           $ref: '#/components/responses/APIError'
         default:
           $ref: '#/components/responses/APIError'
+  /vms/{vmID}/disk/move:
+    post:
+      tags: [VMs]
+      summary: Move a stopped VM's disk to another storage location
+      description: |
+        Relocates the VM's directory (system disk + provisioning ISO, with
+        any internal snapshots) to another configured storage location —
+        `default` (storage.base_dir) or a name from
+        `storage.disk_locations` — e.g. to free space on a physical drive.
+        The VM must be stopped. Same-filesystem moves are a rename;
+        cross-filesystem moves copy, fsync, repoint the domain XML and
+        every snapshot definition, and only then delete the source. Copy
+        progress streams over `GET /vms/{id}/operations/progress` with
+        `op: move_disk`. Emits `vm.disk_moved` (attributes `from`, `to`,
+        `disk_path`). Errors: 400 `invalid_disk_location`, 404 unknown VM,
+        409 `vm_running` / `disk_location_unchanged` / `disk_move_conflict`
+        (leftover target directory), 422 `disk_location_unavailable`
+        (directory missing, e.g. drive not mounted), 507
+        `insufficient_storage`.
+      parameters:
+        - $ref: '#/components/parameters/VMID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveDiskRequest'
+      responses:
+        '200':
+          description: Updated VM (new `disk_path` and `spec.disk_location`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/APIError'
+        '404':
+          $ref: '#/components/responses/APIError'
+        '409':
+          $ref: '#/components/responses/APIError'
+        '422':
+          $ref: '#/components/responses/APIError'
+        '507':
+          $ref: '#/components/responses/APIError'
+        default:
+          $ref: '#/components/responses/APIError'
   /vms/{vmID}/gpus/{gpuAddr}:
     delete:
       tags: [VMs]
@@ -2072,6 +2118,29 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/GPUDevice'
+        default:
+          $ref: '#/components/responses/APIError'
+  /host/storage-locations:
+    get:
+      tags: [Host]
+      summary: List storage locations VM disks can be placed in
+      description: >
+        Returns the implicit `default` location (storage.base_dir) followed
+        by every `storage.disk_locations` entry, each with live filesystem
+        capacity and the number of VMs whose disk currently lives there.
+        A location whose directory is missing (e.g. an unmounted drive) is
+        reported with `available: false` and an `error`. Use the names with
+        VMSpec.disk_location / `vm create --disk-location` and
+        `POST /vms/{id}/disk/move`.
+      responses:
+        '200':
+          description: Storage locations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StorageLocation'
         default:
           $ref: '#/components/responses/APIError'
   /host/stats:
@@ -4309,6 +4378,17 @@ components:
             have installed the virtio-net drivers in a Windows guest can
             pin "virtio" here for throughput. Any other value returns 400
             `invalid_nic_model`.
+        disk_location:
+          type: string
+          description: >-
+            Storage location the VM's disk directory is created in:
+            `default` (storage.base_dir) or a name from
+            `storage.disk_locations` (see GET /host/storage-locations).
+            Empty/omitted means `default` and the default is stored as
+            empty. Unknown names return 400 `invalid_disk_location`; a
+            configured location whose directory is missing returns 422
+            `disk_location_unavailable`. Change it post-create via
+            POST /vms/{id}/disk/move.
         host:
           type: string
           description: >-
@@ -5199,6 +5279,40 @@ components:
           type: boolean
         is_physical:
           type: boolean
+    StorageLocation:
+      type: object
+      required: [name, path, default, available, total_bytes, free_bytes, vm_count]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        description:
+          type: string
+        default:
+          type: boolean
+          description: True for the implicit location backed by storage.base_dir.
+        available:
+          type: boolean
+          description: False when the directory is missing or cannot be statted.
+        error:
+          type: string
+        total_bytes:
+          type: integer
+          format: int64
+        free_bytes:
+          type: integer
+          format: int64
+        vm_count:
+          type: integer
+          description: VMs whose disk currently lives in this location.
+    MoveDiskRequest:
+      type: object
+      required: [location]
+      properties:
+        location:
+          type: string
+          description: Target storage location name.
     GPUDevice:
       type: object
       required: [address, vendor_id, device_id, vendor, class, iommu_group]

@@ -62,6 +62,7 @@ var vmCreateCmd = &cobra.Command{
 		autoStart, _ := cmd.Flags().GetBool("auto-start")
 		locked, _ := cmd.Flags().GetBool("locked")
 		hostName, _ := cmd.Flags().GetString("host")
+		diskLocation, _ := cmd.Flags().GetString("disk-location")
 
 		if strings.TrimSpace(image) == "" && strings.TrimSpace(installISO) == "" {
 			return fmt.Errorf("one of --image or --install-iso is required")
@@ -114,6 +115,7 @@ var vmCreateCmd = &cobra.Command{
 			AutoStart:     autoStart,
 			Locked:        locked,
 			Host:          strings.TrimSpace(hostName),
+			DiskLocation:  strings.TrimSpace(diskLocation),
 		}
 		if spec.InstallISO != "" {
 			spec.InstallImageIndex = installImageIndex
@@ -823,6 +825,11 @@ var vmInfoCmd = &cobra.Command{
 			fmt.Printf("SSH:          ssh %s@%s\n", sshUser, v.IP)
 		}
 		fmt.Printf("Disk Path:    %s\n", v.DiskPath)
+		diskLoc := v.Spec.DiskLocation
+		if diskLoc == "" {
+			diskLoc = "default"
+		}
+		fmt.Printf("Disk Location: %s\n", diskLoc)
 		fmt.Printf("Auto-start:   %t\n", v.Spec.AutoStart)
 		fmt.Printf("Locked:       %t\n", v.Spec.Locked)
 		fmt.Printf("Created:      %s\n", v.CreatedAt.Format("2006-01-02 15:04:05"))
@@ -1284,6 +1291,7 @@ func init() {
 	vmCreateCmd.Flags().StringSlice("tag", nil, "tag to apply to the VM (repeatable)")
 	vmCreateCmd.Flags().Bool("auto-start", false, "auto-start this VM when the daemon boots")
 	vmCreateCmd.Flags().Bool("locked", false, "lock the VM (delete-protected) on create")
+	vmCreateCmd.Flags().String("disk-location", "", "storage location for the VM's disk: 'default' (storage.base_dir) or a name from storage.disk_locations; list them with 'vmsmith host storage'")
 	vmCreateCmd.Flags().String("host", "", "place the VM on this configured libvirt host (5.5.3; default: the local host)")
 	vmCreateCmd.Flags().String("nat-ip", "",
 		"static IP for the primary NAT interface in CIDR notation (e.g. 192.168.100.50/24); leave empty for DHCP")

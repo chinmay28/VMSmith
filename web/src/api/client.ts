@@ -71,6 +71,9 @@ export const vms = {
     unwrap(apiClient.PATCH('/vms/{vmID}', { params: { path: { vmID: id } }, body: patch })),
   clone: (id: string, name: string) =>
     unwrap(apiClient.POST('/vms/{vmID}/clone', { params: { path: { vmID: id } }, body: { name } })),
+  // Move a stopped VM's disk to another storage location (see host.storageLocations).
+  moveDisk: (id: string, location: string) =>
+    unwrap(apiClient.POST('/vms/{vmID}/disk/move', { params: { path: { vmID: id } }, body: { location } })),
   start: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/start', { params: { path: { vmID: id } } })),
   stop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/stop', { params: { path: { vmID: id } } })),
   forceStop: (id: string) => unwrap(apiClient.POST('/vms/{vmID}/force-stop', { params: { path: { vmID: id } } })),
@@ -293,6 +296,8 @@ export const host = {
   interfaces: () => unwrap(apiClient.GET('/host/interfaces')),
   gpus: () => unwrap(apiClient.GET('/host/gpus')),
   stats: () => unwrap(apiClient.GET('/host/stats')),
+  // Storage locations VM disks can be placed in / moved to, with free space.
+  storageLocations: () => unwrap(apiClient.GET('/host/storage-locations')),
   // Multi-host overview (5.5.4): one row per managed libvirt host.
   list: () => unwrap(apiClient.GET('/hosts' as any)),
 };

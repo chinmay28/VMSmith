@@ -2062,6 +2062,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vms/{vmID}/disk/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move a stopped VM's disk to another storage location
+         * @description Relocates the VM's directory (system disk + provisioning ISO, with
+         *     any internal snapshots) to another configured storage location —
+         *     `default` (storage.base_dir) or a name from
+         *     `storage.disk_locations` — e.g. to free space on a physical drive.
+         *     The VM must be stopped. Same-filesystem moves are a rename;
+         *     cross-filesystem moves copy, fsync, repoint the domain XML and
+         *     every snapshot definition, and only then delete the source. Copy
+         *     progress streams over `GET /vms/{id}/operations/progress` with
+         *     `op: move_disk`. Emits `vm.disk_moved` (attributes `from`, `to`,
+         *     `disk_path`). Errors: 400 `invalid_disk_location`, 404 unknown VM,
+         *     409 `vm_running` / `disk_location_unchanged` / `disk_move_conflict`
+         *     (leftover target directory), 422 `disk_location_unavailable`
+         *     (directory missing, e.g. drive not mounted), 507
+         *     `insufficient_storage`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    vmID: components["parameters"]["VMID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MoveDiskRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated VM (new `disk_path` and `spec.disk_location`) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["VM"];
+                    };
+                };
+                400: components["responses"]["APIError"];
+                404: components["responses"]["APIError"];
+                409: components["responses"]["APIError"];
+                422: components["responses"]["APIError"];
+                507: components["responses"]["APIError"];
+                default: components["responses"]["APIError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vms/{vmID}/gpus/{gpuAddr}": {
         parameters: {
             query?: never;
@@ -3295,6 +3359,46 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["GPUDevice"][];
+                    };
+                };
+                default: components["responses"]["APIError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/host/storage-locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List storage locations VM disks can be placed in
+         * @description Returns the implicit `default` location (storage.base_dir) followed by every `storage.disk_locations` entry, each with live filesystem capacity and the number of VMs whose disk currently lives there. A location whose directory is missing (e.g. an unmounted drive) is reported with `available: false` and an `error`. Use the names with VMSpec.disk_location / `vm create --disk-location` and `POST /vms/{id}/disk/move`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Storage locations */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StorageLocation"][];
                     };
                 };
                 default: components["responses"]["APIError"];
@@ -4766,6 +4870,8 @@ export interface components {
              * @enum {string}
              */
             nic_model?: "virtio" | "e1000e";
+            /** @description Storage location the VM's disk directory is created in: `default` (storage.base_dir) or a name from `storage.disk_locations` (see GET /host/storage-locations). Empty/omitted means `default` and the default is stored as empty. Unknown names return 400 `invalid_disk_location`; a configured location whose directory is missing returns 422 `disk_location_unavailable`. Change it post-create via POST /vms/{id}/disk/move. */
+            disk_location?: string;
             /** @description Placement (roadmap 5.5.3) — the configured libvirt host the VM is created on. Empty/omitted means the implicit "local" host. Unknown names return 400 `invalid_host`. Fixed post-create (no live migration in v1 — see docs/MULTI_HOST.md). */
             host?: string;
             /** @description Libvirt machine type override (e.g. `pc-q35-rhel9.6.0`). Empty/omitted resolves to vmsmith's default (`pc-q35-6.2`). Only letters, digits, dots, hyphens, and underscores are allowed; anything else returns 400 `invalid_machine`. */
@@ -5225,6 +5331,26 @@ export interface components {
             mac: string;
             is_up: boolean;
             is_physical: boolean;
+        };
+        StorageLocation: {
+            name: string;
+            path: string;
+            description?: string;
+            /** @description True for the implicit location backed by storage.base_dir. */
+            default: boolean;
+            /** @description False when the directory is missing or cannot be statted. */
+            available: boolean;
+            error?: string;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            free_bytes: number;
+            /** @description VMs whose disk currently lives in this location. */
+            vm_count: number;
+        };
+        MoveDiskRequest: {
+            /** @description Target storage location name. */
+            location: string;
         };
         GPUDevice: {
             /** @description PCI address in canonical form, e.g. "0000:01:00.0". */

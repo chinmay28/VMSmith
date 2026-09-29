@@ -147,6 +147,13 @@ type VMSpec struct {
 	// fixed post-create (no live migration in v1 — see docs/MULTI_HOST.md).
 	Host string `json:"host,omitempty" yaml:"host,omitempty"`
 
+	// DiskLocation names the configured storage location
+	// (storage.disk_locations, or "default" for storage.base_dir) the VM's
+	// disk directory is created in. Empty means "default". Unknown names are
+	// rejected at create with 400 invalid_disk_location. Change it
+	// post-create via POST /vms/{id}/disk/move (the VM must be stopped).
+	DiskLocation string `json:"disk_location,omitempty" yaml:"disk_location,omitempty"`
+
 	// Machine overrides the libvirt <os><type machine='...'/></os> machine
 	// type. Empty falls back to vmsmith's default ("pc-q35-6.2"). Useful for
 	// pinning a specific QEMU machine version when a host's libvirt has

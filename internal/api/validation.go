@@ -526,19 +526,21 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "invalid_vnc_password", "invalid_install_iso", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "invalid_vnc_password", "invalid_install_iso", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed", "invalid_disk_location":
 		return 400
 	// 422 (not 503): the request is well-formed but unprocessable against
 	// this daemon's configuration. 503 would imply a transient outage and
 	// invite retries; a missing/rotated daemon.console.password_key needs
 	// operator intervention, not a retry.
-	case "vnc_password_key_missing", "vnc_password_undecryptable":
+	case "vnc_password_key_missing", "vnc_password_undecryptable", "disk_location_unavailable":
 		return 422
+	case "insufficient_storage":
+		return 507
 	case "service_unavailable", "network_unavailable":
 		return 503
 	case "quota_exceeded":
 		return 429
-	case "vm_locked", "vm_running", "vm_already_stopped", "vm_not_running", "vm_not_paused", "vm_already_paused":
+	case "vm_locked", "vm_running", "vm_already_stopped", "vm_not_running", "vm_not_paused", "vm_already_paused", "disk_location_unchanged", "disk_move_conflict":
 		return 409
 	default:
 		return fallback
