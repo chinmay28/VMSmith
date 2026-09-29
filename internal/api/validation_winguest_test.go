@@ -23,15 +23,54 @@ func TestValidateVMSpec_InstallISOAndImageMutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestValidateVMSpec_InstallISORequiresWindows(t *testing.T) {
+func TestValidateVMSpec_LinuxInstallISOAccepted(t *testing.T) {
 	err := validateVMSpec(types.VMSpec{
-		Name: "linux", InstallISO: "/isos/win2022.iso",
+		Name: "umbrel", InstallISO: "umbrelos-amd64-usb-installer.iso",
+		Firmware: "uefi", DiskGB: 128,
 	})
-	if err == nil {
-		t.Fatal("expected error")
+	if err != nil {
+		t.Fatalf("linux install_iso should be accepted: %v", err)
 	}
-	if err.(*types.APIError).Code != "invalid_install_iso" {
-		t.Fatalf("err = %+v", err)
+}
+
+func TestValidateVMSpec_LinuxInstallISORejectsWindowsOnlyFields(t *testing.T) {
+	for name, spec := range map[string]types.VMSpec{
+		"image_index": {Name: "linux", InstallISO: "/isos/debian.iso", InstallImageIndex: 2},
+		"locale":      {Name: "linux", InstallISO: "/isos/debian.iso", Locale: "de-DE"},
+	} {
+		err := validateVMSpec(spec)
+		if err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+		if apiErr := err.(*types.APIError); apiErr.Code != "invalid_install_iso" || !strings.Contains(apiErr.Message, "Windows") {
+			t.Fatalf("%s: err = %+v", name, apiErr)
+		}
+	}
+}
+
+func TestValidateVMSpec_InstallISORejectsNUL(t *testing.T) {
+	err := validateVMSpec(types.VMSpec{Name: "linux", InstallISO: "bad\x00.iso"})
+	if err == nil || err.(*types.APIError).Code != "invalid_install_iso" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateVMUpdateSpec_InstallISOEjectOnly(t *testing.T) {
+	empty, iso := "", "/isos/other.iso"
+	if err := validateVMUpdateSpec(types.VMUpdateSpec{InstallISO: &empty}); err != nil {
+		t.Fatalf("eject should be accepted: %v", err)
+	}
+	err := validateVMUpdateSpec(types.VMUpdateSpec{InstallISO: &iso})
+	if err == nil || err.(*types.APIError).Code != "invalid_install_iso" {
+		t.Fatalf("attaching an ISO on PATCH should be rejected, err = %v", err)
+	}
+}
+
+func TestStatusForAPIError_InvalidInstallISOIs400(t *testing.T) {
+	// The manager's host probe returns invalid_install_iso when the ISO is
+	// missing on the daemon host; it must surface as a 400, not a 500.
+	if got := statusForAPIError(types.NewAPIError("invalid_install_iso", "missing"), 500); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
 	}
 }
 

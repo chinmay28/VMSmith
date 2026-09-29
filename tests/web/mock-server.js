@@ -399,10 +399,17 @@ function createVM(spec) {
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
-    spec: { name: spec.name, image: spec.image || "ubuntu", cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "", disk_bus: spec.disk_bus || "", nic_model: spec.nic_model || "", machine: spec.machine || "", firmware: spec.firmware || "", virtio_win_iso: spec.virtio_win_iso || "", gpus: Array.isArray(spec.gpus) ? spec.gpus.slice() : [] },
+    spec: { name: spec.name, image: spec.install_iso ? "" : (spec.image || "ubuntu"), cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "", disk_bus: spec.disk_bus || "", nic_model: spec.nic_model || "", machine: spec.machine || "", firmware: spec.firmware || "", virtio_win_iso: spec.virtio_win_iso || "", gpus: Array.isArray(spec.gpus) ? spec.gpus.slice() : [] },
     state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
+  // secure_boot / tpm are pointer-semantics on the daemon (omitted = auto),
+  // so only persist them when the create request set them explicitly.
+  if (typeof spec.secure_boot === "boolean") vm.spec.secure_boot = spec.secure_boot;
+  if (typeof spec.tpm === "boolean") vm.spec.tpm = spec.tpm;
+  // install_iso is stored as the resolved absolute path (omitempty on the
+  // daemon — absent when the VM was built from a base image).
+  if (spec.install_iso) vm.spec.install_iso = spec.install_iso;
   vms.set(id, vm);
   snapshots.set(id, snapshots.get(id) || []);
   portForwards.set(id, []);
@@ -1176,6 +1183,27 @@ const server = http.createServer(async (req, res) => {
     if (nicModelErr) return nicModelErr;
     const firmwareErr = enumCheck("firmware", ["bios", "uefi", "ovmf"], "invalid_firmware");
     if (firmwareErr) return firmwareErr;
+    // 5.6.9 — secure_boot:true requires UEFI; an explicit bios is rejected.
+    if (spec.secure_boot === true && spec.firmware === "bios") {
+      return json(res, 400, { code: "invalid_firmware", message: "secure_boot requires uefi/ovmf firmware" });
+    }
+    // 5.6.11 — install_iso (Linux + Windows): boot a raw installer ISO onto a
+    // blank disk. Mutually exclusive with image; install_image_index / locale
+    // are Windows Autounattend-only. Bare names resolve against the daemon's
+    // images dir; the stored spec holds the resolved absolute path.
+    if (typeof spec.install_iso === "string" && spec.install_iso.trim() !== "") {
+      const iso = spec.install_iso.trim();
+      if (typeof spec.image === "string" && spec.image.trim() !== "") {
+        return json(res, 400, { code: "invalid_install_iso", message: "install_iso and image are mutually exclusive" });
+      }
+      const isWindows = typeof spec.os_type === "string" && spec.os_type.trim().toLowerCase() === "windows";
+      if (!isWindows && (Number(spec.install_image_index) > 0 || (typeof spec.locale === "string" && spec.locale.trim() !== ""))) {
+        return json(res, 400, { code: "invalid_install_iso", message: "install_image_index and locale are only supported for windows guests" });
+      }
+      spec.install_iso = iso.startsWith("/") ? iso : `/var/lib/vmsmith/images/${iso}`;
+    } else {
+      delete spec.install_iso;
+    }
     if (typeof spec.machine === "string" && spec.machine.trim() !== "") {
       if (!/^[A-Za-z0-9._-]+$/.test(spec.machine.trim())) {
         return json(res, 400, { code: "invalid_machine", message: "machine must contain only letters, numbers, dots, hyphens, and underscores" });
@@ -1220,6 +1248,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (Object.prototype.hasOwnProperty.call(body, "os_variant")) {
       return json(res, 400, { code: "os_type_immutable", message: "os_variant cannot be changed after VM creation" });
+    }
+    // 5.6.11 — install_iso is eject-only on PATCH: "" detaches the installer
+    // ISO (and drops the cdrom-first boot entry); any other value is 400.
+    // null / omitted = no change (pointer semantics).
+    let ejectInstallISO = false;
+    if (Object.prototype.hasOwnProperty.call(body, "install_iso") && body.install_iso !== null) {
+      if (typeof body.install_iso !== "string" || body.install_iso.trim() !== "") {
+        return json(res, 400, { code: "invalid_install_iso", message: "install_iso can only be cleared (ejected) after creation" });
+      }
+      ejectInstallISO = true;
     }
     if (body.cpus > 0) vm.spec.cpus = body.cpus;
     if (body.ram_mb > 0) vm.spec.ram_mb = body.ram_mb;
@@ -1274,6 +1312,7 @@ const server = http.createServer(async (req, res) => {
         vm.spec.nic_model = normalised;
       }
     }
+    if (ejectInstallISO) delete vm.spec.install_iso;
     vm.updated_at = new Date().toISOString();
     return json(res, 200, vm);
   }

@@ -26,18 +26,25 @@ func validateVMSpec(spec types.VMSpec) error {
 	if !vmNameRe.MatchString(name) {
 		return types.NewAPIError("invalid_name", "vm name must be 1-64 characters and contain only letters, numbers, and hyphens")
 	}
-	// The unattended-install path (roadmap 5.6.11) starts from a blank disk
-	// + install ISO instead of a base image, so image and install_iso are
-	// mutually exclusive and exactly one must be present.
+	// The install-from-ISO path (roadmap 5.6.11, extended to Linux in
+	// 5.6.19) starts from a blank disk + install ISO instead of a base
+	// image, so image and install_iso are mutually exclusive and exactly
+	// one must be present.
 	if strings.TrimSpace(spec.InstallISO) != "" {
 		if strings.TrimSpace(spec.Image) != "" {
-			return types.NewAPIError("invalid_install_iso", "image and install_iso are mutually exclusive — an unattended install starts from a blank disk")
+			return types.NewAPIError("invalid_install_iso", "image and install_iso are mutually exclusive — an ISO install starts from a blank disk")
 		}
-		if !spec.IsWindows() {
-			return types.NewAPIError("invalid_install_iso", "install_iso requires os_type \"windows\" — the unattended-install path generates a Windows Autounattend.xml")
+		if strings.ContainsRune(spec.InstallISO, '\x00') {
+			return types.NewAPIError("invalid_install_iso", "install_iso must not contain NUL bytes")
 		}
 		if spec.InstallImageIndex < 0 {
 			return types.NewAPIError("invalid_install_iso", "install_image_index must be >= 0")
+		}
+		// Edition select + locale feed the generated Windows
+		// Autounattend.xml; Linux installers run interactively, so
+		// accepting them would silently do nothing.
+		if !spec.IsWindows() && (spec.InstallImageIndex != 0 || strings.TrimSpace(spec.Locale) != "") {
+			return types.NewAPIError("invalid_install_iso", "install_image_index and locale apply only to Windows unattended installs (os_type \"windows\")")
 		}
 	} else if strings.TrimSpace(spec.Image) == "" {
 		return types.NewAPIError("invalid_image", "image is required")
@@ -95,6 +102,9 @@ func validateVMUpdateSpec(patch types.VMUpdateSpec) error {
 	}
 	if patch.GPUs != nil {
 		return types.NewAPIError("gpus_immutable", "gpus cannot be changed after VM creation: GPU passthrough is configured only at create time")
+	}
+	if patch.InstallISO != nil && strings.TrimSpace(*patch.InstallISO) != "" {
+		return types.NewAPIError("invalid_install_iso", "install_iso can only be cleared (ejected) after creation; send \"install_iso\": \"\"")
 	}
 	if err := validateOptionalVMResourceValue(patch.CPUs, 1, 128, "cpus"); err != nil {
 		return err
@@ -516,7 +526,7 @@ func statusForAPIError(err error, fallback int) int {
 	switch apiErr.Code {
 	case "resource_not_found":
 		return 404
-	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "invalid_vnc_password", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
+	case "invalid_name", "invalid_image", "invalid_spec", "invalid_description", "invalid_port_forward", "invalid_snapshot", "invalid_sort", "invalid_order", "invalid_webhook", "invalid_os_type", "invalid_os_variant", "invalid_clock_offset", "invalid_disk_bus", "invalid_nic_model", "invalid_machine", "invalid_firmware", "invalid_gpu", "invalid_vnc_password", "invalid_install_iso", "os_type_immutable", "gpus_immutable", "disk_shrink_not_allowed":
 		return 400
 	// 422 (not 503): the request is well-formed but unprocessable against
 	// this daemon's configuration. 503 would imply a transient outage and

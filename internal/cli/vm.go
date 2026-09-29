@@ -63,6 +63,10 @@ var vmCreateCmd = &cobra.Command{
 		locked, _ := cmd.Flags().GetBool("locked")
 		hostName, _ := cmd.Flags().GetString("host")
 
+		if strings.TrimSpace(image) == "" && strings.TrimSpace(installISO) == "" {
+			return fmt.Errorf("one of --image or --install-iso is required")
+		}
+
 		logger.Info("cli", "vm create", "name", name, "image", image,
 			"cpus", fmt.Sprintf("%d", cpus), "ram", fmt.Sprintf("%d", ram),
 			"disk", fmt.Sprintf("%d", disk))
@@ -167,6 +171,10 @@ var vmCreateCmd = &cobra.Command{
 		}
 		if result.Spec.Locked {
 			fmt.Printf("  Locked (delete-protected): true\n")
+		}
+		if result.Spec.InstallISO != "" {
+			fmt.Printf("  Install ISO: %s\n", result.Spec.InstallISO)
+			fmt.Printf("  Finish the installer on the VNC console, then detach it: vmsmith vm edit %s --eject-iso\n", result.ID)
 		}
 		if gpus := result.Spec.ResolvedGPUs(); len(gpus) > 0 {
 			fmt.Printf("  GPU passthrough: %s\n", strings.Join(gpus, ", "))
@@ -639,9 +647,10 @@ var vmEditCmd = &cobra.Command{
 		diskBus, _ := cmd.Flags().GetString("disk-bus")
 		nicModelChanged := cmd.Flags().Changed("nic-model")
 		nicModel, _ := cmd.Flags().GetString("nic-model")
+		ejectISO, _ := cmd.Flags().GetBool("eject-iso")
 
-		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged && !diskBusChanged && !nicModelChanged {
-			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, --clock-offset, --disk-bus, or --nic-model")
+		if cpus == 0 && ram == 0 && disk == 0 && natIP == "" && description == "" && len(tags) == 0 && !autoStartChanged && !lockedChanged && !clockOffsetChanged && !diskBusChanged && !nicModelChanged && !ejectISO {
+			return fmt.Errorf("specify at least one of --cpus, --ram, --disk, --nat-ip, --description, --tag, --auto-start, --locked, --clock-offset, --disk-bus, --nic-model, or --eject-iso")
 		}
 
 		logger.Info("cli", "vm edit", "id", id, "cpus", fmt.Sprintf("%d", cpus),
@@ -686,6 +695,10 @@ var vmEditCmd = &cobra.Command{
 			normalised := strings.TrimSpace(strings.ToLower(nicModel))
 			patch.NICModel = &normalised
 		}
+		if ejectISO {
+			empty := ""
+			patch.InstallISO = &empty
+		}
 
 		result, err := mgr.Update(context.Background(), id, patch)
 		if err != nil {
@@ -714,6 +727,9 @@ var vmEditCmd = &cobra.Command{
 		}
 		fmt.Printf("  Auto-start: %t\n", result.Spec.AutoStart)
 		fmt.Printf("  Locked:     %t\n", result.Spec.Locked)
+		if result.Spec.InstallISO != "" {
+			fmt.Printf("  Install ISO: %s\n", result.Spec.InstallISO)
+		}
 		return nil
 	},
 }
@@ -1243,7 +1259,7 @@ func avgBpsStr(samples []types.MetricSample, field string) string {
 }
 
 func init() {
-	vmCreateCmd.Flags().String("image", "", "base image name or absolute path to a .qcow2 file (required)")
+	vmCreateCmd.Flags().String("image", "", "base image name or absolute path to a .qcow2 file (required unless --install-iso is set)")
 	vmCreateCmd.Flags().Int("cpus", 0, "number of vCPUs (default from config)")
 	vmCreateCmd.Flags().Int("ram", 0, "RAM in MB (default from config)")
 	vmCreateCmd.Flags().Int("disk", 0, "disk size in GB (default from config)")
@@ -1258,7 +1274,7 @@ func init() {
 	vmCreateCmd.Flags().String("machine", "", "libvirt machine type override (default: pc-q35-6.2)")
 	vmCreateCmd.Flags().String("firmware", "", "firmware override: bios (default), uefi, or ovmf (uefi/ovmf both select libvirt's firmware='efi')")
 	vmCreateCmd.Flags().String("virtio-win-iso", "", "per-VM virtio-win driver ISO path (overrides daemon storage.virtio_win_iso for this Windows VM only)")
-	vmCreateCmd.Flags().String("install-iso", "", "unattended install: path to a raw Windows installation ISO (mutually exclusive with --image; boots the installer against a blank disk with a generated Autounattend.xml)")
+	vmCreateCmd.Flags().String("install-iso", "", "install from ISO onto a blank --disk: file name in the images dir or absolute path (mutually exclusive with --image). Windows guests get a generated Autounattend.xml; Linux installers run on the VNC console. Detach afterwards with 'vm edit --eject-iso'")
 	vmCreateCmd.Flags().Int("install-image-index", 0, "unattended install: WIM image index for edition selection (0 = installer default)")
 	vmCreateCmd.Flags().String("locale", "", "unattended install: Windows UI/input locale (default en-US)")
 	vmCreateCmd.Flags().Bool("secure-boot", false, "enable UEFI Secure Boot (default: on for --os-variant windows-11, off otherwise; pass --secure-boot=false to disable)")
@@ -1291,7 +1307,9 @@ Examples:
   --network eth2:ip=192.168.2.100/24,gw=192.168.2.1
   --network eth3:mode=bridge,bridge=br-storage
   --network eth1 --network eth2 --network eth3`)
-	vmCreateCmd.MarkFlagRequired("image")
+	// --image and --install-iso are alternative boot sources; exactly one is
+	// required, enforced in RunE (cobra's MarkFlagRequired cannot express it).
+	vmCreateCmd.MarkFlagsMutuallyExclusive("image", "install-iso")
 
 	vmEditCmd.Flags().Int("cpus", 0, "new vCPU count (0 = no change)")
 	vmEditCmd.Flags().Int("ram", 0, "new RAM in MB (0 = no change)")
@@ -1305,6 +1323,7 @@ Examples:
 	vmEditCmd.Flags().String("clock-offset", "", "new libvirt domain clock offset: utc, localtime, or empty to clear the override and use the OS-family default")
 	vmEditCmd.Flags().String("disk-bus", "", "switch the system disk bus: virtio or sata, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
 	vmEditCmd.Flags().String("nic-model", "", "switch every NIC model: virtio or e1000e, or empty to clear the override and use the OS-family default (roadmap 5.6.12)")
+	vmEditCmd.Flags().Bool("eject-iso", false, "detach the installer ISO attached via --install-iso once installation is done (roadmap 5.6.19)")
 	vmCloneCmd.Flags().String("name", "", "name for the cloned VM (required)")
 
 	vmListCmd.Flags().String("tag", "", "filter VMs by tag")

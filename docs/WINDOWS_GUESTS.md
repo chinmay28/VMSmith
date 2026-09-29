@@ -322,7 +322,10 @@ and it will drive Windows Setup hands-free:
 ```
 
 What happens: the VM gets a **blank** qcow2 disk (no backing image), the ISO
-is attached as a boot cdrom, and a generated `Autounattend.xml` rides in the
+is attached as a boot cdrom (boot order: system disk first, installer second —
+the blank disk falls through to Setup, and once Setup has written a
+bootloader the disk wins, so Setup's reboots continue from disk instead of
+re-entering the installer), and a generated `Autounattend.xml` rides in the
 provisioning cdrom's root (Windows Setup scans attached removable media for
 it). The unattend file covers firmware-matched partitioning (GPT/EFI layout
 under UEFI, single active MBR partition under BIOS), edition selection,
@@ -332,7 +335,15 @@ generated password from the create response applies when you omit
 
 Notes:
 - `image` and `install_iso` are mutually exclusive (400 `invalid_install_iso`).
+- A bare file name (`"install_iso": "win2022.iso"`) resolves against
+  `storage.images_dir`.
 - Expect the first boot to take a while — it is a full Windows installation.
+- Once Windows is installed, detach the ISO with
+  `PATCH /api/v1/vms/{id}` `{"install_iso": ""}` (CLI:
+  `vmsmith vm edit <id> --eject-iso`; GUI: **Eject ISO** on the VM page).
+- The same `install_iso` path works for Linux guests (distro installers,
+  appliance images such as umbrelOS) — see the README's
+  "Install from an ISO" section.
 - Combine with `os_variant: windows-11` to get the UEFI/Secure Boot/TPM
   stack the Windows 11 installer requires.
 

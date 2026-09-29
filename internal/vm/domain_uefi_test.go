@@ -104,18 +104,76 @@ func TestDomainXML_InstallISOAttachesBootCDROM(t *testing.T) {
 	if !strings.Contains(xml, "<target dev='sdd' bus='sata'/>") {
 		t.Errorf("install ISO should sit on sdd:\n%s", xml)
 	}
-	// cdrom boot entry must precede the hd entry so the installer runs first.
-	cdromIdx := strings.Index(xml, "<boot dev='cdrom'/>")
-	hdIdx := strings.Index(xml, "<boot dev='hd'/>")
-	if cdromIdx == -1 || hdIdx == -1 || cdromIdx > hdIdx {
-		t.Errorf("boot order should be cdrom then hd:\n%s", xml)
+	assertInstallBootOrder(t, xml)
+}
+
+// assertInstallBootOrder checks the per-device boot order used whenever an
+// install ISO is attached: system disk first (order 1), installer second
+// (order 2), and no os-level <boot dev> entries (libvirt rejects mixing the
+// two, and dev='cdrom' would resolve to the provisioning cdrom).
+func assertInstallBootOrder(t *testing.T, xml string) {
+	t.Helper()
+	if strings.Contains(xml, "<boot dev=") {
+		t.Errorf("install-ISO domain must not use os-level <boot dev>:\n%s", xml)
 	}
+	diskIdx := strings.Index(xml, "<disk type='file' device='disk'>")
+	isoIdx := strings.Index(xml, "<target dev='sdd' bus='sata'/>")
+	order1 := strings.Index(xml, "<boot order='1'/>")
+	order2 := strings.Index(xml, "<boot order='2'/>")
+	if diskIdx == -1 || isoIdx == -1 || order1 == -1 || order2 == -1 {
+		t.Fatalf("missing disk / install cdrom / boot order entries:\n%s", xml)
+	}
+	if !(diskIdx < order1 && order1 < isoIdx && isoIdx < order2) {
+		t.Errorf("boot order should be system disk (1) then install cdrom (2):\n%s", xml)
+	}
+}
+
+func TestDomainXML_LinuxInstallISO(t *testing.T) {
+	xml := renderSpec(t, types.VMSpec{
+		Name: "umbrel", CPUs: 4, RAMMB: 8192, Firmware: "uefi",
+		InstallISO: "/var/lib/vmsmith/images/umbrelos-amd64-usb-installer.iso",
+	})
+	if !strings.Contains(xml, "<source file='/var/lib/vmsmith/images/umbrelos-amd64-usb-installer.iso'/>") {
+		t.Errorf("missing install ISO cdrom:\n%s", xml)
+	}
+	// The virtio system disk keeps vda; the provisioning cdrom keeps sda.
+	if !strings.Contains(xml, "<target dev='vda' bus='virtio'/>") || !strings.Contains(xml, "<target dev='sda' bus='sata'/>") {
+		t.Errorf("linux install should keep vda disk + sda provisioning cdrom:\n%s", xml)
+	}
+	assertInstallBootOrder(t, xml)
 }
 
 func TestDomainXML_NoInstallISOMeansNoCDROMBoot(t *testing.T) {
 	xml := renderSpec(t, types.VMSpec{Name: "plain", CPUs: 2, RAMMB: 2048})
-	if strings.Contains(xml, "<boot dev='cdrom'/>") {
-		t.Errorf("plain VM should not boot from cdrom:\n%s", xml)
+	if !strings.Contains(xml, "<boot dev='hd'/>") {
+		t.Errorf("plain VM should keep the os-level hd boot entry:\n%s", xml)
+	}
+	if strings.Contains(xml, "<boot order=") {
+		t.Errorf("plain VM should not carry per-device boot order:\n%s", xml)
+	}
+}
+
+func TestDomainXML_UEFIWithoutSecureBootPinsFeaturesOff(t *testing.T) {
+	off := false
+	for name, spec := range map[string]types.VMSpec{
+		"implicit": {Name: "efi-plain", CPUs: 2, RAMMB: 2048, Firmware: "uefi"},
+		"explicit": {Name: "efi-off", CPUs: 2, RAMMB: 2048, Firmware: "ovmf", SecureBoot: &off},
+	} {
+		xml := renderSpec(t, spec)
+		if !strings.Contains(xml, "<feature enabled='no' name='secure-boot'/>") ||
+			!strings.Contains(xml, "<feature enabled='no' name='enrolled-keys'/>") {
+			t.Errorf("%s: UEFI without secure boot must pin both features off:\n%s", name, xml)
+		}
+		if strings.Contains(xml, "enabled='yes'") {
+			t.Errorf("%s: no firmware feature should be enabled:\n%s", name, xml)
+		}
+	}
+}
+
+func TestDomainXML_BIOSHasNoFirmwareFeatures(t *testing.T) {
+	xml := renderSpec(t, types.VMSpec{Name: "bios", CPUs: 2, RAMMB: 2048})
+	if strings.Contains(xml, "<firmware>") {
+		t.Errorf("SeaBIOS domain must not carry a <firmware> block:\n%s", xml)
 	}
 }
 

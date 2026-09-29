@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -114,6 +115,10 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 	// bbolt in production); the mock VM persisted in m.vms mirrors that.
 	storedSpec := spec
 	storedSpec.AdminPassword = ""
+	// Mirror LibvirtManager.resolveInstallISO against the default images dir.
+	if iso := strings.TrimSpace(spec.InstallISO); iso != "" && !filepath.IsAbs(iso) {
+		storedSpec.InstallISO = filepath.Join("/var/lib/vmsmith/images", iso)
+	}
 
 	// Mirror the libvirt manager's VNC password derivation (5.1.8): only
 	// synthetic hash/blob markers are stored, never the plaintext.
@@ -250,6 +255,9 @@ func (m *MockManager) Update(ctx context.Context, id string, patch types.VMUpdat
 	}
 	if patch.NICModel != nil {
 		vm.Spec.NICModel = strings.ToLower(strings.TrimSpace(*patch.NICModel))
+	}
+	if patch.InstallISO != nil && strings.TrimSpace(*patch.InstallISO) == "" {
+		vm.Spec.InstallISO = ""
 	}
 
 	// VNC password change mirrors the libvirt manager's contract (5.1.8):

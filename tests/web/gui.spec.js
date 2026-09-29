@@ -269,12 +269,13 @@ test.describe("VM List", () => {
     await page.getByTestId("btn-new-vm").click();
 
     await page.getByTestId("input-vm-name").fill("dev-overrides");
-    await page.getByTestId("input-vm-image").fill("rocky9");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
+    // Firmware lives on the Basic tab next to the Secure Boot toggle.
+    await page.getByTestId("create-vm-firmware").selectOption("uefi");
 
     await page.getByTestId("tab-advanced").click();
     await page.getByTestId("input-vm-disk-bus").selectOption("sata");
     await page.getByTestId("input-vm-nic-model").selectOption("e1000e");
-    await page.getByTestId("input-vm-firmware").selectOption("uefi");
     await page.getByTestId("input-vm-machine").fill("pc-q35-rhel9.6.0");
     await page.getByTestId("input-vm-virtio-win-iso").fill("/tmp/virtio-win.iso");
 
@@ -297,13 +298,86 @@ test.describe("VM List", () => {
     expect(stored.virtio_win_iso).toBe("/tmp/virtio-win.iso");
   });
 
+  // 5.6.11 — Linux install-from-ISO: the Boot source toggle swaps the image
+  // dropdown for an ISO path input; UEFI + unchecked Secure Boot must send an
+  // explicit secure_boot:false (the daemon renders disabled SB features).
+  test("create Linux VM from installer ISO with UEFI and Secure Boot off", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("umbrel-iso");
+    await page.getByTestId("create-vm-boot-source-iso").check();
+    await expect(page.getByTestId("input-vm-image")).toHaveCount(0);
+    // ISO mode requires a non-empty ISO value before Create is enabled.
+    await expect(page.getByTestId("btn-submit-create")).toBeDisabled();
+    await page.getByTestId("create-vm-install-iso").fill("umbrelos-2.0.0-amd64-usb-installer.iso");
+    await expect(page.getByTestId("btn-submit-create")).toBeEnabled();
+
+    await page.getByTestId("create-vm-firmware").selectOption("uefi");
+    await expect(page.getByTestId("create-vm-secure-boot")).toBeVisible();
+    await expect(page.getByTestId("create-vm-secure-boot")).not.toBeChecked();
+
+    const reqPromise = page.waitForRequest((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/v1/vms");
+    await page.getByTestId("btn-submit-create").click();
+    const body = (await reqPromise).postDataJSON();
+    expect(body.install_iso).toBe("umbrelos-2.0.0-amd64-usb-installer.iso");
+    expect(body).not.toHaveProperty("image");
+    expect(body).not.toHaveProperty("boot_source");
+    expect(body.firmware).toBe("uefi");
+    expect(body.secure_boot).toBe(false);
+
+    await expect(page.getByTestId("vm-card-umbrel-iso")).toBeVisible();
+    // The mock resolves bare names against the images dir, like the daemon.
+    const stored = await page.evaluate(async () => {
+      const r = await fetch("/api/v1/vms");
+      const list = await r.json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      const match = arr.find((vm) => vm.name === "umbrel-iso");
+      return match ? match.spec : null;
+    });
+    expect(stored.install_iso).toBe("/var/lib/vmsmith/images/umbrelos-2.0.0-amd64-usb-installer.iso");
+    expect(stored.secure_boot).toBe(false);
+  });
+
+  test("Secure Boot toggle is hidden for BIOS and BIOS creates omit firmware fields", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    // Default firmware is BIOS → no Secure Boot checkbox.
+    await expect(page.getByTestId("create-vm-firmware")).toHaveValue("");
+    await expect(page.getByTestId("create-vm-secure-boot")).toHaveCount(0);
+
+    await page.getByTestId("create-vm-firmware").selectOption("uefi");
+    await expect(page.getByTestId("create-vm-secure-boot")).toBeVisible();
+    await page.getByTestId("create-vm-secure-boot").check();
+
+    // Switching back to BIOS hides it again, and the request drops both
+    // firmware and secure_boot (identical to the pre-UEFI-picker shape).
+    await page.getByTestId("create-vm-firmware").selectOption("");
+    await expect(page.getByTestId("create-vm-secure-boot")).toHaveCount(0);
+
+    await page.getByTestId("input-vm-name").fill("bios-default");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
+    const reqPromise = page.waitForRequest((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/v1/vms");
+    await page.getByTestId("btn-submit-create").click();
+    const body = (await reqPromise).postDataJSON();
+    expect(body.image).toBe("/images/ubuntu-base.qcow2");
+    expect(body).not.toHaveProperty("firmware");
+    expect(body).not.toHaveProperty("secure_boot");
+    expect(body).not.toHaveProperty("install_iso");
+    expect(body).not.toHaveProperty("boot_source");
+    await expect(page.getByTestId("vm-card-bios-default")).toBeVisible();
+  });
+
   test("GPU passthrough selection round-trips through the Advanced tab", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("nav-vms").click();
     await page.getByTestId("btn-new-vm").click();
 
     await page.getByTestId("input-vm-name").fill("gpu-box");
-    await page.getByTestId("input-vm-image").fill("rocky9");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
 
     await page.getByTestId("tab-advanced").click();
 
@@ -1800,6 +1874,57 @@ test.describe("VM Detail", () => {
     await expect(page.getByTestId("vm-detail-image")).toHaveText("ubuntu-22.04");
     await expect(page.getByTestId("vm-detail-resources")).toContainText("2 vCPU");
     await expect(page.getByTestId("vm-detail-resources")).toContainText("4096 MB");
+  });
+
+  // 5.6.11 — an attached installer ISO surfaces on the overview with an
+  // Eject button that PATCHes {install_iso: ""} and the card disappears.
+  test("installer ISO card shows the path and Eject clears it", async ({ page }) => {
+    await page.goto(BASE_URL);
+    const created = await page.evaluate(async () => {
+      const r = await fetch("/api/v1/vms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "iso-installer", install_iso: "umbrelos.iso", firmware: "uefi", secure_boot: false, disk_gb: 64 }),
+      });
+      return { status: r.status, body: await r.json() };
+    });
+    expect(created.status).toBe(201);
+
+    // Contract checks mirrored from the daemon: image+install_iso and
+    // Windows-only install fields on Linux are 400; PATCH is eject-only.
+    const codes = await page.evaluate(async (id) => {
+      const call = async (method, url, body) => {
+        const r = await fetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        return [r.status, (await r.json()).code];
+      };
+      return {
+        both: await call("POST", "/api/v1/vms", { name: "bad-both", image: "ubuntu", install_iso: "x.iso" }),
+        locale: await call("POST", "/api/v1/vms", { name: "bad-locale", install_iso: "x.iso", locale: "de-DE" }),
+        patch: await call("PATCH", `/api/v1/vms/${id}`, { install_iso: "other.iso" }),
+      };
+    }, created.body.id);
+    expect(codes.both).toEqual([400, "invalid_install_iso"]);
+    expect(codes.locale).toEqual([400, "invalid_install_iso"]);
+    expect(codes.patch).toEqual([400, "invalid_install_iso"]);
+
+    await page.goto(`${BASE_URL}/vms/${created.body.id}`);
+    await expect(page.getByTestId("vm-detail-name")).toHaveText("iso-installer");
+    await expect(page.getByTestId("vm-detail-firmware")).toHaveText("UEFI · Secure Boot off");
+    await expect(page.getByTestId("vm-detail-install-iso")).toBeVisible();
+    await expect(page.getByTestId("vm-detail-install-iso-path")).toHaveText("/var/lib/vmsmith/images/umbrelos.iso");
+
+    page.once("dialog", (d) => d.accept());
+    const reqPromise = page.waitForRequest((r) => r.method() === "PATCH" && new URL(r.url()).pathname === `/api/v1/vms/${created.body.id}`);
+    await page.getByTestId("vm-detail-eject-iso").click();
+    const body = (await reqPromise).postDataJSON();
+    expect(body).toEqual({ install_iso: "" });
+    await expect(page.getByTestId("vm-detail-install-iso")).toHaveCount(0);
+
+    // Base-image VMs never show the card and report BIOS by default.
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("vm-detail-firmware")).toHaveText("BIOS");
+    await expect(page.getByTestId("vm-detail-install-iso")).toHaveCount(0);
   });
 
   test("windows VM detail shows OS badge and RDP hint", async ({ page }) => {

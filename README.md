@@ -253,6 +253,36 @@ vm-1741234567890123    web01   running  192.168.100.10   4     4096
 
 The VM boots immediately and gets a DHCP address on the `192.168.100.0/24` NAT network.
 
+#### Install from an ISO
+
+For operating systems and appliances that ship as an installer ISO rather than
+a cloud image (distro installers, umbrelOS, TrueNAS, …), boot the ISO onto a
+blank disk instead of passing `--image`:
+
+```bash
+# Stage the ISO in the images directory (or pass an absolute path)
+sudo curl -fLo /var/lib/vmsmith/images/umbrelos-amd64-usb-installer.iso \
+  https://download.umbrel.com/release/latest/umbrelos-amd64-usb-installer.iso
+
+sudo ./bin/vmsmith vm create umbrel \
+  --install-iso umbrelos-amd64-usb-installer.iso \
+  --firmware uefi \
+  --cpus 4 --ram 8192 --disk 128
+
+# Run the installer on the VNC console (GUI → VM → Console), then detach the ISO
+sudo ./bin/vmsmith vm edit <vm-id> --eject-iso
+```
+
+The system disk boots first and the installer second, so a blank disk falls
+through to the installer and, once installation has written a bootloader, the
+VM boots the installed system even before the ISO is ejected. UEFI guests boot
+with Secure Boot **off** unless you pass `--secure-boot` (or use
+`--os-variant windows-11`), so unsigned installers such as umbrelOS's are not
+refused. The same flow is available in
+the GUI's **New VM** dialog (Boot source → Install from ISO) and via
+`POST /api/v1/vms` with `"install_iso"`; Windows ISOs additionally get a
+generated `Autounattend.xml` — see [docs/WINDOWS_GUESTS.md](docs/WINDOWS_GUESTS.md).
+
 ---
 
 ### Step 3 — Access the VM
@@ -313,7 +343,7 @@ When configured, VMSmith rejects create/update requests that would exceed these 
 
 ### Step 4b — Edit VM resources and IP
 
-Increase vCPU count, RAM, disk size, or change the primary NAT IP address. The VM is powered off automatically, the changes are applied, and it is powered back on.
+Increase vCPU count, RAM, disk size, or change the primary NAT IP address. The VM is powered off automatically (an ACPI shutdown request; a guest that has not stopped after 60 seconds is forced off), the changes are applied, and it is powered back on. The disk is grown before anything else is changed, so a failed resize leaves the VM exactly as it was.
 
 ```bash
 # Scale up to 8 vCPUs and 16 GB RAM
@@ -564,12 +594,15 @@ Production deployment guide: [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEP
 ## CLI Reference
 
 ```
-vmsmith vm create <name>   --image <name|path> [--cpus N] [--ram MB] [--disk GB]
+vmsmith vm create <name>   --image <name|path> | --install-iso <name|path>
+                           [--cpus N] [--ram MB] [--disk GB]
+                           [--firmware bios|uefi] [--secure-boot]
                            [--ssh-key "ssh-rsa ..."] [--default-user <user>]
                            [--cloud-init <file>]
                            [--network <iface[:key=val,...]>]...
 vmsmith vm clone  <id>     --name <new-name>
 vmsmith vm edit   <id>     [--cpus N] [--ram MB] [--disk GB] [--nat-ip CIDR]
+                           [--eject-iso]
 vmsmith vm list             [--tag <tag>] [--status <state>]
 vmsmith vm start  <id>      | --all [--tag <tag>]
 vmsmith vm stop   <id>      | --all [--tag <tag>]

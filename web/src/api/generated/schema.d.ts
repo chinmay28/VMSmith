@@ -617,7 +617,10 @@ export interface paths {
             };
         };
         put?: never;
-        /** Create a VM */
+        /**
+         * Create a VM
+         * @description Create a VM from a base `image` or, alternatively, from a raw installer ISO via `install_iso` (Linux or Windows; blank disk of `disk_gb`). Validation failures return 400 with a specific code, e.g. `invalid_install_iso` (image + install_iso together, or Windows-only install fields on a Linux guest) or `invalid_firmware` (unknown firmware, or `secure_boot: true` with `firmware: bios`).
+         */
         post: {
             parameters: {
                 query?: never;
@@ -816,7 +819,10 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** Update a VM */
+        /**
+         * Update a VM
+         * @description Partial update. Send `{"install_iso": ""}` to eject an installer ISO attached at create time (restarts a running VM); a non-empty `install_iso` returns 400 `invalid_install_iso`.
+         */
         patch: {
             parameters: {
                 query?: never;
@@ -4710,7 +4716,8 @@ export interface components {
         };
         VMSpec: {
             name: string;
-            image: string;
+            /** @description Base image name/ID to clone the system disk from. Required unless `install_iso` is set; the two are mutually exclusive (400 `invalid_install_iso`). */
+            image?: string;
             template_id?: string;
             cpus?: number;
             ram_mb?: number;
@@ -4768,15 +4775,15 @@ export interface components {
              * @enum {string}
              */
             firmware?: "bios" | "uefi" | "ovmf";
-            /** @description Enable UEFI Secure Boot (roadmap 5.6.9): the domain renders with firmware='efi' plus the secure-boot + enrolled-keys firmware features so libvirt selects the host's secboot OVMF build. Omitted = auto (on for os_variant windows-11, off otherwise). Requires uefi/ovmf firmware — combining it with an explicit "bios" returns 400 `invalid_firmware`. Create fails with 4xx `ovmf_missing` when the host has no (secboot) OVMF build. Immutable post-create. */
+            /** @description Enable UEFI Secure Boot (roadmap 5.6.9): the domain renders with firmware='efi' plus the secure-boot + enrolled-keys firmware features so libvirt selects the host's secboot OVMF build. Omitted = auto (on for os_variant windows-11, off otherwise) — i.e. for UEFI guests Secure Boot is OFF unless `secure_boot: true` is sent (or os_variant is windows-11). An explicit `secure_boot: false` with uefi/ovmf firmware renders explicitly disabled secure-boot / enrolled-keys firmware features, so libvirt picks a non-secboot OVMF build and Secure Boot is genuinely off (needed for installers with unsigned bootloaders). `secure_boot: true` requires uefi/ovmf firmware — combining it with an explicit "bios" returns 400 `invalid_firmware`. Create fails with 4xx `ovmf_missing` when the host has no (secboot) OVMF build. Immutable post-create. */
             secure_boot?: boolean;
             /** @description Attach an emulated TPM 2.0 device (tpm-crb backed by swtpm) — roadmap 5.6.9. Omitted = auto (on for os_variant windows-11, off otherwise). Create fails with 4xx `swtpm_missing` when swtpm is not installed on the host. Immutable post-create. */
             tpm?: boolean;
-            /** @description Unattended install from a raw Windows ISO (roadmap 5.6.11). Path to the installation ISO on the daemon host. Mutually exclusive with `image`: the VM starts from a blank qcow2 disk of disk_gb, boots the ISO, and a generated Autounattend.xml (partition layout matched to the firmware, edition via install_image_index, locale, Administrator password, RDP + WinRM enablement) baked into the provisioning cdrom drives the install hands-free. Windows-only; violations return 400 `invalid_install_iso`. */
+            /** @description Boot a raw installer ISO onto a blank disk (roadmap 5.6.11). Works for Linux and Windows guests. Either a bare file name, resolved against the daemon's images directory (e.g. `umbrelos-2.0.0-amd64-usb-installer.iso` → `<images_dir>/umbrelos-2.0.0-amd64-usb-installer.iso`), or an absolute path on the daemon host. Mutually exclusive with `image`: the VM starts from a blank qcow2 disk of `disk_gb` and boots the ISO first (cdrom-first boot order). The stored `spec.install_iso` holds the resolved absolute path. For Windows guests a generated Autounattend.xml (partition layout matched to the firmware, edition via install_image_index, locale, Administrator password, RDP + WinRM enablement) baked into the provisioning cdrom drives the install hands-free; for Linux guests the installer runs interactively over the console. After installation, eject the ISO with `PATCH /vms/{id}` `{"install_iso": ""}`. Violations (image + install_iso together, Windows-only fields on a Linux guest) return 400 `invalid_install_iso`. */
             install_iso?: string;
-            /** @description WIM image index for edition selection during an unattended install (e.g. 2 = Standard with Desktop Experience on Server media). 0 omits the selection. Only meaningful with install_iso. */
+            /** @description WIM image index for edition selection during an unattended Windows install (e.g. 2 = Standard with Desktop Experience on Server media). 0 omits the selection. Windows-only and only meaningful with install_iso; sending it for a Linux guest returns 400 `invalid_install_iso`. */
             install_image_index?: number;
-            /** @description Windows UI/input locale for the unattended install (default en-US). Only meaningful with install_iso. */
+            /** @description Windows UI/input locale for the unattended install (default en-US). Windows-only and only meaningful with install_iso; sending it for a Linux guest returns 400 `invalid_install_iso`. */
             locale?: string;
             /** @description Per-VM virtio-win driver ISO path. Overrides the daemon-wide `storage.virtio_win_iso` config for this Windows VM only; ignored for Linux guests. If the override path is missing on the daemon host the resolver logs a warning and falls back to the daemon config / probe. The guest still boots without an ISO (SATA + e1000e work natively); the ISO is only required in-guest to install virtio drivers. */
             virtio_win_iso?: string;
@@ -4821,6 +4828,8 @@ export interface components {
             nic_model?: "virtio" | "e1000e" | "" | null;
             /** @description **Immutable post-create.** GPU passthrough is configured only on create via `VMSpec.gpus`; PATCH rejects `gpus` with 400 `gpus_immutable`, and clone clears any inherited GPU assignment so passthrough devices are not silently shared across VMs. This avoids disruptive IOMMU-group rebinding on an existing VM. */
             gpus?: string[];
+            /** @description **Eject-only.** Omit (null) to leave unchanged; send an empty string to eject the installer ISO attached at create time (`VMSpec.install_iso`): the cdrom is detached, the cdrom-first boot entry is removed, and the domain is redefined — a running VM is restarted. After eject `spec.install_iso` is absent from GET responses. Any non-empty value returns 400 `invalid_install_iso` ("install_iso can only be cleared (ejected) after creation"). */
+            install_iso?: string | null;
         };
         VM: {
             id: string;

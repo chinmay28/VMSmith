@@ -188,6 +188,7 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// host capabilities that are missing (roadmap 5.6.9 / 5.6.11): swtpm for
 	// the emulated TPM, an OVMF (secboot) build for UEFI / Secure Boot, and
 	// an existing install ISO for the unattended-install path.
+	spec.InstallISO = m.resolveInstallISO(spec.InstallISO)
 	if err := probeUEFIRequirements(spec); err != nil {
 		return nil, err
 	}
@@ -982,6 +983,12 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
+	// Eject the installer ISO (roadmap 5.6.19). Only the clear direction is
+	// accepted (the API rejects non-empty values); ejecting drops both the
+	// cdrom and the cdrom-first boot entry on the redefine below so the
+	// guest boots its freshly-installed disk.
+	isoEjected := patch.InstallISO != nil && strings.TrimSpace(*patch.InstallISO) == "" && storedVM.Spec.InstallISO != ""
+
 	// VNC password changes require the VM stopped because the password lives
 	// in the defined domain XML and only takes effect on the next start.
 	vncChanged := false
@@ -999,13 +1006,13 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 
 	// Nothing to do?
-	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged {
+	if newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !autoStartChanged && !lockedChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged && !isoEjected {
 		return storedVM, nil
 	}
 
 	// Metadata-only changes (AutoStart and/or Locked) skip the stop/restart
 	// dance and any libvirt redefinitions — they're pure bbolt writes.
-	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged
+	metadataOnly := (autoStartChanged || lockedChanged) && newCPUs == storedVM.Spec.CPUs && newRAMMB == storedVM.Spec.RAMMB && newDiskGB == storedVM.Spec.DiskGB && newDescription == storedVM.Description && strings.Join(newTags, ",") == strings.Join(storedVM.Tags, ",") && !ipChanged && !clockChanged && !diskBusChanged && !nicModelChanged && !vncChanged && !isoEjected
 	if metadataOnly {
 		if autoStartChanged {
 			storedVM.Spec.AutoStart = newAutoStart
@@ -1028,14 +1035,32 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 				return nil, fmt.Errorf("force-stopping domain: %w", err2)
 			}
 		}
-		// Wait up to 60 s for the domain to reach the shut-off state.
-		deadline := time.Now().Add(60 * time.Second)
-		for time.Now().Before(deadline) {
-			s, _, _ := dom.GetState()
-			if s == libvirt.DOMAIN_SHUTOFF {
-				break
+		// Wait up to 60 s for the domain to reach the shut-off state, then
+		// force it off: a guest that ignores ACPI (firmware shell, hung OS)
+		// or takes too long to stop would otherwise leave the disk locked by
+		// QEMU and the redefine/resize below racing a live domain.
+		if !waitForShutoff(dom, 60*time.Second) {
+			logger.Warn("daemon", "guest did not shut down within 60s for update; forcing it off",
+				"vm", storedVM.Name)
+			_ = dom.Destroy()
+			if !waitForShutoff(dom, 15*time.Second) {
+				return nil, fmt.Errorf("stopping domain %s for update: still running after forced stop", storedVM.Name)
 			}
-			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// Grow the disk first: it is the step most likely to fail (host disk
+	// space, image locks), and doing it before the domain redefine / DHCP /
+	// provisioning-ISO changes means a failure leaves the VM exactly as it
+	// was rather than half-updated. Shrink is rejected above.
+	if newDiskGB > storedVM.Spec.DiskGB {
+		cmd := exec.Command("qemu-img", "resize", storedVM.DiskPath, fmt.Sprintf("%dG", newDiskGB))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			if wasRunning {
+				// Nothing else has changed yet; put the VM back as it was.
+				_ = dom.Create()
+			}
+			return nil, fmt.Errorf("resizing disk: %s: %w", string(out), err)
 		}
 	}
 
@@ -1080,8 +1105,8 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 	}
 
-	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model.
-	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged || vncChanged {
+	// Redefine the domain XML with updated CPU/RAM/clock offset/disk_bus/nic_model/install ISO.
+	if newCPUs != storedVM.Spec.CPUs || newRAMMB != storedVM.Spec.RAMMB || clockChanged || diskBusChanged || nicModelChanged || vncChanged || isoEjected {
 		// Preserve the existing domain UUID so libvirt accepts the redefinition.
 		existingUUID, _ := dom.GetUUIDString()
 
@@ -1091,8 +1116,12 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		updatedSpec.ClockOffset = newClockOffset
 		updatedSpec.DiskBus = newDiskBus
 		updatedSpec.NICModel = newNICModel
+		if isoEjected {
+			updatedSpec.InstallISO = ""
+		}
 		cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")
 		params := DomainParamsFromSpec(updatedSpec, storedVM.DiskPath, cloudInitISO, m.cfg.Network.Name, storedVM.NatMAC)
+		dropMissingInstallISO(&params, updatedSpec.Name)
 		params.UUID = existingUUID
 		params.Machine = resolveMachine(updatedSpec.Machine, func() string { return detectMachineType(m.conn) })
 		m.applyVirtioWin(&params, updatedSpec)
@@ -1114,14 +1143,6 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 		}
 		if _, err := m.conn.DomainDefineXML(xmlDoc); err != nil {
 			return nil, fmt.Errorf("redefining domain: %w", err)
-		}
-	}
-
-	// Grow the disk if requested.
-	if newDiskGB > storedVM.Spec.DiskGB {
-		cmd := exec.Command("qemu-img", "resize", storedVM.DiskPath, fmt.Sprintf("%dG", newDiskGB))
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("resizing disk: %s: %w", string(out), err)
 		}
 	}
 
@@ -1154,6 +1175,9 @@ func (m *LibvirtManager) Update(ctx context.Context, id string, patch types.VMUp
 	}
 	if nicModelChanged {
 		storedVM.Spec.NICModel = newNICModel
+	}
+	if isoEjected {
+		storedVM.Spec.InstallISO = ""
 	}
 	if vncChanged {
 		storedVM.VNCPasswordHash = newVNCHash
@@ -1825,6 +1849,54 @@ func createBlankDisk(diskPath string, sizeGB int) error {
 		return fmt.Errorf("qemu-img create: %s: %w", string(out), err)
 	}
 	return nil
+}
+
+// waitForShutoff polls the domain state until it reports shut off or the
+// timeout elapses, returning whether the domain is shut off.
+func waitForShutoff(dom *libvirt.Domain, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if s, _, err := dom.GetState(); err == nil && s == libvirt.DOMAIN_SHUTOFF {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// dropMissingInstallISO detaches an install ISO that no longer exists on
+// the host before a domain redefine. Operators routinely delete the
+// installer once a guest is set up; without this, an unrelated redefine
+// (CPU/RAM change) would render a cdrom pointing at a missing file and the
+// next start would fail. The stored spec is left alone so the VM record
+// still shows how it was installed until it is explicitly ejected.
+func dropMissingInstallISO(params *DomainParams, vmName string) {
+	if params.InstallISO == "" {
+		return
+	}
+	if _, err := os.Stat(params.InstallISO); err == nil {
+		return
+	}
+	logger.Warn("daemon", "install_iso no longer exists on the host; rendering the domain without it",
+		"vm", vmName, "path", params.InstallISO)
+	params.InstallISO = ""
+}
+
+// resolveInstallISO resolves a relative install ISO path (typically a bare
+// file name) against storage.images_dir, the directory operators already
+// stage base images in and which libvirt-qemu can read. Absolute paths are
+// returned cleaned; empty stays empty.
+func (m *LibvirtManager) resolveInstallISO(iso string) string {
+	iso = strings.TrimSpace(iso)
+	if iso == "" {
+		return ""
+	}
+	if !filepath.IsAbs(iso) {
+		return filepath.Join(m.cfg.Storage.ImagesDir, iso)
+	}
+	return filepath.Clean(iso)
 }
 
 // virtioWinISOPath resolves the virtio-win driver ISO to attach to Windows

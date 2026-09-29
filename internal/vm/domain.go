@@ -26,11 +26,15 @@ const domainXMLTemplate = `<domain type='kvm'>
       <feature enabled='yes' name='secure-boot'/>
       <feature enabled='yes' name='enrolled-keys'/>
     </firmware>
+    {{- else if eq .FirmwareAttr "efi"}}
+    <firmware>
+      <feature enabled='no' name='secure-boot'/>
+      <feature enabled='no' name='enrolled-keys'/>
+    </firmware>
     {{- end}}
-    {{- if .BootFromCDROM}}
-    <boot dev='cdrom'/>
-    {{- end}}
+    {{- if not .InstallISO}}
     <boot dev='hd'/>
+    {{- end}}
   </os>
   <features>
     <acpi/>
@@ -62,6 +66,9 @@ const domainXMLTemplate = `<domain type='kvm'>
       <driver name='qemu' type='qcow2' discard='unmap'/>
       <source file='{{.DiskPath}}'/>
       <target dev='{{.DiskTarget}}' bus='{{.DiskBus}}'/>
+      {{- if .InstallISO}}
+      <boot order='1'/>
+      {{- end}}
     </disk>
     {{- if .CloudInitISO}}
     <disk type='file' device='cdrom'>
@@ -84,6 +91,7 @@ const domainXMLTemplate = `<domain type='kvm'>
       <driver name='qemu' type='raw'/>
       <source file='{{.InstallISO}}'/>
       <target dev='{{.InstallISOTarget}}' bus='sata'/>
+      <boot order='2'/>
       <readonly/>
     </disk>
     {{- end}}
@@ -161,21 +169,27 @@ type DomainParams struct {
 	// SecureBoot emits the <os><firmware> feature block enabling
 	// secure-boot + enrolled-keys so libvirt auto-selects the host's
 	// secboot OVMF build (roadmap 5.6.9). Requires FirmwareAttr "efi".
+	// When false on an "efi" domain the same block is emitted with both
+	// features disabled: without it libvirt's firmware auto-selection is
+	// free to pick a secboot build with Microsoft keys enrolled (Ubuntu's
+	// descriptor ordering does exactly that), silently enforcing Secure
+	// Boot on guests whose installers are not signed.
 	SecureBoot bool
 	// TPM attaches an emulated TPM 2.0 device (tpm-crb, swtpm backend) —
 	// roadmap 5.6.9. The host must have swtpm installed.
 	TPM bool
-	// InstallISO attaches a Windows installation ISO as an extra cdrom
-	// for the unattended-install create path (roadmap 5.6.11); combine
-	// with BootFromCDROM so the first boot enters Windows Setup.
+	// InstallISO attaches an installer ISO as an extra cdrom for the
+	// install-from-ISO create path (roadmap 5.6.11 / 5.6.19). When set,
+	// the domain switches from the os-level <boot dev='hd'/> to per-device
+	// boot order: system disk first, installer second. A blank disk is not
+	// bootable, so the first boot falls through to the installer; once the
+	// installer has written a bootloader the disk wins, so the guest never
+	// re-enters the installer even before the ISO is ejected. Per-device
+	// order (rather than <boot dev='cdrom'/>) is required because libvirt
+	// maps dev='cdrom' to the *first* cdrom — the provisioning ISO.
 	InstallISO string
 	// InstallISOTarget is the cdrom target dev for InstallISO (e.g. "sdd").
 	InstallISOTarget string
-	// BootFromCDROM prepends <boot dev='cdrom'/> ahead of the hd entry so
-	// a fresh (blank-disk) VM boots the installer; after installation the
-	// installer's "press any key" prompt times out and boot falls through
-	// to the disk.
-	BootFromCDROM bool
 	// NICModel is the libvirt <interface><model type='...'/></interface>
 	// value used for the primary NAT interface and every additional
 	// attachment. Populated in DomainParamsFromSpec via
@@ -365,13 +379,12 @@ func DomainParamsFromSpec(spec types.VMSpec, diskPath, cloudInitISO, networkName
 	params.SecureBoot = spec.ResolvedSecureBoot()
 	params.TPM = spec.ResolvedTPM()
 
-	// Unattended install from a raw Windows ISO (roadmap 5.6.11): attach
-	// the installer as a boot cdrom on the next free SATA slot after the
-	// provisioning (sdb) and virtio-win (sdc) cdroms.
+	// Install from ISO (roadmap 5.6.11 Windows / 5.6.19 Linux): attach the
+	// installer as a boot cdrom on the next free SATA slot after the
+	// provisioning (sda/sdb) and virtio-win (sdc) cdroms.
 	if spec.InstallISO != "" {
 		params.InstallISO = spec.InstallISO
 		params.InstallISOTarget = "sdd"
-		params.BootFromCDROM = true
 	}
 
 	return params
