@@ -274,8 +274,58 @@ var hostListCmd = &cobra.Command{
 	},
 }
 
+// hostStorageCmd lists the storage locations VM disks can be placed in
+// (`vm create --disk-location`) or moved to (`vm move-disk`), with live
+// free space so operators can pick a drive with room.
+var hostStorageCmd = &cobra.Command{
+	Use:     "storage",
+	Aliases: []string{"storage-locations"},
+	Short:   "List VM disk storage locations with free space",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		flagAPIKey, _ := cmd.Flags().GetString("api-key")
+		asJSON, _ := cmd.Flags().GetBool("json")
+
+		logger.Info("cli", "host storage", "api-url", apiURL)
+
+		body, err := hostGET(cmd, apiURL, flagAPIKey, "/api/v1/host/storage-locations")
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			fmt.Println(strings.TrimSpace(string(body)))
+			return nil
+		}
+		var locs []types.StorageLocation
+		if err := json.Unmarshal(body, &locs); err != nil {
+			return fmt.Errorf("decoding /host/storage-locations response: %w", err)
+		}
+		return renderStorageLocations(os.Stdout, locs)
+	},
+}
+
+// renderStorageLocations prints the storage-location table.
+func renderStorageLocations(out io.Writer, locs []types.StorageLocation) error {
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tPATH\tFREE\tTOTAL\tVMS\tSTATUS")
+	for _, l := range locs {
+		name := l.Name
+		if l.Default {
+			name += " (default)"
+		}
+		free, total, status := "-", "-", "ok"
+		if l.Available {
+			free, total = formatBytes(l.FreeBytes), formatBytes(l.TotalBytes)
+		} else {
+			status = "unavailable: " + l.Error
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", name, l.Path, free, total, l.VMCount, status)
+	}
+	return w.Flush()
+}
+
 func init() {
-	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd, hostGPUsCmd, hostListCmd} {
+	for _, c := range []*cobra.Command{hostStatsCmd, hostQuotasCmd, hostGPUsCmd, hostListCmd, hostStorageCmd} {
 		c.Flags().String("api-url", "", "daemon API URL (defaults to http://<daemon.listen>)")
 		c.Flags().String("api-key", os.Getenv("VMSMITH_API_KEY"), "Bearer token for daemons with auth enabled (defaults to $VMSMITH_API_KEY)")
 		c.Flags().Bool("json", false, "emit the raw JSON response instead of a table")
@@ -284,4 +334,5 @@ func init() {
 	hostCmd.AddCommand(hostQuotasCmd)
 	hostCmd.AddCommand(hostGPUsCmd)
 	hostCmd.AddCommand(hostListCmd)
+	hostCmd.AddCommand(hostStorageCmd)
 }

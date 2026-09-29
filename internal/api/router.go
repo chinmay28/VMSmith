@@ -38,6 +38,7 @@ type Server struct {
 	metricsManager       MetricsManager
 	eventBus             *events.EventBus
 	hostStatsPath        string
+	storageConfig        config.StorageConfig
 	quotas               config.QuotasConfig
 	metricsConfig        config.MetricsConfig
 	consoleConfig        config.ConsoleConfig
@@ -133,6 +134,7 @@ func NewServerWithMetrics(vmMgr vm.Manager, storageMgr *storage.Manager, portFwd
 		store:                store,
 		metricsManager:       metricsMgr,
 		hostStatsPath:        cfg.Storage.BaseDir,
+		storageConfig:        cfg.Storage,
 		quotas:               cfg.Quotas,
 		metricsConfig:        cfg.Metrics,
 		consoleConfig:        cfg.Daemon.Console,
@@ -281,6 +283,9 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 				// Post-create GPU passthrough lifecycle (5.7.10).
 				r.Post("/gpus", s.withRequestBodyLimit(s.AttachGPU))
 				r.Delete("/gpus/{gpuAddr}", s.DetachGPU)
+
+				// Move the VM's disk to another storage location.
+				r.Post("/disk/move", s.withRequestBodyLimit(s.MoveVMDisk))
 			})
 		})
 
@@ -311,6 +316,7 @@ func (s *Server) setupRoutes(webHandler http.Handler) {
 		r.Get("/host/interfaces", s.ListHostInterfaces)
 		r.Get("/host/gpus", s.ListHostGPUs)
 		r.Get("/host/stats", s.GetHostStats)
+		r.Get("/host/storage-locations", s.ListStorageLocations)
 
 		// Quotas / allocation overview
 		r.Get("/quotas/usage", s.GetQuotaUsage)

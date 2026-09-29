@@ -7072,3 +7072,86 @@ test.describe("RDP Console", () => {
     await expect(page.getByTestId("rdp-display")).toBeVisible();
   });
 });
+
+test.describe("VM disk location", () => {
+  test("create modal places the disk in the chosen storage location", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("nav-vms").click();
+    await page.getByTestId("btn-new-vm").click();
+
+    await page.getByTestId("input-vm-name").fill("bulk-box");
+    await page.getByTestId("input-vm-image").selectOption("/images/ubuntu-base.qcow2");
+
+    const picker = page.getByTestId("input-vm-disk-location");
+    await expect(picker).toHaveValue("default");
+    // The unmounted "archive" location is listed but not selectable.
+    await expect(picker.locator('option[value="archive"]')).toBeDisabled();
+    await expect(picker.locator('option[value="bulk"]')).toContainText("free of");
+    await picker.selectOption("bulk");
+
+    await page.getByTestId("btn-submit-create").click();
+    await expect(page.getByTestId("vm-card-bulk-box")).toBeVisible();
+
+    const stored = await page.evaluate(async () => {
+      const r = await fetch("/api/v1/vms");
+      const list = await r.json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      return arr.find((vm) => vm.name === "bulk-box") || null;
+    });
+    expect(stored.spec.disk_location).toBe("bulk");
+    expect(stored.disk_path).toMatch(/^\/mnt\/bulk\//);
+  });
+
+  test("move disk modal relocates a stopped VM's disk", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-db-server").click();
+
+    await expect(page.getByTestId("vm-detail-disk-location")).toHaveText("default");
+    await page.getByTestId("btn-move-disk").click();
+    await expect(page.getByTestId("move-disk-current")).toHaveText("default");
+
+    const picker = page.getByTestId("input-move-disk-location");
+    await expect(picker).toHaveValue("bulk");
+    await expect(picker.locator('option[value="default"]')).toBeDisabled();
+    await page.getByTestId("btn-submit-move-disk").click();
+
+    await expect(page.getByTestId("vm-detail-disk-location")).toHaveText("bulk");
+    await expect(page.getByTestId("vm-detail-disk-path")).toContainText("/mnt/bulk/");
+
+    // Restore the shared mock state for later tests.
+    const restored = await page.evaluate(async () => {
+      const list = await (await fetch("/api/v1/vms")).json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      const vm = arr.find((v) => v.name === "db-server");
+      const r = await fetch(`/api/v1/vms/${vm.id}/disk/move`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ location: "default" }),
+      });
+      return r.status;
+    });
+    expect(restored).toBe(200);
+  });
+
+  test("move disk is disabled while the VM is running", async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-web-server").click();
+    await expect(page.getByTestId("btn-move-disk")).toBeDisabled();
+  });
+
+  test("move disk surfaces API errors inline", async ({ page }) => {
+    await page.route("**/api/v1/vms/*/disk/move", async (route) => {
+      await route.fulfill({
+        status: 507,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "insufficient_storage", message: 'location "bulk" has 10 bytes free but the vm needs 20' }),
+      });
+    });
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-db-server").click();
+    await page.getByTestId("btn-move-disk").click();
+    await page.getByTestId("btn-submit-move-disk").click();
+    await expect(page.getByTestId("move-disk-error")).toContainText("has 10 bytes free");
+    await expect(page.getByTestId("vm-detail-disk-location")).toHaveText("default");
+  });
+});

@@ -192,6 +192,11 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	if err := probeUEFIRequirements(spec); err != nil {
 		return nil, err
 	}
+	diskLoc, err := ResolveDiskLocation(m.cfg.Storage, spec.DiskLocation)
+	if err != nil {
+		return nil, err
+	}
+	spec.DiskLocation = storedDiskLocationName(diskLoc.Name)
 
 	if spec.VNCPassword != "" && strings.TrimSpace(m.cfg.Daemon.Console.PasswordKey) == "" {
 		return nil, types.NewAPIError("vnc_password_key_missing",
@@ -256,8 +261,8 @@ func (m *LibvirtManager) Create(ctx context.Context, spec types.VMSpec) (*types.
 	// Generate a unique ID
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
 
-	// Set up VM directory
-	vmDir := filepath.Join(m.cfg.Storage.BaseDir, id)
+	// Set up VM directory in the requested storage location.
+	vmDir := filepath.Join(diskLoc.Path, id)
 	if err := os.MkdirAll(vmDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating VM dir: %w", err)
 	}
@@ -441,13 +446,24 @@ func (m *LibvirtManager) Clone(ctx context.Context, sourceID string, newName str
 			"source_vm", sourceID, "clone_name", newName)
 	}
 
+	clonedSpec := cloneVMSpec(sourceVM.Spec, newName)
+
+	// The clone lands in the same storage location as its source; if that
+	// location has since been removed from config (or is unmounted), fall
+	// back to the default location rather than failing the clone.
+	cloneLoc, locErr := ResolveDiskLocation(m.cfg.Storage, clonedSpec.DiskLocation)
+	if locErr != nil {
+		logger.Warn("daemon", "clone source disk location unavailable; placing clone in the default location",
+			"source_vm", sourceID, "location", clonedSpec.DiskLocation, "error", locErr.Error())
+		cloneLoc, _ = m.cfg.Storage.ResolveDiskLocation(config.DefaultDiskLocation)
+	}
+	clonedSpec.DiskLocation = storedDiskLocationName(cloneLoc.Name)
+
 	id := fmt.Sprintf("vm-%d", time.Now().UnixNano())
-	vmDir := filepath.Join(m.cfg.Storage.BaseDir, id)
+	vmDir := filepath.Join(cloneLoc.Path, id)
 	if err := os.MkdirAll(vmDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating VM dir: %w", err)
 	}
-
-	clonedSpec := cloneVMSpec(sourceVM.Spec, newName)
 	clonedDiskPath := filepath.Join(vmDir, "disk.qcow2")
 	if err := createClonedDiskWithProgress(sourceVM.DiskPath, clonedDiskPath, cloneProgressFromContext(ctx)); err != nil {
 		os.RemoveAll(vmDir)

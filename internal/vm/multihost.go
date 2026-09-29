@@ -372,6 +372,14 @@ func (m *MultiHostManager) DetachGPU(ctx context.Context, id string, pciAddr str
 	return mgr.DetachGPU(ctx, id, pciAddr)
 }
 
+func (m *MultiHostManager) MoveDisk(ctx context.Context, id string, location string) (*types.VM, error) {
+	mgr, _, err := m.locate(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.MoveDisk(ctx, id, location)
+}
+
 // SetConsoleSessionTerminator fans the hook out to every per-host manager
 // that supports it.
 func (m *MultiHostManager) SetConsoleSessionTerminator(fn ConsoleSessionTerminator) {

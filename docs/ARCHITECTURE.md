@@ -406,6 +406,16 @@ vmsmith vm create db01 --image ubuntu \
 - Stored in `/var/lib/vmsmith/images/`
 - Transferred between hosts via SCP (`image push/pull`) or HTTP download
 
+**Disk locations** — where a VM's files live on the host:
+- Each VM owns a directory `<location>/<vm-id>/` holding `disk.qcow2` and `cidata.iso`. `<location>` is `storage.base_dir` (the implicit `default` location) or one of the named `storage.disk_locations` entries (e.g. a second physical drive).
+- Chosen at create via `spec.disk_location` / `vm create --disk-location` / the "Disk location" picker in the New VM modal; unknown names → 400 `invalid_disk_location`, a configured-but-missing directory → 422 `disk_location_unavailable`. Clones land in their source's location.
+- `GET /api/v1/host/storage-locations` (`vmsmith host storage`) lists every location with live free/total bytes and a VM count derived from each VM's `disk_path`.
+- Moving a stopped VM (`POST /vms/{id}/disk/move`, `vmsmith vm move-disk <id> <location>`, VMDetail "Move disk") is handled by `LibvirtManager.MoveDisk` (`internal/vm/disk_move.go`):
+  1. Pre-checks: VM shut off (409 `vm_running`), target differs (409 `disk_location_unchanged`), no leftover target dir (409 `disk_move_conflict`), enough free space on a different filesystem (507 `insufficient_storage`, sized by allocated blocks).
+  2. `dirRelocator` (`internal/vm/dir_relocate.go`) renames on the same filesystem; across filesystems it copies into `<dst>.partial`, fsyncs, and renames into place, so the destination is never half-written. Progress streams over `/vms/{id}/operations/progress` (`op: move_disk`).
+  3. The domain XML is redefined with the new paths (UUID + VNC password preserved), then every snapshot definition that embeds the old path is re-created with `SnapshotCreateXML(REDEFINE)` — internal qcow2 snapshots travel inside the disk file, but libvirt's snapshot metadata carries a full domain copy that would otherwise revert to the old path.
+  4. The bbolt record is updated, and only then is the source copy deleted. Any failure unwinds the steps in reverse. Emits `vm.disk_moved` (`from`, `to`, `disk_path`).
+
 ---
 
 ### 4. Metrics
@@ -844,6 +854,9 @@ storage:
   base_dir:   "/var/lib/vmsmith/vms"
   db_path:    "~/.vmsmith/vmsmith.db"
   virtio_win_iso: ""          # optional virtio-win driver ISO for Windows guests; empty auto-probes /usr/share/virtio-win/virtio-win.iso
+  disk_locations:             # optional extra VM disk locations; base_dir is the implicit "default"
+    - name: bulk
+      path: /mnt/bulk/vmsmith   # must exist; not auto-created
 
 network:
   name:       "vmsmith-net"

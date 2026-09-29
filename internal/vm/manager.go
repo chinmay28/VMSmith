@@ -42,6 +42,15 @@ type Manager interface {
 	AttachGPU(ctx context.Context, id string, pciAddr string, force bool) (*types.VM, error)
 	DetachGPU(ctx context.Context, id string, pciAddr string) (*types.VM, error)
 
+	// MoveDisk relocates a stopped VM's disk directory (system disk +
+	// provisioning ISO) to another configured storage location
+	// (storage.disk_locations or "default" for storage.base_dir), e.g. to
+	// free space on a physical drive. Snapshots move with the disk. Typed
+	// errors: invalid_disk_location, disk_location_unavailable,
+	// disk_location_unchanged, vm_running, insufficient_storage,
+	// disk_move_conflict.
+	MoveDisk(ctx context.Context, id string, location string) (*types.VM, error)
+
 	// Console access — returns the host/port (vnc) or pty path (serial)
 	// the daemon's console proxy should dial.  Returns a typed
 	// `vm_not_running` API error when the VM is stopped (graphics + pty

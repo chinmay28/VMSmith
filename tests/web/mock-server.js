@@ -394,15 +394,29 @@ function resetState() {
   seed();
 }
 
+// Storage locations for VM disk placement / move. "bulk" is available,
+// "archive" simulates an unmounted drive.
+const mockStorageLocations = [
+  { name: "default", path: "/var/lib/vmsmith/vms", default: true, available: true, total_bytes: 500 * 1024 ** 3, free_bytes: 120 * 1024 ** 3 },
+  { name: "bulk", path: "/mnt/bulk", description: "8 TB HDD", default: false, available: true, total_bytes: 8 * 1024 ** 4, free_bytes: 6 * 1024 ** 4 },
+  { name: "archive", path: "/mnt/archive", default: false, available: false, error: "stat /mnt/archive: no such file or directory", total_bytes: 0, free_bytes: 0 },
+];
+
+function mockDiskLocationPath(name) {
+  const loc = mockStorageLocations.find(l => l.name === (name || "default"));
+  return loc ? loc.path : null;
+}
+
 function createVM(spec) {
   vmCounter++;
   const id = `vm-${vmCounter}`;
   const vm = {
     id, name: spec.name,
     spec: { name: spec.name, image: spec.install_iso ? "" : (spec.image || "ubuntu"), cpus: spec.cpus || 2, ram_mb: spec.ram_mb || 2048, disk_gb: spec.disk_gb || 20, ssh_pub_key: spec.ssh_pub_key || "", default_user: spec.default_user || "", os_type: spec.os_type || "", os_variant: spec.os_variant || "", networks: spec.networks || [], auto_start: !!spec.auto_start, locked: !!spec.locked, clock_offset: spec.clock_offset || "", disk_bus: spec.disk_bus || "", nic_model: spec.nic_model || "", machine: spec.machine || "", firmware: spec.firmware || "", virtio_win_iso: spec.virtio_win_iso || "", gpus: Array.isArray(spec.gpus) ? spec.gpus.slice() : [] },
-    state: "running", ip: "", disk_path: `/var/lib/vmsmith/vms/${id}/disk.qcow2`,
+    state: "running", ip: "", disk_path: `${mockDiskLocationPath(spec.disk_location) || "/var/lib/vmsmith/vms"}/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
+  if (spec.disk_location && spec.disk_location !== "default") vm.spec.disk_location = spec.disk_location;
   // secure_boot / tpm are pointer-semantics on the daemon (omitted = auto),
   // so only persist them when the create request set them explicitly.
   if (typeof spec.secure_boot === "boolean") vm.spec.secure_boot = spec.secure_boot;
@@ -1367,6 +1381,21 @@ const server = http.createServer(async (req, res) => {
     if (vm.state !== "paused") return json(res, 409, { code: "vm_not_paused", message: "vm must be paused to resume" });
     vm.state = "running";
     return json(res, 200, { status: "resumed" });
+  }
+  if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/disk\/move$/)) && method === "POST") {
+    const vm = vms.get(m[1]);
+    if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
+    const body = await parseBody(req);
+    const target = String(body.location || "").trim().toLowerCase();
+    const loc = mockStorageLocations.find(l => l.name === target);
+    if (!loc) return json(res, 400, { code: "invalid_disk_location", message: `disk location "${target}" is not configured` });
+    if (!loc.available) return json(res, 422, { code: "disk_location_unavailable", message: `disk location "${target}" directory ${loc.path} is not available` });
+    if (vm.state !== "stopped") return json(res, 409, { code: "vm_running", message: "vm must be stopped before its disk can be moved" });
+    if ((vm.spec.disk_location || "default") === target) return json(res, 409, { code: "disk_location_unchanged", message: `vm disk already lives in location "${target}"` });
+    vm.disk_path = `${loc.path}/${vm.id}/disk.qcow2`;
+    if (target === "default") delete vm.spec.disk_location; else vm.spec.disk_location = target;
+    vm.updated_at = new Date().toISOString();
+    return json(res, 200, vm);
   }
   if ((m = p.match(/^\/api\/v1\/vms\/([^/]+)\/clone$/)) && method === "POST") {
     const source = vms.get(m[1]);
@@ -3791,6 +3820,12 @@ const server = http.createServer(async (req, res) => {
       { name: "eth0", ips: ["10.21.100.101/24"], mac: "52:54:00:00:00:01", is_up: true, is_physical: true },
       { name: "eth1", ips: ["192.168.1.16/24"], mac: "52:54:00:00:00:02", is_up: true, is_physical: true },
     ]);
+  }
+  if (p === "/api/v1/host/storage-locations" && method === "GET") {
+    return json(res, 200, mockStorageLocations.map(loc => ({
+      ...loc,
+      vm_count: [...vms.values()].filter(v => (v.disk_path || "").startsWith(`${loc.path}/`)).length,
+    })));
   }
   if (p === "/api/v1/host/gpus" && method === "GET") {
     return json(res, 200, [

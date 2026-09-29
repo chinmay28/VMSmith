@@ -56,7 +56,7 @@ func (m *LibvirtManager) AttachGPU(ctx context.Context, id string, pciAddr strin
 	newSpec := storedVM.Spec
 	newSpec.GPUs = append(append([]string(nil), newSpec.ResolvedGPUs()...), norm)
 
-	if err := m.redefineWithGPUs(dom, storedVM, newSpec); err != nil {
+	if err := m.redefineDomain(dom, storedVM, newSpec); err != nil {
 		return nil, err
 	}
 
@@ -123,7 +123,7 @@ func (m *LibvirtManager) DetachGPU(ctx context.Context, id string, pciAddr strin
 	newSpec := storedVM.Spec
 	newSpec.GPUs = remaining
 
-	if err := m.redefineWithGPUs(dom, storedVM, newSpec); err != nil {
+	if err := m.redefineDomain(dom, storedVM, newSpec); err != nil {
 		return nil, err
 	}
 
@@ -141,10 +141,10 @@ func (m *LibvirtManager) DetachGPU(ctx context.Context, id string, pciAddr strin
 	return storedVM, nil
 }
 
-// redefineWithGPUs re-renders the domain XML from the stored VM with the
-// given spec (which carries the new GPU set) and redefines it in libvirt,
+// redefineDomain re-renders the domain XML from the stored VM (disk path,
+// NAT MAC) with the given spec and redefines it in libvirt,
 // preserving the existing UUID and the injected VNC password.
-func (m *LibvirtManager) redefineWithGPUs(dom *libvirt.Domain, storedVM *types.VM, newSpec types.VMSpec) error {
+func (m *LibvirtManager) redefineDomain(dom *libvirt.Domain, storedVM *types.VM, newSpec types.VMSpec) error {
 	existingUUID, _ := dom.GetUUIDString()
 
 	cloudInitISO := filepath.Join(filepath.Dir(storedVM.DiskPath), "cidata.iso")

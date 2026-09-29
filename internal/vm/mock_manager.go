@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vmsmith/vmsmith/internal/config"
 	"github.com/vmsmith/vmsmith/pkg/types"
 )
 
@@ -45,6 +46,7 @@ type MockManager struct {
 	GetConsoleEndpointErr error
 	AttachGPUErr          error
 	DetachGPUErr          error
+	MoveDiskErr           error
 	OpenSerialConsoleErr  error
 	CreateDelay           time.Duration
 
@@ -54,6 +56,26 @@ type MockManager struct {
 	// vnc_password_key_missing error the LibvirtManager returns, so API
 	// tests can exercise the 422 path deterministically.
 	VNCPasswordKeyMissing bool
+
+	// DiskLocations maps extra storage-location names to directories for
+	// Create's DiskLocation placement and MoveDisk. The implicit "default"
+	// location (/var/lib/vmsmith/vms) is always available.
+	DiskLocations map[string]string
+}
+
+const mockDefaultDiskDir = "/var/lib/vmsmith/vms"
+
+// mockDiskLocationDir resolves a location name the way ResolveDiskLocation
+// does for the libvirt manager (minus the on-disk existence check).
+func (m *MockManager) mockDiskLocationDir(name string) (string, string, error) {
+	canon := config.NormalizeDiskLocationName(name)
+	if canon == config.DefaultDiskLocation {
+		return canon, mockDefaultDiskDir, nil
+	}
+	if dir, ok := m.DiskLocations[canon]; ok {
+		return canon, dir, nil
+	}
+	return "", "", types.NewAPIError("invalid_disk_location", fmt.Sprintf("disk location %q is not configured", strings.TrimSpace(name)))
 }
 
 // NewMockManager creates a new mock VM manager.
@@ -133,6 +155,12 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 		storedSpec.VNCPassword = ""
 	}
 
+	locName, locDir, err := m.mockDiskLocationDir(spec.DiskLocation)
+	if err != nil {
+		return nil, err
+	}
+	storedSpec.DiskLocation = storedDiskLocationName(locName)
+
 	vm := &types.VM{
 		ID:              id,
 		Name:            spec.Name,
@@ -141,7 +169,7 @@ func (m *MockManager) Create(ctx context.Context, spec types.VMSpec) (*types.VM,
 		Spec:            storedSpec,
 		State:           types.VMStateRunning,
 		IP:              "192.168.100.10",
-		DiskPath:        fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		DiskPath:        filepath.Join(locDir, id, "disk.qcow2"),
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 		VNCPasswordHash: vncHash,
@@ -188,7 +216,7 @@ func (m *MockManager) Clone(ctx context.Context, sourceID string, newName string
 		Spec:        spec,
 		State:       types.VMStateStopped,
 		IP:          "",
-		DiskPath:    fmt.Sprintf("/var/lib/vmsmith/vms/%s/disk.qcow2", id),
+		DiskPath:    filepath.Join(filepath.Dir(filepath.Dir(source.DiskPath)), id, "disk.qcow2"),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -649,6 +677,38 @@ func (m *MockManager) GetConsoleEndpoint(ctx context.Context, id string, intent 
 	}
 	m.mu.RUnlock()
 	return nil, fmt.Errorf("vms/%s: not found", id)
+}
+
+// MoveDisk mirrors the LibvirtManager contract in memory: the VM must be
+// stopped, the location must be known, and moving to the current location
+// is a 409 disk_location_unchanged.
+func (m *MockManager) MoveDisk(ctx context.Context, id string, location string) (*types.VM, error) {
+	if m.MoveDiskErr != nil {
+		return nil, m.MoveDiskErr
+	}
+	locName, locDir, err := m.mockDiskLocationDir(location)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	vm, ok := m.vms[id]
+	if !ok {
+		return nil, fmt.Errorf("vms/%s: not found", id)
+	}
+	newPath := filepath.Join(locDir, id, filepath.Base(vm.DiskPath))
+	if newPath == filepath.Clean(vm.DiskPath) {
+		return nil, types.NewAPIError("disk_location_unchanged", fmt.Sprintf("vm disk already lives in location %q", locName))
+	}
+	if vm.State != types.VMStateStopped {
+		return nil, types.NewAPIError("vm_running", "vm must be stopped before its disk can be moved")
+	}
+	vm.DiskPath = newPath
+	vm.Spec.DiskLocation = storedDiskLocationName(locName)
+	vm.UpdatedAt = time.Now()
+	out := *vm
+	return &out, nil
 }
 
 // AttachGPU mirrors the LibvirtManager contract in memory (roadmap 5.7.10):

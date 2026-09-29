@@ -61,6 +61,17 @@ storage:
   # Leave empty to auto-probe /usr/share/virtio-win/virtio-win.iso (RHEL/Fedora
   # virtio-win package) or to skip the attachment entirely.
   virtio_win_iso: ""
+  # Optional extra storage locations for VM disks (e.g. a second physical
+  # drive). storage.base_dir is always the implicit "default" location.
+  # Pick one at create time (vm create --disk-location / spec.disk_location)
+  # or move a stopped VM's disk later (vmsmith vm move-disk <id> <name>,
+  # POST /api/v1/vms/{id}/disk/move). Directories must already exist — they
+  # are not auto-created, so an unmounted drive fails loudly — and must be
+  # traversable by the libvirt-qemu user (mode 755 up the path).
+  #disk_locations:
+  #  - name: bulk
+  #    path: /mnt/bulk/vmsmith
+  #    description: "8 TB HDD"
 
 network:
   name: "vmsmith-net"
