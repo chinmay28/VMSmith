@@ -1391,7 +1391,7 @@ function VMRow({ vm, selected, onToggleSelected, onNavigate, actionMenu, setActi
 }
 
 function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
-  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', virtio_win_iso: '', gpus: [] };
+  const emptyForm = { name: '', image: '', cpus: 2, ram_mb: 2048, disk_gb: 20, description: '', tags: '', ssh_pub_key: '', default_user: '', nat_static_ip: '', nat_gateway: '', template_id: '', auto_start: false, os_type: 'linux', os_variant: '', admin_password: '', disk_bus: '', nic_model: '', machine: '', firmware: '', secure_boot: false, boot_source: 'image', install_iso: '', virtio_win_iso: '', gpus: [] };
   const [form, setForm] = useState(emptyForm);
   const [networks, setNetworks] = useState([]);
   const [activeTab, setActiveTab] = useState('basic');
@@ -1487,8 +1487,23 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     }));
   }, [isWindows]);
 
+  const isoMode = form.boot_source === 'iso';
+  const isUefi = form.firmware === 'uefi';
+
   const handleSubmit = async () => {
     const spec = { ...form };
+    // Boot source: a base image (default) or a raw installer ISO booted onto
+    // a blank disk of disk_gb. The two are mutually exclusive on the API, so
+    // ISO mode never sends `image`; a selected template still supplies its
+    // sizing (the server ignores the template's base image when install_iso
+    // is set).
+    delete spec.boot_source;
+    if (isoMode) {
+      delete spec.image;
+      spec.install_iso = form.install_iso.trim();
+    } else {
+      delete spec.install_iso;
+    }
     spec.tags = form.tags.split(',').map(tag => tag.trim()).filter(Boolean);
     if (!spec.description) delete spec.description;
     if (spec.tags.length === 0) delete spec.tags;
@@ -1507,7 +1522,15 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     if (!spec.disk_bus) delete spec.disk_bus;
     if (!spec.nic_model) delete spec.nic_model;
     if (!spec.machine) delete spec.machine;
-    if (!spec.firmware) delete spec.firmware;
+    // Firmware: BIOS (default) sends neither firmware nor secure_boot so the
+    // request is identical to the pre-UEFI-picker shape. UEFI always sends an
+    // explicit secure_boot so "unchecked" genuinely disables Secure Boot.
+    if (spec.firmware === 'uefi') {
+      spec.secure_boot = !!form.secure_boot;
+    } else {
+      delete spec.firmware;
+      delete spec.secure_boot;
+    }
     if (!spec.virtio_win_iso) delete spec.virtio_win_iso;
     // GPU passthrough — only send the list when the operator selected at least
     // one device, so the daemon defaults to no passthrough otherwise.
@@ -1546,7 +1569,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
   const advancedCount = [
     form.description, form.tags, form.ssh_pub_key, form.default_user, form.nat_static_ip, form.nat_gateway,
-    form.disk_bus, form.nic_model, form.machine, form.firmware, form.virtio_win_iso,
+    form.disk_bus, form.nic_model, form.machine, form.virtio_win_iso,
     networks.length > 0 ? 'x' : '',
     (form.gpus && form.gpus.length > 0) ? 'x' : ''
   ].filter(Boolean).length;
@@ -1632,8 +1655,45 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Base Image</label>
-                  {noImages && !form.template_id ? (
+                  <label className="label">Boot source</label>
+                  <div className="flex gap-4 mb-1.5 text-xs text-steel-300" role="radiogroup" aria-label="Boot source">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name="create-vm-boot-source"
+                        value="image"
+                        checked={!isoMode}
+                        onChange={() => setForm(f => ({ ...f, boot_source: 'image' }))}
+                        data-testid="create-vm-boot-source-image"
+                      />
+                      Base image
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name="create-vm-boot-source"
+                        value="iso"
+                        checked={isoMode}
+                        onChange={() => setForm(f => ({ ...f, boot_source: 'iso' }))}
+                        data-testid="create-vm-boot-source-iso"
+                      />
+                      Install from ISO
+                    </label>
+                  </div>
+                  {isoMode ? (
+                    <>
+                      <input
+                        className="input font-mono"
+                        placeholder="installer.iso or /path/to/installer.iso"
+                        value={form.install_iso}
+                        onChange={update('install_iso')}
+                        data-testid="create-vm-install-iso"
+                      />
+                      <p className="mt-1 text-[11px] text-steel-500">
+                        ISO file name in the images directory, or an absolute path on the host. The VM boots the installer onto a blank disk; eject the ISO after installation.
+                      </p>
+                    </>
+                  ) : noImages && !form.template_id ? (
                     <div className="input flex items-center text-steel-500 text-xs">
                       No images available — upload one in the Images section first.
                     </div>
@@ -1722,6 +1782,31 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                     <input className="input font-mono" type="password" placeholder="Set once at first boot" value={form.admin_password} onChange={update('admin_password')} data-testid="input-vm-admin-password" />
                   </div>
                 ) : <div />}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Firmware</label>
+                  <select className="input" value={form.firmware} onChange={update('firmware')} data-testid="create-vm-firmware">
+                    <option value="">BIOS (default)</option>
+                    <option value="uefi">UEFI</option>
+                  </select>
+                </div>
+                <div className="flex items-end pb-2">
+                  {isUefi && (
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="rounded border-steel-600 bg-steel-800 text-blue-500 focus:ring-blue-500/30"
+                        checked={!!form.secure_boot}
+                        onChange={(e) => setForm(f => ({ ...f, secure_boot: e.target.checked }))}
+                        data-testid="create-vm-secure-boot"
+                      />
+                      <span className="text-xs text-steel-300">Secure Boot</span>
+                      <span className="text-[11px] text-steel-500">(leave off for installers with unsigned bootloaders)</span>
+                    </label>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1848,20 +1933,6 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="label text-[10px]">Firmware</label>
-                      <select
-                        className="input py-1 text-xs"
-                        value={form.firmware}
-                        onChange={update('firmware')}
-                        data-testid="input-vm-firmware"
-                      >
-                        <option value="">Default (bios)</option>
-                        <option value="bios">bios</option>
-                        <option value="uefi">uefi (required for Windows 11)</option>
-                        <option value="ovmf">ovmf (alias for uefi)</option>
-                      </select>
-                    </div>
-                    <div>
                       <label className="label text-[10px]">Machine Type</label>
                       <input
                         className="input py-1 text-xs font-mono"
@@ -1958,7 +2029,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                       );
                     })}
                     <p className="text-[10px] text-steel-500 px-1">
-                      The whole IOMMU group is attached together. UEFI firmware (above) is recommended for passthrough.
+                      The whole IOMMU group is attached together. UEFI firmware (Basic tab) is recommended for passthrough.
                     </p>
                   </div>
                 )}
@@ -2074,7 +2145,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
           )}
           <div className="flex justify-end gap-2">
             <button className="btn-secondary" onClick={onClose} data-testid="btn-cancel-create" disabled={createMut.loading}>Cancel</button>
-            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (!form.image && !form.template_id)} data-testid="btn-submit-create">
+            <button className="btn-primary" onClick={handleSubmit} disabled={createMut.loading || !form.name || (isoMode ? !form.install_iso.trim() : (!form.image && !form.template_id))} data-testid="btn-submit-create">
               {createMut.loading ? <Spinner size={14} /> : <Plus size={15} />}
               Create
             </button>

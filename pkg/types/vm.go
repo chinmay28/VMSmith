@@ -185,15 +185,19 @@ type VMSpec struct {
 	// when it is missing. Immutable post-create.
 	TPM *bool `json:"tpm,omitempty" yaml:"tpm,omitempty"`
 
-	// InstallISO enables the unattended-install-from-ISO create path for
-	// Windows guests (roadmap 5.6.11): instead of overlaying a prepared
-	// base image, VMSmith creates a blank qcow2 disk of DiskGB, attaches
-	// the referenced Windows installation ISO as a boot cdrom, and bakes a
-	// generated Autounattend.xml (partitioning matched to the firmware,
-	// edition selection via InstallImageIndex, locale, Administrator
-	// password, RDP + WinRM enablement) into the provisioning ISO so
-	// Windows Setup runs hands-free. Mutually exclusive with Image; the
-	// path must exist on the daemon host at create time. Windows-only.
+	// InstallISO enables the install-from-ISO create path: instead of
+	// overlaying a prepared base image, VMSmith creates a blank qcow2 disk
+	// of DiskGB and attaches the referenced installer ISO as a boot cdrom.
+	// For Windows guests (roadmap 5.6.11) a generated Autounattend.xml
+	// (partitioning matched to the firmware, edition selection via
+	// InstallImageIndex, locale, Administrator password, RDP + WinRM
+	// enablement) rides in the provisioning ISO so Windows Setup runs
+	// hands-free. For Linux guests the installer runs interactively on the
+	// VNC console (appliance installers such as umbrelOS, distro ISOs).
+	// A bare file name resolves against storage.images_dir; the stored
+	// value is the resolved absolute path. Mutually exclusive with Image;
+	// the file must exist on the daemon host at create time. Eject it
+	// after installation with VMUpdateSpec.InstallISO = "".
 	InstallISO string `json:"install_iso,omitempty" yaml:"install_iso,omitempty"`
 
 	// InstallImageIndex selects the WIM image index inside the install
@@ -326,6 +330,15 @@ type VMUpdateSpec struct {
 	// the password is baked into the defined domain XML, so the VM must be
 	// stopped and the change takes effect on the next start.
 	VNCPassword *string `json:"vnc_password,omitempty"`
+
+	// InstallISO ejects the installer ISO attached at create time via
+	// VMSpec.InstallISO. Pointer semantics: nil = no change; pointer-to-""
+	// detaches the ISO and drops the cdrom-first boot entry so the guest
+	// boots from its freshly-installed disk. Any non-empty value is
+	// rejected with 400 invalid_install_iso — attaching an installer is a
+	// create-time decision. Applying the eject redefines the domain and
+	// restarts the VM if it was running.
+	InstallISO *string `json:"install_iso,omitempty"`
 }
 
 // ResolvedOSType returns the guest OS family, defaulting an empty value to

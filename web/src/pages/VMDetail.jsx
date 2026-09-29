@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Play, Square, Trash2, Camera, Network,
-  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu, MonitorPlay
+  Plus, RotateCcw, RefreshCw, Download, Clock, Pencil, Copy, Zap, Pause, Search, X, Cpu, MonitorPlay, Disc
 } from 'lucide-react';
 import { vms, snapshots, ports, images as imagesApi, schedules as schedulesApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
@@ -238,6 +238,10 @@ export default function VMDetail() {
   const suspendMut   = useMutation(vms.suspend);
   const resumeMut    = useMutation(vms.resume);
   const deleteMut    = useMutation(vms.delete);
+  // Eject the installer ISO attached at create time (`spec.install_iso`).
+  // PATCH `{install_iso: ""}` detaches the cdrom + drops the cdrom-first boot
+  // entry; the daemon restarts the VM if it was running.
+  const ejectIsoMut  = useMutation((vmId) => vms.update(vmId, { install_iso: '' }));
 
   if (loading && !vm) return <div className="flex justify-center py-20"><Spinner size={20} /></div>;
   if (error) return <ErrorBanner message={error} />;
@@ -252,6 +256,25 @@ export default function VMDetail() {
   const diskText = Number.isFinite(spec.disk_gb) ? spec.disk_gb : '—';
   const createdText = vm.created_at ? new Date(vm.created_at).toLocaleString() : '—';
   const osType = resolveOsType(spec);
+  const installIso = typeof spec.install_iso === 'string' ? spec.install_iso.trim() : '';
+  // Effective firmware: uefi/ovmf, or secure_boot=true (which forces EFI),
+  // resolve to UEFI; anything else is the SeaBIOS default. Secure Boot is
+  // on when explicitly requested, or auto-on for windows-11 when unset.
+  const firmwareRaw = String(spec.firmware || '').trim().toLowerCase();
+  const secureBootOn = spec.secure_boot === true
+    || (spec.secure_boot == null && String(spec.os_variant || '').toLowerCase() === 'windows-11');
+  // Mirrors VMSpec.ResolvedFirmwareAttr: resolved-on Secure Boot forces EFI.
+  const isUefi = firmwareRaw === 'uefi' || firmwareRaw === 'ovmf' || secureBootOn;
+  const firmwareText = isUefi ? `UEFI · Secure Boot ${secureBootOn ? 'on' : 'off'}` : 'BIOS';
+
+  const handleEjectIso = async () => {
+    const restartNote = vm.state === 'running' ? ' The machine will restart to apply the change.' : '';
+    if (!window.confirm(`Eject the installer ISO from ${vm.name}? The VM will boot from its disk.${restartNote}`)) return;
+    try {
+      await ejectIsoMut.execute(id);
+      refresh();
+    } catch { /* error displayed via mutation */ }
+  };
   const sshUser = spec.default_user || (osType === 'windows' ? 'Administrator' : 'root');
   const rdpForward = portList.find((port) => Number(port.guest_port) === 3389 && String(port.protocol || '').toLowerCase() === 'tcp')
     || portList.find((port) => Number(port.guest_port) === 3389);
@@ -437,7 +460,37 @@ export default function VMDetail() {
           value={spec.locked ? 'Locked' : 'Unlocked'}
           testId="vm-detail-locked"
         />
+        <InfoCard label="Firmware" value={firmwareText} testId="vm-detail-firmware" />
       </div>
+
+      {installIso && (
+        <div className="card mb-4 border-amber-500/20" data-testid="vm-detail-install-iso">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Disc size={14} className="text-amber-400 shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-sm font-display font-semibold text-steel-300">Installer ISO attached</h2>
+                <p className="font-mono text-xs text-steel-400 truncate" data-testid="vm-detail-install-iso-path">{installIso}</p>
+                <p className="text-[11px] text-steel-500 mt-0.5">
+                  The VM boots from this ISO first. Eject it once the installation has finished.
+                </p>
+              </div>
+            </div>
+            <button
+              className="btn-secondary shrink-0"
+              onClick={handleEjectIso}
+              disabled={ejectIsoMut.loading}
+              data-testid="vm-detail-eject-iso"
+              title={vm.state === 'running' ? 'Detach the ISO (restarts the machine)' : 'Detach the ISO'}
+            >
+              {ejectIsoMut.loading ? <Spinner size={14} /> : <Disc size={14} />} Eject ISO
+            </button>
+          </div>
+          {ejectIsoMut.error && (
+            <p className="px-4 pb-3 text-sm text-red-400" data-testid="vm-detail-eject-iso-error">Error: {ejectIsoMut.error}</p>
+          )}
+        </div>
+      )}
 
       {osType === 'windows' && hasRDPForward && (
         <div className="card mb-4 border-sky-500/20" data-testid="vm-detail-rdp-hint">

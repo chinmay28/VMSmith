@@ -177,7 +177,10 @@ func (s *Server) CreateVM(w http.ResponseWriter, r *http.Request) {
 func mergeVMSpecWithTemplate(spec types.VMSpec, tpl *types.VMTemplate) types.VMSpec {
 	merged := spec
 	merged.TemplateID = strings.TrimSpace(spec.TemplateID)
-	if merged.Image == "" {
+	// An explicit install_iso means "blank disk + installer" — inheriting
+	// the template's base image would trip the image/install_iso
+	// mutual-exclusion check, so the ISO request wins.
+	if merged.Image == "" && strings.TrimSpace(merged.InstallISO) == "" {
 		merged.Image = tpl.Image
 	}
 	if merged.CPUs == 0 {
