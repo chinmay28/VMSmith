@@ -722,7 +722,7 @@ Keeping the websocket endpoint on the same origin as the main UI avoids exposing
 
 ### 9. Web GUI
 
-The React SPA is embedded into the binary via `go:embed dist/*`. The same port serves both the API and the GUI.
+The React SPA is embedded into the binary via `go:embed dist/*`. The same port serves both the API and the GUI. The SPA is also an installable PWA (web manifest, a service worker that never handles `/api/*`, and a responsive drawer layout below 1024 px). `internal/web.NewHandler` sets the matching cache headers; see [PWA.md](PWA.md).
 
 **Pages:**
 

@@ -4,6 +4,7 @@ import { Webhook, Trash2, Pencil, Plus, Send, CheckCircle2, AlertCircle, Clock, 
 import { webhooks as webhooksApi } from '../api/client';
 import { useFetch, useMutation } from '../hooks/useFetch';
 import { PageHeader, EmptyState, Spinner, ErrorBanner, Modal, PaginationControls, FilterPanel } from '../components/Shared';
+import { AppInstallCard } from '../components/Pwa';
 
 const DEFAULT_WEBHOOK_PER_PAGE = 25;
 
@@ -261,6 +262,8 @@ export default function Settings() {
           </button>
         }
       />
+
+      <AppInstallCard />
 
       <h2 className="font-display font-semibold text-steel-200 text-sm uppercase tracking-wider mb-3">
         Webhooks

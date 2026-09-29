@@ -203,7 +203,7 @@ export default function LogViewer() {
         title="Logs"
         subtitle={`${totalEntries} total entries`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Source filter */}
             <select
               className="input py-1 text-xs w-28"

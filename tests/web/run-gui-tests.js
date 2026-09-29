@@ -1678,6 +1678,132 @@ async function main() {
 
     await page.close();
 
+    // ================== PWA (docs/PWA.md) ==================
+    // Fresh contexts so the service worker / Cache Storage state is isolated
+    // from the suites above.
+    console.log("\nPWA:");
+
+    const pwaContext = await browser.newContext();
+    page = await pwaContext.newPage();
+
+    await runTest("manifest is served and linked", async (p) => {
+      const res = await p.request.get(`${BASE}/manifest.webmanifest`);
+      await assert(res.ok(), `manifest status ${res.status()}`);
+      const manifest = await res.json();
+      await assert(manifest.name === "VM Smith" && manifest.display === "standalone", "manifest fields");
+      await p.goto(BASE);
+      const href = await p.locator('link[rel="manifest"]').getAttribute("href");
+      await assert(href === "/manifest.webmanifest", `manifest link href ${href}`);
+    }, page);
+
+    await runTest("service worker installs and controls the app", async (p) => {
+      await p.goto(BASE);
+      await p.evaluate(() => navigator.serviceWorker.ready);
+      await p.reload();
+      await p.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 10000 });
+    }, page);
+
+    await runTest("service worker precaches the shell and never caches /api", async (p) => {
+      await p.goto(`${BASE}/vms`);
+      await assertVisible(p, "nav-vms");
+      const urls = await p.evaluate(async () => {
+        const out = [];
+        for (const name of await caches.keys()) {
+          const cache = await caches.open(name);
+          out.push(...(await cache.keys()).map((r) => new URL(r.url).pathname));
+        }
+        return out;
+      });
+      await assert(urls.includes("/index.html"), `shell not precached: ${urls.join(", ")}`);
+      await assert(urls.some((u) => u.startsWith("/assets/") && u.endsWith(".js")), "app bundle not precached");
+      const api = urls.filter((u) => u.startsWith("/api/"));
+      await assert(api.length === 0, `API responses were cached: ${api.join(", ")}`);
+    }, page);
+
+    await runTest("settings shows app install / offline status", async (p) => {
+      await p.goto(`${BASE}/settings`);
+      await assertVisible(p, "pwa-app-card");
+      await p.waitForFunction(
+        () => document.querySelector('[data-testid="pwa-offline-status"]')?.textContent?.includes("ready"),
+        null,
+        { timeout: 10000 },
+      );
+    }, page);
+
+    await runTest("app shell loads offline and shows the offline banner", async (p) => {
+      await pwaContext.setOffline(true);
+      try {
+        await p.goto(`${BASE}/schedules`);
+        await assertVisible(p, "nav-schedules", "app shell did not render offline");
+        await assertVisible(p, "pwa-offline-banner");
+      } finally {
+        await pwaContext.setOffline(false);
+      }
+      await p.waitForSelector('[data-testid="pwa-offline-banner"]', { state: "detached", timeout: 5000 });
+    }, page);
+
+    await page.close();
+    await pwaContext.close();
+
+    // Mobile viewport: drawer navigation + no horizontal page scroll on
+    // every top-level section (NAV_ITEMS is the same list Layout renders,
+    // so new sections are covered automatically).
+    const { NAV_ITEMS } = await import("../../web/src/navigation.js");
+    const mobileContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      serviceWorkers: "block",
+    });
+    page = await mobileContext.newPage();
+
+    await runTest("mobile: sidebar collapses into a drawer", async (p) => {
+      await p.goto(BASE);
+      await assertVisible(p, "nav-toggle");
+      await assertNotVisible(p, "nav-vms");
+      await p.locator('[data-testid="nav-toggle"]').click();
+      await p.waitForSelector('[data-testid="nav-vms"]', { state: "visible", timeout: 5000 });
+      await p.locator('[data-testid="nav-vms"]').click();
+      await p.waitForURL(`${BASE}/vms`);
+      await assertText(p, "mobile-section-title", "Machines");
+      await p.waitForSelector('[data-testid="nav-vms"]', { state: "hidden", timeout: 5000 });
+    }, page);
+
+    await runTest("mobile: backdrop and Escape close the drawer", async (p) => {
+      await p.goto(BASE);
+      await p.locator('[data-testid="nav-toggle"]').click();
+      await assertVisible(p, "nav-backdrop");
+      await p.locator('[data-testid="nav-backdrop"]').click({ position: { x: 370, y: 400 } });
+      await p.waitForSelector('[data-testid="nav-backdrop"]', { state: "detached", timeout: 5000 });
+      await p.locator('[data-testid="nav-toggle"]').click();
+      await p.keyboard.press("Escape");
+      await p.waitForSelector('[data-testid="nav-backdrop"]', { state: "detached", timeout: 5000 });
+    }, page);
+
+    const mobileRoutes = [
+      ...NAV_ITEMS.map((item) => ({ label: item.label, to: item.to })),
+      { label: "VM detail", to: "/vms/vm-1" },
+    ];
+    for (const item of mobileRoutes) {
+      await runTest(`mobile: ${item.label} page has no horizontal page scroll`, async (p) => {
+        await p.goto(`${BASE}${item.to}`);
+        await assertVisible(p, "nav-toggle");
+        await p.waitForTimeout(600);
+        const overflow = await p.evaluate(() => ({
+          doc: document.documentElement.scrollWidth - window.innerWidth,
+          main: (() => {
+            const m = document.querySelector("main");
+            return m ? m.scrollWidth - m.clientWidth : 0;
+          })(),
+        }));
+        await assert(overflow.doc <= 0 && overflow.main <= 0,
+          `${item.to} overflows horizontally (document +${overflow.doc}px, main +${overflow.main}px)`);
+      }, page);
+    }
+
+    await page.close();
+    await mobileContext.close();
+
   } finally {
     if (browser) await browser.close();
     server.kill();

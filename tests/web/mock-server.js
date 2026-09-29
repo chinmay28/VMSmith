@@ -3912,6 +3912,7 @@ const server = http.createServer(async (req, res) => {
           ".svg": "image/svg+xml",
           ".png": "image/png",
           ".ico": "image/x-icon",
+          ".webmanifest": "application/manifest+json",
         }[ext] || "application/octet-stream";
         res.writeHead(200, { "Content-Type": contentType });
         return res.end(fs.readFileSync(filePath));
