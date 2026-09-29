@@ -10,7 +10,7 @@ CLI tool, HTTP REST server, and embedded web GUI for provisioning and managing Q
 - **Portable images** — upload, export, download, and share qcow2 images
 - **NAT networking + port forwarding** — expose VM services to your network
 - **Multi-network** — attach VMs to additional host interfaces (macvtap/bridge)
-- **REST API + Web GUI** — React dashboard embedded in the binary
+- **REST API + Web GUI** — React dashboard embedded in the binary, installable as a PWA on desktop and mobile
 - **Zero external dependencies** — embedded bbolt database, no PostgreSQL/Redis/etc.
 
 ---
@@ -499,6 +499,8 @@ sudo ./bin/vmsmith --api-key "$VMSMITH_API_KEY" image pull http://other-host:808
 ### Step 9 — Web GUI
 
 Open **http://localhost:8080** after starting the daemon.
+
+The GUI is also an installable **Progressive Web App**. Install it from the sidebar's **Install app** button or from **Settings → App** (on iOS: Share → Add to Home Screen) to get a standalone window, a phone-friendly layout, an offline app shell, and an in-app prompt when the daemon ships a new GUI build. Installing needs HTTPS or `localhost`; see [docs/PWA.md](docs/PWA.md).
 
 GUI: VM Dashboard
 

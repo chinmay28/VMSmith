@@ -40,12 +40,12 @@ export function SeverityBadge({ severity }) {
 // --- Page Header ---
 export function PageHeader({ title, subtitle, actions }) {
   return (
-    <div className="flex items-start justify-between mb-6">
-      <div>
-        <h1 className="font-display font-bold text-2xl text-steel-100 tracking-tight">{title}</h1>
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+      <div className="min-w-0">
+        <h1 className="font-display font-bold text-xl sm:text-2xl text-steel-100 tracking-tight">{title}</h1>
         {subtitle && <p className="text-sm text-steel-500 mt-0.5">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -55,16 +55,17 @@ export function Modal({ open, onClose, title, children, wide }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative card border-steel-700/60 shadow-2xl p-0 animate-slide-up ${wide ? 'w-full max-w-2xl' : 'w-full max-w-md'}`}>
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-steel-800/60">
+      {/* Height-capped with a scrolling body so long forms stay usable on phones. */}
+      <div className={`relative card border-steel-700/60 shadow-2xl p-0 animate-slide-up flex flex-col max-h-[calc(100vh-1.5rem)] max-h-[calc(100dvh-1.5rem)] ${wide ? 'w-full max-w-2xl' : 'w-full max-w-md'}`}>
+        <div className="flex shrink-0 items-center justify-between px-5 py-3.5 border-b border-steel-800/60">
           <h2 className="font-display font-semibold text-steel-100">{title}</h2>
           <button aria-label="Close modal" onClick={onClose} className="text-steel-500 hover:text-steel-300 transition-colors">
             <X size={18} />
           </button>
         </div>
-        <div className="px-5 py-4">
+        <div className="px-5 py-4 overflow-y-auto">
           {children}
         </div>
       </div>

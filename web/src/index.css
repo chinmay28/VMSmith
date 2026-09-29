@@ -138,3 +138,29 @@
     100% { transform: translateX(320%); }
   }
 }
+
+/* --- PWA / small-screen support (docs/PWA.md) --- */
+@layer utilities {
+  /* Keep chrome clear of notches and home indicators in the installed app
+     (index.html sets viewport-fit=cover). */
+  .safe-pt { padding-top: env(safe-area-inset-top); }
+  .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+@media (max-width: 1023px) {
+  /* Every data table in the app scrolls horizontally inside its card rather
+     than widening the page. Applied globally so tables added to future pages
+     are covered without per-page wrappers. */
+  .app-main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (display-mode: standalone) {
+  /* No pull-to-refresh / overscroll bounce inside the installed app: the
+     GUI polls and streams its own data. */
+  html, body { overscroll-behavior-y: none; }
+}

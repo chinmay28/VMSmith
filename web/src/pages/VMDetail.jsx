@@ -301,8 +301,8 @@ export default function VMDetail() {
   return (
     <div className="animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+        <div className="flex items-center gap-3 min-w-0">
           <button className="btn-ghost -ml-2" onClick={() => navigate('/vms')} data-testid="back-link">
             <ArrowLeft size={16} />
           </button>
@@ -320,7 +320,7 @@ export default function VMDetail() {
             <p className="text-xs font-mono text-steel-500 mt-0.5">{vm.id}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {vm.state === 'stopped' && (
             <button className="btn-primary" onClick={() => { startMut.execute(id).then(refresh); }} data-testid="btn-start">
               <Play size={14} /> Start
@@ -406,7 +406,7 @@ export default function VMDetail() {
       )}
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b border-steel-800/60">
+      <div className="flex items-center gap-1 mb-4 border-b border-steel-800/60 overflow-x-auto">
         <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} testId="tab-overview">
           Overview
         </TabButton>
@@ -960,7 +960,7 @@ function TabButton({ active, onClick, children, testId }) {
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+      className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
         active
           ? 'border-forge-500 text-forge-300'
           : 'border-transparent text-steel-400 hover:text-steel-200'

@@ -16,7 +16,7 @@ LDFLAGS   := -ldflags "-s -w -X $(VERSION_PKG).Patch=$(PATCH) -X $(VERSION_PKG).
 WEB_DIR   := ./web
 
 .PHONY: build version install install-service clean purge test lint fmt fmt-check deps web web-install \
-       test-web-deps test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb \
+       test-web-deps test-web-unit test-e2e test-e2e-cli test-e2e-api test-e2e-gui test-e2e-deps dev install-githooks docker-build dist rpm deb \
        test-e2e-metrics test-e2e-schedules test-e2e-windows test-e2e-gpu
 
 # --- Full build (frontend + backend) ---
@@ -83,11 +83,15 @@ test-unit:
 test-integration:
 	go test -v -race ./internal/api/...
 
+# Frontend unit tests (node:test) for the PWA layer — no browser needed.
+test-web-unit:
+	cd $(WEB_DIR) && node --test tests/pwa-*.test.js
+
 test-web:
 	node tests/web/run-gui-tests.js
 	node tests/web/run-built-web-regression.js
 
-test-all: test test-web
+test-all: test test-web-unit test-web
 
 # --- Real E2E tests (require running daemon + Rocky image) ---
 # Install Python deps for E2E tests
