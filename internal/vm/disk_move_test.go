@@ -49,7 +49,7 @@ func TestRewriteDiskDirInXMLNoMatchIsIdentity(t *testing.T) {
 }
 
 func TestStoredDiskLocationName(t *testing.T) {
-	cases := map[string]string{"": "", "default": "", " Default ": "", "Bulk": "bulk", " nvme ": "nvme"}
+	cases := map[string]string{"": "", "default": "", " Default ": "", "Bulk": "bulk", " nvme ": "nvme", " /Mnt/USB/ ": "/Mnt/USB"}
 	for in, want := range cases {
 		if got := storedDiskLocationName(in); got != want {
 			t.Errorf("storedDiskLocationName(%q) = %q, want %q", in, got, want)
@@ -89,5 +89,52 @@ func TestResolveDiskLocationTypedErrors(t *testing.T) {
 	cfg.DiskLocations = append(cfg.DiskLocations, config.DiskLocation{Name: "file", Path: file})
 	if _, err := ResolveDiskLocation(cfg, "file"); err == nil {
 		t.Fatal("a regular file resolved as a location")
+	}
+}
+
+func TestResolveDiskLocationByPath(t *testing.T) {
+	root := t.TempDir()
+	allowed := filepath.Join(root, "allowed")
+	outside := filepath.Join(root, "outside")
+	for _, d := range []string{filepath.Join(allowed, "usb"), outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.StorageConfig{BaseDir: filepath.Join(root, "vms"), DiskLocationRoots: []string{allowed}}
+
+	loc, err := ResolveDiskLocation(cfg, filepath.Join(allowed, "usb")+"/")
+	if err != nil || loc.Name != filepath.Join(allowed, "usb") || loc.Path != loc.Name {
+		t.Fatalf("path location = %+v, %v", loc, err)
+	}
+	if storedDiskLocationName(loc.Name) != loc.Name {
+		t.Fatalf("stored name of a path location must be the path, got %q", storedDiskLocationName(loc.Name))
+	}
+
+	_, err = ResolveDiskLocation(cfg, filepath.Join(allowed, "missing"))
+	if apiErr, ok := err.(*types.APIError); !ok || apiErr.Code != "disk_location_unavailable" {
+		t.Fatalf("missing dir err = %v", err)
+	}
+	_, err = ResolveDiskLocation(cfg, outside)
+	if apiErr, ok := err.(*types.APIError); !ok || apiErr.Code != "invalid_disk_location" {
+		t.Fatalf("outside roots err = %v", err)
+	}
+
+	// A symlink under an allowed root must not smuggle disks elsewhere...
+	escape := filepath.Join(allowed, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ResolveDiskLocation(cfg, escape)
+	if apiErr, ok := err.(*types.APIError); !ok || apiErr.Code != "invalid_disk_location" || !strings.Contains(apiErr.Message, "resolves to") {
+		t.Fatalf("symlink escape err = %v", err)
+	}
+	// ...while one that stays inside resolves to (and is stored as) its target.
+	inside := filepath.Join(allowed, "link")
+	if err := os.Symlink(filepath.Join(allowed, "usb"), inside); err != nil {
+		t.Fatal(err)
+	}
+	if loc, err := ResolveDiskLocation(cfg, inside); err != nil || loc.Path != filepath.Join(allowed, "usb") {
+		t.Fatalf("inside symlink = %+v, %v", loc, err)
 	}
 }

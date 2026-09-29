@@ -72,6 +72,13 @@ storage:
   #  - name: bulk
   #    path: /mnt/bulk/vmsmith
   #    description: "8 TB HDD"
+  # Besides the named locations, any existing directory under these roots
+  # can be used directly by absolute path (vm move-disk <id> /mnt/nvme,
+  # spec.disk_location: /media/alice/USB). Mounted drives under them are
+  # listed by 'vmsmith host storage' and the GUI pickers. System trees
+  # (/etc, /usr, /proc, /run, /boot, ...) and images_dir are always refused.
+  # Set to [] to allow only the named locations above.
+  #disk_location_roots: [/mnt, /media, /var, /srv, /opt, /data, /home]
 
 network:
   name: "vmsmith-net"

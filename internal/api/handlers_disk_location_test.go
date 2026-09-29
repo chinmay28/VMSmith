@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ func withBulkLocation(t *testing.T) func(*config.Config) {
 	return func(cfg *config.Config) {
 		cfg.Storage.BaseDir = "/var/lib/vmsmith/vms"
 		cfg.Storage.DiskLocations = []config.DiskLocation{{Name: "bulk", Path: bulk, Description: "big HDD"}}
+		cfg.Storage.DiskLocationRoots = []string{}
 	}
 }
 
@@ -61,7 +64,7 @@ func TestBuildStorageLocations(t *testing.T) {
 		return 1000, 400, nil
 	}
 
-	got := buildStorageLocations(cfg, vms, usage)
+	got := buildStorageLocations(cfg, vms, nil, usage)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -74,6 +77,75 @@ func TestBuildStorageLocations(t *testing.T) {
 	}
 	if gone.Available || gone.Error != "not mounted" || gone.FreeBytes != 0 {
 		t.Errorf("gone = %+v", gone)
+	}
+	if def.Kind != types.StorageLocationDefault || bulk.Kind != types.StorageLocationConfigured {
+		t.Errorf("kinds = %q, %q", def.Kind, bulk.Kind)
+	}
+}
+
+func TestBuildStorageLocationsDiscovers(t *testing.T) {
+	cfg := config.StorageConfig{
+		BaseDir:           "/var/lib/vmsmith/vms",
+		DiskLocations:     []config.DiskLocation{{Name: "bulk", Path: "/mnt/bulk"}},
+		DiskLocationRoots: []string{"/mnt", "/media"},
+	}
+	vms := []*types.VM{
+		{ID: "vm-1", DiskPath: "/mnt/custom/vm-1/disk.qcow2"},
+		{ID: "vm-2", DiskPath: "/mnt/bulk/vm-2/disk.qcow2"},
+	}
+	mounts := []string{"/", "/boot", "/mnt/bulk", "/mnt/unplugged", "/media/alice/USB"}
+	usage := func(path string) (uint64, uint64, error) {
+		switch path {
+		case "/mnt/unplugged", "/mnt/custom":
+			return 0, 0, errors.New("no such directory")
+		}
+		return 1000, 400, nil
+	}
+
+	got := buildStorageLocations(cfg, vms, mounts, usage)
+	var names []string
+	byName := map[string]types.StorageLocation{}
+	for _, l := range got {
+		names = append(names, l.Name)
+		byName[l.Name] = l
+	}
+	// Missing discovered dirs are hidden unless a VM lives there.
+	if want := "default bulk /media /media/alice/USB /mnt /mnt/custom"; strings.Join(names, " ") != want {
+		t.Fatalf("names = %v, want %s", names, want)
+	}
+	usb := byName["/media/alice/USB"]
+	if usb.Kind != types.StorageLocationDiscovered || usb.Path != usb.Name || !usb.Available || usb.Description != "mount point" {
+		t.Errorf("usb = %+v", usb)
+	}
+	custom := byName["/mnt/custom"]
+	if custom.VMCount != 1 || custom.Available || custom.Error == "" {
+		t.Errorf("custom = %+v", custom)
+	}
+	if byName["bulk"].VMCount != 1 {
+		t.Errorf("bulk = %+v", byName["bulk"])
+	}
+}
+
+func TestTraversalWarning(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{filepath.Dir(root), root} {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := traversalWarning(root); w != "" {
+		t.Skipf("host path above the temp dir is not o+x: %s", w)
+	}
+	private := filepath.Join(root, "alice")
+	disk := filepath.Join(private, "USB")
+	if err := os.MkdirAll(disk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(private, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if w := traversalWarning(disk); !strings.Contains(w, private) || !strings.Contains(w, "0750") {
+		t.Fatalf("warning = %q, want it to name %s", w, private)
 	}
 }
 
@@ -141,6 +213,63 @@ func TestMoveVMDisk(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&moved)
 	if moved.DiskPath != "/mnt/bulk/vm-1/disk.qcow2" || moved.Spec.DiskLocation != "bulk" {
 		t.Fatalf("moved = %+v", moved)
+	}
+}
+
+func withPathRoots(roots ...string) func(*config.Config) {
+	return func(cfg *config.Config) {
+		cfg.Storage.BaseDir = "/var/lib/vmsmith/vms"
+		cfg.Storage.DiskLocationRoots = roots
+	}
+}
+
+func TestMoveVMDiskToPath(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, withPathRoots("/mnt", "/media"))
+	defer cleanup()
+	mockMgr.DiskLocationRoots = []string{"/mnt", "/media"}
+	mockMgr.SeedVM(&types.VM{ID: "vm-1", Name: "a", State: types.VMStateStopped, DiskPath: "/var/lib/vmsmith/vms/vm-1/disk.qcow2"})
+
+	resp := postDiskJSON(t, ts.URL+"/api/v1/vms/vm-1/disk/move", `{"location":"/media/alice/USB/"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var moved types.VM
+	json.NewDecoder(resp.Body).Decode(&moved)
+	if moved.DiskPath != "/media/alice/USB/vm-1/disk.qcow2" || moved.Spec.DiskLocation != "/media/alice/USB" {
+		t.Fatalf("moved = %+v", moved)
+	}
+
+	for _, bad := range []string{"/etc/vms", "/tmp/vms", "/var/lib/vmsmith/vms/sub", "/mnt/../proc"} {
+		resp := postDiskJSON(t, ts.URL+"/api/v1/vms/vm-1/disk/move", `{"location":"`+bad+`"}`)
+		code := decodeAPIError(t, resp)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || code != "invalid_disk_location" {
+			t.Errorf("%s: status = %d code = %q, want 400 invalid_disk_location", bad, resp.StatusCode, code)
+		}
+	}
+}
+
+func TestCreateVMWithDiskLocationPath(t *testing.T) {
+	ts, mockMgr, cleanup := testServerWithConfig(t, withPathRoots("/mnt"))
+	defer cleanup()
+	mockMgr.DiskLocationRoots = []string{"/mnt"}
+
+	resp := postDiskJSON(t, ts.URL+"/api/v1/vms", `{"name":"placed","image":"img","disk_location":"/mnt/nvme"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var created types.VM
+	json.NewDecoder(resp.Body).Decode(&created)
+	if created.Spec.DiskLocation != "/mnt/nvme" || !strings.HasPrefix(created.DiskPath, "/mnt/nvme/") {
+		t.Fatalf("created = %+v", created)
+	}
+
+	bad := postDiskJSON(t, ts.URL+"/api/v1/vms", `{"name":"outside","image":"img","disk_location":"/opt/vms"}`)
+	defer bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest || decodeAPIError(t, bad) != "invalid_disk_location" {
+		t.Fatalf("path outside roots status = %d", bad.StatusCode)
 	}
 }
 

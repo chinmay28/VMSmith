@@ -43,8 +43,9 @@ func diskMoveProgressFromContext(ctx context.Context) func(percent float64) {
 }
 
 // storedDiskLocationName is the form persisted in VMSpec.DiskLocation:
-// the canonical name, with the default location stored as "" so records
-// created before locations existed and new default-placed VMs look alike.
+// the canonical name (or absolute path for an ad-hoc location), with the
+// default location stored as "" so records created before locations
+// existed and new default-placed VMs look alike.
 func storedDiskLocationName(name string) string {
 	name = config.NormalizeDiskLocationName(name)
 	if name == config.DefaultDiskLocation {
@@ -53,25 +54,39 @@ func storedDiskLocationName(name string) string {
 	return name
 }
 
-// ResolveDiskLocation validates a location name against the configuration
-// and checks its directory exists. Typed errors: invalid_disk_location
-// (unknown name) and disk_location_unavailable (directory missing — e.g.
+// ResolveDiskLocation validates a location — a configured name or an
+// absolute directory path under storage.disk_location_roots — and checks
+// its directory exists. A path is resolved through symlinks and re-checked
+// so a link cannot smuggle disks into a denied tree; the resolved path is
+// what gets stored. Typed errors: invalid_disk_location (unknown name or
+// disallowed path) and disk_location_unavailable (directory missing — e.g.
 // the drive is not mounted).
 func ResolveDiskLocation(cfg config.StorageConfig, name string) (config.DiskLocation, error) {
-	loc, ok := cfg.ResolveDiskLocation(name)
-	if !ok {
-		known := make([]string, 0, len(cfg.DiskLocations)+1)
-		for _, l := range cfg.AllDiskLocations() {
-			known = append(known, l.Name)
-		}
-		return config.DiskLocation{}, types.NewAPIError("invalid_disk_location",
-			fmt.Sprintf("disk location %q is not configured (known: %s)", strings.TrimSpace(name), strings.Join(known, ", ")))
+	loc, err := cfg.ResolveDiskLocation(name)
+	if err != nil {
+		return config.DiskLocation{}, types.NewAPIError("invalid_disk_location", err.Error())
 	}
 	if info, err := os.Stat(loc.Path); err != nil || !info.IsDir() {
 		return config.DiskLocation{}, types.NewAPIError("disk_location_unavailable",
 			fmt.Sprintf("disk location %q directory %s is not available; create it (and mount the drive) first", loc.Name, loc.Path))
 	}
-	return loc, nil
+	if !config.IsDiskLocationPath(loc.Name) {
+		return loc, nil
+	}
+	real, err := filepath.EvalSymlinks(loc.Path)
+	if err != nil {
+		return config.DiskLocation{}, types.NewAPIError("disk_location_unavailable",
+			fmt.Sprintf("resolving disk location %s: %v", loc.Path, err))
+	}
+	if real == loc.Path {
+		return loc, nil
+	}
+	resolved, err := cfg.ResolveDiskLocation(real)
+	if err != nil {
+		return config.DiskLocation{}, types.NewAPIError("invalid_disk_location",
+			fmt.Sprintf("%s resolves to %s: %v", loc.Path, real, err))
+	}
+	return resolved, nil
 }
 
 // MoveDisk relocates a stopped VM's disk directory to another configured
@@ -93,6 +108,10 @@ func (m *LibvirtManager) MoveDisk(ctx context.Context, id string, location strin
 	if srcDir == dstDir {
 		return nil, types.NewAPIError("disk_location_unchanged",
 			fmt.Sprintf("vm disk already lives in location %q", loc.Name))
+	}
+	if strings.HasPrefix(dstDir, srcDir+"/") {
+		return nil, types.NewAPIError("invalid_disk_location",
+			fmt.Sprintf("location %s is inside the vm's own directory %s", loc.Path, srcDir))
 	}
 
 	dom, err := m.conn.LookupDomainByName(storedVM.Name)

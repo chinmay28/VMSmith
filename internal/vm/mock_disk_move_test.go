@@ -88,3 +88,27 @@ func TestMockManager_MoveDisk(t *testing.T) {
 		t.Fatal("missing vm moved")
 	}
 }
+
+func TestMockManager_MoveDiskToPath(t *testing.T) {
+	m := NewMockManager()
+	m.DiskLocations = map[string]string{"bulk": "/mnt/bulk"}
+	ctx := context.Background()
+	m.SeedVM(&types.VM{ID: "vm-1", Name: "one", State: types.VMStateStopped, DiskPath: "/var/lib/vmsmith/vms/vm-1/disk.qcow2"})
+
+	moved, err := m.MoveDisk(ctx, "vm-1", "/media/alice/USB")
+	if err != nil || moved.DiskPath != "/media/alice/USB/vm-1/disk.qcow2" || moved.Spec.DiskLocation != "/media/alice/USB" {
+		t.Fatalf("moved = %+v, %v", moved, err)
+	}
+	// The directory of a named location resolves to that name.
+	moved, err = m.MoveDisk(ctx, "vm-1", "/mnt/bulk/")
+	if err != nil || moved.Spec.DiskLocation != "bulk" {
+		t.Fatalf("named-by-path = %+v, %v", moved, err)
+	}
+	if _, err := m.MoveDisk(ctx, "vm-1", "/etc"); apiErrCode(err) != "invalid_disk_location" {
+		t.Fatalf("denied path err = %v", err)
+	}
+	m.DiskLocationRoots = []string{}
+	if _, err := m.MoveDisk(ctx, "vm-1", "/mnt/x"); apiErrCode(err) != "invalid_disk_location" {
+		t.Fatalf("no-roots err = %v", err)
+	}
+}

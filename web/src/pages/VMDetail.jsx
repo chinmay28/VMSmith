@@ -1052,20 +1052,27 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
   const current = vm?.spec?.disk_location || 'default';
   const moveMut = useMutation((target) => vms.moveDisk(vm.id, target));
   const progress = useOperationProgress(vm?.id, 'move_disk', location);
+  const preselected = useRef(false);
 
   useEffect(() => {
     if (open) {
       moveMut.reset();
       setLocation('');
+      preselected.current = false;
     }
   }, [open, moveMut.reset]);
 
-  // Preselect the first selectable location other than the current one.
+  // Preselect the first selectable location other than the current one,
+  // once per opening — afterwards '' is a legitimate choice (an empty
+  // custom path) that must not be overwritten.
   useEffect(() => {
-    if (!open || location) return;
+    if (!open || preselected.current) return;
     const first = locations.find(l => l.available && l.name !== current);
-    if (first) setLocation(first.name);
-  }, [open, locations, location, current]);
+    if (first) {
+      preselected.current = true;
+      setLocation(first.name);
+    }
+  }, [open, locations, current]);
 
   const handleClose = () => {
     progress.reset();
@@ -1076,7 +1083,7 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
   const handleSubmit = async () => {
     progress.start();
     try {
-      await moveMut.execute(location);
+      await moveMut.execute(location.trim());
       progress.finish();
       onMoved?.();
       reloadLocations();
@@ -1094,7 +1101,7 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
     <Modal open={open} onClose={handleClose} title="Move Disk">
       <div className="space-y-4">
         <p className="text-xs text-steel-500">
-          Move this machine&apos;s disk (and its snapshots) to another storage location, e.g. a drive with more free space.
+          Move this machine&apos;s disk (and its snapshots) to another storage location or directory, e.g. a drive mounted under /mnt or /media with more free space.
           Moves across drives copy the data, so they can take a while for large disks.
         </p>
         <div>
@@ -1105,7 +1112,7 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
           <Spinner size={14} />
         ) : loadError ? (
           <p className="text-sm text-red-400">{loadError}</p>
-        ) : selectable ? (
+        ) : (
           <div>
             <label className="label">Target location</label>
             <StorageLocationSelect
@@ -1115,11 +1122,12 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
               exclude={current}
               testId="input-move-disk-location"
             />
+            {!selectable && (
+              <p className="mt-1 text-[11px] text-steel-500" data-testid="move-disk-no-targets">
+                No other storage location was found. Pick &quot;Custom path…&quot; to enter a directory, or add one under <span className="font-mono">storage.disk_locations</span> in the daemon config.
+              </p>
+            )}
           </div>
-        ) : (
-          <p className="text-sm text-steel-400" data-testid="move-disk-no-targets">
-            No other storage location is available. Add one under <span className="font-mono">storage.disk_locations</span> in the daemon config.
-          </p>
         )}
         <ProgressReadout active={moveMut.loading} percent={progress.percent} label="Moving disk…" testId="move-disk-progress" />
         {moveMut.error && <p className="text-sm text-red-400" data-testid="move-disk-error">{moveMut.error}</p>}
@@ -1129,7 +1137,7 @@ function MoveDiskModal({ vm, open, onClose, onMoved }) {
             data-testid="btn-submit-move-disk"
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={!selectable || !location || location === current || moveMut.loading}
+            disabled={!location.trim() || location.trim() === current || moveMut.loading}
           >
             {moveMut.loading ? <Spinner size={14} /> : <HardDrive size={14} />} Move disk
           </button>

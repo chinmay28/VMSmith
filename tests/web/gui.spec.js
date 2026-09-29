@@ -7133,6 +7133,51 @@ test.describe("VM disk location", () => {
     expect(restored).toBe(200);
   });
 
+  test("move disk offers discovered drives and custom paths", async ({ page }) => {
+    const moveBack = () => page.evaluate(async () => {
+      const list = await (await fetch("/api/v1/vms")).json();
+      const arr = Array.isArray(list) ? list : list.data || [];
+      const vm = arr.find((v) => v.name === "db-server");
+      const r = await fetch(`/api/v1/vms/${vm.id}/disk/move`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ location: "default" }),
+      });
+      return r.status;
+    });
+
+    await page.goto(BASE_URL);
+    await page.getByTestId("vm-row-db-server").click();
+    await page.getByTestId("btn-move-disk").click();
+
+    // A mounted drive discovered under /media is selectable, with its
+    // permission warning surfaced.
+    const picker = page.getByTestId("input-move-disk-location");
+    await expect(picker.locator('optgroup[label="Drives & directories"] option[value="/media/alice/USB"]')).toBeEnabled();
+    await picker.selectOption("/media/alice/USB");
+    await expect(page.getByTestId("input-move-disk-location-warning")).toContainText("/media/alice (mode 0750)");
+    await page.getByTestId("btn-submit-move-disk").click();
+    await expect(page.getByTestId("vm-detail-disk-location")).toHaveText("/media/alice/USB");
+    await expect(page.getByTestId("vm-detail-disk-path")).toContainText("/media/alice/USB/");
+    expect(await moveBack()).toBe(200);
+
+    // Any directory under an allowed root can be typed in.
+    await page.reload();
+    await page.getByTestId("btn-move-disk").click();
+    await picker.selectOption("__custom__");
+    const custom = page.getByTestId("input-move-disk-location-custom");
+    await expect(page.getByTestId("btn-submit-move-disk")).toBeDisabled();
+    await custom.fill("/etc/vms");
+    await page.getByTestId("btn-submit-move-disk").click();
+    await expect(page.getByTestId("move-disk-error")).toContainText("system directory /etc");
+
+    await custom.fill("/srv/vmdisks");
+    await page.getByTestId("btn-submit-move-disk").click();
+    await expect(page.getByTestId("vm-detail-disk-location")).toHaveText("/srv/vmdisks");
+    await expect(page.getByTestId("vm-detail-disk-path")).toContainText("/srv/vmdisks/");
+    expect(await moveBack()).toBe(200);
+  });
+
   test("move disk is disabled while the VM is running", async ({ page }) => {
     await page.goto(BASE_URL);
     await page.getByTestId("vm-row-web-server").click();

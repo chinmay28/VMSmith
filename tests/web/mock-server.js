@@ -395,16 +395,42 @@ function resetState() {
 }
 
 // Storage locations for VM disk placement / move. "bulk" is available,
-// "archive" simulates an unmounted drive.
+// "archive" simulates an unmounted drive, and the discovered entries mirror
+// the daemon's allowed roots + mounted drives (named by their path; the USB
+// stick carries a traversal warning like udisks' mode-0750 /media/<user>).
 const mockStorageLocations = [
-  { name: "default", path: "/var/lib/vmsmith/vms", default: true, available: true, total_bytes: 500 * 1024 ** 3, free_bytes: 120 * 1024 ** 3 },
-  { name: "bulk", path: "/mnt/bulk", description: "8 TB HDD", default: false, available: true, total_bytes: 8 * 1024 ** 4, free_bytes: 6 * 1024 ** 4 },
-  { name: "archive", path: "/mnt/archive", default: false, available: false, error: "stat /mnt/archive: no such file or directory", total_bytes: 0, free_bytes: 0 },
+  { name: "default", kind: "default", path: "/var/lib/vmsmith/vms", default: true, available: true, total_bytes: 500 * 1024 ** 3, free_bytes: 120 * 1024 ** 3 },
+  { name: "bulk", kind: "configured", path: "/mnt/bulk", description: "8 TB HDD", default: false, available: true, total_bytes: 8 * 1024 ** 4, free_bytes: 6 * 1024 ** 4 },
+  { name: "archive", kind: "configured", path: "/mnt/archive", default: false, available: false, error: "stat /mnt/archive: no such file or directory", total_bytes: 0, free_bytes: 0 },
+  { name: "/mnt", kind: "discovered", path: "/mnt", description: "allowed root", default: false, available: true, total_bytes: 500 * 1024 ** 3, free_bytes: 120 * 1024 ** 3 },
+  { name: "/media/alice/USB", kind: "discovered", path: "/media/alice/USB", description: "mount point", default: false, available: true, warning: "/media/alice (mode 0750) is not traversable by other users; QEMU may be unable to open disks here — chmod o+x it", total_bytes: 256 * 1024 ** 3, free_bytes: 200 * 1024 ** 3 },
 ];
 
+const mockDiskLocationRoots = ["/mnt", "/media", "/var", "/srv", "/opt", "/data", "/home"];
+const mockDeniedDiskPrefixes = ["/proc", "/sys", "/dev", "/run", "/boot", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/var/run", "/var/lock"];
+
+// Resolve a disk location (name or absolute path) the way the daemon does:
+// returns { name, path } or { error } (an invalid_disk_location message).
+function mockResolveDiskLocation(raw) {
+  const value = String(raw || "").trim();
+  if (!value.startsWith("/")) {
+    const name = value.toLowerCase() || "default";
+    const loc = mockStorageLocations.find(l => l.kind !== "discovered" && l.name === name);
+    return loc ? { name: loc.name, path: loc.path, loc } : { error: `disk location "${value}" is not configured` };
+  }
+  const p = value.replace(/\/+$/, "").replace(/\/+/g, "/") || "/";
+  const within = (dir) => p === dir || p.startsWith(`${dir}/`);
+  const named = mockStorageLocations.find(l => l.kind !== "discovered" && l.path === p);
+  if (named) return { name: named.name, path: named.path, loc: named };
+  const denied = mockDeniedDiskPrefixes.find(within);
+  if (p === "/" || denied) return { error: `disk location path ${p} is inside the system directory ${denied || "/"}` };
+  if (!mockDiskLocationRoots.some(within)) return { error: `disk location path ${p} is not under an allowed root (${mockDiskLocationRoots.join(", ")})` };
+  return { name: p, path: p, loc: mockStorageLocations.find(l => l.path === p) };
+}
+
 function mockDiskLocationPath(name) {
-  const loc = mockStorageLocations.find(l => l.name === (name || "default"));
-  return loc ? loc.path : null;
+  const r = mockResolveDiskLocation(name);
+  return r.error ? null : r.path;
 }
 
 function createVM(spec) {
@@ -416,7 +442,10 @@ function createVM(spec) {
     state: "running", ip: "", disk_path: `${mockDiskLocationPath(spec.disk_location) || "/var/lib/vmsmith/vms"}/${id}/disk.qcow2`,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
-  if (spec.disk_location && spec.disk_location !== "default") vm.spec.disk_location = spec.disk_location;
+  if (spec.disk_location) {
+    const r = mockResolveDiskLocation(spec.disk_location);
+    if (!r.error && r.name !== "default") vm.spec.disk_location = r.name;
+  }
   // secure_boot / tpm are pointer-semantics on the daemon (omitted = auto),
   // so only persist them when the create request set them explicitly.
   if (typeof spec.secure_boot === "boolean") vm.spec.secure_boot = spec.secure_boot;
@@ -1386,9 +1415,11 @@ const server = http.createServer(async (req, res) => {
     const vm = vms.get(m[1]);
     if (!vm) return json(res, 404, { code: "resource_not_found", message: "vm not found" });
     const body = await parseBody(req);
-    const target = String(body.location || "").trim().toLowerCase();
-    const loc = mockStorageLocations.find(l => l.name === target);
-    if (!loc) return json(res, 400, { code: "invalid_disk_location", message: `disk location "${target}" is not configured` });
+    if (!String(body.location || "").trim()) return json(res, 400, { code: "invalid_disk_location", message: "location is required" });
+    const resolved = mockResolveDiskLocation(body.location);
+    if (resolved.error) return json(res, 400, { code: "invalid_disk_location", message: resolved.error });
+    const target = resolved.name;
+    const loc = resolved.loc || { path: resolved.path, available: true };
     if (!loc.available) return json(res, 422, { code: "disk_location_unavailable", message: `disk location "${target}" directory ${loc.path} is not available` });
     if (vm.state !== "stopped") return json(res, 409, { code: "vm_running", message: "vm must be stopped before its disk can be moved" });
     if ((vm.spec.disk_location || "default") === target) return json(res, 409, { code: "disk_location_unchanged", message: `vm disk already lives in location "${target}"` });
@@ -3824,7 +3855,7 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/v1/host/storage-locations" && method === "GET") {
     return json(res, 200, mockStorageLocations.map(loc => ({
       ...loc,
-      vm_count: [...vms.values()].filter(v => (v.disk_path || "").startsWith(`${loc.path}/`)).length,
+      vm_count: [...vms.values()].filter(v => (v.disk_path || "").replace(/\/[^/]+\/[^/]+$/, "") === loc.path).length,
     })));
   }
   if (p === "/api/v1/host/gpus" && method === "GET") {

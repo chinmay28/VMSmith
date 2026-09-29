@@ -17,9 +17,13 @@ var vmMoveDiskCmd = &cobra.Command{
 internal snapshots) to another configured storage location — e.g. to free
 space on a physical drive.
 
-<location> is 'default' (storage.base_dir) or a name declared under
-storage.disk_locations in the daemon config. List locations and their free
-space with: vmsmith host storage
+<location> is 'default' (storage.base_dir), a name declared under
+storage.disk_locations in the daemon config, or the absolute path of an
+existing directory under storage.disk_location_roots (by default /mnt,
+/media, /var, /srv, /opt, /data and /home — e.g. /mnt/nvme or
+/media/alice/USB). System directories (/etc, /usr, /proc, /run, ...) are
+always refused. List locations, mounted drives and their free space with:
+vmsmith host storage
 
 The VM must be stopped. A move within one filesystem is an instant rename;
 across filesystems the files are copied, verified on disk, and the source

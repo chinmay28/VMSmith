@@ -1539,6 +1539,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
     // one device, so the daemon defaults to no passthrough otherwise.
     if (!spec.gpus || spec.gpus.length === 0) delete spec.gpus;
     // Disk placement — omit for the default location (storage.base_dir).
+    spec.disk_location = (spec.disk_location || '').trim();
     if (!spec.disk_location || spec.disk_location === 'default') delete spec.disk_location;
     if (networks.length > 0) {
       spec.networks = networks.map(n => {
@@ -1789,7 +1790,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                 ) : <div />}
               </div>
 
-              {storageLocations.length > 1 && (
+              {storageLocations.length > 0 && (
                 <div>
                   <label className="label">Disk location</label>
                   <StorageLocationSelect
@@ -1798,7 +1799,7 @@ function CreateVMModal({ open, onClose, onCreated, onPasswordGenerated }) {
                     onChange={v => setForm(f => ({ ...f, disk_location: v }))}
                     testId="input-vm-disk-location"
                   />
-                  <p className="mt-1 text-[11px] text-steel-500">Where the VM's disk file lives. You can move it later from the VM page.</p>
+                  <p className="mt-1 text-[11px] text-steel-500">Where the VM's disk file lives — a configured location, a mounted drive, or any directory under /mnt, /media, /var, … You can move it later from the VM page.</p>
                 </div>
               )}
 

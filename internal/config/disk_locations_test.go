@@ -49,17 +49,119 @@ func TestResolveDiskLocation(t *testing.T) {
 		DiskLocations: []DiskLocation{{Name: "bulk", Path: "/mnt/bulk/", Description: " big disk "}},
 	}
 	for _, name := range []string{"", "default", " DEFAULT "} {
-		loc, ok := s.ResolveDiskLocation(name)
-		if !ok || loc.Name != DefaultDiskLocation || loc.Path != "/var/lib/vmsmith/vms" {
-			t.Fatalf("ResolveDiskLocation(%q) = %+v, %v", name, loc, ok)
+		loc, err := s.ResolveDiskLocation(name)
+		if err != nil || loc.Name != DefaultDiskLocation || loc.Path != "/var/lib/vmsmith/vms" {
+			t.Fatalf("ResolveDiskLocation(%q) = %+v, %v", name, loc, err)
 		}
 	}
-	loc, ok := s.ResolveDiskLocation(" Bulk")
-	if !ok || loc.Name != "bulk" || loc.Path != "/mnt/bulk" || loc.Description != "big disk" {
-		t.Fatalf("ResolveDiskLocation(bulk) = %+v, %v", loc, ok)
+	loc, err := s.ResolveDiskLocation(" Bulk")
+	if err != nil || loc.Name != "bulk" || loc.Path != "/mnt/bulk" || loc.Description != "big disk" {
+		t.Fatalf("ResolveDiskLocation(bulk) = %+v, %v", loc, err)
 	}
-	if _, ok := s.ResolveDiskLocation("nope"); ok {
-		t.Fatal("unknown location resolved")
+	if _, err := s.ResolveDiskLocation("nope"); err == nil || !strings.Contains(err.Error(), "bulk") {
+		t.Fatalf("unknown location err = %v", err)
+	}
+}
+
+func TestResolveDiskLocationByPath(t *testing.T) {
+	s := StorageConfig{
+		BaseDir:           "/var/lib/vmsmith/vms",
+		ImagesDir:         "/var/lib/vmsmith/images",
+		DiskLocations:     []DiskLocation{{Name: "bulk", Path: "/mnt/bulk"}},
+		DiskLocationRoots: DefaultDiskLocationRoots,
+	}
+	cases := []struct {
+		in, wantName, wantErr string
+	}{
+		{in: "/mnt/bulk/", wantName: "bulk"},
+		{in: "/var/lib/vmsmith/vms", wantName: "default"},
+		{in: " /media/usb/VMs ", wantName: "/media/usb/VMs"},
+		{in: "/mnt/other/../nvme", wantName: "/mnt/nvme"},
+		{in: "/var/lib/vmsmith", wantName: "/var/lib/vmsmith"},
+		{in: "/srv", wantName: "/srv"},
+		{in: "/", wantErr: "filesystem root"},
+		{in: "/etc/vms", wantErr: "system directory /etc"},
+		{in: "/var/run/x", wantErr: "system directory /var/run"},
+		{in: "/mnt/../usr/lib", wantErr: "system directory /usr"},
+		{in: "/var/lib/vmsmith/images/x", wantErr: "images_dir"},
+		{in: "/var/lib/vmsmith/vms/vm-1", wantErr: `inside location "default"`},
+		{in: "/mnt/bulk/sub", wantErr: `inside location "bulk"`},
+		{in: "/tmp/vms", wantErr: "not under an allowed root"},
+	}
+	for _, tc := range cases {
+		loc, err := s.ResolveDiskLocation(tc.in)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("ResolveDiskLocation(%q) err = %v, want containing %q", tc.in, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || loc.Name != tc.wantName {
+			t.Errorf("ResolveDiskLocation(%q) = %+v, %v; want name %q", tc.in, loc, err, tc.wantName)
+		}
+	}
+
+	s.DiskLocationRoots = nil
+	if _, err := s.ResolveDiskLocation("/mnt/x"); err == nil || !strings.Contains(err.Error(), "disk_location_roots is empty") {
+		t.Fatalf("no roots err = %v", err)
+	}
+	s.DiskLocationRoots = []string{"/"}
+	if _, err := s.ResolveDiskLocation("/tmp/vms"); err != nil {
+		t.Fatalf("root / should allow /tmp/vms: %v", err)
+	}
+	if _, err := s.ResolveDiskLocation("/proc/1"); err == nil {
+		t.Fatal("denied trees must stay denied under root /")
+	}
+}
+
+func TestNormalizeDiskLocationName(t *testing.T) {
+	cases := map[string]string{"": "default", " Bulk ": "bulk", "/Mnt/USB/": "/Mnt/USB", " /a//b ": "/a/b"}
+	for in, want := range cases {
+		if got := NormalizeDiskLocationName(in); got != want {
+			t.Errorf("NormalizeDiskLocationName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDiscoverDiskLocations(t *testing.T) {
+	s := StorageConfig{
+		BaseDir:           "/var/lib/vmsmith/vms",
+		DiskLocations:     []DiskLocation{{Name: "bulk", Path: "/mnt/bulk"}},
+		DiskLocationRoots: []string{"/mnt", "/media"},
+	}
+	got := s.DiscoverDiskLocations([]string{"/media/alice/USB", "/mnt/bulk", "/", "/boot/efi", "/mnt/nvme", "/mnt/nvme/", "relative"})
+	var paths []string
+	for _, l := range got {
+		if l.Name != l.Path {
+			t.Errorf("discovered location %+v should be named by its path", l)
+		}
+		paths = append(paths, l.Path)
+	}
+	want := "/media /media/alice/USB /mnt /mnt/nvme"
+	if strings.Join(paths, " ") != want {
+		t.Fatalf("discovered = %v, want %s", paths, want)
+	}
+}
+
+func TestLoadDiskLocationRoots(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		path := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	cfg, err := Load(write("storage:\n  base_dir: /var/lib/vmsmith/vms\n"))
+	if err != nil || strings.Join(cfg.Storage.DiskLocationRoots, ",") != strings.Join(DefaultDiskLocationRoots, ",") {
+		t.Fatalf("default roots = %v, %v", cfg.Storage.DiskLocationRoots, err)
+	}
+	cfg, err = Load(write("storage:\n  disk_location_roots: []\n"))
+	if err != nil || len(cfg.Storage.DiskLocationRoots) != 0 {
+		t.Fatalf("explicit empty roots = %v, %v", cfg.Storage.DiskLocationRoots, err)
+	}
+	if _, err := Load(write("storage:\n  disk_location_roots: [mnt]\n")); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative root err = %v", err)
 	}
 }
 
@@ -82,7 +184,7 @@ func TestDiskLocationForDiskPath(t *testing.T) {
 	cases := map[string]string{
 		"/var/lib/vmsmith/vms/vm-1/disk.qcow2": "default",
 		"/mnt/bulk/vm-1/disk.qcow2":            "bulk",
-		"/mnt/other/vm-1/disk.qcow2":           "",
+		"/mnt/other/vm-1/disk.qcow2":           "/mnt/other",
 		"":                                     "",
 	}
 	for path, want := range cases {
