@@ -2074,9 +2074,14 @@ export interface paths {
         /**
          * Move a stopped VM's disk to another storage location
          * @description Relocates the VM's directory (system disk + provisioning ISO, with
-         *     any internal snapshots) to another configured storage location —
-         *     `default` (storage.base_dir) or a name from
-         *     `storage.disk_locations` — e.g. to free space on a physical drive.
+         *     any internal snapshots) to another storage location — `default`
+         *     (storage.base_dir), a name from `storage.disk_locations`, or the
+         *     absolute path of an existing directory under
+         *     `storage.disk_location_roots` (default `/mnt`, `/media`, `/var`,
+         *     `/srv`, `/opt`, `/data`, `/home`; system trees such as `/etc`,
+         *     `/usr`, `/proc`, `/run` and `storage.images_dir` are always
+         *     refused, and paths are re-checked after symlink resolution) —
+         *     e.g. to free space on a physical drive.
          *     The VM must be stopped. Same-filesystem moves are a rename;
          *     cross-filesystem moves copy, fsync, repoint the domain XML and
          *     every snapshot definition, and only then delete the source. Copy
@@ -3381,7 +3386,7 @@ export interface paths {
         };
         /**
          * List storage locations VM disks can be placed in
-         * @description Returns the implicit `default` location (storage.base_dir) followed by every `storage.disk_locations` entry, each with live filesystem capacity and the number of VMs whose disk currently lives there. A location whose directory is missing (e.g. an unmounted drive) is reported with `available: false` and an `error`. Use the names with VMSpec.disk_location / `vm create --disk-location` and `POST /vms/{id}/disk/move`.
+         * @description Returns the implicit `default` location (storage.base_dir), every `storage.disk_locations` entry, then `discovered` directories usable by absolute path: the `storage.disk_location_roots` that exist, writable storage-backed mount points under them (e.g. a USB drive at `/media/alice/USB`), and any directory VMs already live in. Each entry carries live filesystem capacity, the number of VMs whose disk currently lives there, and a `warning` when a parent directory is not traversable by QEMU's unprivileged user. A configured location whose directory is missing (e.g. an unmounted drive) is reported with `available: false` and an `error`; missing discovered directories without VMs are omitted. Use the names with VMSpec.disk_location / `vm create --disk-location` and `POST /vms/{id}/disk/move`.
          */
         get: {
             parameters: {
@@ -4870,7 +4875,7 @@ export interface components {
              * @enum {string}
              */
             nic_model?: "virtio" | "e1000e";
-            /** @description Storage location the VM's disk directory is created in: `default` (storage.base_dir) or a name from `storage.disk_locations` (see GET /host/storage-locations). Empty/omitted means `default` and the default is stored as empty. Unknown names return 400 `invalid_disk_location`; a configured location whose directory is missing returns 422 `disk_location_unavailable`. Change it post-create via POST /vms/{id}/disk/move. */
+            /** @description Storage location the VM's disk directory is created in: `default` (storage.base_dir), a name from `storage.disk_locations`, or the absolute path of an existing directory under `storage.disk_location_roots` (see GET /host/storage-locations). Paths are stored symlink-resolved. Empty/omitted means `default` and the default is stored as empty. Unknown names and disallowed paths return 400 `invalid_disk_location`; a configured location whose directory is missing returns 422 `disk_location_unavailable`. Change it post-create via POST /vms/{id}/disk/move. */
             disk_location?: string;
             /** @description Placement (roadmap 5.5.3) — the configured libvirt host the VM is created on. Empty/omitted means the implicit "local" host. Unknown names return 400 `invalid_host`. Fixed post-create (no live migration in v1 — see docs/MULTI_HOST.md). */
             host?: string;
@@ -5333,14 +5338,19 @@ export interface components {
             is_physical: boolean;
         };
         StorageLocation: {
+            /** @description Value for VMSpec.disk_location / MoveDiskRequest.location: the configured name, or the absolute path for a discovered location. */
             name: string;
             path: string;
             description?: string;
+            /** @enum {string} */
+            kind: "default" | "configured" | "discovered";
             /** @description True for the implicit location backed by storage.base_dir. */
             default: boolean;
             /** @description False when the directory is missing or cannot be statted. */
             available: boolean;
             error?: string;
+            /** @description Set when the location is usable but risky, e.g. a parent directory QEMU's unprivileged user cannot traverse. */
+            warning?: string;
             /** Format: int64 */
             total_bytes: number;
             /** Format: int64 */
@@ -5349,7 +5359,7 @@ export interface components {
             vm_count: number;
         };
         MoveDiskRequest: {
-            /** @description Target storage location name. */
+            /** @description Target storage location: a configured name, or the absolute path of an existing directory under storage.disk_location_roots. */
             location: string;
         };
         GPUDevice: {

@@ -275,8 +275,10 @@ var hostListCmd = &cobra.Command{
 }
 
 // hostStorageCmd lists the storage locations VM disks can be placed in
-// (`vm create --disk-location`) or moved to (`vm move-disk`), with live
-// free space so operators can pick a drive with room.
+// (`vm create --disk-location`) or moved to (`vm move-disk`) — configured
+// names plus discovered directories (allowed roots and mounted drives,
+// usable by path) — with live free space so operators can pick a drive
+// with room.
 var hostStorageCmd = &cobra.Command{
 	Use:     "storage",
 	Aliases: []string{"storage-locations"},
@@ -307,19 +309,27 @@ var hostStorageCmd = &cobra.Command{
 // renderStorageLocations prints the storage-location table.
 func renderStorageLocations(out io.Writer, locs []types.StorageLocation) error {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tPATH\tFREE\tTOTAL\tVMS\tSTATUS")
+	fmt.Fprintln(w, "NAME\tKIND\tPATH\tFREE\tTOTAL\tVMS\tSTATUS")
 	for _, l := range locs {
-		name := l.Name
-		if l.Default {
-			name += " (default)"
+		name, kind := l.Name, l.Kind
+		if kind == types.StorageLocationDiscovered {
+			// Discovered locations are named by their path; don't print it twice.
+			name = "-"
+		}
+		if kind == "" {
+			kind = "-"
 		}
 		free, total, status := "-", "-", "ok"
+		switch {
+		case !l.Available:
+			status = "unavailable: " + l.Error
+		case l.Warning != "":
+			status = "warning: " + l.Warning
+		}
 		if l.Available {
 			free, total = formatBytes(l.FreeBytes), formatBytes(l.TotalBytes)
-		} else {
-			status = "unavailable: " + l.Error
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", name, l.Path, free, total, l.VMCount, status)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n", name, kind, l.Path, free, total, l.VMCount, status)
 	}
 	return w.Flush()
 }

@@ -61,6 +61,10 @@ type MockManager struct {
 	// Create's DiskLocation placement and MoveDisk. The implicit "default"
 	// location (/var/lib/vmsmith/vms) is always available.
 	DiskLocations map[string]string
+
+	// DiskLocationRoots bounds ad-hoc (absolute path) locations the way
+	// storage.disk_location_roots does; nil means the config defaults.
+	DiskLocationRoots []string
 }
 
 const mockDefaultDiskDir = "/var/lib/vmsmith/vms"
@@ -69,6 +73,21 @@ const mockDefaultDiskDir = "/var/lib/vmsmith/vms"
 // does for the libvirt manager (minus the on-disk existence check).
 func (m *MockManager) mockDiskLocationDir(name string) (string, string, error) {
 	canon := config.NormalizeDiskLocationName(name)
+	if config.IsDiskLocationPath(canon) {
+		roots := m.DiskLocationRoots
+		if roots == nil {
+			roots = config.DefaultDiskLocationRoots
+		}
+		cfg := config.StorageConfig{BaseDir: mockDefaultDiskDir, DiskLocationRoots: roots}
+		for n, dir := range m.DiskLocations {
+			cfg.DiskLocations = append(cfg.DiskLocations, config.DiskLocation{Name: n, Path: dir})
+		}
+		loc, err := cfg.ResolveDiskLocation(canon)
+		if err != nil {
+			return "", "", types.NewAPIError("invalid_disk_location", err.Error())
+		}
+		return loc.Name, loc.Path, nil
+	}
 	if canon == config.DefaultDiskLocation {
 		return canon, mockDefaultDiskDir, nil
 	}

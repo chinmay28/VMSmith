@@ -191,6 +191,14 @@ type StorageConfig struct {
 	// filling the root filesystem) and, like base_dir, must be traversable
 	// by the libvirt-qemu user.
 	DiskLocations []DiskLocation `yaml:"disk_locations"`
+
+	// DiskLocationRoots are the directories under which any existing
+	// directory can be used as a VM disk location by absolute path
+	// (spec.disk_location / disk move target), without declaring it in
+	// DiskLocations. System trees (/etc, /usr, /proc, /run, ...) and
+	// images_dir are always refused. Defaults to DefaultDiskLocationRoots;
+	// set to [] to allow only the named locations.
+	DiskLocationRoots []string `yaml:"disk_location_roots"`
 }
 
 // DefaultVirtioWinISOPath is the conventional install location for the
@@ -291,8 +299,9 @@ func DefaultConfig() *Config {
 			URI: "qemu:///system",
 		},
 		Storage: StorageConfig{
-			ImagesDir: filepath.Join(dataDir, "images"),
-			BaseDir:   filepath.Join(dataDir, "vms"),
+			ImagesDir:         filepath.Join(dataDir, "images"),
+			BaseDir:           filepath.Join(dataDir, "vms"),
+			DiskLocationRoots: append([]string(nil), DefaultDiskLocationRoots...),
 			// Keep the DB in ~/.vmsmith so it stays with the user without root.
 			DBPath: filepath.Join(homeDir, ".vmsmith", "vmsmith.db"),
 		},
@@ -401,6 +410,9 @@ func (c *Config) expandPaths() {
 	expand(&c.Storage.VirtioWinISO)
 	for i := range c.Storage.DiskLocations {
 		expand(&c.Storage.DiskLocations[i].Path)
+	}
+	for i := range c.Storage.DiskLocationRoots {
+		expand(&c.Storage.DiskLocationRoots[i])
 	}
 }
 
